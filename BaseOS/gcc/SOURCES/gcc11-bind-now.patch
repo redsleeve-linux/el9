@@ -1,0 +1,333 @@
+From 36362544fb039599c0eb58d839e90ffb5410ad27 Mon Sep 17 00:00:00 2001
+From: Marek Polacek <polacek@redhat.com>
+Date: Wed, 9 Feb 2022 15:18:43 -0500
+Subject: [PATCH] configure: Implement --enable-host-bind-now
+
+As promised in the --enable-host-pie patch, this patch adds another
+configure option, --enable-host-bind-now, which adds -z now when linking
+the compiler executables in order to extend hardening.  BIND_NOW with RELRO
+allows the GOT to be marked RO; this prevents GOT modification attacks.
+
+This option does not affect linking of target libraries; you can use
+LDFLAGS_FOR_TARGET=-Wl,-z,relro,-z,now to enable RELRO/BIND_NOW.
+
+Bootstrapped/regtested on x86_64-pc-linux-gnu (with the option enabled vs
+not enabled).  I suppose this is GCC 13 material, but maybe I'll get some
+comments anyway.
+
+c++tools/ChangeLog:
+
+	* configure.ac (--enable-host-bind-now): New check.
+	* configure: Regenerate.
+
+gcc/ChangeLog:
+
+	* configure.ac (--enable-host-bind-now): New check.  Add
+	-Wl,-z,now to LD_PICFLAG if --enable-host-bind-now.
+	* configure: Regenerate.
+	* doc/install.texi: Document --enable-host-bind-now.
+
+lto-plugin/ChangeLog:
+
+	* configure.ac (--enable-host-bind-now): New check.  Link with
+	-z,now.
+	* configure: Regenerate.
+---
+ c++tools/configure      | 11 +++++++++++
+ c++tools/configure.ac   |  7 +++++++
+ gcc/configure           | 20 ++++++++++++++++++--
+ gcc/configure.ac        | 13 ++++++++++++-
+ gcc/doc/install.texi    |  6 ++++++
+ lto-plugin/configure    | 20 ++++++++++++++++++--
+ lto-plugin/configure.ac | 11 +++++++++++
+ 7 files changed, 83 insertions(+), 5 deletions(-)
+
+diff --git a/c++tools/configure b/c++tools/configure
+index c1aceb8404a..25432b5040d 100755
+--- a/c++tools/configure
++++ b/c++tools/configure
+@@ -631,6 +631,7 @@ ac_ct_CC
+ CFLAGS
+ CC
+ LD_PICFLAG
++enable_host_bind_now
+ PICFLAG
+ MAINTAINER
+ CXX_AUX_TOOLS
+@@ -704,6 +705,7 @@ enable_c___tools
+ enable_maintainer_mode
+ enable_default_pie
+ enable_host_pie
++enable_host_bind_now
+ with_gcc_major_version_only
+ '
+       ac_precious_vars='build_alias
+@@ -1336,6 +1338,7 @@ Optional Features:
+                           configurey bits
+   --enable-default-pie    enable Position Independent Executable as default
+   --enable-host-pie       build host code as PIE
++  --enable-host-bind-now  link host code as BIND_NOW
+ 
+ Optional Packages:
+   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
+@@ -3009,6 +3012,14 @@ fi
+ 
+ 
+ 
++# Enable --enable-host-bind-now
++# Check whether --enable-host-bind-now was given.
++if test "${enable_host_bind_now+set}" = set; then :
++  enableval=$enable_host_bind_now; LD_PICFLAG="$LD_PICFLAG -Wl,-z,now"
++fi
++
++
++
+ 
+ # Check if O_CLOEXEC is defined by fcntl
+ ac_ext=c
+diff --git a/c++tools/configure.ac b/c++tools/configure.ac
+index 1e42689f2eb..d3f23f66f00 100644
+--- a/c++tools/configure.ac
++++ b/c++tools/configure.ac
+@@ -110,6 +110,13 @@ AC_ARG_ENABLE(host-pie,
+ 		[build host code as PIE])],
+ [PICFLAG=-fPIE; LD_PICFLAG=-pie], [])
+ AC_SUBST(PICFLAG)
++
++# Enable --enable-host-bind-now
++AC_ARG_ENABLE(host-bind-now,
++[AS_HELP_STRING([--enable-host-bind-now],
++       [link host code as BIND_NOW])],
++[LD_PICFLAG="$LD_PICFLAG -Wl,-z,now"], [])
++AC_SUBST(enable_host_bind_now)
+ AC_SUBST(LD_PICFLAG)
+ 
+ # Check if O_CLOEXEC is defined by fcntl
+diff --git a/gcc/configure b/gcc/configure
+index 2ded5d4c50b..5671dc7dcf4 100755
+--- a/gcc/configure
++++ b/gcc/configure
+@@ -635,6 +635,7 @@ CET_HOST_FLAGS
+ LD_PICFLAG
+ PICFLAG
+ enable_default_pie
++enable_host_bind_now
+ enable_host_pie
+ enable_host_shared
+ enable_plugin
+@@ -1023,6 +1024,7 @@ enable_version_specific_runtime_libs
+ enable_plugin
+ enable_host_shared
+ enable_host_pie
++enable_host_bind_now
+ enable_libquadmath_support
+ with_linker_hash_style
+ with_diagnostics_color
+@@ -1786,6 +1788,7 @@ Optional Features:
+   --enable-plugin         enable plugin support
+   --enable-host-shared    build host code as shared libraries
+   --enable-host-pie       build host code as PIE
++  --enable-host-bind-now  link host code as BIND_NOW
+   --disable-libquadmath-support
+                           disable libquadmath support for Fortran
+   --enable-default-pie    enable Position Independent Executable as default
+@@ -19394,7 +19397,7 @@ else
+   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
+   lt_status=$lt_dlunknown
+   cat > conftest.$ac_ext <<_LT_EOF
+-#line 19409 "configure"
++#line 19412 "configure"
+ #include "confdefs.h"
+ 
+ #if HAVE_DLFCN_H
+@@ -19500,7 +19503,7 @@ else
+   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
+   lt_status=$lt_dlunknown
+   cat > conftest.$ac_ext <<_LT_EOF
+-#line 19515 "configure"
++#line 19518 "configure"
+ #include "confdefs.h"
+ 
+ #if HAVE_DLFCN_H
+@@ -32109,6 +32112,14 @@ fi
+ 
+ 
+ 
++# Enable --enable-host-bind-now
++# Check whether --enable-host-bind-now was given.
++if test "${enable_host_bind_now+set}" = set; then :
++  enableval=$enable_host_bind_now;
++fi
++
++
++
+ # Check whether --enable-libquadmath-support was given.
+ if test "${enable_libquadmath_support+set}" = set; then :
+   enableval=$enable_libquadmath_support; ENABLE_LIBQUADMATH_SUPPORT=$enableval
+@@ -32295,6 +32306,8 @@ else
+   PICFLAG=
+ fi
+ 
++
++
+ if test x$enable_host_pie = xyes; then
+   LD_PICFLAG=-pie
+ elif test x$gcc_cv_no_pie = xyes; then
+@@ -32303,6 +32316,9 @@ else
+   LD_PICFLAG=
+ fi
+ 
++if test x$enable_host_bind_now = xyes; then
++  LD_PICFLAG="$LD_PICFLAG -Wl,-z,now"
++fi
+ 
+ 
+ 
+diff --git a/gcc/configure.ac b/gcc/configure.ac
+index dca995aeec7..6017bcbc8c6 100644
+--- a/gcc/configure.ac
++++ b/gcc/configure.ac
+@@ -7497,6 +7497,12 @@ AC_ARG_ENABLE(host-pie,
+ 		[build host code as PIE])])
+ AC_SUBST(enable_host_pie)
+ 
++# Enable --enable-host-bind-now
++AC_ARG_ENABLE(host-bind-now,
++[AS_HELP_STRING([--enable-host-bind-now],
++		[link host code as BIND_NOW])])
++AC_SUBST(enable_host_bind_now)
++
+ AC_ARG_ENABLE(libquadmath-support,
+ [AS_HELP_STRING([--disable-libquadmath-support],
+   [disable libquadmath support for Fortran])],
+@@ -7638,6 +7644,8 @@ else
+   PICFLAG=
+ fi
+ 
++AC_SUBST([PICFLAG])
++
+ if test x$enable_host_pie = xyes; then
+   LD_PICFLAG=-pie
+ elif test x$gcc_cv_no_pie = xyes; then
+@@ -7646,7 +7654,10 @@ else
+   LD_PICFLAG=
+ fi
+ 
+-AC_SUBST([PICFLAG])
++if test x$enable_host_bind_now = xyes; then
++  LD_PICFLAG="$LD_PICFLAG -Wl,-z,now"
++fi
++
+ AC_SUBST([LD_PICFLAG])
+ 
+ # Enable Intel CET on Intel CET enabled host if jit is enabled.
+diff --git a/gcc/doc/install.texi b/gcc/doc/install.texi
+index 9747f832a75..b59af198d3e 100644
+--- a/gcc/doc/install.texi
++++ b/gcc/doc/install.texi
+@@ -1041,6 +1041,12 @@ protection against Return Oriented Programming (ROP) attacks.
+ in which case @option{-fPIC} is used when compiling, and @option{-pie} when
+ linking.
+ 
++@item --enable-host-bind-now
++Specify that the @emph{host} executables should be linked with the option
++@option{-Wl,-z,now}, which means that the dynamic linker will resolve all
++symbols when the executables are started, and that in turn allows RELRO to
++mark the GOT read-only, resulting in better security.
++
+ @item @anchor{with-gnu-as}--with-gnu-as
+ Specify that the compiler should assume that the
+ assembler it finds is the GNU assembler.  However, this does not modify
+diff --git a/lto-plugin/configure b/lto-plugin/configure
+index baa84adbb6c..669ccaede52 100755
+--- a/lto-plugin/configure
++++ b/lto-plugin/configure
+@@ -656,6 +656,7 @@ accel_dir_suffix
+ gcc_build_dir
+ CET_HOST_FLAGS
+ ac_lto_plugin_ldflags
++enable_host_bind_now
+ ac_lto_plugin_warn_cflags
+ EGREP
+ GREP
+@@ -771,6 +772,7 @@ enable_maintainer_mode
+ with_libiberty
+ enable_dependency_tracking
+ enable_largefile
++enable_host_bind_now
+ enable_cet
+ with_gcc_major_version_only
+ enable_shared
+@@ -1418,6 +1420,7 @@ Optional Features:
+   --disable-dependency-tracking
+                           speeds up one-time build
+   --disable-largefile     omit support for large files
++  --enable-host-bind-now  link host code as BIND_NOW
+   --enable-cet            enable Intel CET in host libraries [default=auto]
+   --enable-shared[=PKGS]  build shared libraries [default=yes]
+   --enable-static[=PKGS]  build static libraries [default=yes]
+@@ -5662,6 +5665,19 @@ if test "x$have_static_libgcc" = xyes; then
+    ac_lto_plugin_ldflags="-Wc,-static-libgcc"
+ fi
+ 
++# Enable --enable-host-bind-now
++# Check whether --enable-host-bind-now was given.
++if test "${enable_host_bind_now+set}" = set; then :
++  enableval=$enable_host_bind_now;
++fi
++
++
++
++if test x$enable_host_bind_now = xyes; then
++  ac_lto_plugin_ldflags="$ac_lto_plugin_ldflags -Wl,-z,now"
++fi
++
++
+ 
+  # Check whether --enable-cet was given.
+ if test "${enable_cet+set}" = set; then :
+@@ -11950,7 +11968,7 @@ else
+   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
+   lt_status=$lt_dlunknown
+   cat > conftest.$ac_ext <<_LT_EOF
+-#line 11963 "configure"
++#line 11983 "configure"
+ #include "confdefs.h"
+ 
+ #if HAVE_DLFCN_H
+@@ -12056,7 +12074,7 @@ else
+   lt_dlunknown=0; lt_dlno_uscore=1; lt_dlneed_uscore=2
+   lt_status=$lt_dlunknown
+   cat > conftest.$ac_ext <<_LT_EOF
+-#line 12069 "configure"
++#line 12089 "configure"
+ #include "confdefs.h"
+ 
+ #if HAVE_DLFCN_H
+diff --git a/lto-plugin/configure.ac b/lto-plugin/configure.ac
+index 7e6f729e9dc..5d5fea8fe70 100644
+--- a/lto-plugin/configure.ac
++++ b/lto-plugin/configure.ac
+@@ -25,6 +25,17 @@ LDFLAGS="$saved_LDFLAGS"
+ if test "x$have_static_libgcc" = xyes; then
+    ac_lto_plugin_ldflags="-Wc,-static-libgcc"
+ fi
++
++# Enable --enable-host-bind-now
++AC_ARG_ENABLE(host-bind-now,
++[AS_HELP_STRING([--enable-host-bind-now],
++       [link host code as BIND_NOW])])
++AC_SUBST(enable_host_bind_now)
++
++if test x$enable_host_bind_now = xyes; then
++  ac_lto_plugin_ldflags="$ac_lto_plugin_ldflags -Wl,-z,now"
++fi
++
+ AC_SUBST(ac_lto_plugin_ldflags)
+ 
+ GCC_CET_HOST_FLAGS(CET_HOST_FLAGS)
+
+base-commit: bf799d3409cb9a189114a6c9ff5b7cd123915764
+-- 
+2.34.1
+

@@ -1,0 +1,772 @@
+diff -rup binutils.orig/libctf/ctf-create.c binutils-2.34.0/libctf/ctf-create.c
+--- binutils.orig/libctf/ctf-create.c	2020-06-16 12:06:28.466468753 +0100
++++ binutils-2.34.0/libctf/ctf-create.c	2020-06-16 12:16:19.744482839 +0100
+@@ -871,7 +871,8 @@ ctf_add_encoded (ctf_file_t *fp, uint32_
+ 
+   if ((type = ctf_add_generic (fp, flag, name, kind, &dtd)) == CTF_ERR)
+     return CTF_ERR;		/* errno is set for us.  */
+-
++  if (dtd == NULL)
++    return CTF_ERR;
+   dtd->dtd_data.ctt_info = CTF_TYPE_INFO (kind, flag, 0);
+   dtd->dtd_data.ctt_size = clp2 (P2ROUNDUP (ep->cte_bits, CHAR_BIT)
+ 				 / CHAR_BIT);
+@@ -896,6 +897,8 @@ ctf_add_reftype (ctf_file_t *fp, uint32_
+ 
+   if ((type = ctf_add_generic (fp, flag, NULL, kind, &dtd)) == CTF_ERR)
+     return CTF_ERR;		/* errno is set for us.  */
++  if (dtd == NULL)
++    return CTF_ERR;
+ 
+   dtd->dtd_data.ctt_info = CTF_TYPE_INFO (kind, flag, 0);
+   dtd->dtd_data.ctt_type = (uint32_t) ref;
+@@ -958,6 +961,8 @@ ctf_add_slice (ctf_file_t *fp, uint32_t
+ 
+   if ((type = ctf_add_generic (fp, flag, NULL, CTF_K_SLICE, &dtd)) == CTF_ERR)
+     return CTF_ERR;		/* errno is set for us.  */
++  if (dtd == NULL)
++    return CTF_ERR;
+ 
+   dtd->dtd_data.ctt_info = CTF_TYPE_INFO (CTF_K_SLICE, flag, 0);
+   dtd->dtd_data.ctt_size = clp2 (P2ROUNDUP (ep->cte_bits, CHAR_BIT)
+@@ -1008,6 +1013,8 @@ ctf_add_array (ctf_file_t *fp, uint32_t
+ 
+   if ((type = ctf_add_generic (fp, flag, NULL, CTF_K_ARRAY, &dtd)) == CTF_ERR)
+     return CTF_ERR;		/* errno is set for us.  */
++  if (dtd == NULL)
++    return CTF_ERR;
+ 
+   dtd->dtd_data.ctt_info = CTF_TYPE_INFO (CTF_K_ARRAY, flag, 0);
+   dtd->dtd_data.ctt_size = 0;
+@@ -1075,6 +1082,8 @@ ctf_add_function (ctf_file_t *fp, uint32
+       free (vdat);
+       return CTF_ERR;		   /* errno is set for us.  */
+     }
++  if (dtd == NULL)
++    return CTF_ERR;
+ 
+   dtd->dtd_data.ctt_info = CTF_TYPE_INFO (CTF_K_FUNCTION, flag, vlen);
+   dtd->dtd_data.ctt_type = (uint32_t) ctc->ctc_return;
+@@ -1104,6 +1113,8 @@ ctf_add_struct_sized (ctf_file_t *fp, ui
+   else if ((type = ctf_add_generic (fp, flag, name, CTF_K_STRUCT,
+ 				    &dtd)) == CTF_ERR)
+     return CTF_ERR;		/* errno is set for us.  */
++  if (dtd == NULL)
++    return CTF_ERR;
+ 
+   dtd->dtd_data.ctt_info = CTF_TYPE_INFO (CTF_K_STRUCT, flag, 0);
+ 
+@@ -1141,6 +1152,8 @@ ctf_add_union_sized (ctf_file_t *fp, uin
+   else if ((type = ctf_add_generic (fp, flag, name, CTF_K_UNION,
+ 				    &dtd)) == CTF_ERR)
+     return CTF_ERR;		/* errno is set for us */
++  if (dtd == NULL)
++    return CTF_ERR;
+ 
+   dtd->dtd_data.ctt_info = CTF_TYPE_INFO (CTF_K_UNION, flag, 0);
+ 
+@@ -1177,6 +1190,8 @@ ctf_add_enum (ctf_file_t *fp, uint32_t f
+   else if ((type = ctf_add_generic (fp, flag, name, CTF_K_ENUM,
+ 				    &dtd)) == CTF_ERR)
+     return CTF_ERR;		/* errno is set for us.  */
++  if (dtd == NULL)
++    return CTF_ERR;
+ 
+   dtd->dtd_data.ctt_info = CTF_TYPE_INFO (CTF_K_ENUM, flag, 0);
+   dtd->dtd_data.ctt_size = fp->ctf_dmodel->ctd_int;
+diff -rup binutils.orig/libctf/ctf-types.c binutils-2.34.0/libctf/ctf-types.c
+--- binutils.orig/libctf/ctf-types.c	2020-06-16 12:06:28.466468753 +0100
++++ binutils-2.34.0/libctf/ctf-types.c	2020-06-16 12:10:58.033563365 +0100
+@@ -748,7 +748,7 @@ ctf_type_encoding (ctf_file_t *fp, ctf_i
+ 	case CTF_K_SLICE:
+ 	  {
+ 	    const ctf_slice_t *slice;
+-	    ctf_encoding_t underlying_en;
++	    ctf_encoding_t underlying_en = {0};
+ 	    slice = &dtd->dtd_u.dtu_slice;
+ 
+ 	    data = ctf_type_encoding (fp, slice->cts_type, &underlying_en);
+diff -rup binutils.orig/opcodes/s390-mkopc.c binutils-2.34.0/opcodes/s390-mkopc.c
+--- binutils.orig/opcodes/s390-mkopc.c	2020-06-16 12:06:28.447468816 +0100
++++ binutils-2.34.0/opcodes/s390-mkopc.c	2020-06-16 12:17:10.783311417 +0100
+@@ -168,7 +168,7 @@ insertExpandedMnemonic (char *opcode, ch
+   int mask_start, i = 0, tag_found = 0, reading_number = 0;
+   int number_p = 0, suffix_p = 0, prefix_p = 0;
+   const struct s390_cond_ext_format *ext_table;
+-  int ext_table_length;
++  int ext_table_length = 0;
+ 
+   if (!(tag = strpbrk (mnemonic, "*$")))
+     {
+Only in binutils.orig/libctf: .#ctf-create.c
+diff -rup binutils.orig/libctf/ctf-create.c binutils-2.34.0/libctf/ctf-create.c
+--- binutils.orig/libctf/ctf-create.c	2020-06-16 14:49:06.080801319 +0100
++++ binutils-2.34.0/libctf/ctf-create.c	2020-06-16 14:49:08.046794113 +0100
+@@ -798,6 +798,7 @@ ctf_add_generic (ctf_file_t *fp, uint32_
+ {
+   ctf_dtdef_t *dtd;
+   ctf_id_t type;
++  *rp = NULL;
+ 
+   if (flag != CTF_ADD_NONROOT && flag != CTF_ADD_ROOT)
+     return (ctf_set_errno (fp, EINVAL));
+diff -rup binutils.orig/opcodes/fr30-ibld.c binutils-2.34.0/opcodes/fr30-ibld.c
+--- binutils.orig/opcodes/fr30-ibld.c	2020-06-16 14:49:06.074801341 +0100
++++ binutils-2.34.0/opcodes/fr30-ibld.c	2020-06-16 16:43:31.428324833 +0100
+@@ -810,7 +810,7 @@ fr30_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case FR30_OPERAND_DIR10 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 8, 16, total_length, pc, & value);
+         value = ((value) << (2));
+         fields->f_dir10 = value;
+@@ -821,7 +821,7 @@ fr30_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case FR30_OPERAND_DIR9 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 8, 16, total_length, pc, & value);
+         value = ((value) << (1));
+         fields->f_dir9 = value;
+@@ -829,7 +829,7 @@ fr30_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case FR30_OPERAND_DISP10 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 0, 4, 8, 16, total_length, pc, & value);
+         value = ((value) * (4));
+         fields->f_disp10 = value;
+@@ -840,7 +840,7 @@ fr30_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case FR30_OPERAND_DISP9 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 0, 4, 8, 16, total_length, pc, & value);
+         value = ((value) * (2));
+         fields->f_disp9 = value;
+@@ -865,7 +865,7 @@ fr30_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case FR30_OPERAND_LABEL12 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 5, 11, 16, total_length, pc, & value);
+         value = ((((value) * (2))) + (((pc) + (2))));
+         fields->f_rel12 = value;
+@@ -873,7 +873,7 @@ fr30_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case FR30_OPERAND_LABEL9 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 8, 8, 16, total_length, pc, & value);
+         value = ((((value) * (2))) + (((pc) + (2))));
+         fields->f_rel9 = value;
+@@ -881,7 +881,7 @@ fr30_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case FR30_OPERAND_M4 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 4, 16, total_length, pc, & value);
+         value = ((value) | (-16));
+         fields->f_m4 = value;
+@@ -911,7 +911,7 @@ fr30_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case FR30_OPERAND_U10 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 8, 16, total_length, pc, & value);
+         value = ((value) << (2));
+         fields->f_u10 = value;
+@@ -928,7 +928,7 @@ fr30_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case FR30_OPERAND_UDISP6 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 4, 16, total_length, pc, & value);
+         value = ((value) << (2));
+         fields->f_udisp6 = value;
+
+diff -rup binutils.orig/opcodes/fr30-ibld.c binutils-2.34.0/opcodes/fr30-ibld.c
+--- binutils.orig/opcodes/fr30-ibld.c	2020-06-16 17:10:22.540563440 +0100
++++ binutils-2.34.0/opcodes/fr30-ibld.c	2020-06-16 17:10:48.966468906 +0100
+@@ -903,7 +903,7 @@ fr30_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case FR30_OPERAND_S10 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 0, 8, 8, 16, total_length, pc, & value);
+         value = ((value) * (4));
+         fields->f_s10 = value;
+Only in binutils-2.34.0/opcodes: fr30-ibld.c~
+--- binutils.orig/opcodes/m32c-ibld.c	2020-06-16 17:10:22.531563472 +0100
++++ binutils-2.34.0/opcodes/m32c-ibld.c	2020-06-16 17:25:48.612258094 +0100
+@@ -1805,7 +1805,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_BIT32RNPREFIXED :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 2, 32, total_length, pc, & value);
+         value = (((((~ (((USI) (value) >> (1))))) & (1))) | (((((value) << (1))) & (2))));
+         fields->f_dst32_rn_prefixed_QI = value;
+@@ -1813,7 +1813,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_BIT32RNUNPREFIXED :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 2, 32, total_length, pc, & value);
+         value = (((((~ (((USI) (value) >> (1))))) & (1))) | (((((value) << (1))) & (2))));
+         fields->f_dst32_rn_unprefixed_QI = value;
+@@ -1824,7 +1824,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_BITBASE16_16_U16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_16_u16 = value;
+@@ -1860,7 +1860,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 13, 3, 32, total_length, pc, & fields->f_bitno32_unprefixed);
+         if (length <= 0) break;
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 0, 16, 16, 32, total_length, pc, & value);
+         value = EXTHISI (((HI) (INT) (((((((UINT) (value) >> (8))) & (255))) | (((((value) & (255))) << (8)))))));
+         fields->f_dsp_16_s16 = value;
+@@ -1887,7 +1887,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 13, 3, 32, total_length, pc, & fields->f_bitno32_unprefixed);
+         if (length <= 0) break;
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_16_u16 = value;
+@@ -1903,7 +1903,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 13, 3, 32, total_length, pc, & fields->f_bitno32_unprefixed);
+         if (length <= 0) break;
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_16_u16 = value;
+@@ -1971,7 +1971,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 24, 8, 32, total_length, pc, & fields->f_dsp_24_u8);
+         if (length <= 0) break;
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 0, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_32_u16 = value;
+@@ -1996,7 +1996,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_16_S16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 0, 16, 16, 32, total_length, pc, & value);
+         value = EXTHISI (((HI) (INT) (((((((UINT) (value) >> (8))) & (255))) | (((((value) & (255))) << (8)))))));
+         fields->f_dsp_16_s16 = value;
+@@ -2007,7 +2007,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_16_U16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_16_u16 = value;
+@@ -2016,7 +2016,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+     case M32C_OPERAND_DSP_16_U20 :
+       {
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_16_u16 = value;
+@@ -2032,7 +2032,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+     case M32C_OPERAND_DSP_16_U24 :
+       {
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_16_u16 = value;
+@@ -2078,7 +2078,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 24, 8, 32, total_length, pc, & fields->f_dsp_24_u8);
+         if (length <= 0) break;
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 0, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_32_u16 = value;
+@@ -2094,7 +2094,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 24, 8, 32, total_length, pc, & fields->f_dsp_24_u8);
+         if (length <= 0) break;
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 0, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_32_u16 = value;
+@@ -2110,7 +2110,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_32_S16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 32, 0, 16, 32, total_length, pc, & value);
+         value = EXTHISI (((HI) (INT) (((((((UINT) (value) >> (8))) & (255))) | (((((value) & (255))) << (8)))))));
+         fields->f_dsp_32_s16 = value;
+@@ -2121,7 +2121,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_32_U16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 0, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_32_u16 = value;
+@@ -2129,7 +2129,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_32_U20 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 0, 24, 32, total_length, pc, & value);
+         value = ((((((((USI) (value) >> (16))) & (255))) | (((value) & (65280))))) | (((((value) << (16))) & (16711680))));
+         fields->f_dsp_32_u24 = value;
+@@ -2137,7 +2137,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_32_U24 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 0, 24, 32, total_length, pc, & value);
+         value = ((((((((USI) (value) >> (16))) & (255))) | (((value) & (65280))))) | (((((value) << (16))) & (16711680))));
+         fields->f_dsp_32_u24 = value;
+@@ -2148,7 +2148,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_40_S16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 32, 8, 16, 32, total_length, pc, & value);
+         value = EXTHISI (((HI) (INT) (((((((UINT) (value) >> (8))) & (255))) | (((((value) & (255))) << (8)))))));
+         fields->f_dsp_40_s16 = value;
+@@ -2159,7 +2159,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_40_U16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 8, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_40_u16 = value;
+@@ -2167,7 +2167,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_40_U20 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 8, 20, 32, total_length, pc, & value);
+         value = ((((((((USI) (value) >> (16))) & (255))) | (((value) & (65280))))) | (((((value) << (16))) & (983040))));
+         fields->f_dsp_40_u20 = value;
+@@ -2175,7 +2175,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_40_U24 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 8, 24, 32, total_length, pc, & value);
+         value = ((((((((USI) (value) >> (16))) & (255))) | (((value) & (65280))))) | (((((value) << (16))) & (16711680))));
+         fields->f_dsp_40_u24 = value;
+@@ -2186,7 +2186,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_48_S16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 32, 16, 16, 32, total_length, pc, & value);
+         value = EXTHISI (((HI) (INT) (((((((UINT) (value) >> (8))) & (255))) | (((((value) & (255))) << (8)))))));
+         fields->f_dsp_48_s16 = value;
+@@ -2197,7 +2197,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_48_U16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_48_u16 = value;
+@@ -2206,7 +2206,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+     case M32C_OPERAND_DSP_48_U20 :
+       {
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_48_u16 = value;
+@@ -2222,7 +2222,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+     case M32C_OPERAND_DSP_48_U24 :
+       {
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_48_u16 = value;
+@@ -2240,7 +2240,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_8_S24 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 0, 8, 24, 32, total_length, pc, & value);
+         value = ((((((((((((USI) (value) >> (16))) & (255))) | (((value) & (65280))))) | (((((value) & (255))) << (16))))) ^ (8388608))) - (8388608));
+         fields->f_dsp_8_s24 = value;
+@@ -2251,7 +2251,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_8_U16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_8_u16 = value;
+@@ -2259,7 +2259,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DSP_8_U24 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 24, 32, total_length, pc, & value);
+         value = ((((((USI) (value) >> (16))) | (((value) & (65280))))) | (((((value) & (255))) << (16))));
+         fields->f_dsp_8_u24 = value;
+@@ -2343,7 +2343,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DST32RNPREFIXEDHI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 2, 32, total_length, pc, & value);
+         value = ((((value) + (2))) % (4));
+         fields->f_dst32_rn_prefixed_HI = value;
+@@ -2351,7 +2351,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DST32RNPREFIXEDQI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 2, 32, total_length, pc, & value);
+         value = (((((~ (((USI) (value) >> (1))))) & (1))) | (((((value) << (1))) & (2))));
+         fields->f_dst32_rn_prefixed_QI = value;
+@@ -2359,7 +2359,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DST32RNPREFIXEDSI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 2, 32, total_length, pc, & value);
+         value = ((value) - (2));
+         fields->f_dst32_rn_prefixed_SI = value;
+@@ -2367,7 +2367,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DST32RNUNPREFIXEDHI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 2, 32, total_length, pc, & value);
+         value = ((((value) + (2))) % (4));
+         fields->f_dst32_rn_unprefixed_HI = value;
+@@ -2375,7 +2375,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DST32RNUNPREFIXEDQI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 2, 32, total_length, pc, & value);
+         value = (((((~ (((USI) (value) >> (1))))) & (1))) | (((((value) << (1))) & (2))));
+         fields->f_dst32_rn_unprefixed_QI = value;
+@@ -2383,7 +2383,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_DST32RNUNPREFIXEDSI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 8, 2, 32, total_length, pc, & value);
+         value = ((value) - (2));
+         fields->f_dst32_rn_unprefixed_SI = value;
+@@ -2402,7 +2402,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_IMM_16_HI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 0, 16, 16, 32, total_length, pc, & value);
+         value = EXTHISI (((HI) (INT) (((((((UINT) (value) >> (8))) & (255))) | (((((value) & (255))) << (8)))))));
+         fields->f_dsp_16_s16 = value;
+@@ -2414,14 +2414,14 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+     case M32C_OPERAND_IMM_16_SI :
+       {
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_16_u16 = value;
+       }
+         if (length <= 0) break;
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 0, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_32_u16 = value;
+@@ -2454,7 +2454,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 24, 8, 32, total_length, pc, & fields->f_dsp_24_u8);
+         if (length <= 0) break;
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 0, 24, 32, total_length, pc, & value);
+         value = ((((((((USI) (value) >> (16))) & (255))) | (((value) & (65280))))) | (((((value) << (16))) & (16711680))));
+         fields->f_dsp_32_u24 = value;
+@@ -2467,7 +2467,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_IMM_32_HI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 32, 0, 16, 32, total_length, pc, & value);
+         value = EXTHISI (((HI) (INT) (((((((UINT) (value) >> (8))) & (255))) | (((((value) & (255))) << (8)))))));
+         fields->f_dsp_32_s16 = value;
+@@ -2486,7 +2486,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_IMM_40_HI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 32, 8, 16, 32, total_length, pc, & value);
+         value = EXTHISI (((HI) (INT) (((((((UINT) (value) >> (8))) & (255))) | (((((value) & (255))) << (8)))))));
+         fields->f_dsp_40_s16 = value;
+@@ -2498,7 +2498,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+     case M32C_OPERAND_IMM_40_SI :
+       {
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 8, 24, 32, total_length, pc, & value);
+         value = ((((((((USI) (value) >> (16))) & (255))) | (((value) & (65280))))) | (((((value) << (16))) & (16711680))));
+         fields->f_dsp_40_u24 = value;
+@@ -2513,7 +2513,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_IMM_48_HI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 32, 16, 16, 32, total_length, pc, & value);
+         value = EXTHISI (((HI) (INT) (((((((UINT) (value) >> (8))) & (255))) | (((((value) & (255))) << (8)))))));
+         fields->f_dsp_48_s16 = value;
+@@ -2525,14 +2525,14 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+     case M32C_OPERAND_IMM_48_SI :
+       {
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 32, 16, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_48_u16 = value;
+       }
+         if (length <= 0) break;
+         {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 64, 0, 16, 32, total_length, pc, & value);
+         value = ((((((UHI) (value) >> (8))) & (255))) | (((((value) & (255))) << (8))));
+         fields->f_dsp_64_u16 = value;
+@@ -2567,7 +2567,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_IMM_8_HI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED), 0, 8, 16, 32, total_length, pc, & value);
+         value = EXTHISI (((HI) (INT) (((((((UINT) (value) >> (8))) & (255))) | (((((value) & (255))) << (8)))))));
+         fields->f_dsp_8_s16 = value;
+@@ -2593,7 +2593,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_IMM1_S :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 2, 1, 32, total_length, pc, & value);
+         value = ((value) + (1));
+         fields->f_imm1_S = value;
+@@ -2612,7 +2612,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_LAB_16_8 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 16, 8, 32, total_length, pc, & value);
+         value = ((value) + (((pc) + (2))));
+         fields->f_lab_16_8 = value;
+@@ -2620,7 +2620,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_LAB_24_8 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 24, 8, 32, total_length, pc, & value);
+         value = ((value) + (((pc) + (2))));
+         fields->f_lab_24_8 = value;
+@@ -2628,7 +2628,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_LAB_32_8 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_PCREL_ADDR), 32, 0, 8, 32, total_length, pc, & value);
+         value = ((value) + (((pc) + (2))));
+         fields->f_lab_32_8 = value;
+@@ -2636,7 +2636,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_LAB_40_8 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_PCREL_ADDR), 32, 8, 8, 32, total_length, pc, & value);
+         value = ((value) + (((pc) + (2))));
+         fields->f_lab_40_8 = value;
+@@ -2644,7 +2644,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_LAB_5_3 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_PCREL_ADDR), 0, 5, 3, 32, total_length, pc, & value);
+         value = ((value) + (((pc) + (2))));
+         fields->f_lab_5_3 = value;
+@@ -2652,7 +2652,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_LAB_8_16 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGN_OPT)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 8, 16, 32, total_length, pc, & value);
+         value = ((((((((((USI) (((value) & (65280))) >> (8))) | (((((value) & (255))) << (8))))) ^ (32768))) - (32768))) + (((pc) + (1))));
+         fields->f_lab_8_16 = value;
+@@ -2660,7 +2660,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_LAB_8_24 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_ABS_ADDR), 0, 8, 24, 32, total_length, pc, & value);
+         value = ((((((USI) (value) >> (16))) | (((value) & (65280))))) | (((((value) & (255))) << (16))));
+         fields->f_lab_8_24 = value;
+@@ -2668,7 +2668,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_LAB_8_8 :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0|(1<<CGEN_IFLD_SIGNED)|(1<<CGEN_IFLD_PCREL_ADDR), 0, 8, 8, 32, total_length, pc, & value);
+         value = ((value) + (((pc) + (1))));
+         fields->f_lab_8_8 = value;
+@@ -2757,7 +2757,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_SRC32RNPREFIXEDHI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 18, 2, 32, total_length, pc, & value);
+         value = ((((value) + (2))) % (4));
+         fields->f_src32_rn_prefixed_HI = value;
+@@ -2765,7 +2765,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_SRC32RNPREFIXEDQI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 18, 2, 32, total_length, pc, & value);
+         value = (((((~ (((USI) (value) >> (1))))) & (1))) | (((((value) << (1))) & (2))));
+         fields->f_src32_rn_prefixed_QI = value;
+@@ -2773,7 +2773,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_SRC32RNPREFIXEDSI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 18, 2, 32, total_length, pc, & value);
+         value = ((value) - (2));
+         fields->f_src32_rn_prefixed_SI = value;
+@@ -2781,7 +2781,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_SRC32RNUNPREFIXEDHI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 10, 2, 32, total_length, pc, & value);
+         value = ((((value) + (2))) % (4));
+         fields->f_src32_rn_unprefixed_HI = value;
+@@ -2789,7 +2789,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_SRC32RNUNPREFIXEDQI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 10, 2, 32, total_length, pc, & value);
+         value = (((((~ (((USI) (value) >> (1))))) & (1))) | (((((value) << (1))) & (2))));
+         fields->f_src32_rn_unprefixed_QI = value;
+@@ -2797,7 +2797,7 @@ m32c_cgen_extract_operand (CGEN_CPU_DESC
+       break;
+     case M32C_OPERAND_SRC32RNUNPREFIXEDSI :
+       {
+-        long value;
++        long value = 0;
+         length = extract_normal (cd, ex_info, insn_value, 0, 0, 10, 2, 32, total_length, pc, & value);
+         value = ((value) - (2));
+         fields->f_src32_rn_unprefixed_SI = value;
+--- binutils.orig/binutils/srconv.c	2020-06-16 17:10:22.251564474 +0100
++++ binutils-2.34.0/binutils/srconv.c	2020-06-16 20:07:51.670025912 +0100
+@@ -492,6 +492,8 @@ wr_rl (struct coff_ofile *ptr ATTRIBUTE_
+       rl.addr = r->offset;
+       rl.bitloc = 0;
+       rl.flen = 32;		/* SH Specific.  */
++      rl.dunno = 0;
++      rl.symn = 0;
+ 
+       /* What sort of reloc ? Look in the section to find out.  */
+       ref = r->symbol;
+--- binutils.orig/libctf/ctf-create.c	2020-07-24 15:33:26.100996335 +0100
++++ binutils-2.35/libctf/ctf-create.c	2020-07-24 15:33:29.042977475 +0100
+@@ -1257,6 +1257,8 @@ ctf_add_forward (ctf_file_t *fp, uint32_
+ 
+   if ((type = ctf_add_generic (fp, flag, name, kind, &dtd)) == CTF_ERR)
+     return CTF_ERR;		/* errno is set for us.  */
++  if (dtd == NULL)
++    return CTF_ERR;
+ 
+   dtd->dtd_data.ctt_info = CTF_TYPE_INFO (CTF_K_FORWARD, flag, 0);
+   dtd->dtd_data.ctt_type = kind;

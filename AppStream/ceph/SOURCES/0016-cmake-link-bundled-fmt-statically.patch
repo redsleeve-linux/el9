@@ -1,0 +1,32 @@
+From 1207906fcf005812f1d861e7bf577a1dc2d1e053 Mon Sep 17 00:00:00 2001
+From: Boris Ranto <branto@redhat.com>
+Date: Thu, 5 Aug 2021 15:59:39 +0200
+Subject: [PATCH] cmake: link bundled fmt statically
+
+instead of building the bundled fmt library as shared library, built
+static library. otherwise we'd have to link against libfmt.so.
+
+Signed-off-by: Kefu Chai <kchai@redhat.com>
+---
+ src/CMakeLists.txt | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index c4d73633ed8..b1a9001e744 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -310,7 +310,11 @@ if(fmt_FOUND)
+   include_directories(SYSTEM "${fmt_INCLUDE_DIR}")
+ else()
+   message(STATUS "Could not find fmt, will build it")
++  set(old_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
++  set(BUILD_SHARED_LIBS FALSE)
+   add_subdirectory(fmt)
++  set(BUILD_SHARED_LIBS ${old_BUILD_SHARED_LIBS})
++  unset(old_BUILD_SHARED_LIBS)
+   include_directories(SYSTEM "${CMAKE_SOURCE_DIR}/src/fmt/include")
+ endif()
+ 
+-- 
+2.31.1
+

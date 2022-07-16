@@ -1,0 +1,60 @@
+From 8ae75219cc7a0dc69e77e22ba2547104078769d8 Mon Sep 17 00:00:00 2001
+From: Pingfan Liu <piliu@redhat.com>
+Date: Thu, 10 Jun 2021 11:06:07 +0800
+Subject: [PATCH 3/6] shm.c: fix memleak in verify_shm()
+
+Signed-off-by: Pingfan Liu <piliu@redhat.com>
+---
+ shm.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/shm.c b/shm.c
+index c0b6ee3..e5192e5 100644
+--- a/shm.c
++++ b/shm.c
+@@ -273,8 +273,6 @@ void verify_shm(int policy, struct bitmask *nodes)
+ 	int pol2;
+ 	struct bitmask *nodes2;
+ 
+-	nodes2 = numa_allocate_nodemask();
+-
+ 	if (policy == MPOL_INTERLEAVE) {
+ 		if (get_mempolicy(&ilnode, NULL, 0, shmptr,
+ 					MPOL_F_ADDR|MPOL_F_NODE)
+@@ -282,6 +280,8 @@ void verify_shm(int policy, struct bitmask *nodes)
+ 			err("get_mempolicy");
+ 	}
+ 
++	nodes2 = numa_allocate_nodemask();
++
+ 	for (p = shmptr; p - (char *)shmptr < shmlen; p += shm_pagesize) {
+ 		if (get_mempolicy(&pol2, nodes2->maskp, nodes2->size, p,
+ 							MPOL_F_ADDR) < 0)
+@@ -289,7 +289,7 @@ void verify_shm(int policy, struct bitmask *nodes)
+ 		if (pol2 != policy) {
+ 			vwarn(p, "wrong policy %s, expected %s\n",
+ 			      policy_name(pol2), policy_name(policy));
+-			return;
++			goto out;
+ 		}
+ 		if (memcmp(nodes2, nodes, numa_bitmask_nbytes(nodes))) {
+ 			vwarn(p, "mismatched node mask\n");
+@@ -307,7 +307,7 @@ void verify_shm(int policy, struct bitmask *nodes)
+ 			if (node != ilnode) {
+ 				vwarn(p, "expected interleave node %d, got %d\n",
+ 				     ilnode,node);
+-				return;
++				goto out;
+ 			}
+ 			ilnode = interleave_next(ilnode, nodes2);
+ 			break;
+@@ -325,4 +325,6 @@ void verify_shm(int policy, struct bitmask *nodes)
+ 		}
+ 	}
+ 
++out:
++	numa_free_nodemask(nodes2);
+ }
+-- 
+2.29.2
+

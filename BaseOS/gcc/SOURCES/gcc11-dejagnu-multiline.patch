@@ -1,0 +1,32 @@
+commit 14c7757e9b751781360737f53b71f851fc356d3d
+Author: Jeff Law <jeffreyalaw@gmail.com>
+Date:   Fri Oct 29 11:30:15 2021 -0400
+
+    Avoid overly-greedy match in dejagnu regexp.
+    
+    Occasionally I've been seeing failures with the multi-line diagnostics.  It's never been clear what's causing the spurious failures, though I have long suspected a greedy regexp match.
+    
+    It happened again yesterday with a local change that in no way should affect diagnostics, so I finally went searching and found that sure enough the multi-line diagnostics had a ".*" in their regexp.  According to the comments, the .* is primarily to catch any dg directives that may appear -- ie it should eat to EOL, but not multiple lines.  But a .* can indeed match a newline and cause it to eat multiple lines.
+    
+    The fix is simple.  [^\r\n]* will eat to EOL, but not further.
+    
+    Regression tested on x86_64 and on our internal target.
+    
+    gcc/testsuite
+    
+            * lib/multiline.exp (_build_multiline_regex): Use a better
+            regexp than .* to match up to EOL.
+
+diff --git a/gcc/testsuite/lib/multiline.exp b/gcc/testsuite/lib/multiline.exp
+index 0e151b6d222..86387f8209b 100644
+--- a/gcc/testsuite/lib/multiline.exp
++++ b/gcc/testsuite/lib/multiline.exp
+@@ -331,7 +331,7 @@ proc _build_multiline_regex { multiline index } {
+ 		# Support arbitrary followup text on each non-empty line,
+ 		# to deal with comments containing containing DejaGnu
+ 		# directives.
+-		append rexp ".*"
++		append rexp "\[^\\n\\r\]*"
+ 	    }
+ 	}
+ 	append rexp "\n"

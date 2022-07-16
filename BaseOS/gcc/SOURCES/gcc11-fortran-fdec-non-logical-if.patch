@@ -1,0 +1,378 @@
+From cc87ddb841017bb0976b05091733609ee17d7f05 Mon Sep 17 00:00:00 2001
+From: Mark Eggleston <markeggleston@gcc.gnu.org>
+Date: Fri, 22 Jan 2021 13:15:17 +0000
+Subject: [PATCH 07/10] Allow non-logical expressions in IF statements
+
+Use -fdec-non-logical-if to enable feature. Also enabled using -fdec.
+---
+ gcc/fortran/lang.opt                          |  4 ++
+ gcc/fortran/options.c                         |  1 +
+ gcc/fortran/resolve.c                         | 60 ++++++++++++++++---
+ ...gical_expressions_if_statements_blocks_1.f | 25 ++++++++
+ ...gical_expressions_if_statements_blocks_2.f | 25 ++++++++
+ ...gical_expressions_if_statements_blocks_3.f | 25 ++++++++
+ ...gical_expressions_if_statements_blocks_4.f | 45 ++++++++++++++
+ ...gical_expressions_if_statements_blocks_5.f | 45 ++++++++++++++
+ ...gical_expressions_if_statements_blocks_6.f | 45 ++++++++++++++
+ 9 files changed, 266 insertions(+), 9 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_1.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_2.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_3.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_4.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_5.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_6.f
+
+diff --git a/gcc/fortran/lang.opt b/gcc/fortran/lang.opt
+index 4a269ebb22d..d886c2f33ed 100644
+--- a/gcc/fortran/lang.opt
++++ b/gcc/fortran/lang.opt
+@@ -497,6 +497,10 @@ fdec-override-kind
+ Fortran Var(flag_dec_override_kind)
+ Enable support for per variable kind specification.
+ 
++fdec-non-logical-if
++Fortran Var(flag_dec_non_logical_if)
++Enable support for non-logical expressions in if statements.
++
+ fdec-old-init
+ Fortran Var(flag_dec_old_init)
+ Enable support for old style initializers in derived types.
+diff --git a/gcc/fortran/options.c b/gcc/fortran/options.c
+index edbab483b36..a946c86790a 100644
+--- a/gcc/fortran/options.c
++++ b/gcc/fortran/options.c
+@@ -81,6 +81,7 @@ set_dec_flags (int value)
+   SET_BITFLAG (flag_dec_non_integer_index, value, value);
+   SET_BITFLAG (flag_dec_old_init, value, value);
+   SET_BITFLAG (flag_dec_override_kind, value, value);
++  SET_BITFLAG (flag_dec_non_logical_if, value, value);
+ }
+ 
+ /* Finalize DEC flags.  */
+diff --git a/gcc/fortran/resolve.c b/gcc/fortran/resolve.c
+index bc0df0fdb99..07dd039f3bf 100644
+--- a/gcc/fortran/resolve.c
++++ b/gcc/fortran/resolve.c
+@@ -10789,10 +10789,31 @@ gfc_resolve_blocks (gfc_code *b, gfc_namespace *ns)
+       switch (b->op)
+ 	{
+ 	case EXEC_IF:
+-	  if (t && b->expr1 != NULL
+-	      && (b->expr1->ts.type != BT_LOGICAL || b->expr1->rank != 0))
+-	    gfc_error ("IF clause at %L requires a scalar LOGICAL expression",
+-		       &b->expr1->where);
++	  if (t && b->expr1 != NULL)
++	    {
++	      if (flag_dec_non_logical_if && b->expr1->ts.type != BT_LOGICAL)
++		{
++		  gfc_expr* cast;
++		  cast = gfc_ne (b->expr1,
++				 gfc_get_int_expr (1, &gfc_current_locus, 0),
++				 INTRINSIC_NE);
++		  if (cast == NULL)
++		    gfc_internal_error ("gfc_resolve_blocks(): Failed to cast "
++					"to LOGICAL in IF");
++		  b->expr1 = cast;
++		  if (warn_conversion_extra)
++		    {
++		      gfc_warning (OPT_Wconversion_extra, "Non-LOGICAL type in"
++				   " IF statement condition %L will be true if"
++				   " it evaluates to nonzero",
++				   &b->expr1->where);
++		    }
++		}
++
++	      if ((b->expr1->ts.type != BT_LOGICAL || b->expr1->rank != 0))
++		gfc_error ("IF clause at %L requires a scalar LOGICAL "
++			   "expression", &b->expr1->where);
++	    }
+ 	  break;
+ 
+ 	case EXEC_WHERE:
+@@ -12093,11 +12114,32 @@ start:
+ 	  break;
+ 
+ 	case EXEC_IF:
+-	  if (t && code->expr1 != NULL
+-	      && (code->expr1->ts.type != BT_LOGICAL
+-		  || code->expr1->rank != 0))
+-	    gfc_error ("IF clause at %L requires a scalar LOGICAL expression",
+-		       &code->expr1->where);
++	  if (t && code->expr1 != NULL)
++	    {
++	      if (flag_dec_non_logical_if
++		  && code->expr1->ts.type != BT_LOGICAL)
++		{
++		  gfc_expr* cast;
++		  cast = gfc_ne (code->expr1,
++				 gfc_get_int_expr (1, &gfc_current_locus, 0),
++				 INTRINSIC_NE);
++		  if (cast == NULL)
++		    gfc_internal_error ("gfc_resolve_code(): Failed to cast "
++					"to LOGICAL in IF");
++		  code->expr1 = cast;
++		  if (warn_conversion_extra)
++		    {
++		      gfc_warning (OPT_Wconversion_extra, "Non-LOGICAL type in"
++				   " IF statement condition %L will be true if"
++				   " it evaluates to nonzero",
++				   &code->expr1->where);
++		    }
++		}
++
++	      if (code->expr1->ts.type != BT_LOGICAL || code->expr1->rank != 0)
++		gfc_error ("IF clause at %L requires a scalar LOGICAL "
++			   "expression", &code->expr1->where);
++	    }
+ 	  break;
+ 
+ 	case EXEC_CALL:
+diff --git a/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_1.f b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_1.f
+new file mode 100644
+index 00000000000..0101db893ca
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_1.f
+@@ -0,0 +1,25 @@
++! { dg-do run }
++! { dg-options "-fdec -Wconversion-extra" }
++!
++! Allow logical expressions in if statements and blocks
++!
++! Contributed by Francisco Redondo Marchena <francisco.marchema@codethink.co.uk>
++!             and Jeff Law <law@redhat.com>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        PROGRAM logical_exp_if_st_bl
++          INTEGER ipos/1/
++          INTEGER ineg/0/
++
++          ! Test non logical variables
++          if (ineg) STOP 1 ! { dg-warning "if it evaluates to nonzero" }
++          if (0) STOP 2 ! { dg-warning "if it evaluates to nonzero" }
++
++          ! Test non logical expressions in if statements
++          if (MOD(ipos, 1)) STOP 3 ! { dg-warning "if it evaluates to nonzero" }
++
++          ! Test non logical expressions in if blocks
++          if (MOD(2 * ipos, 2)) then ! { dg-warning "if it evaluates to nonzero" }
++            STOP 4
++          endif
++        END
+diff --git a/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_2.f b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_2.f
+new file mode 100644
+index 00000000000..876f4e09508
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_2.f
+@@ -0,0 +1,25 @@
++! { dg-do run }
++! { dg-options "-fdec-non-logical-if -Wconversion-extra" }
++!
++! Allow logical expressions in if statements and blocks
++!
++! Contributed by Francisco Redondo Marchena <francisco.marchema@codethink.co.uk>
++!             and Jeff Law <law@redhat.com>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        PROGRAM logical_exp_if_st_bl
++          INTEGER ipos/1/
++          INTEGER ineg/0/
++
++          ! Test non logical variables
++          if (ineg) STOP 1 ! { dg-warning "if it evaluates to nonzero" }
++          if (0) STOP 2 ! { dg-warning "if it evaluates to nonzero" }
++
++          ! Test non logical expressions in if statements
++          if (MOD(ipos, 1)) STOP 3 ! { dg-warning "if it evaluates to nonzero" }
++
++          ! Test non logical expressions in if blocks
++          if (MOD(2 * ipos, 2)) then ! { dg-warning "if it evaluates to nonzero" }
++            STOP 4
++          endif
++        END
+diff --git a/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_3.f b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_3.f
+new file mode 100644
+index 00000000000..35cb4c51b8d
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_3.f
+@@ -0,0 +1,25 @@
++! { dg-do compile }
++! { dg-options "-fdec -fno-dec-non-logical-if" }
++!
++! Allow logical expressions in if statements and blocks
++!
++! Contributed by Francisco Redondo Marchena <francisco.marchema@codethink.co.uk>
++!             and Jeff Law <law@redhat.com>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        PROGRAM logical_exp_if_st_bl
++          INTEGER ipos/1/
++          INTEGER ineg/0/
++
++          ! Test non logical variables
++          if (ineg) STOP 1 ! { dg-error "IF clause at" }
++          if (0) STOP 2 ! { dg-error "IF clause at" }
++
++          ! Test non logical expressions in if statements
++          if (MOD(ipos, 1)) STOP 3 ! { dg-error "IF clause at" }
++
++          ! Test non logical expressions in if blocks
++          if (MOD(2 * ipos, 2)) then ! { dg-error "IF clause at" }
++            STOP 4
++          endif
++        END
+diff --git a/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_4.f b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_4.f
+new file mode 100644
+index 00000000000..7b60b60827f
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_4.f
+@@ -0,0 +1,45 @@
++! { dg-do run }
++! { dg-options "-fdec -Wconversion-extra" }
++!
++! Contributed by Francisco Redondo Marchena <francisco.marchema@codethink.co.uk>
++!             and Jeff Law <law@redhat.com>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++       function othersub1()
++        integer*4 othersub1
++        othersub1 = 9
++       end
++
++       function othersub2()
++        integer*4 othersub2
++        othersub2 = 0
++       end
++
++       program MAIN
++        integer*4 othersub1
++        integer*4 othersub2
++        integer a /1/
++        integer b /2/        
++ 
++        if (othersub1()) then ! { dg-warning "if it evaluates to nonzero" }
++           write(*,*) "OK"
++        else
++           stop 1
++        end if
++        if (othersub2()) then ! { dg-warning "if it evaluates to nonzero" }
++           stop 2
++        else
++           write(*,*) "OK"
++        end if
++        if (a-b) then ! { dg-warning "if it evaluates to nonzero" }
++           write(*,*) "OK"
++        else
++           stop 3
++        end if
++        if (b-(a+1)) then ! { dg-warning "if it evaluates to nonzero" }
++           stop 3
++        else
++           write(*,*) "OK"
++        end if
++       end
++
+diff --git a/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_5.f b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_5.f
+new file mode 100644
+index 00000000000..80336f48ca1
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_5.f
+@@ -0,0 +1,45 @@
++! { dg-do run }
++! { dg-options "-fdec-non-logical-if -Wconversion-extra" }
++!
++! Contributed by Francisco Redondo Marchena <francisco.marchema@codethink.co.uk>
++!             and Jeff Law <law@redhat.com>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++       function othersub1()
++        integer*4 othersub1
++        othersub1 = 9
++       end
++
++       function othersub2()
++        integer*4 othersub2
++        othersub2 = 0
++       end
++
++       program MAIN
++        integer*4 othersub1
++        integer*4 othersub2
++        integer a /1/
++        integer b /2/        
++ 
++        if (othersub1()) then ! { dg-warning "Non-LOGICAL type in IF statement" }
++           write(*,*) "OK"
++        else
++           stop 1
++        end if
++        if (othersub2()) then ! { dg-warning "Non-LOGICAL type in IF statement" }
++           stop 2
++        else
++           write(*,*) "OK"
++        end if
++        if (a-b) then ! { dg-warning "Non-LOGICAL type in IF statement" }
++           write(*,*) "OK"
++        else
++           stop 3
++        end if
++        if (b-(a+1)) then ! { dg-warning "Non-LOGICAL type in IF statement" }
++           stop 3
++        else
++           write(*,*) "OK"
++        end if
++       end
++
+diff --git a/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_6.f b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_6.f
+new file mode 100644
+index 00000000000..e1125ca717a
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_logical_expressions_if_statements_blocks_6.f
+@@ -0,0 +1,45 @@
++! { dg-do compile }
++! { dg-options "-fdec -fno-dec-non-logical-if" }
++!
++! Contributed by Francisco Redondo Marchena <francisco.marchema@codethink.co.uk>
++!             and Jeff Law <law@redhat.com>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++       function othersub1()
++        integer*4 othersub1
++        othersub1 = 9
++       end
++
++       function othersub2()
++        integer*4 othersub2
++        othersub2 = 0
++       end
++
++       program MAIN
++        integer*4 othersub1
++        integer*4 othersub2
++        integer a /1/
++        integer b /2/        
++ 
++        if (othersub1()) then ! { dg-error "IF clause at" }
++           write(*,*) "OK"
++        else
++           stop 1
++        end if
++        if (othersub2()) then ! { dg-error "IF clause at" }
++           stop 2
++        else
++           write(*,*) "OK"
++        end if
++        if (a-b) then ! { dg-error "IF clause at" }
++           write(*,*) "OK"
++        else
++           stop 3
++        end if
++        if (b-(a+1)) then ! { dg-error "IF clause at" }
++           stop 3
++        else
++           write(*,*) "OK"
++        end if
++       end
++
+-- 
+2.27.0
+

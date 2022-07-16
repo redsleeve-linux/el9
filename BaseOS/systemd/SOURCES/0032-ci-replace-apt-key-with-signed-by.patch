@@ -1,0 +1,34 @@
+From be021c2328550a9d5b987cb206eda5df90b45acd Mon Sep 17 00:00:00 2001
+From: Evgeny Vereshchagin <evvers@ya.ru>
+Date: Sun, 26 Dec 2021 01:11:00 +0000
+Subject: [PATCH] ci: replace apt-key with signed-by
+
+to limit the scope of the key to apt.llvm.org only.
+
+This is mostly inspired by https://blog.cloudflare.com/dont-use-apt-key/
+
+(cherry picked from commit bfa6bd1be098adc4710e1819b9cd34d65b3855da)
+
+Related: #2013213
+---
+ .github/workflows/build_test.sh | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/.github/workflows/build_test.sh b/.github/workflows/build_test.sh
+index 5b18784461..549e59b2c9 100755
+--- a/.github/workflows/build_test.sh
++++ b/.github/workflows/build_test.sh
+@@ -80,9 +80,10 @@ if [[ "$COMPILER" == clang ]]; then
+     # llvm package if available in such cases to avoid that.
+     if ! apt show --quiet "llvm-$COMPILER_VERSION" &>/dev/null; then
+         # Latest LLVM stack deb packages provided by https://apt.llvm.org/
+-        # Following snippet was borrowed from https://apt.llvm.org/llvm.sh
+-        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
+-        add-apt-repository -y "deb http://apt.llvm.org/$RELEASE/   llvm-toolchain-$RELEASE-$COMPILER_VERSION  main"
++        # Following snippet was partly borrowed from https://apt.llvm.org/llvm.sh
++        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --yes --dearmor --output /usr/share/keyrings/apt-llvm-org.gpg
++        printf "deb [signed-by=/usr/share/keyrings/apt-llvm-org.gpg] http://apt.llvm.org/%s/   llvm-toolchain-%s-%s  main\n" \
++		"$RELEASE" "$RELEASE" "$COMPILER_VERSION" >/etc/apt/sources.list.d/llvm-toolchain.list
+         PACKAGES+=("clang-$COMPILER_VERSION" "lldb-$COMPILER_VERSION" "lld-$COMPILER_VERSION" "clangd-$COMPILER_VERSION")
+     fi
+ elif [[ "$COMPILER" == gcc ]]; then

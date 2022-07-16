@@ -1,0 +1,52 @@
+From 00e90946e6ffc0bb5bf11f02d6fd8993974e8159 Mon Sep 17 00:00:00 2001
+From: Kefu Chai <kchai@redhat.com>
+Date: Sat, 24 Jul 2021 00:09:58 +0800
+Subject: [PATCH 1/3] osdc/Objecter: move LingerOp's ctor to .cc
+
+so the linkage of fmt::fmt does not spill out to other compilation
+units.
+
+Signed-off-by: Kefu Chai <kchai@redhat.com>
+---
+ src/osdc/Objecter.cc | 7 +++++++
+ src/osdc/Objecter.h  | 6 +-----
+ 2 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/src/osdc/Objecter.cc b/src/osdc/Objecter.cc
+index d935b73adb9..da25c584f79 100644
+--- a/src/osdc/Objecter.cc
++++ b/src/osdc/Objecter.cc
+@@ -4722,6 +4722,13 @@ void Objecter::handle_command_reply(MCommandReply *m)
+   m->put();
+ }
+ 
++Objecter::LingerOp::LingerOp(Objecter *o, uint64_t linger_id)
++  : objecter(o),
++    linger_id(linger_id),
++    watch_lock(ceph::make_shared_mutex(
++		 fmt::format("LingerOp::watch_lock #{}", linger_id)))
++{}
++
+ void Objecter::submit_command(CommandOp *c, ceph_tid_t *ptid)
+ {
+   shunique_lock sul(rwlock, ceph::acquire_unique);
+diff --git a/src/osdc/Objecter.h b/src/osdc/Objecter.h
+index 5af605913c0..163a3359de7 100644
+--- a/src/osdc/Objecter.h
++++ b/src/osdc/Objecter.h
+@@ -2304,11 +2304,7 @@ public:
+       watch_pending_async.pop_front();
+     }
+ 
+-    explicit LingerOp(Objecter *o, uint64_t linger_id)
+-      : objecter(o), linger_id(linger_id),
+-	watch_lock(ceph::make_shared_mutex(
+-		     fmt::format("LingerOp::watch_lock #{}", linger_id))) {}
+-
++    LingerOp(Objecter *o, uint64_t linger_id);
+     const LingerOp& operator=(const LingerOp& r) = delete;
+     LingerOp(const LingerOp& o) = delete;
+ 
+-- 
+2.31.1
+

@@ -1,0 +1,268 @@
+From 6c286621ff551eed1dca5afaf08aeaa41eabd96d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Sat, 30 Jan 2021 13:05:26 +0100
+Subject: [PATCH] Revert "Remove use of vasprintf"
+
+This reverts commit 1f0713f80303154d07d9221a7398b6fbc5c0fa6d.
+
+$ valgrind ./modules/json-c/tests/test_json_pointer
+==56== Memcheck, a memory error detector
+==56== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
+==56== Using Valgrind-3.16.1 and LibVEX; rerun with -h for copyright info
+==56== Command: ./modules/json-c/tests/test_json_pointer
+==56==
+PASSED - GET - LOADED TEST JSON
+{ "foo": [ "bar", "baz" ], "": 0, "a\/b": 1, "c%d": 2, "e^f": 3, "g|h": 4, "i\\j": 5, "k\"l": 6, " ": 7, "m~n": 8 }
+PASSED - GET - ENTIRE OBJECT WORKED
+PASSED - GET - /foo == ['bar', 'baz']
+PASSED - GET - /foo/0 == 'bar'
+PASSED - GET -  / == 0
+PASSED - GET -  /a~1b == 1
+PASSED - GET -  /c%d == 2
+PASSED - GET -  /e^f == 3
+PASSED - GET -  /g|h == 4
+PASSED - GET -  /i\j == 5
+PASSED - GET -  /k"l == 6
+PASSED - GET -  /  == 7
+PASSED - GET -  /m~0n == 8
+PASSED - GET - LOADED TEST JSON
+{ "foo": [ "bar", "baz" ], "": 0, "a\/b": 1, "c%d": 2, "e^f": 3, "g|h": 4, "i\\j": 5, "k\"l": 6, " ": 7, "m~n": 8 }
+PASSED - GET - MISSING /
+PASSED - GET - NULL INPUTS
+==56== Invalid write of size 1
+==56==    at 0x48D0F75: _IO_default_xsputn (in /usr/lib64/libc-2.32.9000.so)
+==56==    by 0x48B954F: __vfprintf_internal (in /usr/lib64/libc-2.32.9000.so)
+==56==    by 0x48C54F3: __vsprintf_internal (in /usr/lib64/libc-2.32.9000.so)
+==56==    by 0x110C34: UnknownInlinedFun (stdio2.h:52)
+==56==    by 0x110C34: json_vasprintf.constprop.0 (vasprintf_compat.h:34)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==  Address 0x4a24a27 is 0 bytes after a block of size 7 alloc'd
+==56==    at 0x483C805: malloc (vg_replace_malloc.c:307)
+==56==    by 0x110C12: json_vasprintf.constprop.0 (vasprintf_compat.h:31)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==
+==56== Invalid write of size 1
+==56==    at 0x48C54F9: __vsprintf_internal (in /usr/lib64/libc-2.32.9000.so)
+==56==    by 0x110C34: UnknownInlinedFun (stdio2.h:52)
+==56==    by 0x110C34: json_vasprintf.constprop.0 (vasprintf_compat.h:34)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==  Address 0x4a24a29 is 2 bytes after a block of size 7 alloc'd
+==56==    at 0x483C805: malloc (vg_replace_malloc.c:307)
+==56==    by 0x110C12: json_vasprintf.constprop.0 (vasprintf_compat.h:31)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==
+==56== Invalid read of size 1
+==56==    at 0x483F800: __strchr_sse2 (vg_replace_strmem.c:248)
+==56==    by 0x10CCDC: json_pointer_get_recursive (json_pointer.c:152)
+==56==    by 0x110F07: json_pointer_getf.constprop.0 (json_pointer.c:223)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==  Address 0x4a24a27 is 0 bytes after a block of size 7 alloc'd
+==56==    at 0x483C805: malloc (vg_replace_malloc.c:307)
+==56==    by 0x110C12: json_vasprintf.constprop.0 (vasprintf_compat.h:31)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==
+==56== Invalid write of size 1
+==56==    at 0x10CCE5: json_pointer_get_recursive (json_pointer.c:154)
+==56==    by 0x110F07: json_pointer_getf.constprop.0 (json_pointer.c:223)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==  Address 0x4a24a27 is 0 bytes after a block of size 7 alloc'd
+==56==    at 0x483C805: malloc (vg_replace_malloc.c:307)
+==56==    by 0x110C12: json_vasprintf.constprop.0 (vasprintf_compat.h:31)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==
+==56== Invalid read of size 1
+==56==    at 0x483FBE4: __strlen_sse2 (vg_replace_strmem.c:461)
+==56==    by 0x10CB0B: string_replace_all_occurrences_with_char (json_pointer.c:30)
+==56==    by 0x10CD47: UnknownInlinedFun (json_pointer.c:100)
+==56==    by 0x10CD47: json_pointer_get_recursive (json_pointer.c:157)
+==56==    by 0x110F07: json_pointer_getf.constprop.0 (json_pointer.c:223)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==  Address 0x4a24a27 is 0 bytes after a block of size 7 alloc'd
+==56==    at 0x483C805: malloc (vg_replace_malloc.c:307)
+==56==    by 0x110C12: json_vasprintf.constprop.0 (vasprintf_compat.h:31)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==
+==56== Invalid read of size 1
+==56==    at 0x4844510: strstr (vg_replace_strmem.c:1642)
+==56==    by 0x10CB53: string_replace_all_occurrences_with_char (json_pointer.c:33)
+==56==    by 0x10CD47: UnknownInlinedFun (json_pointer.c:100)
+==56==    by 0x10CD47: json_pointer_get_recursive (json_pointer.c:157)
+==56==    by 0x110F07: json_pointer_getf.constprop.0 (json_pointer.c:223)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==  Address 0x4a24a27 is 0 bytes after a block of size 7 alloc'd
+==56==    at 0x483C805: malloc (vg_replace_malloc.c:307)
+==56==    by 0x110C12: json_vasprintf.constprop.0 (vasprintf_compat.h:31)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==
+==56== Invalid read of size 1
+==56==    at 0x483FBE4: __strlen_sse2 (vg_replace_strmem.c:461)
+==56==    by 0x10CB0B: string_replace_all_occurrences_with_char (json_pointer.c:30)
+==56==    by 0x10CD5B: UnknownInlinedFun (json_pointer.c:101)
+==56==    by 0x10CD5B: json_pointer_get_recursive (json_pointer.c:157)
+==56==    by 0x110F07: json_pointer_getf.constprop.0 (json_pointer.c:223)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==  Address 0x4a24a27 is 0 bytes after a block of size 7 alloc'd
+==56==    at 0x483C805: malloc (vg_replace_malloc.c:307)
+==56==    by 0x110C12: json_vasprintf.constprop.0 (vasprintf_compat.h:31)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==
+==56== Invalid read of size 1
+==56==    at 0x4844510: strstr (vg_replace_strmem.c:1642)
+==56==    by 0x10CB53: string_replace_all_occurrences_with_char (json_pointer.c:33)
+==56==    by 0x10CD5B: UnknownInlinedFun (json_pointer.c:101)
+==56==    by 0x10CD5B: json_pointer_get_recursive (json_pointer.c:157)
+==56==    by 0x110F07: json_pointer_getf.constprop.0 (json_pointer.c:223)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==  Address 0x4a24a27 is 0 bytes after a block of size 7 alloc'd
+==56==    at 0x483C805: malloc (vg_replace_malloc.c:307)
+==56==    by 0x110C12: json_vasprintf.constprop.0 (vasprintf_compat.h:31)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==
+==56== Invalid read of size 1
+==56==    at 0x483FBE4: __strlen_sse2 (vg_replace_strmem.c:461)
+==56==    by 0x10DAD3: lh_char_hash (linkhash.c:480)
+==56==    by 0x10CDCA: UnknownInlinedFun (linkhash.h:346)
+==56==    by 0x10CDCA: UnknownInlinedFun (linkhash.c:625)
+==56==    by 0x10CDCA: UnknownInlinedFun (linkhash.c:630)
+==56==    by 0x10CDCA: UnknownInlinedFun (json_object.c:547)
+==56==    by 0x10CDCA: UnknownInlinedFun (json_object.c:535)
+==56==    by 0x10CDCA: UnknownInlinedFun (json_pointer.c:103)
+==56==    by 0x10CDCA: json_pointer_get_recursive (json_pointer.c:157)
+==56==    by 0x110F07: json_pointer_getf.constprop.0 (json_pointer.c:223)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==  Address 0x4a24a27 is 0 bytes after a block of size 7 alloc'd
+==56==    at 0x483C805: malloc (vg_replace_malloc.c:307)
+==56==    by 0x110C12: json_vasprintf.constprop.0 (vasprintf_compat.h:31)
+==56==    by 0x110EBF: json_pointer_getf.constprop.0 (json_pointer.c:211)
+==56==    by 0x10AAE7: UnknownInlinedFun (test_json_pointer.c:199)
+==56==    by 0x10AAE7: main (test_json_pointer.c:314)
+==56==
+test_json_pointer: test_json_pointer.c:200: test_wrong_inputs_get: Assertion `errno == EINVAL' failed.
+==56==
+==56== Process terminating with default action of signal 6 (SIGABRT)
+==56==    at 0x488A282: raise (in /usr/lib64/libc-2.32.9000.so)
+==56==    by 0x48738A3: abort (in /usr/lib64/libc-2.32.9000.so)
+==56==    by 0x4873788: __assert_fail_base.cold (in /usr/lib64/libc-2.32.9000.so)
+==56==    by 0x4882A05: __assert_fail (in /usr/lib64/libc-2.32.9000.so)
+==56==    by 0x10B8F8: UnknownInlinedFun (test_json_pointer.c:200)
+==56==    by 0x10B8F8: main (test_json_pointer.c:314)
+==56==
+==56== HEAP SUMMARY:
+==56==     in use at exit: 2,307 bytes in 29 blocks
+==56==   total heap usage: 130 allocs, 101 frees, 10,302 bytes allocated
+==56==
+==56== LEAK SUMMARY:
+==56==    definitely lost: 0 bytes in 0 blocks
+==56==    indirectly lost: 0 bytes in 0 blocks
+==56==      possibly lost: 0 bytes in 0 blocks
+==56==    still reachable: 2,307 bytes in 29 blocks
+==56==         suppressed: 0 bytes in 0 blocks
+==56== Rerun with --leak-check=full to see details of leaked memory
+==56==
+==56== For lists of detected and suppressed errors, rerun with: -s
+==56== ERROR SUMMARY: 10 errors from 9 contexts (suppressed: 0 from 0)
+Aborted (core dumped)
+---
+ configure.ac       | 2 +-
+ json_pointer.c     | 4 ++--
+ printbuf.c         | 2 +-
+ vasprintf_compat.h | 4 +++-
+ 4 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/configure.ac b/configure.ac
+index 9eb80bcf1c..f61fcccf24 100644
+--- a/modules/json-c/configure.ac
++++ b/modules/json-c/configure.ac
+@@ -81,7 +81,7 @@ AS_IF([test "x$ac_cv___thread" != xno],
+ AC_FUNC_VPRINTF
+ AC_FUNC_MEMCMP
+ AC_CHECK_FUNCS([realloc])
+-AC_CHECK_FUNCS(strcasecmp strdup strerror snprintf vsnprintf open strncasecmp setlocale)
++AC_CHECK_FUNCS(strcasecmp strdup strerror snprintf vsnprintf vasprintf open strncasecmp setlocale)
+ AC_CHECK_DECLS([INFINITY], [], [], [[#include <math.h>]])
+ AC_CHECK_DECLS([nan], [], [], [[#include <math.h>]])
+ AC_CHECK_DECLS([isnan], [], [], [[#include <math.h>]])
+diff --git a/modules/json-c/json_pointer.c b/modules/json-c/json_pointer.c
+index 3b43eb2f40..9531c036c8 100644
+--- a/modules/json-c/json_pointer.c
++++ b/modules/json-c/json_pointer.c
+@@ -208,7 +208,7 @@ int json_pointer_getf(struct json_object *obj, struct json_object **res, const c
+ 	}
+ 
+ 	va_start(args, path_fmt);
+-	rc = json_vasprintf(&path_copy, path_fmt, args);
++	rc = vasprintf(&path_copy, path_fmt, args);
+ 	va_end(args);
+ 
+ 	if (rc < 0)
+@@ -287,7 +287,7 @@ int json_pointer_setf(struct json_object **obj, struct json_object *value, const
+ 
+ 	/* pass a working copy to the recursive call */
+ 	va_start(args, path_fmt);
+-	rc = json_vasprintf(&path_copy, path_fmt, args);
++	rc = vasprintf(&path_copy, path_fmt, args);
+ 	va_end(args);
+ 
+ 	if (rc < 0)
+diff --git a/modules/json-c/printbuf.c b/modules/json-c/printbuf.c
+index b326293b01..6c77b5defd 100644
+--- a/modules/json-c/printbuf.c
++++ b/modules/json-c/printbuf.c
+@@ -129,7 +129,7 @@ int sprintbuf(struct printbuf *p, const char *msg, ...)
+      would have been written - this code handles both cases. */
+   if(size == -1 || size > 127) {
+     va_start(ap, msg);
+-    if((size = json_vasprintf(&t, msg, ap)) < 0) { va_end(ap); return -1; }
++    if((size = vasprintf(&t, msg, ap)) < 0) { va_end(ap); return -1; }
+     va_end(ap);
+     printbuf_memappend(p, t, size);
+     free(t);
+diff --git a/modules/json-c/vasprintf_compat.h b/modules/json-c/vasprintf_compat.h
+index b57f30f64c..43dbf8939c 100644
+--- a/modules/json-c/vasprintf_compat.h
++++ b/modules/json-c/vasprintf_compat.h
+@@ -8,8 +8,9 @@
+ 
+ #include "snprintf_compat.h"
+ 
++#if !defined(HAVE_VASPRINTF)
+ /* CAW: compliant version of vasprintf */
+-static int json_vasprintf(char **buf, const char *fmt, va_list ap)
++static int vasprintf(char **buf, const char *fmt, va_list ap)
+ {
+ #ifndef WIN32
+ 	static char _T_emptybuffer = '\0';
+@@ -40,5 +41,6 @@ static int json_vasprintf(char **buf, const char *fmt, va_list ap)
+ 
+ 	return chars;
+ }
++#endif /* !HAVE_VASPRINTF */
+ 
+ #endif /* __vasprintf_compat_h */

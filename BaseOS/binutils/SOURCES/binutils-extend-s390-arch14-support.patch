@@ -1,0 +1,657 @@
+Only in binutils-2.35.1/gas: ChangeLog.orig
+Only in binutils-2.35.1/gas: ChangeLog.rej
+Only in binutils-2.35.1/gas/config: tc-s390.c.rej
+diff -rup binutils.orig/gas/doc/c-s390.texi binutils-2.35.1/gas/doc/c-s390.texi
+--- binutils.orig/gas/doc/c-s390.texi	2021-03-25 14:35:40.951633346 +0000
++++ binutils-2.35.1/gas/doc/c-s390.texi	2021-03-25 14:39:39.910468584 +0000
+@@ -313,7 +313,7 @@ field. The notation changes as follows:
+ @cindex instruction formats, s390
+ @cindex s390 instruction formats
+ 
+-The Principles of Operation manuals lists 26 instruction formats where
++The Principles of Operation manuals lists 35 instruction formats where
+ some of the formats have multiple variants. For the @samp{.insn}
+ pseudo directive the assembler recognizes some of the formats.
+ Typically, the most general variant of the instruction format is used
+@@ -545,6 +545,54 @@ with the @samp{.insn} pseudo directive:
+ 0        8    12   16   20            32   36           47
+ @end verbatim
+ 
++@item VRV format: <insn> V1,D2(V2,B2),M3
++@verbatim
+++--------+----+----+----+-------------+----+------------+
++| OpCode | V1 | V2 | B2 |     D2      | M3 |   Opcode   |
+++--------+----+----+----+-------------+----+------------+
++0        8    12   16   20            32   36           47
++@end verbatim
++
++@item VRI format: <insn> V1,V2,I3,M4,M5
++@verbatim
+++--------+----+----+-------------+----+----+------------+
++| OpCode | V1 | V2 |     I3      | M5 | M4 |   Opcode   |
+++--------+----+----+-------------+----+----+------------+
++0        8    12   16            28   32   36           47
++@end verbatim
++
++@item VRX format: <insn> V1,D2(R2,B2),M3
++@verbatim
+++--------+----+----+----+-------------+----+------------+
++| OpCode | V1 | R2 | B2 |     D2      | M3 |   Opcode   |
+++--------+----+----+----+-------------+----+------------+
++0        8    12   16   20            32   36           47
++@end verbatim
++
++@item VRS format: <insn> R1,V3,D2(B2),M4
++@verbatim
+++--------+----+----+----+-------------+----+------------+
++| OpCode | R1 | V3 | B2 |     D2      | M4 |   Opcode   |
+++--------+----+----+----+-------------+----+------------+
++0        8    12   16   20            32   36           47
++@end verbatim
++
++@item VRR format: <insn> V1,V2,V3,M4,M5,M6
++@verbatim
+++--------+----+----+----+---+----+----+----+------------+
++| OpCode | V1 | V2 | V3 |///| M6 | M5 | M4 |   Opcode   |
+++--------+----+----+----+---+----+----+----+------------+
++0        8    12   16       24   28   32   36           47
++@end verbatim
++
++@item VSI format: <insn> V1,D2(B2),I3
++@verbatim
+++--------+---------+----+-------------+----+------------+
++| OpCode |   I3    | B2 |     D2      | V1 |   Opcode   |
+++--------+---------+----+-------------+----+------------+
++0        8         16   20            32   36           47
++@end verbatim
++
+ @end table
+ 
+ For the complete list of all instruction format variants see the
+Only in binutils-2.35.1/gas/doc: c-s390.texi.orig
+Only in binutils-2.35.1/gas/doc: c-s390.texi.rej
+diff -rup binutils.orig/gas/testsuite/gas/s390/esa-g5.d binutils-2.35.1/gas/testsuite/gas/s390/esa-g5.d
+--- binutils.orig/gas/testsuite/gas/s390/esa-g5.d	2021-03-25 14:35:41.038632922 +0000
++++ binutils-2.35.1/gas/testsuite/gas/s390/esa-g5.d	2021-03-25 14:39:56.533387550 +0000
+@@ -78,10 +78,14 @@ Disassembly of section .text:
+ .*:	07 29 [	 ]*bhr	%r9
+ .*:	07 f9 [	 ]*br	%r9
+ .*:	a7 95 00 00 [	 ]*bras	%r9,e2 <foo\+0xe2>
+-.*:	a7 64 00 00 [	 ]*jlh	e6 <foo\+0xe6>
+-.*:	a7 66 00 00 [	 ]*brct	%r6,ea <foo\+0xea>
+-.*:	84 69 00 00 [	 ]*brxh	%r6,%r9,ee <foo\+0xee>
+-.*:	85 69 00 00 [	 ]*brxle	%r6,%r9,f2 <foo\+0xf2>
++.*:	a7 65 00 00 [	 ]*bras	%r6,e6 <foo\+0xe6>
++.*:	a7 64 00 00 [	 ]*jlh	ea <foo\+0xea>
++.*:	a7 66 00 00 [	 ]*brct	%r6,ee <foo\+0xee>
++.*:	a7 66 00 00 [	 ]*brct	%r6,f2 <foo\+0xf2>
++.*:	84 69 00 00 [	 ]*brxh	%r6,%r9,f6 <foo\+0xf6>
++.*:	84 69 00 00 [	 ]*brxh	%r6,%r9,fa <foo\+0xfa>
++.*:	85 69 00 00 [	 ]*brxle	%r6,%r9,fe <foo\+0xfe>
++.*:	85 69 00 00 [	 ]*brxle	%r6,%r9,102 <foo\+0x102>
+ .*:	b2 5a 00 69 [	 ]*bsa	%r6,%r9
+ .*:	b2 58 00 69 [	 ]*bsg	%r6,%r9
+ .*:	0b 69 [	 ]*bsm	%r6,%r9
+@@ -180,27 +184,49 @@ Disassembly of section .text:
+ .*:	b2 21 00 69 [	 ]*ipte	%r6,%r9
+ .*:	b2 29 00 69 [	 ]*iske	%r6,%r9
+ .*:	b2 23 00 69 [	 ]*ivsk	%r6,%r9
+-.*:	a7 f4 00 00 [	 ]*j	278 <foo\+0x278>
+-.*:	a7 84 00 00 [	 ]*je	27c <foo\+0x27c>
+-.*:	a7 24 00 00 [	 ]*jh	280 <foo\+0x280>
+-.*:	a7 a4 00 00 [	 ]*jhe	284 <foo\+0x284>
+-.*:	a7 44 00 00 [	 ]*jl	288 <foo\+0x288>
+-.*:	a7 c4 00 00 [	 ]*jle	28c <foo\+0x28c>
+-.*:	a7 64 00 00 [	 ]*jlh	290 <foo\+0x290>
+-.*:	a7 44 00 00 [	 ]*jl	294 <foo\+0x294>
+-.*:	a7 74 00 00 [	 ]*jne	298 <foo\+0x298>
+-.*:	a7 d4 00 00 [	 ]*jnh	29c <foo\+0x29c>
+-.*:	a7 54 00 00 [	 ]*jnhe	2a0 <foo\+0x2a0>
+-.*:	a7 b4 00 00 [	 ]*jnl	2a4 <foo\+0x2a4>
+-.*:	a7 34 00 00 [	 ]*jnle	2a8 <foo\+0x2a8>
+-.*:	a7 94 00 00 [	 ]*jnlh	2ac <foo\+0x2ac>
+-.*:	a7 b4 00 00 [	 ]*jnl	2b0 <foo\+0x2b0>
+-.*:	a7 e4 00 00 [	 ]*jno	2b4 <foo\+0x2b4>
+-.*:	a7 d4 00 00 [	 ]*jnh	2b8 <foo\+0x2b8>
+-.*:	a7 74 00 00 [	 ]*jne	2bc <foo\+0x2bc>
+-.*:	a7 14 00 00 [	 ]*jo	2c0 <foo\+0x2c0>
+-.*:	a7 24 00 00 [	 ]*jh	2c4 <foo\+0x2c4>
+-.*:	a7 84 00 00 [	 ]*je	2c8 <foo\+0x2c8>
++.*:	a7 f4 00 00 [	 ]*j	288 <foo\+0x288>
++.*:	a7 84 00 00 [	 ]*je	28c <foo\+0x28c>
++.*:	a7 24 00 00 [	 ]*jh	290 <foo\+0x290>
++.*:	a7 a4 00 00 [	 ]*jhe	294 <foo\+0x294>
++.*:	a7 44 00 00 [	 ]*jl	298 <foo\+0x298>
++.*:	a7 c4 00 00 [	 ]*jle	29c <foo\+0x29c>
++.*:	a7 64 00 00 [	 ]*jlh	2a0 <foo\+0x2a0>
++.*:	a7 44 00 00 [	 ]*jl	2a4 <foo\+0x2a4>
++.*:	a7 74 00 00 [	 ]*jne	2a8 <foo\+0x2a8>
++.*:	a7 d4 00 00 [	 ]*jnh	2ac <foo\+0x2ac>
++.*:	a7 54 00 00 [	 ]*jnhe	2b0 <foo\+0x2b0>
++.*:	a7 b4 00 00 [	 ]*jnl	2b4 <foo\+0x2b4>
++.*:	a7 34 00 00 [	 ]*jnle	2b8 <foo\+0x2b8>
++.*:	a7 94 00 00 [	 ]*jnlh	2bc <foo\+0x2bc>
++.*:	a7 b4 00 00 [	 ]*jnl	2c0 <foo\+0x2c0>
++.*:	a7 e4 00 00 [	 ]*jno	2c4 <foo\+0x2c4>
++.*:	a7 d4 00 00 [	 ]*jnh	2c8 <foo\+0x2c8>
++.*:	a7 74 00 00 [	 ]*jne	2cc <foo\+0x2cc>
++.*:	a7 14 00 00 [	 ]*jo	2d0 <foo\+0x2d0>
++.*:	a7 24 00 00 [	 ]*jh	2d4 <foo\+0x2d4>
++.*:	a7 84 00 00 [	 ]*je	2d8 <foo\+0x2d8>
++.*:	a7 04 00 00 [	 ]*jnop	2dc <foo\+0x2dc>
++.*:	a7 14 00 00 [	 ]*jo	2e0 <foo\+0x2e0>
++.*:	a7 24 00 00 [	 ]*jh	2e4 <foo\+0x2e4>
++.*:	a7 24 00 00 [	 ]*jh	2e8 <foo\+0x2e8>
++.*:	a7 34 00 00 [	 ]*jnle	2ec <foo\+0x2ec>
++.*:	a7 44 00 00 [	 ]*jl	2f0 <foo\+0x2f0>
++.*:	a7 44 00 00 [	 ]*jl	2f4 <foo\+0x2f4>
++.*:	a7 54 00 00 [	 ]*jnhe	2f8 <foo\+0x2f8>
++.*:	a7 64 00 00 [	 ]*jlh	2fc <foo\+0x2fc>
++.*:	a7 74 00 00 [	 ]*jne	300 <foo\+0x300>
++.*:	a7 74 00 00 [	 ]*jne	304 <foo\+0x304>
++.*:	a7 84 00 00 [	 ]*je	308 <foo\+0x308>
++.*:	a7 84 00 00 [	 ]*je	30c <foo\+0x30c>
++.*:	a7 94 00 00 [	 ]*jnlh	310 <foo\+0x310>
++.*:	a7 a4 00 00 [	 ]*jhe	314 <foo\+0x314>
++.*:	a7 b4 00 00 [	 ]*jnl	318 <foo\+0x318>
++.*:	a7 b4 00 00 [	 ]*jnl	31c <foo\+0x31c>
++.*:	a7 c4 00 00 [	 ]*jle	320 <foo\+0x320>
++.*:	a7 d4 00 00 [	 ]*jnh	324 <foo\+0x324>
++.*:	a7 d4 00 00 [	 ]*jnh	328 <foo\+0x328>
++.*:	a7 e4 00 00 [	 ]*jno	32c <foo\+0x32c>
++.*:	a7 f4 00 00 [	 ]*j	330 <foo\+0x330>
+ .*:	ed 65 af ff 00 18 [	 ]*kdb	%f6,4095\(%r5,%r10\)
+ .*:	b3 18 00 69 [	 ]*kdbr	%f6,%f9
+ .*:	ed 65 af ff 00 08 [	 ]*keb	%f6,4095\(%r5,%r10\)
+@@ -483,4 +509,4 @@ Disassembly of section .text:
+ .*:	f8 58 5f ff af ff [	 ]*zap	4095\(6,%r5\),4095\(9,%r10\)
+ .*:	b2 21 b0 69 [	 ]*ipte	%r6,%r9,%r11
+ .*:	b2 21 bd 69 [	 ]*ipte	%r6,%r9,%r11,13
+-.*:	07 07 [ 	]*nopr	%r7
++.*:	07 07 [	 ]*nopr	%r7
+diff -rup binutils.orig/gas/testsuite/gas/s390/esa-g5.s binutils-2.35.1/gas/testsuite/gas/s390/esa-g5.s
+--- binutils.orig/gas/testsuite/gas/s390/esa-g5.s	2021-03-25 14:35:41.038632922 +0000
++++ binutils-2.35.1/gas/testsuite/gas/s390/esa-g5.s	2021-03-25 14:39:56.534387545 +0000
+@@ -72,10 +72,14 @@ foo:
+ 	bpr	%r9
+ 	br	%r9
+ 	bras	%r9,.
++	jas	%r6,.
+ 	brc	6,.
+ 	brct	6,.
++	jct	%r6,.
+ 	brxh	%r6,%r9,.
++	jxh	%r6,%r9,.
+ 	brxle	%r6,%r9,.
++	jxle	%r6,%r9,.
+ 	bsa	%r6,%r9
+ 	bsg	%r6,%r9
+ 	bsm	%r6,%r9
+@@ -195,6 +199,28 @@ foo:
+ 	jo	.
+ 	jp	.
+ 	jz	.
++	jnop	.
++	bro	.
++	brh	.
++	brp	.
++	brnle	.
++	brl	.
++	brm	.
++	brnhe	.
++	brlh	.
++	brne	.
++	brnz	.
++	bre	.
++	brz	.
++	brnlh	.
++	brhe	.
++	brnl	.
++	brnm	.
++	brle	.
++	brnh	.
++	brnp	.
++	brno	.
++	bru	.
+ 	kdb	%f6,4095(%r5,%r10)
+ 	kdbr	%f6,%f9
+ 	keb	%f6,4095(%r5,%r10)
+diff -rup binutils.orig/gas/testsuite/gas/s390/esa-z900.d binutils-2.35.1/gas/testsuite/gas/s390/esa-z900.d
+--- binutils.orig/gas/testsuite/gas/s390/esa-z900.d	2021-03-25 14:35:41.038632922 +0000
++++ binutils-2.35.1/gas/testsuite/gas/s390/esa-z900.d	2021-03-25 14:39:56.534387545 +0000
+@@ -6,29 +6,52 @@
+ Disassembly of section .text:
+ 
+ .* <foo>:
+-.*:	c0 f4 00 00 00 00 [	 ]*jg	0 \<foo\>
+-.*:	c0 14 00 00 00 00 [	 ]*jgo	6 \<foo\+0x6>
+-.*:	c0 24 00 00 00 00 [	 ]*jgh	c \<foo\+0xc>
+-.*:	c0 24 00 00 00 00 [	 ]*jgh	12 \<foo\+0x12>
+-.*:	c0 34 00 00 00 00 [	 ]*jgnle	18 \<foo\+0x18>
+-.*:	c0 44 00 00 00 00 [	 ]*jgl	1e \<foo\+0x1e>
+-.*:	c0 44 00 00 00 00 [	 ]*jgl	24 \<foo\+0x24>
+-.*:	c0 54 00 00 00 00 [	 ]*jgnhe	2a \<foo\+0x2a>
+-.*:	c0 64 00 00 00 00 [	 ]*jglh	30 \<foo\+0x30>
+-.*:	c0 74 00 00 00 00 [	 ]*jgne	36 \<foo\+0x36>
+-.*:	c0 74 00 00 00 00 [	 ]*jgne	3c \<foo\+0x3c>
+-.*:	c0 84 00 00 00 00 [	 ]*jge	42 \<foo\+0x42>
+-.*:	c0 84 00 00 00 00 [	 ]*jge	48 \<foo\+0x48>
+-.*:	c0 94 00 00 00 00 [	 ]*jgnlh	4e \<foo\+0x4e>
+-.*:	c0 a4 00 00 00 00 [	 ]*jghe	54 \<foo\+0x54>
+-.*:	c0 b4 00 00 00 00 [	 ]*jgnl	5a \<foo\+0x5a>
+-.*:	c0 b4 00 00 00 00 [	 ]*jgnl	60 \<foo\+0x60>
+-.*:	c0 c4 00 00 00 00 [	 ]*jgle	66 \<foo\+0x66>
+-.*:	c0 d4 00 00 00 00 [	 ]*jgnh	6c \<foo\+0x6c>
+-.*:	c0 d4 00 00 00 00 [	 ]*jgnh	72 \<foo\+0x72>
+-.*:	c0 e4 00 00 00 00 [	 ]*jgno	78 \<foo\+0x78>
+-.*:	c0 f4 00 00 00 00 [	 ]*jg	7e \<foo\+0x7e>
+-.*:	c0 65 00 00 00 00 [	 ]*brasl	%r6,84 \<foo\+0x84>
++.*:	c0 f4 00 00 00 00 [	 ]*jg	0 <foo>
++.*:	c0 04 00 00 00 00 [	 ]*jgnop	6 <foo\+0x6>
++.*:	c0 14 00 00 00 00 [	 ]*jgo	c <foo\+0xc>
++.*:	c0 24 00 00 00 00 [	 ]*jgh	12 <foo\+0x12>
++.*:	c0 24 00 00 00 00 [	 ]*jgh	18 <foo\+0x18>
++.*:	c0 34 00 00 00 00 [	 ]*jgnle	1e <foo\+0x1e>
++.*:	c0 44 00 00 00 00 [	 ]*jgl	24 <foo\+0x24>
++.*:	c0 44 00 00 00 00 [	 ]*jgl	2a <foo\+0x2a>
++.*:	c0 54 00 00 00 00 [	 ]*jgnhe	30 <foo\+0x30>
++.*:	c0 64 00 00 00 00 [	 ]*jglh	36 <foo\+0x36>
++.*:	c0 74 00 00 00 00 [	 ]*jgne	3c <foo\+0x3c>
++.*:	c0 74 00 00 00 00 [	 ]*jgne	42 <foo\+0x42>
++.*:	c0 84 00 00 00 00 [	 ]*jge	48 <foo\+0x48>
++.*:	c0 84 00 00 00 00 [	 ]*jge	4e <foo\+0x4e>
++.*:	c0 94 00 00 00 00 [	 ]*jgnlh	54 <foo\+0x54>
++.*:	c0 a4 00 00 00 00 [	 ]*jghe	5a <foo\+0x5a>
++.*:	c0 b4 00 00 00 00 [	 ]*jgnl	60 <foo\+0x60>
++.*:	c0 b4 00 00 00 00 [	 ]*jgnl	66 <foo\+0x66>
++.*:	c0 c4 00 00 00 00 [	 ]*jgle	6c <foo\+0x6c>
++.*:	c0 d4 00 00 00 00 [	 ]*jgnh	72 <foo\+0x72>
++.*:	c0 d4 00 00 00 00 [	 ]*jgnh	78 <foo\+0x78>
++.*:	c0 e4 00 00 00 00 [	 ]*jgno	7e <foo\+0x7e>
++.*:	c0 f4 00 00 00 00 [	 ]*jg	84 <foo\+0x84>
++.*:	c0 14 00 00 00 00 [	 ]*jgo	8a <foo\+0x8a>
++.*:	c0 24 00 00 00 00 [	 ]*jgh	90 <foo\+0x90>
++.*:	c0 24 00 00 00 00 [	 ]*jgh	96 <foo\+0x96>
++.*:	c0 34 00 00 00 00 [	 ]*jgnle	9c <foo\+0x9c>
++.*:	c0 44 00 00 00 00 [	 ]*jgl	a2 <foo\+0xa2>
++.*:	c0 44 00 00 00 00 [	 ]*jgl	a8 <foo\+0xa8>
++.*:	c0 54 00 00 00 00 [	 ]*jgnhe	ae <foo\+0xae>
++.*:	c0 64 00 00 00 00 [	 ]*jglh	b4 <foo\+0xb4>
++.*:	c0 74 00 00 00 00 [	 ]*jgne	ba <foo\+0xba>
++.*:	c0 74 00 00 00 00 [	 ]*jgne	c0 <foo\+0xc0>
++.*:	c0 84 00 00 00 00 [	 ]*jge	c6 <foo\+0xc6>
++.*:	c0 84 00 00 00 00 [	 ]*jge	cc <foo\+0xcc>
++.*:	c0 94 00 00 00 00 [	 ]*jgnlh	d2 <foo\+0xd2>
++.*:	c0 a4 00 00 00 00 [	 ]*jghe	d8 <foo\+0xd8>
++.*:	c0 b4 00 00 00 00 [	 ]*jgnl	de <foo\+0xde>
++.*:	c0 b4 00 00 00 00 [	 ]*jgnl	e4 <foo\+0xe4>
++.*:	c0 c4 00 00 00 00 [	 ]*jgle	ea <foo\+0xea>
++.*:	c0 d4 00 00 00 00 [	 ]*jgnh	f0 <foo\+0xf0>
++.*:	c0 d4 00 00 00 00 [	 ]*jgnh	f6 <foo\+0xf6>
++.*:	c0 e4 00 00 00 00 [	 ]*jgno	fc <foo\+0xfc>
++.*:	c0 f4 00 00 00 00 [	 ]*jg	102 <foo\+0x102>
++.*:	c0 65 00 00 00 00 [	 ]*brasl	%r6,108 <foo\+0x108>
++.*:	c0 65 00 00 00 00 [	 ]*brasl	%r6,10e <foo\+0x10e>
+ .*:	01 0b [	 ]*tam
+ .*:	01 0c [	 ]*sam24
+ .*:	01 0d [	 ]*sam31
+@@ -39,7 +62,7 @@ Disassembly of section .text:
+ .*:	b9 97 00 69 [	 ]*dlr	%r6,%r9
+ .*:	b9 98 00 69 [	 ]*alcr	%r6,%r9
+ .*:	b9 99 00 69 [	 ]*slbr	%r6,%r9
+-.*:	c0 60 00 00 00 00 [	 ]*larl	%r6,ac \<foo\+0xac\>
++.*:	c0 60 00 00 00 00 [	 ]*larl	%r6,136 <foo\+0x136>
+ .*:	e3 65 af ff 00 1e [	 ]*lrv	%r6,4095\(%r5,%r10\)
+ .*:	e3 65 af ff 00 1f [	 ]*lrvh	%r6,4095\(%r5,%r10\)
+ .*:	e3 65 af ff 00 3e [	 ]*strv	%r6,4095\(%r5,%r10\)
+@@ -49,3 +72,4 @@ Disassembly of section .text:
+ .*:	e3 65 af ff 00 98 [	 ]*alc	%r6,4095\(%r5,%r10\)
+ .*:	e3 65 af ff 00 99 [	 ]*slb	%r6,4095\(%r5,%r10\)
+ .*:	eb 69 5f ff 00 1d [	 ]*rll	%r6,%r9,4095\(%r5\)
++.*:	07 07 [	 ]*nopr	%r7
+diff -rup binutils.orig/gas/testsuite/gas/s390/esa-z900.s binutils-2.35.1/gas/testsuite/gas/s390/esa-z900.s
+--- binutils.orig/gas/testsuite/gas/s390/esa-z900.s	2021-03-25 14:35:41.037632927 +0000
++++ binutils-2.35.1/gas/testsuite/gas/s390/esa-z900.s	2021-03-25 14:39:56.534387545 +0000
+@@ -1,6 +1,7 @@
+ .text
+ foo:
+ 	brcl	15,.
++	jgnop	.
+ 	jgo	.
+ 	jgh	.
+ 	jgp	.
+@@ -22,7 +23,29 @@ foo:
+ 	jgnp	.
+ 	jgno	.
+ 	jg	.
++	brol	.
++	brhl	.
++	brpl	.
++	brnlel	.
++	brll	.
++	brml	.
++	brnhel	.
++	brlhl	.
++	brnel	.
++	brnzl	.
++	brel	.
++	brzl	.
++	brnlhl	.
++	brhel	.
++	brnll	.
++	brnml	.
++	brlel	.
++	brnhl	.
++	brnpl	.
++	brnol	.
++	brul	.
+ 	brasl	%r6,.
++	jasl	%r6,.
+ 	tam
+ 	sam24
+ 	sam31
+Only in binutils-2.35.1/gas/testsuite/gas/s390: s390.exp.rej
+Only in binutils-2.35.1/gas/testsuite/gas/s390: zarch-arch14.d
+Only in binutils-2.35.1/gas/testsuite/gas/s390: zarch-arch14.s
+diff -rup binutils.orig/gas/testsuite/gas/s390/zarch-z10.d binutils-2.35.1/gas/testsuite/gas/s390/zarch-z10.d
+--- binutils.orig/gas/testsuite/gas/s390/zarch-z10.d	2021-03-25 14:35:41.038632922 +0000
++++ binutils-2.35.1/gas/testsuite/gas/s390/zarch-z10.d	2021-03-25 14:39:49.766420543 +0000
+@@ -362,11 +362,13 @@ Disassembly of section .text:
+ .*:	ec 67 d2 dc e6 54 [	 ]*rnsbg	%r6,%r7,210,220,230
+ .*:	ec 67 d2 dc e6 57 [	 ]*rxsbg	%r6,%r7,210,220,230
+ .*:	ec 67 d2 dc e6 56 [	 ]*rosbg	%r6,%r7,210,220,230
+-.*:	ec 67 d2 dc e6 55 [	 ]*risbg	%r6,%r7,210,220,230
+-.*:	c4 6f 00 00 00 00 [	 ]*strl	%r6,7f6 <foo\+0x7f6>
+-.*:	c4 6b 00 00 00 00 [	 ]*stgrl	%r6,7fc <foo\+0x7fc>
+-.*:	c4 67 00 00 00 00 [	 ]*sthrl	%r6,802 <foo\+0x802>
+-.*:	c6 60 00 00 00 00 [	 ]*exrl	%r6,808 <foo\+0x808>
++.*:	ec 67 d2 14 e6 55 [	 ]*risbg	%r6,%r7,210,20,230
++.*:	ec 67 d2 bc e6 55 [	 ]*risbgz	%r6,%r7,210,60,230
++.*:	ec 67 d2 94 e6 55 [	 ]*risbgz	%r6,%r7,210,20,230
++.*:	c4 6f 00 00 00 00 [	 ]*strl	%r6,802 <foo\+0x802>
++.*:	c4 6b 00 00 00 00 [	 ]*stgrl	%r6,808 <foo\+0x808>
++.*:	c4 67 00 00 00 00 [	 ]*sthrl	%r6,80e <foo\+0x80e>
++.*:	c6 60 00 00 00 00 [	 ]*exrl	%r6,814 <foo\+0x814>
+ .*:	af ee 6d 05 [	 ]*mc	3333\(%r6\),238
+ .*:	b9 a2 00 60 [	 ]*ptf	%r6
+ .*:	b9 af 00 67 [	 ]*pfmf	%r6,%r7
+diff -rup binutils.orig/gas/testsuite/gas/s390/zarch-z10.s binutils-2.35.1/gas/testsuite/gas/s390/zarch-z10.s
+--- binutils.orig/gas/testsuite/gas/s390/zarch-z10.s	2021-03-25 14:35:41.038632922 +0000
++++ binutils-2.35.1/gas/testsuite/gas/s390/zarch-z10.s	2021-03-25 14:39:49.766420543 +0000
+@@ -356,7 +356,9 @@ foo:
+ 	rnsbg	%r6,%r7,210,220,230
+ 	rxsbg	%r6,%r7,210,220,230
+ 	rosbg	%r6,%r7,210,220,230
+-	risbg	%r6,%r7,210,220,230
++	risbg	%r6,%r7,210,20,230
++	risbg	%r6,%r7,210,188,230
++	risbgz	%r6,%r7,210,20,230
+ 	strl	%r6,.
+ 	stgrl	%r6,.
+ 	sthrl	%r6,.
+diff -rup binutils.orig/gas/testsuite/gas/s390/zarch-z900.d binutils-2.35.1/gas/testsuite/gas/s390/zarch-z900.d
+--- binutils.orig/gas/testsuite/gas/s390/zarch-z900.d	2021-03-25 14:35:41.037632927 +0000
++++ binutils-2.35.1/gas/testsuite/gas/s390/zarch-z900.d	2021-03-25 14:39:56.534387545 +0000
+@@ -20,8 +20,11 @@ Disassembly of section .text:
+ .*:	e3 95 af ff 00 46 [ 	]*bctg	%r9,4095\(%r5,%r10\)
+ .*:	b9 46 00 96 [ 	]*bctgr	%r9,%r6
+ .*:	a7 97 00 00 [	 ]*brctg	%r9,40 \<foo\+0x40\>
+-.*:	ec 96 00 00 00 44 [ 	]*brxhg	%r9,%r6,44 <foo\+0x44>
+-.*:	ec 96 00 00 00 45 [ 	]*brxlg	%r9,%r6,4a <foo\+0x4a>
++.*:	a7 67 00 00 [	 ]*brctg	%r6,44 <foo\+0x44>
++.*:	ec 96 00 00 00 44 [ 	]*brxhg	%r9,%r6,48 <foo\+0x48>
++.*:	ec 69 00 00 00 44 [	 ]*brxhg	%r6,%r9,4e <foo\+0x4e>
++.*:	ec 96 00 00 00 45 [ 	]*brxlg	%r9,%r6,54 <foo\+0x54>
++.*:	ec 69 00 00 00 45 [	 ]*brxlg	%r6,%r9,5a <foo\+0x5a>
+ .*:	eb 96 5f ff 00 44 [ 	]*bxhg	%r9,%r6,4095\(%r5\)
+ .*:	eb 96 5f ff 00 45 [ 	]*bxleg	%r9,%r6,4095\(%r5\)
+ .*:	b3 a5 00 96 [ 	]*cdgbr	%f9,%r6
+diff -rup binutils.orig/gas/testsuite/gas/s390/zarch-z900.s binutils-2.35.1/gas/testsuite/gas/s390/zarch-z900.s
+--- binutils.orig/gas/testsuite/gas/s390/zarch-z900.s	2021-03-25 14:35:41.038632922 +0000
++++ binutils-2.35.1/gas/testsuite/gas/s390/zarch-z900.s	2021-03-25 14:39:56.534387545 +0000
+@@ -14,8 +14,11 @@ foo:
+ 	bctg	%r9,4095(%r5,%r10)
+ 	bctgr	%r9,%r6
+ 	brctg	%r9,.
++	jctg	%r6,.
+ 	brxhg	%r9,%r6,.
++	jxhg	%r6,%r9,.
+ 	brxlg	%r9,%r6,.
++	jxleg	%r6,%r9,.
+ 	bxhg	%r9,%r6,4095(%r5)
+ 	bxleg	%r9,%r6,4095(%r5)
+ 	cdgbr	%f9,%r6
+diff -rup binutils.orig/gas/testsuite/gas/s390/zarch-zEC12.d binutils-2.35.1/gas/testsuite/gas/s390/zarch-zEC12.d
+--- binutils.orig/gas/testsuite/gas/s390/zarch-zEC12.d	2021-03-25 14:35:41.037632927 +0000
++++ binutils-2.35.1/gas/testsuite/gas/s390/zarch-zEC12.d	2021-03-25 14:39:49.766420543 +0000
+@@ -47,6 +47,8 @@ Disassembly of section .text:
+ .*:	eb 6c 7a 4d fe 2b [	 ]*clgtnh	%r6,-5555\(%r7\)
+ .*:	eb 6c 7a 4d fe 2b [	 ]*clgtnh	%r6,-5555\(%r7\)
+ .*:	ec 67 0c 0d 0e 59 [	 ]*risbgn	%r6,%r7,12,13,14
++.*:	ec 67 0c bc 0e 59 [	 ]*risbgnz	%r6,%r7,12,60,14
++.*:	ec 67 0c 94 0e 59 [	 ]*risbgnz	%r6,%r7,12,20,14
+ .*:	ed 0f 8f a0 6d aa [	 ]*cdzt	%f6,4000\(16,%r8\),13
+ .*:	ed 21 8f a0 4d ab [	 ]*cxzt	%f4,4000\(34,%r8\),13
+ .*:	ed 0f 8f a0 6d a8 [	 ]*czdt	%f6,4000\(16,%r8\),13
+@@ -54,16 +56,16 @@ Disassembly of section .text:
+ .*:	b2 e8 c0 56 [	 ]*ppa	%r5,%r6,12
+ .*:	b9 8f 60 59 [	 ]*crdte	%r5,%r6,%r9
+ .*:	b9 8f 61 59 [	 ]*crdte	%r5,%r6,%r9,1
+-.*:	c5 a0 0c 00 00 0c [	 ]*bprp	10,12a <bar>,12a <bar>
+-.*:	c5 a0 00 00 00 00 [	 ]*bprp	10,118 <foo\+0x118>,118 <foo\+0x118>
+-[	 ]*119: R_390_PLT12DBL	bar\+0x1
+-[	 ]*11b: R_390_PLT24DBL	bar\+0x3
+-.*:	c7 a0 00 00 00 00 [	 ]*bpp	10,11e <foo\+0x11e>,0
+-[	 ]*122: R_390_PLT16DBL	bar\+0x4
+-.*:	c7 a0 00 00 00 00 [	 ]*bpp	10,124 <foo\+0x124>,0
+-[	 ]*128: R_390_PC16DBL	baz\+0x4
++.*:	c5 a0 0c 00 00 0c [	 ]*bprp	10,136 <bar>,136 <bar>
++.*:	c5 a0 00 00 00 00 [	 ]*bprp	10,124 <foo\+0x124>,124 <foo\+0x124>
++[	 ]*125: R_390_PLT12DBL	bar\+0x1
++[	 ]*127: R_390_PLT24DBL	bar\+0x3
++.*:	c7 a0 00 00 00 00 [	 ]*bpp	10,12a <foo\+0x12a>,0
++[	 ]*12e: R_390_PLT16DBL	bar\+0x4
++.*:	c7 a0 00 00 00 00 [	 ]*bpp	10,130 <foo\+0x130>,0
++[	 ]*134: R_390_PC16DBL	baz\+0x4
+ 
+ 
+-000000000000012a <bar>:
++0000000000000136 <bar>:
+ 
+ .*:	07 07 [	 ]*nopr	%r7
+diff -rup binutils.orig/gas/testsuite/gas/s390/zarch-zEC12.s binutils-2.35.1/gas/testsuite/gas/s390/zarch-zEC12.s
+--- binutils.orig/gas/testsuite/gas/s390/zarch-zEC12.s	2021-03-25 14:35:41.038632922 +0000
++++ binutils-2.35.1/gas/testsuite/gas/s390/zarch-zEC12.s	2021-03-25 14:39:49.766420543 +0000
+@@ -44,6 +44,9 @@ foo:
+ 	clgtnh	%r6,-5555(%r7)
+ 
+ 	risbgn	%r6,%r7,12,13,14
++	risbgn	%r6,%r7,12,188,14
++	risbgnz	%r6,%r7,12,20,14
++
+ 	cdzt	%f6,4000(16,%r8),13
+ 	cxzt	%f4,4000(34,%r8),13
+ 	czdt	%f6,4000(16,%r8),13
+Only in binutils-2.35.1/include: ChangeLog.orig
+Only in binutils-2.35.1/include: ChangeLog.rej
+Only in binutils-2.35.1/include/opcode: s390.h.rej
+Only in binutils-2.35.1/ld: ChangeLog.orig
+Only in binutils-2.35.1/ld: ChangeLog.rej
+diff -rup binutils.orig/ld/testsuite/ld-s390/tlsbin_64.dd binutils-2.35.1/ld/testsuite/ld-s390/tlsbin_64.dd
+--- binutils.orig/ld/testsuite/ld-s390/tlsbin_64.dd	2021-03-25 14:35:40.826633955 +0000
++++ binutils-2.35.1/ld/testsuite/ld-s390/tlsbin_64.dd	2021-03-25 14:39:56.534387545 +0000
+@@ -87,26 +87,26 @@ Disassembly of section .text:
+  +[0-9a-f]+:	41 22 90 00       	la	%r2,0\(%r2,%r9\)
+ # GD -> LE with global variable defined in executable
+  +[0-9a-f]+:	e3 20 d0 10 00 04 	lg	%r2,16\(%r13\)
+- +[0-9a-f]+:	c0 04 00 00 00 00 	brcl	0,[0-9a-f]+ <fn2\+0xca>
++ +[0-9a-f]+:	c0 04 00 00 00 00 	jgnop	[0-9a-f]+ <fn2\+0xca>
+  +[0-9a-f]+:	41 22 90 00       	la	%r2,0\(%r2,%r9\)
+ # GD -> LE with local variable defined in executable
+  +[0-9a-f]+:	e3 20 d0 18 00 04 	lg	%r2,24\(%r13\)
+- +[0-9a-f]+:	c0 04 00 00 00 00 	brcl	0,[0-9a-f]+ <fn2\+0xda>
++ +[0-9a-f]+:	c0 04 00 00 00 00 	jgnop	[0-9a-f]+ <fn2\+0xda>
+  +[0-9a-f]+:	41 22 90 00       	la	%r2,0\(%r2,%r9\)
+ # GD -> LE with hidden variable defined in executable
+  +[0-9a-f]+:	e3 20 d0 20 00 04 	lg	%r2,32\(%r13\)
+- +[0-9a-f]+:	c0 04 00 00 00 00 	brcl	0,[0-9a-f]+ <fn2\+0xea>
++ +[0-9a-f]+:	c0 04 00 00 00 00 	jgnop	[0-9a-f]+ <fn2\+0xea>
+  +[0-9a-f]+:	41 22 90 00       	la	%r2,0\(%r2,%r9\)
+ # LD -> LE
+  +[0-9a-f]+:	e3 20 d0 28 00 04 	lg	%r2,40\(%r13\)
+- +[0-9a-f]+:	c0 04 00 00 00 00 	brcl	0,[0-9a-f]+ <fn2\+0xfa>
++ +[0-9a-f]+:	c0 04 00 00 00 00 	jgnop	[0-9a-f]+ <fn2\+0xfa>
+  +[0-9a-f]+:	41 32 90 00       	la	%r3,0\(%r2,%r9\)
+  +[0-9a-f]+:	e3 40 d0 30 00 04 	lg	%r4,48\(%r13\)
+  +[0-9a-f]+:	41 54 30 00       	la	%r5,0\(%r4,%r3\)
+  +[0-9a-f]+:	e3 40 d0 38 00 04 	lg	%r4,56\(%r13\)
+  +[0-9a-f]+:	41 54 30 00       	la	%r5,0\(%r4,%r3\)
+  +[0-9a-f]+:	e3 20 d0 40 00 04 	lg	%r2,64\(%r13\)
+- +[0-9a-f]+:	c0 04 00 00 00 00 	brcl	0,[0-9a-f]+ <fn2\+0x11e>
++ +[0-9a-f]+:	c0 04 00 00 00 00 	jgnop	[0-9a-f]+ <fn2\+0x11e>
+  +[0-9a-f]+:	41 32 90 00       	la	%r3,0\(%r2,%r9\)
+  +[0-9a-f]+:	e3 40 d0 48 00 04 	lg	%r4,72\(%r13\)
+  +[0-9a-f]+:	41 54 30 00       	la	%r5,0\(%r4,%r3\)
+Only in binutils-2.35.1/opcodes: ChangeLog.orig
+Only in binutils-2.35.1/opcodes: ChangeLog.rej
+Only in binutils-2.35.1/opcodes: s390-mkopc.c.rej
+diff -rup binutils.orig/opcodes/s390-opc.c binutils-2.35.1/opcodes/s390-opc.c
+--- binutils.orig/opcodes/s390-opc.c	2021-03-25 14:35:40.719634477 +0000
++++ binutils-2.35.1/opcodes/s390-opc.c	2021-03-25 14:39:49.766420543 +0000
+@@ -218,32 +218,34 @@ const struct s390_operand s390_operands[
+   { 8, 8, 0 },
+ #define U8_16       68            /* 8 bit unsigned value starting at 16 */
+   { 8, 16, 0 },
+-#define U8_24       69            /* 8 bit unsigned value starting at 24 */
++#define U6_26       69            /* 6 bit unsigned value starting at 26 */
++  { 6, 26, 0 },
++#define U8_24       70            /* 8 bit unsigned value starting at 24 */
+   { 8, 24, 0 },
+-#define U8_28       70            /* 8 bit unsigned value starting at 28 */
++#define U8_28       71            /* 8 bit unsigned value starting at 28 */
+   { 8, 28, 0 },
+-#define U8_32       71            /* 8 bit unsigned value starting at 32 */
++#define U8_32       72            /* 8 bit unsigned value starting at 32 */
+   { 8, 32, 0 },
+-#define U12_16      72            /* 12 bit unsigned value starting at 16 */
++#define U12_16      73            /* 12 bit unsigned value starting at 16 */
+   { 12, 16, 0 },
+-#define U16_16      73            /* 16 bit unsigned value starting at 16 */
++#define U16_16      74            /* 16 bit unsigned value starting at 16 */
+   { 16, 16, 0 },
+-#define U16_32      74		  /* 16 bit unsigned value starting at 32 */
++#define U16_32      75		  /* 16 bit unsigned value starting at 32 */
+   { 16, 32, 0 },
+-#define U32_16      75		  /* 32 bit unsigned value starting at 16 */
++#define U32_16      76		  /* 32 bit unsigned value starting at 16 */
+   { 32, 16, 0 },
+ 
+ /* PC-relative address operands.  */
+ 
+-#define J12_12      76            /* 12 bit PC relative offset at 12 */
++#define J12_12      77            /* 12 bit PC relative offset at 12 */
+   { 12, 12, S390_OPERAND_PCREL },
+-#define J16_16      77            /* 16 bit PC relative offset at 16 */
++#define J16_16      78            /* 16 bit PC relative offset at 16 */
+   { 16, 16, S390_OPERAND_PCREL },
+-#define J16_32      78            /* 16 bit PC relative offset at 32 */
++#define J16_32      79            /* 16 bit PC relative offset at 32 */
+   { 16, 32, S390_OPERAND_PCREL },
+-#define J24_24      79            /* 24 bit PC relative offset at 24 */
++#define J24_24      80            /* 24 bit PC relative offset at 24 */
+   { 24, 24, S390_OPERAND_PCREL },
+-#define J32_16      80            /* 32 bit PC relative offset at 16 */
++#define J32_16      81            /* 32 bit PC relative offset at 16 */
+   { 32, 16, S390_OPERAND_PCREL },
+ 
+ };
+@@ -313,6 +315,7 @@ const struct s390_operand s390_operands[
+ #define INSTR_RIE_R0U0     6, { R_8,U16_16,0,0,0,0 }             /* e.g. clfitne */
+ #define INSTR_RIE_RUI0     6, { R_8,I16_16,U4_12,0,0,0 }         /* e.g. lochi */
+ #define INSTR_RIE_RRUUU    6, { R_8,R_12,U8_16,U8_24,U8_32,0 }   /* e.g. rnsbg */
++#define INSTR_RIE_RRUUU2   6, { R_8,R_12,U8_16,U6_26,U8_32,0 }   /* e.g. rnsbg */
+ #define INSTR_RIL_0P       6, { J32_16,0,0,0,0 }                 /* e.g. jg    */
+ #define INSTR_RIL_RP       6, { R_8,J32_16,0,0,0,0 }             /* e.g. brasl */
+ #define INSTR_RIL_UP       6, { U4_8,J32_16,0,0,0,0 }            /* e.g. brcl  */
+@@ -534,6 +537,7 @@ const struct s390_operand s390_operands[
+ #define MASK_RIE_R0U0     { 0xff, 0x0f, 0x00, 0x00, 0xff, 0xff }
+ #define MASK_RIE_RUI0     { 0xff, 0x00, 0x00, 0x00, 0xff, 0xff }
+ #define MASK_RIE_RRUUU    { 0xff, 0x00, 0x00, 0x00, 0x00, 0xff }
++#define MASK_RIE_RRUUU2   { 0xff, 0x00, 0x00, 0xc0, 0x00, 0xff }
+ #define MASK_RIL_0P       { 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 }
+ #define MASK_RIL_RP       { 0xff, 0x0f, 0x00, 0x00, 0x00, 0x00 }
+ #define MASK_RIL_UP       { 0xff, 0x0f, 0x00, 0x00, 0x00, 0x00 }
+diff -rup binutils.orig/opcodes/s390-opc.txt binutils-2.35.1/opcodes/s390-opc.txt
+--- binutils.orig/opcodes/s390-opc.txt	2021-03-25 14:35:40.728634433 +0000
++++ binutils-2.35.1/opcodes/s390-opc.txt	2021-03-25 14:39:56.534387545 +0000
+@@ -246,10 +246,14 @@ d7 xc SS_L0RDRD "exclusive OR" g5 esa,za
+ f8 zap SS_LLRDRD "zero and add" g5 esa,zarch
+ a70a ahi RI_RI "add halfword immediate" g5 esa,zarch
+ 84 brxh RSI_RRP "branch relative on index high" g5 esa,zarch
++84 jxh RSI_RRP "branch relative on index high" g5 esa,zarch
+ 85 brxle RSI_RRP "branch relative on index low or equal" g5 esa,zarch
++85 jxle RSI_RRP "branch relative on index low or equal" g5 esa,zarch
+ a705 bras RI_RP "branch relative and save" g5 esa,zarch
++a705 jas RI_RP "branch relative and save" g5 esa,zarch
+ a704 brc RI_UP "branch relative on condition" g5 esa,zarch
+ a706 brct RI_RP "branch relative on count" g5 esa,zarch
++a706 jct RI_RP "branch relative on count" g5 esa,zarch
+ b241 cksm RRE_RR "checksum" g5 esa,zarch
+ a70e chi RI_RI "compare halfword immediate" g5 esa,zarch
+ a9 clcle RS_RRRD "compare logical long extended" g5 esa,zarch
+@@ -268,8 +272,11 @@ a701 tml RI_RU "test under mask low" g5
+ 4700 nop RX_0RRD "no operation" g5 esa,zarch optparm
+ 4700 b*8 RX_0RRD "conditional branch" g5 esa,zarch
+ 47f0 b RX_0RRD "unconditional branch" g5 esa,zarch
++a704 jnop RI_0P "nop jump" g5 esa,zarch
+ a704 j*8 RI_0P "conditional jump" g5 esa,zarch
++a704 br*8 RI_0P "conditional jump" g5 esa,zarch
+ a7f4 j RI_0P "unconditional jump" g5 esa,zarch
++a7f4 bru RI_0P "unconditional jump" g5 esa,zarch
+ b34a axbr RRE_FEFE "add extended bfp" g5 esa,zarch
+ b31a adbr RRE_FF "add long bfp" g5 esa,zarch
+ ed000000001a adb RXE_FRRD "add long bfp" g5 esa,zarch
+@@ -437,7 +444,9 @@ e3000000001b slgf RXE_RRRD "subtract log
+ e3000000000c msg RXE_RRRD "multiply single 64" z900 zarch
+ e3000000001c msgf RXE_RRRD "multiply single 64<32" z900 zarch
+ ec0000000044 brxhg RIE_RRP "branch relative on index high 64" z900 zarch
++ec0000000044 jxhg RIE_RRP "branch relative on index high 64" z900 zarch
+ ec0000000045 brxlg RIE_RRP "branch relative on index low or equal 64" z900 zarch
++ec0000000045 jxleg RIE_RRP "branch relative on index low or equal 64" z900 zarch
+ eb0000000044 bxhg RSE_RRRD "branch on index high 64" z900 zarch
+ eb0000000045 bxleg RSE_RRRD "branch on index low or equal 64" z900 zarch
+ eb000000000c srlg RSE_RRRD "shift right single logical 64" z900 zarch
+@@ -462,10 +471,15 @@ eb0000000080 icmh RSE_RURD "insert chara
+ a702 tmhh RI_RU "test under mask high high" z900 zarch
+ a703 tmhl RI_RU "test under mask high low" z900 zarch
+ c004 brcl RIL_UP "branch relative on condition long" z900 esa,zarch
++c004 jgnop RIL_0P "nop jump long" z900 esa,zarch
+ c004 jg*8 RIL_0P "conditional jump long" z900 esa,zarch
++c004 br*8l RIL_0P "conditional jump long" z900 esa,zarch
+ c0f4 jg RIL_0P "unconditional jump long" z900 esa,zarch
++c0f4 brul RIL_0P "unconditional jump long" z900 esa,zarch
+ c005 brasl RIL_RP "branch relative and save long" z900 esa,zarch
++c005 jasl RIL_RP "branch relative and save long" z900 esa,zarch
+ a707 brctg RI_RP "branch relative on count 64" z900 zarch
++a707 jctg RI_RP "branch relative on count 64" z900 zarch
+ a709 lghi RI_RI "load halfword immediate 64" z900 zarch
+ a70b aghi RI_RI "add halfword immediate 64" z900 zarch
+ a70d mghi RI_RI "multiply halfword immediate 64" z900 zarch
+@@ -956,6 +970,7 @@ ec0000000054 rnsbg RIE_RRUUU "rotate the
+ ec0000000057 rxsbg RIE_RRUUU "rotate then exclusive or selected bits" z10 zarch
+ ec0000000056 rosbg RIE_RRUUU "rotate then or selected bits" z10 zarch
+ ec0000000055 risbg RIE_RRUUU "rotate then insert selected bits" z10 zarch
++ec0000800055 risbgz RIE_RRUUU2 "rotate then insert selected bits and zero remaining bits" z10 zarch
+ c40f strl RIL_RP "store relative long (32)" z10 zarch
+ c40b stgrl RIL_RP "store relative long (64)" z10 zarch
+ c407 sthrl RIL_RP "store halfword relative long" z10 zarch
+@@ -1139,6 +1154,7 @@ eb0000000023 clt$12 RSY_R0RD "compare lo
+ eb000000002b clgt RSY_RURD "compare logical and trap 64 bit reg-mem" zEC12 zarch
+ eb000000002b clgt$12 RSY_R0RD "compare logical and trap 64 bit reg-mem" zEC12 zarch
+ ec0000000059 risbgn RIE_RRUUU "rotate then insert selected bits nocc" zEC12 zarch
++ec0000800059 risbgnz RIE_RRUUU2 "rotate then insert selected bits and zero remaining bits nocc" zEC12 zarch
+ ed00000000aa cdzt RSL_LRDFU "convert from zoned long" zEC12 zarch
+ ed00000000ab cxzt RSL_LRDFEU "convert from zoned extended" zEC12 zarch
+ ed00000000a8 czdt RSL_LRDFU "convert to zoned long" zEC12 zarch
+Only in binutils-2.35.1/opcodes: s390-opc.txt.orig
+Only in binutils-2.35.1/opcodes: s390-opc.txt.rej

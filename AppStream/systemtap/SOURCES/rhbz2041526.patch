@@ -1,0 +1,167 @@
+diff --git a/tapset/linux/ioscheduler.stp b/tapset/linux/ioscheduler.stp
+index abb24dac9..3096a73ea 100644
+--- a/tapset/linux/ioscheduler.stp
++++ b/tapset/linux/ioscheduler.stp
+@@ -11,7 +11,9 @@
+ // </tapsetdescription>
+ %{
+ #include <linux/blkdev.h>
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
+ #include <linux/elevator.h>
++#endif
+ %}
+ 
+ /**
+@@ -76,7 +78,8 @@ probe ioscheduler.elv_completed_request
+ 	elevator_name = kernel_string(
+ 		@choose_defined($q->elevator->type->elevator_name,
+ 			@choose_defined($q->elevator->elevator_type->elevator_name,
+-                                        $q->elevator->elevator_name)), "")
++                                        @choose_defined($q->elevator->elevator_name,
++                                                        0))), "")
+ 	if($rq == 0)  {
+ 		disk_major = -1
+ 		disk_minor = -1
+@@ -114,7 +117,8 @@ probe ioscheduler.elv_add_request.kp =
+ 	elevator_name = kernel_string(
+ 		@choose_defined($q->elevator->type->elevator_name,
+ 			@choose_defined($q->elevator->elevator_type->elevator_name,
+-                                        $q->elevator->elevator_name)), "")
++                                        @choose_defined($q->elevator->elevator_name,
++                                                        0))), "")
+ 	q = $q
+ 	if($rq == 0)  {
+ 		disk_major = -1
+@@ -152,7 +156,8 @@ probe ioscheduler.elv_add_request.tp = kernel.trace("block_rq_insert") ?
+         elevator_name = kernel_string(
+ 			@choose_defined($rq->q->elevator->type->elevator_name,
+ 				@choose_defined($rq->q->elevator->elevator_type->elevator_name,
+-                                                $rq->q->elevator->elevator_name)), "")
++                                                @choose_defined($rq->q->elevator->elevator_name,
++                                                                0))), "")
+ 	rq = $rq
+ 
+ 	if ($rq == 0 || $rq->rq_disk ==0) {
+@@ -201,7 +206,8 @@ probe ioscheduler_trace.elv_completed_request
+         elevator_name = kernel_string(
+ 			@choose_defined($rq->q->elevator->type->elevator_name,
+ 				@choose_defined($rq->q->elevator->elevator_type->elevator_name,
+-                                                $rq->q->elevator->elevator_name)), "")
++                                                @choose_defined($rq->q->elevator->elevator_name,
++                                                                0))), "")
+ 
+ 	rq = $rq
+ 
+@@ -237,7 +243,8 @@ probe ioscheduler_trace.elv_issue_request
+         elevator_name = kernel_string(
+ 			@choose_defined($rq->q->elevator->type->elevator_name,
+ 				@choose_defined($rq->q->elevator->elevator_type->elevator_name,
+-                                                $rq->q->elevator->elevator_name)), "")
++                                                @choose_defined($rq->q->elevator->elevator_name,
++                                                                0))), "")
+ 	rq = $rq
+ 
+ 	if ($rq == 0 || $rq->rq_disk ==0) {
+@@ -272,7 +279,8 @@ probe ioscheduler_trace.elv_requeue_request
+         elevator_name = kernel_string(
+ 			@choose_defined($rq->q->elevator->type->elevator_name,
+ 				@choose_defined($rq->q->elevator->elevator_type->elevator_name,
+-                                                $rq->q->elevator->elevator_name)), "")
++                                                @choose_defined($rq->q->elevator->elevator_name,
++                                                                0))), "")
+ 	rq = $rq
+ 
+ 	if ($rq == 0 || $rq->rq_disk ==0) {
+@@ -306,7 +314,8 @@ probe ioscheduler_trace.elv_abort_request
+         elevator_name = kernel_string(
+ 			@choose_defined($rq->q->elevator->type->elevator_name,
+ 				@choose_defined($rq->q->elevator->elevator_type->elevator_name,
+-                                                $rq->q->elevator->elevator_name)), "")
++                                                @choose_defined($rq->q->elevator->elevator_name,
++                                                                0))), "")
+ 	rq = $rq
+ 
+ 	if ($rq == 0 || $rq->rq_disk ==0) {
+@@ -364,6 +373,9 @@ probe ioscheduler_trace.unplug_timer = kernel.trace("block_unplug_timer") ?
+ 
+ function disk_major_from_request:long(var_q:long)
+ %{ /* pure */
++#ifndef _ELEVATOR_H
++        STAP_ERROR ("unsupported (PR28634)");
++#else
+ 	struct request_queue *q = (struct request_queue *)((uintptr_t)STAP_ARG_var_q);
+ 
+ 	/* We need to make sure there isn't a deref hazard here when
+@@ -382,10 +394,14 @@ function disk_major_from_request:long(var_q:long)
+ 		STAP_RETVALUE = kread(&(rq_disk->major));
+ 	}
+ 	CATCH_DEREF_FAULT();
++#endif
+ %}
+ 
+ function disk_minor_from_request:long(var_q:long)
+ %{ /* pure */
++#ifndef _ELEVATOR_H
++        STAP_ERROR ("unsupported (PR28634)");
++#else
+ 	struct request_queue *q = (struct request_queue *)((uintptr_t)STAP_ARG_var_q);
+ 
+ 	/* We need to make sure there isn't a deref hazard here when
+@@ -404,4 +420,6 @@ function disk_minor_from_request:long(var_q:long)
+ 		STAP_RETVALUE = kread(&(rq_disk->first_minor));
+ 	}
+ 	CATCH_DEREF_FAULT();
++#endif
+ %}
++
+diff --git a/testsuite/systemtap.examples/io/iostat-scsi.stp b/testsuite/systemtap.examples/io/iostat-scsi.stp
+index 6b1bf19ea..3faf32fe9 100755
+--- a/testsuite/systemtap.examples/io/iostat-scsi.stp
++++ b/testsuite/systemtap.examples/io/iostat-scsi.stp
+@@ -26,6 +26,7 @@ probe module("sd_mod").function("sd_init_command") !,
+ %(kernel_v >= "2.6.31" %?
+ %{
+ #include <linux/blkdev.h>
++#include <linux/blk-mq.h>
+ %}
+ 
+ function get_nr_sectors:long(rq:long)
+@@ -47,13 +48,24 @@ probe sd_prep_fn = module("sd_mod").function("sd_prep_fn") !,
+   _cmd_flags = $rq->cmd_flags
+ }
+ 
++function scsi_cmd_to_rq(scmd) {
++    return scmd - @cast_module_sizeof("kernel", "request")
++}
++
+ probe sd_init_command = module("sd_mod").function("sd_init_command") !,
+ 			kernel.function("sd_init_command")
+ {
+-  device = kernel_string(@choose_defined($cmd, $SCpnt)->request->rq_disk->disk_name)
+-  sector_size = @choose_defined($cmd, $SCpnt)->device->sector_size
+-  nr_sectors = get_nr_sectors(@choose_defined($cmd, $SCpnt)->request)
+-  _cmd_flags = @choose_defined($cmd, $SCpnt)->request->cmd_flags
++    sector_size = @choose_defined($cmd, $SCpnt)->device->sector_size
++    # Kernel commits aa8e25e5006aac52c943c84e9056ab488630ee19 2266a2def97ce11ec979b6c58a1b637a16eca7dd
++    if (@defined(@choose_defined($cmd, $SCpnt)->request)) {
++      device = kernel_string(@choose_defined($cmd, $SCpnt)->request->rq_disk->disk_name)
++      nr_sectors = get_nr_sectors(@choose_defined($cmd, $SCpnt)->request)
++      _cmd_flags = @choose_defined($cmd, $SCpnt)->request->cmd_flags
++    } else {
++      device = kernel_string(@cast(scsi_cmd_to_rq(@choose_defined($cmd, $SCpnt)), "request", "kernel")->rq_disk->disk_name)
++      nr_sectors = get_nr_sectors(scsi_cmd_to_rq(@choose_defined($cmd, $SCpnt)))
++      _cmd_flags = @cast(scsi_cmd_to_rq(@choose_defined($cmd, $SCpnt)), "request", "kernel")->cmd_flags
++  }
+ }
+ 
+ probe sd_prep_fn !, sd_init_command
+@@ -71,7 +83,8 @@ probe sd_prep_fn !, sd_init_command
+ probe module("st").function("st_do_scsi").call !,
+       kernel.function("st_do_scsi").call
+ {
+-  device = kernel_string($STp->disk->disk_name)
++  # Kernel commit 45938335d0a9773d65a82a7ca722bb76e4b997a8
++  device = kernel_string(@choose_defined($STp->disk->disk_name, $STp->name))
+   devices[device] = 1
+   if ($direction)
+     writes[device] <<< $bytes

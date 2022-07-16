@@ -1,0 +1,44 @@
+From 3ea45d65d42e5daf032164240abebec82e987f90 Mon Sep 17 00:00:00 2001
+From: Mark Zhang <markzhang@nvidia.com>
+Date: Mon, 20 Dec 2021 11:19:46 +0200
+Subject: [PATCH] mlx5: Initialize wr_data when post a work request
+
+[ Upstream commit 4c905646de3e75bdccada4abe9f0d273d76eaf50 ]
+
+With raw_wqe feature enabled, the wc opcode will be set to
+IBV_WC_DRIVER2 if the wr_data is set to it.
+So if wr_data is not initialized, there's a chance that it happens to be
+IBV_WC_DRIVER2, then the application gets this wc opcode unexpectedly.
+
+Fixes: 8ff1c5c3c411 ("mlx5: Introduce mlx5dv_wr_raw_wqe builder")
+Signed-off-by: Mark Zhang <markzhang@nvidia.com>
+Signed-off-by: Yishai Hadas <yishaih@nvidia.com>
+Signed-off-by: Nicolas Morey-Chaisemartin <nmoreychaisemartin@suse.com>
+---
+ providers/mlx5/qp.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/providers/mlx5/qp.c b/providers/mlx5/qp.c
+index 70c1afb2..8a99f504 100644
+--- a/providers/mlx5/qp.c
++++ b/providers/mlx5/qp.c
+@@ -871,6 +871,7 @@ static inline int _mlx5_post_send(struct ibv_qp *ibqp, struct ibv_send_wr *wr,
+ 
+ 		seg += sizeof *ctrl;
+ 		size = sizeof *ctrl / 16;
++		qp->sq.wr_data[idx] = 0;
+ 
+ 		switch (ibqp->qp_type) {
+ 		case IBV_QPT_XRC_SEND:
+@@ -1251,6 +1252,8 @@ static inline void _common_wqe_init_op(struct ibv_qp_ex *ibqp, int ib_op,
+ 		mqp->sq.wr_data[idx] = IBV_WC_DRIVER1;
+ 	else if (mlx5_op == MLX5_OPCODE_MMO)
+ 		mqp->sq.wr_data[idx] = IBV_WC_DRIVER3;
++	else
++		mqp->sq.wr_data[idx] = 0;
+ 
+ 	ctrl = mlx5_get_send_wqe(mqp, idx);
+ 	*(uint32_t *)((void *)ctrl + 8) = 0;
+-- 
+2.31.1
+

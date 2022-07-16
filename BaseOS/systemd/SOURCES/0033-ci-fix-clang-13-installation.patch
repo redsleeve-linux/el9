@@ -1,0 +1,54 @@
+From b9b1f92cdc74beb8487c87aa2b5c2806e100d1aa Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 22 Feb 2022 14:43:40 +0100
+Subject: [PATCH] ci: fix clang-13 installation
+
+For some reason Ubuntu Focal repositories now have `llvm-13` virtual
+package which can't be installed, but successfully fools our check,
+resulting in no clang/llvm being installed...
+
+```
+$ apt show llvm-13
+Package: llvm-13
+State: not a real package (virtual)
+N: Can't select candidate version from package llvm-13 as it has no candidate
+N: Can't select versions from package 'llvm-13' as it is purely virtual
+N: No packages found
+
+$ apt install --dry-run llvm-13
+Reading package lists... Done
+Building dependency tree
+Reading state information... Done
+Package llvm-13 is not available, but is referred to by another package.
+This may mean that the package is missing, has been obsoleted, or
+is only available from another source
+
+E: Package 'llvm-13' has no installation candidate
+```
+
+(cherry picked from commit b491d74064f9d5e17a71b38b014434237169a077)
+
+Related: #2013213
+---
+ .github/workflows/build_test.sh | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/.github/workflows/build_test.sh b/.github/workflows/build_test.sh
+index 549e59b2c9..5a173a18d5 100755
+--- a/.github/workflows/build_test.sh
++++ b/.github/workflows/build_test.sh
+@@ -78,12 +78,12 @@ if [[ "$COMPILER" == clang ]]; then
+     # ATTOW llvm-11 got into focal-updates, which conflicts with llvm-11
+     # provided by the apt.llvm.org repositories. Let's use the system
+     # llvm package if available in such cases to avoid that.
+-    if ! apt show --quiet "llvm-$COMPILER_VERSION" &>/dev/null; then
++    if ! apt install --dry-run "llvm-$COMPILER_VERSION" >/dev/null; then
+         # Latest LLVM stack deb packages provided by https://apt.llvm.org/
+         # Following snippet was partly borrowed from https://apt.llvm.org/llvm.sh
+         wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --yes --dearmor --output /usr/share/keyrings/apt-llvm-org.gpg
+         printf "deb [signed-by=/usr/share/keyrings/apt-llvm-org.gpg] http://apt.llvm.org/%s/   llvm-toolchain-%s-%s  main\n" \
+-		"$RELEASE" "$RELEASE" "$COMPILER_VERSION" >/etc/apt/sources.list.d/llvm-toolchain.list
++               "$RELEASE" "$RELEASE" "$COMPILER_VERSION" >/etc/apt/sources.list.d/llvm-toolchain.list
+         PACKAGES+=("clang-$COMPILER_VERSION" "lldb-$COMPILER_VERSION" "lld-$COMPILER_VERSION" "clangd-$COMPILER_VERSION")
+     fi
+ elif [[ "$COMPILER" == gcc ]]; then

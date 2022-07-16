@@ -1,0 +1,56 @@
+From 1e423276a24d7c895d196f9f10bf8c0b9155c633 Mon Sep 17 00:00:00 2001
+From: Lukas Nykryn <lnykryn@redhat.com>
+Date: Tue, 12 Feb 2019 16:58:16 +0100
+Subject: [PATCH] rules: add elevator= kernel command line parameter
+
+Kernel removed the elevator= option, so let's reintroduce
+it for rhel8 via udev rule.
+
+RHEL-only
+
+Resolves: #2003002
+---
+ rules.d/40-elevator.rules | 20 ++++++++++++++++++++
+ rules.d/meson.build       |  1 +
+ 2 files changed, 21 insertions(+)
+ create mode 100644 rules.d/40-elevator.rules
+
+diff --git a/rules.d/40-elevator.rules b/rules.d/40-elevator.rules
+new file mode 100644
+index 0000000000..dbe8fc81a4
+--- /dev/null
++++ b/rules.d/40-elevator.rules
+@@ -0,0 +1,20 @@
++# We aren't adding devices skip the elevator check
++ACTION!="add", GOTO="sched_out"
++
++SUBSYSTEM!="block", GOTO="sched_out"
++ENV{DEVTYPE}!="disk", GOTO="sched_out"
++
++# Technically, dm-multipath can be configured to use an I/O scheduler.
++# However, there are races between the 'add' uevent and the linking in
++# of the queue/scheduler sysfs file.  For now, just skip dm- devices.
++KERNEL=="dm-*|md*", GOTO="sched_out"
++
++# Skip bio-based devices, which don't support an I/O scheduler.
++ATTR{queue/scheduler}=="none", GOTO="sched_out"
++
++# If elevator= is specified on the kernel command line, change the
++# scheduler to the one specified.
++IMPORT{cmdline}="elevator"
++ENV{elevator}!="", ATTR{queue/scheduler}="$env{elevator}"
++
++LABEL="sched_out"
+\ No newline at end of file
+diff --git a/rules.d/meson.build b/rules.d/meson.build
+index c5c3590b29..7e0bd89200 100644
+--- a/rules.d/meson.build
++++ b/rules.d/meson.build
+@@ -5,6 +5,7 @@ install_data(
+         install_dir : udevrulesdir)
+ 
+ rules = files('''
++        40-elevator.rules
+         40-redhat.rules
+         60-autosuspend.rules
+         60-block.rules

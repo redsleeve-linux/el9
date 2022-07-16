@@ -1,0 +1,38 @@
+commit 9b6f4d4e4f2649b05459be4ecf48a42661163fd1
+Author: Stan Cox <scox@redhat.com>
+Date:   Fri Feb 25 14:09:26 2022 -0500
+
+    PR28557: module probe insertion on modern kernels
+    
+    Similar to commit 0425c60d7 but for return probes.  Try to fully relocate
+    addresses, before letting the kernel try it with symbols / kallsyms.
+
+diff --git a/runtime/linux/kprobes.c b/runtime/linux/kprobes.c
+index d59935d06..09f0e0665 100644
+--- a/runtime/linux/kprobes.c
++++ b/runtime/linux/kprobes.c
+@@ -269,15 +269,17 @@ stapkp_prepare_kretprobe(struct stap_kprobe_probe *skp)
+    struct kretprobe *krp = &skp->kprobe->u.krp;
+    unsigned long addr = 0;
+ 
+-   if (! skp->symbol_name) {
+-      addr = stapkp_relocate_addr(skp);
+-      if (addr == 0)
+-	 return 1;
+-      krp->kp.addr = (void *) addr;
++   // PR28557 Try a pass resolving the address now with the currently
++   // known module/section addresses within our own stap-symbols tables.
++   addr = stapkp_relocate_addr(skp);
++   if (addr != 0) {
++           krp->kp.addr = (void*) addr;
+    }
+-   else {
++   // fall back to kallsyms-based or kernel kprobes-delegated symbolic
++   // registration
++   else if (skp->symbol_name) {
+       if (USE_KALLSYMS_ON_EACH_SYMBOL && krp->kp.addr == 0)
+-	 return 1;
++	 return 4;
+       else if (!USE_KALLSYMS_ON_EACH_SYMBOL) {
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(3,11,0)
+         if (krp->kp.symbol_name == NULL)

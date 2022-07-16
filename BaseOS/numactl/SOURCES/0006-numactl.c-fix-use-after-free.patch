@@ -1,0 +1,30 @@
+From 498385e3aaf265d6e9786e0a391196cd82ab3260 Mon Sep 17 00:00:00 2001
+From: Pingfan Liu <piliu@redhat.com>
+Date: Fri, 18 Jun 2021 18:14:20 +0800
+Subject: [PATCH 6/6] numactl.c: fix use after free
+
+The following command can trigger the bug
+  numactl --length 65536 --shm xxx -p0 -V > /dev/null
+
+So reset mask to block any new access inside this loop.
+
+Signed-off-by: Pingfan Liu <piliu@redhat.com>
+---
+ numactl.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/numactl.c b/numactl.c
+index 5a9d2df..ae41d6c 100644
+--- a/numactl.c
++++ b/numactl.c
+@@ -544,6 +544,7 @@ int main(int ac, char **av)
+ 			if (nnodes != 1)
+ 				usage();
+ 			numa_bitmask_free(mask);
++			mask = NULL;
+ 			errno = 0;
+ 			did_node_cpu_parse = 1;
+ 			numa_set_bind_policy(0);
+-- 
+2.29.2
+

@@ -1,0 +1,322 @@
+diff --git a/cmd/golist/golist.go b/cmd/golist/golist.go
+index ee028ae..e9c038d 100644
+--- a/cmd/golist/golist.go
++++ b/cmd/golist/golist.go
+@@ -11,9 +11,8 @@ import (
+ 	"strings"
+ 	"text/template"
+ 
+-	"github.com/urfave/cli"
+-
+ 	"pagure.io/golist/pkg/util"
++	"pagure.io/golist/pkg/cli"
+ )
+ 
+ var (
+@@ -100,7 +99,6 @@ func main() {
+ 	}
+ 
+ 	app.Action = func(c *cli.Context) error {
+-
+ 		if len(c.StringSlice("package-path")) == 0 {
+ 			return fmt.Errorf("--package-path is not set")
+ 		}
+diff --git a/pkg/cli/cli.go b/pkg/cli/cli.go
+new file mode 100644
+index 0000000..ec91056
+--- /dev/null
++++ b/pkg/cli/cli.go
+@@ -0,0 +1,293 @@
++package cli
++
++/* golist uses a very small portion of functionality
++   from github.com/urfave/cli. This module provides
++   minimal substitute API implementations for only the
++   core functionality used by golist, for the purpose of
++   bootstrapping golist without additional dependencies.
++*/
++
++import (
++	"strings"
++	"fmt"
++	"os"
++)
++
++type String string
++type StringSlice []string
++type Bool bool
++
++type Flag interface {
++	name() string
++	usage() string
++}
++
++type BoolFlag struct {
++	Name string
++	Usage string
++	Value bool
++}
++
++type StringFlag struct {
++	Name string
++	Usage string
++	Value string
++}
++
++type StringSliceFlag struct {
++	Name string
++	Usage string
++	Value *StringSlice
++}
++
++type App struct {
++	Name string
++	Usage string
++	Version string
++	Flags []Flag
++	Action func(*Context) error
++
++}
++
++func NewApp() App {
++	var a App
++	return a
++}
++
++func (a *App) Run(osArgs []string) error {
++	c, err := newContext(a.Flags, osArgs)
++	if err != nil {
++		return err
++	}
++	if c.Bool("help") {
++		a.PrintHelp()
++		os.Exit(0)
++	}
++	return a.Action(c)
++}
++
++func (a *App) PrintHelp() {
++	maxNameLen := 0
++	for _, flag := range a.Flags {
++		length := len(flag.name())
++		if length > maxNameLen {
++			maxNameLen = length
++		}
++	}
++	fmtSpec := "%-" + fmt.Sprintf("%v", maxNameLen + 6) + "s\t%s\n"
++	fmt.Printf("%s - %s\n", a.Name, a.Usage)
++	fmt.Printf("Options:\n")
++	for _, flag := range a.Flags {
++		flagNameSlice := append([]string{canonicalName(flag)}, alternateNames(flag)...)
++		for i, _ := range flagNameSlice {
++			if len(flagNameSlice[i]) > 1 {
++				flagNameSlice[i] = fmt.Sprintf("--%s", flagNameSlice[i])
++			} else {
++				flagNameSlice[i] = fmt.Sprintf("-%s", flagNameSlice[i])
++			}
++		}
++		flagNameStr := strings.Join(flagNameSlice, ", ")
++		switch flag.(type) {
++			case StringFlag:
++				flagNameStr = fmt.Sprintf("  %s value", flagNameStr)
++			case StringSliceFlag:
++				flagNameStr = fmt.Sprintf("  %s value", flagNameStr)
++			case BoolFlag:
++				flagNameStr = fmt.Sprintf("  %s", flagNameStr)
++		}
++		fmt.Printf(fmtSpec, flagNameStr, flag.usage())
++	}
++}
++
++
++type Context struct {
++	flagValues map[string]interface{}
++	flagDecls map[string]Flag
++	altFlags map[string]string
++	positionalArgs []string
++}
++
++func (c *Context) Bool(flag string) bool {
++	iface, ok := c.flagDecls[flag]
++	if !ok {
++		panic("undefined flag" + flag)
++	}
++	switch iface.(type) {
++		case BoolFlag:
++			break
++		default:
++			panic("flag type mismatch - expected BoolFlag, got: " + flag)
++	}
++	val, ok := c.flagValues[flag]
++	if !ok {
++		return iface.(BoolFlag).Value
++	}
++	return val.(bool)
++}
++
++func (c *Context) String(flag string) string {
++	iface, ok := c.flagDecls[flag]
++	if !ok {
++		panic("undefined flag" + flag)
++	}
++	switch iface.(type) {
++		case StringFlag:
++			break
++		default:
++			panic("flag type mismatch - expected StringFlag, got: " + flag)
++	}
++	val, ok:= c.flagValues[flag]
++	if !ok {
++		return iface.(StringFlag).Value
++	}
++	return val.(string)
++}
++
++func (c *Context) StringSlice(flag string) []string {
++	iface, ok := c.flagDecls[flag];
++	if !ok {
++		panic("undefined flag" + flag)
++	}
++	switch iface.(type) {
++		case StringSliceFlag:
++			break
++		default:
++			panic("flag type mismatch - expected StringSliceFlag, got: " + flag)
++	}
++	val, ok := c.flagValues[flag]
++	if !ok {
++		val = iface.(StringSliceFlag).Value
++		if val != nil {
++			return []string{}
++		}
++	}
++	return val.([]string)
++}
++
++// Create a hash mapping from flag names to declarations
++// and alt names to flag names.
++func (c *Context) setupFlags(flagDecls []Flag) error {
++	helpFlag := BoolFlag {
++		Name: "help, h",
++		Usage: "Show help message",
++	}
++	flagDecls = append(flagDecls, helpFlag)
++	for _, flag := range flagDecls {
++		flagName := canonicalName(flag)
++		if _, ok:= c.flagDecls[flagName]; ok {
++			return fmt.Errorf("cannot redeclare flag: %s", flagName)
++		}
++		c.flagDecls[flagName] = flag
++		altFlagNames := alternateNames(flag)
++		for _, altName := range altFlagNames {
++			c.altFlags[altName] = flagName
++		}
++	}
++	return nil
++}
++
++func (c *Context) parseArgs(osArgs []string) error {
++	// process command line arguments as a stream of tokens.
++	// operations consume the first token in the stream until
++	// the stream is empty.
++	argStream := osArgs
++	for len(argStream) > 0 {
++		arg := argStream[0]
++		if ! isFlag(arg) {
++			argStream = argStream[1:]
++			c.positionalArgs = append(c.positionalArgs, arg)
++
++		} else {
++			arg = trimFlag(arg)
++			if _, ok:= c.altFlags[arg]; ok {
++				arg = c.altFlags[arg]
++			}
++			iface, ok := c.flagDecls[arg]
++			if !ok {
++				return fmt.Errorf("unexpected argument: %v", arg)
++			}
++			switch flag := iface.(type) {
++				case StringFlag:
++					argStream = argStream[1:]
++					if len(argStream) == 0 {
++						return fmt.Errorf("expected value for argument: %v", arg)
++					}
++					if isFlag(argStream[0]) {
++						return fmt.Errorf("unexpected flag: %v", arg)
++					}
++					c.flagValues[arg] = argStream[0]
++				case StringSliceFlag:
++					argStream = argStream[1:]
++					if len (argStream) == 0 {
++						return fmt.Errorf("expected value for argument: %v", arg)
++					}
++					if isFlag(argStream[0]) {
++						return fmt.Errorf("unexpected flag: %v", arg)
++					}
++					c.flagValues[arg] = make([]string, 0)
++					c.flagValues[arg] = append(c.flagValues[arg].([]string), argStream[0])
++					argStream = argStream[1:]
++					for len(argStream) > 0 && ! isFlag(argStream[0]) {
++						c.flagValues[arg] = append(c.flagValues[arg].([]string), argStream[0])
++						argStream = argStream[1:]
++					}
++				case BoolFlag:
++					argStream = argStream[1:]
++					c.flagValues[canonicalName(flag)] = true
++				default:
++					return fmt.Errorf("unexpected flag: %v", arg)
++			}
++		}
++	}
++	return nil
++}
++
++func newContext(flags []Flag, osArgs []string) (*Context, error) {
++	var c Context
++	c.flagValues = make(map[string]interface{})
++	c.flagDecls = make(map[string]Flag)
++	c.altFlags = make(map[string]string)
++	c.altFlags = make(map[string]string)
++	if err := c.setupFlags(flags); err != nil {
++		return nil, err
++	}
++	if err := c.parseArgs(osArgs); err != nil {
++		return nil, err
++	}
++	return &c, nil
++}
++
++func (f StringFlag) name() string {return f.Name}
++func (f StringFlag) usage() string {return f.Usage}
++func (f BoolFlag) name() string {return f.Name}
++func (f BoolFlag) usage() string {return f.Usage}
++func (f StringSliceFlag) name() string {return f.Name}
++func (f StringSliceFlag) usage() string {return f.Usage}
++
++// takes a Flag with a comma delimited string
++// of flag names and returns the first one
++func canonicalName(flag Flag) string {
++	flagNames := strings.Split(flag.name(), ",")
++	return strings.TrimSpace(flagNames[0])
++}
++
++// takes a Flag with a comma delimited string
++// of flag names and returns them as a string slice
++// with the canonical (first) flag ommitted
++func alternateNames(flag Flag) []string {
++	flagNames := strings.Split(flag.name(), ",")
++	altNames := flagNames[1:]
++	for i, _ := range altNames {
++		altNames[i] = strings.TrimSpace(altNames[i])
++	}
++	return altNames
++}
++
++func isFlag(arg string) bool {
++  return strings.HasPrefix(arg, "-")
++}
++
++func trimFlag(arg string) string {
++  return strings.Trim(strings.Trim(arg, "-"), "-")
++}
++

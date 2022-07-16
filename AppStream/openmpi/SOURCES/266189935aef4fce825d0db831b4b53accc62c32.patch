@@ -1,0 +1,33 @@
+From 266189935aef4fce825d0db831b4b53accc62c32 Mon Sep 17 00:00:00 2001
+From: Jeff Squyres <jsquyres@cisco.com>
+Date: Tue, 22 Jun 2021 22:28:37 -0400
+Subject: [PATCH] fbtl-posix: link to common_ompio
+
+The posix fbtl calls mca_common_ompio_progress(), which resides in
+common/ompio (i.e., libmca_common_ompio.la).  So add that into
+mca_fbtl_posix_la_LIBADD (like we do in a few other OMPIO-based
+components).  Failure to do this *can* lead to the posix fbtl
+component failing to load (depending on whether other OMPIO-based
+components that pull in libmca_common_ompio were loaded first).
+
+Thanks to Honggang Li for raising the issue.
+
+Signed-off-by: Jeff Squyres <jsquyres@cisco.com>
+---
+ ompi/mca/fbtl/posix/Makefile.am | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/ompi/mca/fbtl/posix/Makefile.am b/ompi/mca/fbtl/posix/Makefile.am
+index a7b0624d3ec..1ce19cb09b7 100644
+--- a/ompi/mca/fbtl/posix/Makefile.am
++++ b/ompi/mca/fbtl/posix/Makefile.am
+@@ -34,7 +34,8 @@ mcacomponentdir = $(ompilibdir)
+ mcacomponent_LTLIBRARIES = $(component_install)
+ mca_fbtl_posix_la_SOURCES = $(sources)
+ mca_fbtl_posix_la_LDFLAGS = -module -avoid-version
+-mca_fbtl_posix_la_LIBADD = $(top_builddir)/ompi/lib@OMPI_LIBMPI_NAME@.la
++mca_fbtl_posix_la_LIBADD = $(top_builddir)/ompi/lib@OMPI_LIBMPI_NAME@.la \
++    $(OMPI_TOP_BUILDDIR)/ompi/mca/common/ompio/libmca_common_ompio.la
+ 
+ noinst_LTLIBRARIES = $(component_noinst)
+ libmca_fbtl_posix_la_SOURCES = $(sources)

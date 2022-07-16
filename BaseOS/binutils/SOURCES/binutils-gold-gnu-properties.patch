@@ -1,0 +1,181 @@
+diff -rup binutils.orig/gold/testsuite/gnu_property_a.S binutils-2.35/gold/testsuite/gnu_property_a.S
+--- binutils.orig/gold/testsuite/gnu_property_a.S	2021-01-18 14:01:41.228809868 +0000
++++ binutils-2.35/gold/testsuite/gnu_property_a.S	2021-01-18 14:01:52.542736705 +0000
+@@ -1,8 +1,8 @@
+ #define NT_GNU_PROPERTY_TYPE_0 5
+ 
+ #define GNU_PROPERTY_STACK_SIZE 1
+-#define GNU_PROPERTY_X86_ISA_1_USED 0xc0000000
+-#define GNU_PROPERTY_X86_ISA_1_NEEDED 0xc0000001
++#define GNU_PROPERTY_X86_ISA_1_USED 0xc0010002
++#define GNU_PROPERTY_X86_ISA_1_NEEDED 0xc0008002
+ #define GNU_PROPERTY_X86_FEATURE_1_AND 0xc0000002
+ 
+ #if __SIZEOF_PTRDIFF_T__  == 8
+diff -rup binutils.orig/gold/testsuite/gnu_property_b.S binutils-2.35/gold/testsuite/gnu_property_b.S
+--- binutils.orig/gold/testsuite/gnu_property_b.S	2021-01-18 14:01:41.233809836 +0000
++++ binutils-2.35/gold/testsuite/gnu_property_b.S	2021-01-18 14:01:52.542736705 +0000
+@@ -2,8 +2,8 @@
+ 
+ #define GNU_PROPERTY_STACK_SIZE 1
+ #define GNU_PROPERTY_NO_COPY_ON_PROTECTED 2
+-#define GNU_PROPERTY_X86_ISA_1_USED 0xc0000000
+-#define GNU_PROPERTY_X86_ISA_1_NEEDED 0xc0000001
++#define GNU_PROPERTY_X86_ISA_1_USED 0xc0010002
++#define GNU_PROPERTY_X86_ISA_1_NEEDED 0xc0008002
+ #define GNU_PROPERTY_X86_FEATURE_1_AND 0xc0000002
+ 
+ #if __SIZEOF_PTRDIFF_T__  == 8
+diff -rup binutils.orig/gold/testsuite/gnu_property_c.S binutils-2.35/gold/testsuite/gnu_property_c.S
+--- binutils.orig/gold/testsuite/gnu_property_c.S	2021-01-18 14:01:41.232809843 +0000
++++ binutils-2.35/gold/testsuite/gnu_property_c.S	2021-01-18 14:01:52.542736705 +0000
+@@ -2,8 +2,8 @@
+ 
+ #define GNU_PROPERTY_STACK_SIZE 1
+ #define GNU_PROPERTY_NO_COPY_ON_PROTECTED 2
+-#define GNU_PROPERTY_X86_ISA_1_USED 0xc0000000
+-#define GNU_PROPERTY_X86_ISA_1_NEEDED 0xc0000001
++#define GNU_PROPERTY_X86_ISA_1_USED 0xc0010002
++#define GNU_PROPERTY_X86_ISA_1_NEEDED 0xc0008002
+ #define GNU_PROPERTY_X86_FEATURE_1_AND 0xc0000002
+ 
+ #if __SIZEOF_PTRDIFF_T__  == 8
+diff -rup binutils.orig/gold/testsuite/gnu_property_test.sh binutils-2.35/gold/testsuite/gnu_property_test.sh
+--- binutils.orig/gold/testsuite/gnu_property_test.sh	2021-01-18 14:01:41.236809817 +0000
++++ binutils-2.35/gold/testsuite/gnu_property_test.sh	2021-01-18 14:01:52.543736699 +0000
+@@ -57,8 +57,8 @@ check_count gnu_property_test.stdout "GN
+ 
+ check gnu_property_test.stdout "stack size: 0x111100"
+ check gnu_property_test.stdout "no copy on protected"
+-check gnu_property_test.stdout "x86 ISA used: i486, SSE2, SSE4_2, AVX512CD"
+-check gnu_property_test.stdout "x86 ISA needed: i486, SSE2, SSE4_2, AVX512CD"
++check gnu_property_test.stdout "x86 ISA used: x86-64-v2, <unknown: 10>, <unknown: 100>, <unknown: 1000>"
++check gnu_property_test.stdout "x86 ISA needed: x86-64-v2, <unknown: 10>, <unknown: 100>, <unknown: 1000>"
+ check gnu_property_test.stdout "x86 feature: IBT"
+ 
+ exit 0
+diff -rup binutils.orig/gold/x86_64.cc binutils-2.35/gold/x86_64.cc
+--- binutils.orig/gold/x86_64.cc	2021-01-18 14:01:41.225809888 +0000
++++ binutils-2.35/gold/x86_64.cc	2021-01-18 14:01:52.543736699 +0000
+@@ -706,8 +706,9 @@ class Target_x86_64 : public Sized_targe
+       rela_irelative_(NULL), copy_relocs_(elfcpp::R_X86_64_COPY),
+       got_mod_index_offset_(-1U), tlsdesc_reloc_info_(),
+       tls_base_symbol_defined_(false), isa_1_used_(0), isa_1_needed_(0),
+-      feature_1_(0), object_isa_1_used_(0), object_feature_1_(0),
+-      seen_first_object_(false)
++      feature_1_(0), feature_2_used_(0), feature_2_needed_(0),
++      object_isa_1_used_(0), object_feature_1_(0),
++      object_feature_2_used_(0), seen_first_object_(false)
+   { }
+ 
+   // Hook for a new output section.
+@@ -1382,6 +1383,8 @@ class Target_x86_64 : public Sized_targe
+   uint32_t isa_1_used_;
+   uint32_t isa_1_needed_;
+   uint32_t feature_1_;
++  uint32_t feature_2_used_;
++  uint32_t feature_2_needed_;
+   // Target-specific properties from the current object.
+   // These bits get ORed into ISA_1_USED_ after all properties for the object
+   // have been processed. But if either is all zeroes (as when the property
+@@ -1391,6 +1394,7 @@ class Target_x86_64 : public Sized_targe
+   // These bits get ANDed into FEATURE_1_ after all properties for the object
+   // have been processed.
+   uint32_t object_feature_1_;
++  uint32_t object_feature_2_used_;
+   // Whether we have seen our first object, for use in initializing FEATURE_1_.
+   bool seen_first_object_;
+ };
+@@ -1594,9 +1598,15 @@ Target_x86_64<size>::record_gnu_property
+ 
+   switch (pr_type)
+     {
++    case elfcpp::GNU_PROPERTY_X86_COMPAT_ISA_1_USED:
++    case elfcpp::GNU_PROPERTY_X86_COMPAT_ISA_1_NEEDED:
++    case elfcpp::GNU_PROPERTY_X86_COMPAT_2_ISA_1_USED:
++    case elfcpp::GNU_PROPERTY_X86_COMPAT_2_ISA_1_NEEDED:
+     case elfcpp::GNU_PROPERTY_X86_ISA_1_USED:
+     case elfcpp::GNU_PROPERTY_X86_ISA_1_NEEDED:
+     case elfcpp::GNU_PROPERTY_X86_FEATURE_1_AND:
++    case elfcpp::GNU_PROPERTY_X86_FEATURE_2_USED:
++    case elfcpp::GNU_PROPERTY_X86_FEATURE_2_NEEDED:
+       if (pr_datasz != 4)
+ 	{
+ 	  gold_warning(_("%s: corrupt .note.gnu.property section "
+@@ -1625,6 +1635,12 @@ Target_x86_64<size>::record_gnu_property
+       // If we see multiple feature props in one object, OR them together.
+       this->object_feature_1_ |= val;
+       break;
++    case elfcpp::GNU_PROPERTY_X86_FEATURE_2_USED:
++      this->object_feature_2_used_ |= val;
++      break;
++    case elfcpp::GNU_PROPERTY_X86_FEATURE_2_NEEDED:
++      this->feature_2_needed_ |= val;
++      break;
+     }
+ }
+ 
+@@ -1642,15 +1658,23 @@ Target_x86_64<size>::merge_gnu_propertie
+       else if (this->isa_1_used_ != 0)
+ 	this->isa_1_used_ |= this->object_isa_1_used_;
+       this->feature_1_ &= this->object_feature_1_;
++      // If any object is missing the FEATURE_2_USED property, we must
++      // omit it from the output file.
++      if (this->object_feature_2_used_ == 0)
++	this->feature_2_used_ = 0;
++      else if (this->feature_2_used_ != 0)
++	this->feature_2_used_ |= this->object_feature_2_used_;
+     }
+   else
+     {
+       this->isa_1_used_ = this->object_isa_1_used_;
+       this->feature_1_ = this->object_feature_1_;
++      this->feature_2_used_ = this->object_feature_2_used_;
+       this->seen_first_object_ = true;
+     }
+   this->object_isa_1_used_ = 0;
+   this->object_feature_1_ = 0;
++  this->object_feature_2_used_ = 0;
+ }
+ 
+ static inline void
+@@ -1676,6 +1700,12 @@ Target_x86_64<size>::do_finalize_gnu_pro
+   if (this->feature_1_ != 0)
+     add_property(layout, elfcpp::GNU_PROPERTY_X86_FEATURE_1_AND,
+ 		 this->feature_1_);
++  if (this->feature_2_used_ != 0)
++    add_property(layout, elfcpp::GNU_PROPERTY_X86_FEATURE_2_USED,
++		 this->feature_2_used_);
++  if (this->feature_2_needed_ != 0)
++    add_property(layout, elfcpp::GNU_PROPERTY_X86_FEATURE_2_NEEDED,
++		 this->feature_2_needed_);
+ }
+ 
+ // Write the first three reserved words of the .got.plt section.
+--- binutils.orig/elfcpp/elfcpp.h	2021-01-18 14:01:40.778812778 +0000
++++ binutils-2.35/elfcpp/elfcpp.h	2021-01-18 14:50:05.144035077 +0000
+@@ -1009,9 +1009,21 @@ enum
+   GNU_PROPERTY_STACK_SIZE = 1,
+   GNU_PROPERTY_NO_COPY_ON_PROTECTED = 2,
+   GNU_PROPERTY_LOPROC = 0xc0000000,
+-  GNU_PROPERTY_X86_ISA_1_USED = 0xc0000000,
+-  GNU_PROPERTY_X86_ISA_1_NEEDED = 0xc0000001,
+-  GNU_PROPERTY_X86_FEATURE_1_AND = 0xc0000002,
++  GNU_PROPERTY_X86_COMPAT_ISA_1_USED = 0xc0000000,
++  GNU_PROPERTY_X86_COMPAT_ISA_1_NEEDED = 0xc0000001,
++  GNU_PROPERTY_X86_UINT32_AND_LO = 0xc0000002,
++  GNU_PROPERTY_X86_UINT32_AND_HI = 0xc0007fff,
++  GNU_PROPERTY_X86_UINT32_OR_LO = 0xc0008000,
++  GNU_PROPERTY_X86_UINT32_OR_HI = 0xc000ffff,
++  GNU_PROPERTY_X86_UINT32_OR_AND_LO = 0xc0010000,
++  GNU_PROPERTY_X86_UINT32_OR_AND_HI = 0xc0017fff,
++  GNU_PROPERTY_X86_COMPAT_2_ISA_1_NEEDED = GNU_PROPERTY_X86_UINT32_OR_LO + 0,
++  GNU_PROPERTY_X86_COMPAT_2_ISA_1_USED = GNU_PROPERTY_X86_UINT32_OR_AND_LO + 0,
++  GNU_PROPERTY_X86_FEATURE_1_AND = GNU_PROPERTY_X86_UINT32_AND_LO + 0,
++  GNU_PROPERTY_X86_ISA_1_NEEDED = GNU_PROPERTY_X86_UINT32_OR_LO + 2,
++  GNU_PROPERTY_X86_FEATURE_2_NEEDED = GNU_PROPERTY_X86_UINT32_OR_LO + 1,
++  GNU_PROPERTY_X86_ISA_1_USED = GNU_PROPERTY_X86_UINT32_OR_AND_LO + 2,
++  GNU_PROPERTY_X86_FEATURE_2_USED = GNU_PROPERTY_X86_UINT32_OR_AND_LO + 1,
+   GNU_PROPERTY_HIPROC = 0xdfffffff,
+   GNU_PROPERTY_LOUSER = 0xe0000000,
+   GNU_PROPERTY_HIUSER = 0xffffffff

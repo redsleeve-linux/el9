@@ -1,0 +1,40 @@
+From 84b4c8fbff60f534ce14db050b321b8c7c62f7dd Mon Sep 17 00:00:00 2001
+From: Kefu Chai <kchai@redhat.com>
+Date: Fri, 23 Jul 2021 18:02:36 +0800
+Subject: [PATCH 3/3] ceph.spec.in: build with header only fmt on RHEL
+
+because fmt is packaged in EPEL, while librados is packaged
+in RHEL, so we cannot have fmt as a runtime dependency of librados.
+to address this issue, we should compile librados either with static library
+or with header-only library of fmt. but because the fedora packaging
+guideline does no encourage us to package static libraries, and it would
+be complicated to package both static and dynamic library for fmt.
+
+the simpler solution would be to compile Ceph with the header-only
+version of fmt.
+
+in this change, we compile ceph with the header-only version of fmt
+on RHEL to address the runtime dependency issue.
+
+Signed-off-by: Kefu Chai <kchai@redhat.com>
+---
+ ceph.spec.in | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/ceph.spec.in b/ceph.spec.in
+index 718421ca901..fd7ebe92d8b 100644
+--- a/ceph.spec.in
++++ b/ceph.spec.in
+@@ -1335,6 +1335,9 @@ ${CMAKE} .. \
+     -DWITH_SYSTEM_PMDK:BOOL=ON \
+ %endif
+     -DBOOST_J=$CEPH_SMP_NCPUS \
++%if 0%{?rhel}
++    -DWITH_FMT_HEADER_ONLY:BOOL=ON \
++%endif
+     -DWITH_GRAFANA=ON
+ 
+ %if %{with cmake_verbose_logging}
+-- 
+2.31.1
+

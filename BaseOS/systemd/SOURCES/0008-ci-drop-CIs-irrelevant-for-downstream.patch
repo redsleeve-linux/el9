@@ -1,0 +1,298 @@
+From b9c7cd794733257a17b2eb9eadc716007e509ca9 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Sun, 18 Apr 2021 20:46:06 +0200
+Subject: [PATCH] ci: drop CIs irrelevant for downstream
+
+  * CIFuzz would need a separate project in oss-fuzz
+  * Coverity would also need a separate project
+  * the Labeler action is superfluous, since we already have a bot for
+    that
+  * mkosi testing on other distros is irrelevant for downstream RHEL
+    repo
+
+Resolves: #1960703
+rhel-only
+---
+ .github/labeler.yml            | 40 -----------------
+ .github/workflows/cifuzz.yml   | 55 -----------------------
+ .github/workflows/coverity.yml | 43 ------------------
+ .github/workflows/labeler.yml  | 23 ----------
+ .github/workflows/mkosi.yml    | 80 ----------------------------------
+ 5 files changed, 241 deletions(-)
+ delete mode 100644 .github/labeler.yml
+ delete mode 100644 .github/workflows/cifuzz.yml
+ delete mode 100644 .github/workflows/coverity.yml
+ delete mode 100644 .github/workflows/labeler.yml
+ delete mode 100644 .github/workflows/mkosi.yml
+
+diff --git a/.github/labeler.yml b/.github/labeler.yml
+deleted file mode 100644
+index 7d128f42d6..0000000000
+--- a/.github/labeler.yml
++++ /dev/null
+@@ -1,40 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-
+-hwdb:
+-  - hwdb.d/**/*
+-units:
+-  - units/**/*
+-documentation:
+-  - NEWS
+-  - docs/*
+-network:
+-  - src/libsystemd-network/**/*
+-  - src/network/**/*
+-udev:
+-  - src/udev/**/*
+-  - src/libudev/*
+-selinux:
+-  - '**/*selinux*'
+-apparmor:
+-  - '**/*apparmor*'
+-meson:
+-  - meson_option.txt
+-mkosi:
+-  - .mkosi/*
+-  - mkosi.build
+-busctl:
+-  - src/busctl/*
+-systemctl:
+-  - src/systemctl/*
+-journal:
+-  - src/journal/*
+-journal-remote:
+-  - src/journal-remote/*
+-portable:
+-  - src/portable/**/*
+-resolve:
+-  - src/resolve/*
+-timedate:
+-  - src/timedate/*
+-timesync:
+-  - src/timesync/*
+diff --git a/.github/workflows/cifuzz.yml b/.github/workflows/cifuzz.yml
+deleted file mode 100644
+index 11ea788a47..0000000000
+--- a/.github/workflows/cifuzz.yml
++++ /dev/null
+@@ -1,55 +0,0 @@
+----
+-# vi: ts=2 sw=2 et:
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-# See: https://google.github.io/oss-fuzz/getting-started/continuous-integration/
+-
+-name: CIFuzz
+-
+-permissions:
+-  contents: read
+-
+-on:
+-  pull_request:
+-    paths:
+-      - '**/meson.build'
+-      - '.github/workflows/**'
+-      - 'meson_options.txt'
+-      - 'src/**'
+-      - 'test/fuzz/**'
+-      - 'tools/oss-fuzz.sh'
+-  push:
+-    branches:
+-      - main
+-jobs:
+-  Fuzzing:
+-    runs-on: ubuntu-latest
+-    if: github.repository == 'systemd/systemd'
+-    concurrency:
+-      group: ${{ github.workflow }}-${{ matrix.sanitizer }}-${{ github.ref }}
+-      cancel-in-progress: true
+-    strategy:
+-      fail-fast: false
+-      matrix:
+-        sanitizer: [address, undefined, memory]
+-    steps:
+-      - name: Build Fuzzers (${{ matrix.sanitizer }})
+-        id: build
+-        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
+-        with:
+-          oss-fuzz-project-name: 'systemd'
+-          dry-run: false
+-          allowed-broken-targets-percentage: 0
+-          sanitizer: ${{ matrix.sanitizer }}
+-      - name: Run Fuzzers (${{ matrix.sanitizer }})
+-        uses: google/oss-fuzz/infra/cifuzz/actions/run_fuzzers@master
+-        with:
+-          oss-fuzz-project-name: 'systemd'
+-          fuzz-seconds: 600
+-          dry-run: false
+-          sanitizer: ${{ matrix.sanitizer }}
+-      - name: Upload Crash
+-        uses: actions/upload-artifact@82c141cc518b40d92cc801eee768e7aafc9c2fa2
+-        if: failure() && steps.build.outcome == 'success'
+-        with:
+-          name: ${{ matrix.sanitizer }}-artifacts
+-          path: ./out/artifacts
+diff --git a/.github/workflows/coverity.yml b/.github/workflows/coverity.yml
+deleted file mode 100644
+index a164d16fbf..0000000000
+--- a/.github/workflows/coverity.yml
++++ /dev/null
+@@ -1,43 +0,0 @@
+----
+-# vi: ts=2 sw=2 et:
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-#
+-name: Coverity
+-
+-on:
+-  schedule:
+-    # Run Coverity daily at midnight
+-    - cron:  '0 0 * * *'
+-
+-permissions:
+-  contents: read
+-
+-jobs:
+-  build:
+-    runs-on: ubuntu-20.04
+-    if: github.repository == 'systemd/systemd'
+-    env:
+-      COVERITY_SCAN_BRANCH_PATTERN:     "${{ github.ref}}"
+-      COVERITY_SCAN_NOTIFICATION_EMAIL: ""
+-      COVERITY_SCAN_PROJECT_NAME:       "${{ github.repository }}"
+-      # Set in repo settings -> secrets -> repository secrets
+-      COVERITY_SCAN_TOKEN:              "${{ secrets.COVERITY_SCAN_TOKEN }}"
+-      CURRENT_REF:                      "${{ github.ref }}"
+-    steps:
+-      - name: Repository checkout
+-        uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579
+-      # https://docs.github.com/en/free-pro-team@latest/actions/reference/workflow-commands-for-github-actions#setting-an-environment-variable
+-      - name: Set the $COVERITY_SCAN_NOTIFICATION_EMAIL env variable
+-        run: echo "COVERITY_SCAN_NOTIFICATION_EMAIL=$(git log -1 ${{ github.sha }} --pretty=\"%aE\")" >> $GITHUB_ENV
+-      - name: Install Coverity tools
+-        run: tools/get-coverity.sh
+-      # Reuse the setup phase of the unit test script to avoid code duplication
+-      - name: Install build dependencies
+-        run: sudo -E .github/workflows/unit_tests.sh SETUP
+-      # Preconfigure with meson to prevent Coverity from capturing meson metadata
+-      - name: Preconfigure the build directory
+-        run: meson cov-build -Dman=false
+-      - name: Build
+-        run: tools/coverity.sh build
+-      - name: Upload the results
+-        run: tools/coverity.sh upload
+diff --git a/.github/workflows/labeler.yml b/.github/workflows/labeler.yml
+deleted file mode 100644
+index 34d9d63d42..0000000000
+--- a/.github/workflows/labeler.yml
++++ /dev/null
+@@ -1,23 +0,0 @@
+----
+-# vi: ts=2 sw=2 et:
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-#
+-name: "Pull Request Labeler"
+-
+-on:
+-- pull_request_target
+-
+-permissions:
+-  contents: read
+-
+-jobs:
+-  triage:
+-    runs-on: ubuntu-latest
+-    permissions:
+-      pull-requests: write
+-    steps:
+-    - uses: actions/labeler@69da01b8e0929f147b8943611bee75ee4175a49e
+-      with:
+-        repo-token: "${{ secrets.GITHUB_TOKEN }}"
+-        configuration-path: .github/labeler.yml
+-        sync-labels: "" # This is a workaround for issue 18671
+diff --git a/.github/workflows/mkosi.yml b/.github/workflows/mkosi.yml
+deleted file mode 100644
+index 8fd6c72e26..0000000000
+--- a/.github/workflows/mkosi.yml
++++ /dev/null
+@@ -1,80 +0,0 @@
+----
+-# vi: ts=2 sw=2 et:
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-# Simple boot tests that build and boot the mkosi images generated by the mkosi config files in mkosi.default.d/.
+-name: mkosi
+-
+-on:
+-  push:
+-    branches:
+-      - main
+-      - v[0-9]+-stable
+-  pull_request:
+-    branches:
+-      - main
+-      - v[0-9]+-stable
+-
+-permissions:
+-  contents: read
+-
+-env:
+-  # Enable debug logging in systemd, but keep udev's log level to info,
+-  # since it's _very_ verbose in the QEMU task
+-  KERNEL_CMDLINE: "systemd.unit=mkosi-check-and-shutdown.service !quiet systemd.log_level=debug systemd.log_target=console udev.log_level=info systemd.default_standard_output=journal+console"
+-
+-jobs:
+-  ci:
+-    runs-on: ubuntu-20.04
+-    concurrency:
+-      group: ${{ github.workflow }}-${{ matrix.distro }}-${{ github.ref }}
+-      cancel-in-progress: true
+-    strategy:
+-      fail-fast: false
+-      matrix:
+-        distro:
+-          - arch
+-          - debian
+-          - ubuntu
+-          - fedora
+-          - opensuse
+-
+-    steps:
+-    - uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579
+-    - uses: systemd/mkosi@4d64fc8134f93d87ac584183e7762ac1d0efa0e5
+-
+-    - name: Install
+-      run: sudo apt-get update && sudo apt-get install --no-install-recommends python3-pexpect python3-jinja2
+-
+-    - name: Configure
+-      run: echo -e "[Distribution]\nDistribution=${{ matrix.distro }}\n" >mkosi.default
+-
+-    # Ubuntu's systemd-nspawn doesn't support faccessat2() syscall, which is
+-    # required, since current Arch's glibc implements faccessat() via faccessat2().
+-    - name: Update systemd-nspawn
+-      if: ${{ matrix.distro == 'arch' }}
+-      run: |
+-        echo "deb-src http://archive.ubuntu.com/ubuntu/ $(lsb_release -cs) main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+-        sudo apt update
+-        sudo apt build-dep systemd
+-        meson build
+-        ninja -C build
+-        sudo ln -svf $PWD/build/systemd-nspawn `which systemd-nspawn`
+-        systemd-nspawn --version
+-
+-    - name: Build ${{ matrix.distro }}
+-      run: ./.github/workflows/run_mkosi.sh --build-environment=CI_BUILD=1 --kernel-command-line "${{ env.KERNEL_CMDLINE }}" build
+-
+-    - name: Show ${{ matrix.distro }} image summary
+-      run: ./.github/workflows/run_mkosi.sh summary
+-
+-    - name: Boot ${{ matrix.distro }} systemd-nspawn
+-      run: ./.github/workflows/run_mkosi.sh boot ${{ env.KERNEL_CMDLINE }}
+-
+-    - name: Check ${{ matrix.distro }} systemd-nspawn
+-      run: ./.github/workflows/run_mkosi.sh shell bash -c "[[ -e /testok ]] || { cat /failed-services; exit 1; }"
+-
+-    - name: Boot ${{ matrix.distro }} QEMU
+-      run: ./.github/workflows/run_mkosi.sh qemu
+-
+-    - name: Check ${{ matrix.distro }} QEMU
+-      run: ./.github/workflows/run_mkosi.sh shell bash -c "[[ -e /testok ]] || { cat /failed-services; exit 1; }"

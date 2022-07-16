@@ -1,0 +1,70 @@
+diff -up libtasn1-4.16.0/lib/coding.c.coverity libtasn1-4.16.0/lib/coding.c
+--- libtasn1-4.16.0/lib/coding.c.coverity	2020-02-01 23:22:04.000000000 +0100
++++ libtasn1-4.16.0/lib/coding.c	2021-04-13 17:34:34.101819976 +0200
+@@ -1103,7 +1103,10 @@ asn1_der_coding (asn1_node_const element
+   max_len = *len;
+ 
+   if (der == NULL && max_len > 0)
+-    return ASN1_VALUE_NOT_VALID;
++    {
++      err = ASN1_VALUE_NOT_VALID;
++      goto error;
++    }
+ 
+   counter = 0;
+   move = DOWN;
+diff -up libtasn1-4.16.0/lib/element.c.coverity libtasn1-4.16.0/lib/element.c
+--- libtasn1-4.16.0/lib/element.c.coverity	2020-01-03 23:20:17.000000000 +0100
++++ libtasn1-4.16.0/lib/element.c	2021-04-13 18:05:21.054820798 +0200
+@@ -142,7 +142,7 @@ int
+ _asn1_append_sequence_set (asn1_node node, struct node_tail_cache_st *pcache)
+ {
+   asn1_node p, p2;
+-  char temp[LTOSTR_MAX_SIZE];
++  char temp[LTOSTR_MAX_SIZE+1];
+   long n;
+ 
+   if (!node || !(node->down))
+@@ -183,7 +183,12 @@ _asn1_append_sequence_set (asn1_node nod
+       n = strtol (p->name + 1, NULL, 0);
+       n++;
+       temp[0] = '?';
++      if (n < 0)
++	return ASN1_GENERIC_ERROR;
++      /* assuming non-negative n, we have enough space in buffer */
+       _asn1_ltostr (n, temp + 1);
++      if (strlen(temp) >= LTOSTR_MAX_SIZE)
++	return ASN1_GENERIC_ERROR;
+     }
+   _asn1_set_name (p2, temp);
+   /*  p2->type |= CONST_OPTION; */
+diff -up libtasn1-4.16.0/lib/int.h.coverity libtasn1-4.16.0/lib/int.h
+--- libtasn1-4.16.0/lib/int.h.coverity	2020-01-03 23:20:17.000000000 +0100
++++ libtasn1-4.16.0/lib/int.h	2021-04-13 17:34:34.101819976 +0200
+@@ -213,6 +213,7 @@ void *_asn1_realloc(void *ptr, size_t si
+   ret = realloc(ptr, size);
+   if (ret == NULL)
+     {
++      /* cppcheck-suppress doubleFree */
+       free(ptr);
+     }
+   return ret;
+diff -up libtasn1-4.16.0/src/asn1Coding.c.coverity libtasn1-4.16.0/src/asn1Coding.c
+--- libtasn1-4.16.0/src/asn1Coding.c.coverity	2019-07-19 19:55:08.000000000 +0200
++++ libtasn1-4.16.0/src/asn1Coding.c	2021-04-13 17:34:34.102819982 +0200
+@@ -72,13 +72,13 @@ readAssignment (FILE * file, char *varNa
+ 
+   int ret;
+ 
+-  ret = fscanf (file, "%s", varName);
++  ret = fscanf (file, "%1023s", varName);
+   if (ret == EOF)
+     return ASSIGNMENT_EOF;
+   if (!strcmp (varName, "''"))
+     varName[0] = 0;
+ 
+-  ret = fscanf (file, "%s", value);
++  ret = fscanf (file, "%1023s", value);
+   if (ret == EOF)
+     return ASSIGNMENT_ERROR;
+ 

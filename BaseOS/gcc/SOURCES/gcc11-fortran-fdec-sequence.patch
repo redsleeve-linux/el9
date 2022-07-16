@@ -1,0 +1,262 @@
+From bb76446db10c21860a4e19569ce3e350d8a2b59f Mon Sep 17 00:00:00 2001
+From: Mark Eggleston <markeggleston@gcc.gnu.org>
+Date: Fri, 22 Jan 2021 15:00:44 +0000
+Subject: [PATCH 09/10] Add the SEQUENCE attribute by default if it's not
+ present.
+
+Use -fdec-sequence to enable this feature. Also enabled by -fdec.
+---
+ gcc/fortran/lang.opt                          |  4 ++
+ gcc/fortran/options.c                         |  1 +
+ gcc/fortran/resolve.c                         | 13 ++++-
+ ...dd_SEQUENCE_to_COMMON_block_by_default_1.f | 57 +++++++++++++++++++
+ ...dd_SEQUENCE_to_COMMON_block_by_default_2.f | 57 +++++++++++++++++++
+ ...dd_SEQUENCE_to_COMMON_block_by_default_3.f | 57 +++++++++++++++++++
+ 6 files changed, 186 insertions(+), 3 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_1.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_2.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_3.f
+
+diff --git a/gcc/fortran/lang.opt b/gcc/fortran/lang.opt
+index 4ca2f93f2df..019c798cf09 100644
+--- a/gcc/fortran/lang.opt
++++ b/gcc/fortran/lang.opt
+@@ -509,6 +509,10 @@ fdec-promotion
+ Fortran Var(flag_dec_promotion)
+ Add support for type promotion in intrinsic arguments.
+ 
++fdec-sequence
++Fortran Var(flag_dec_sequence)
++Add the SEQUENCE attribute by default if it's not present.
++
+ fdec-structure
+ Fortran Var(flag_dec_structure)
+ Enable support for DEC STRUCTURE/RECORD.
+diff --git a/gcc/fortran/options.c b/gcc/fortran/options.c
+index 15079c7e95a..050f56fdc25 100644
+--- a/gcc/fortran/options.c
++++ b/gcc/fortran/options.c
+@@ -83,6 +83,7 @@ set_dec_flags (int value)
+   SET_BITFLAG (flag_dec_override_kind, value, value);
+   SET_BITFLAG (flag_dec_non_logical_if, value, value);
+   SET_BITFLAG (flag_dec_promotion, value, value);
++  SET_BITFLAG (flag_dec_sequence, value, value);
+ }
+ 
+ /* Finalize DEC flags.  */
+diff --git a/gcc/fortran/resolve.c b/gcc/fortran/resolve.c
+index 07dd039f3bf..fe7d0cc5944 100644
+--- a/gcc/fortran/resolve.c
++++ b/gcc/fortran/resolve.c
+@@ -978,9 +978,16 @@ resolve_common_vars (gfc_common_head *common_block, bool named_common)
+ 
+       if (!(csym->ts.u.derived->attr.sequence
+ 	    || csym->ts.u.derived->attr.is_bind_c))
+-	gfc_error_now ("Derived type variable %qs in COMMON at %L "
+-		       "has neither the SEQUENCE nor the BIND(C) "
+-		       "attribute", csym->name, &csym->declared_at);
++	{
++	  if (flag_dec_sequence)
++	    /* Assume sequence. */
++	    csym->ts.u.derived->attr.sequence = 1;
++	  else
++	    gfc_error_now ("Derived type variable '%s' in COMMON at %L "
++			   "has neither the SEQUENCE nor the BIND(C) "
++			   "attribute", csym->name, &csym->declared_at);
++	}
++
+       if (csym->ts.u.derived->attr.alloc_comp)
+ 	gfc_error_now ("Derived type variable %qs in COMMON at %L "
+ 		       "has an ultimate component that is "
+diff --git a/gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_1.f b/gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_1.f
+new file mode 100644
+index 00000000000..fe7b39625eb
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_1.f
+@@ -0,0 +1,57 @@
++! { dg-do run }
++! { dg-options "-fdec" }
++!
++! Test add default SEQUENCE attribute derived types appearing in
++! COMMON blocks and EQUIVALENCE statements.
++!
++! Contributed by Francisco Redondo Marchena <francisco.marchena@codethink.co.uk>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        MODULE SEQ
++          TYPE STRUCT1
++            INTEGER*4     ID
++            INTEGER*4     TYPE
++            INTEGER*8     DEFVAL
++            CHARACTER*(4) NAME
++            LOGICAL*1     NIL
++          END TYPE STRUCT1
++        END MODULE
++
++        SUBROUTINE A
++          USE SEQ
++          TYPE (STRUCT1) S
++          COMMON /BLOCK1/ S
++          IF (S%ID.NE.5) STOP 1
++          IF (S%TYPE.NE.1000) STOP 2
++          IF (S%DEFVAL.NE.-99) STOP 3
++          IF (S%NAME.NE."JANE") STOP 4
++          IF (S%NIL.NEQV..FALSE.) STOP 5
++        END SUBROUTINE
++
++        PROGRAM sequence_att_common
++          USE SEQ
++          IMPLICIT NONE
++          TYPE (STRUCT1) S1
++          TYPE (STRUCT1) S2
++          TYPE (STRUCT1) S3
++
++          EQUIVALENCE (S1,S2)
++          COMMON /BLOCK1/ S3
++
++          S1%ID = 5
++          S1%TYPE = 1000
++          S1%DEFVAL = -99
++          S1%NAME = "JANE"
++          S1%NIL = .FALSE.
++
++          IF (S2%ID.NE.5) STOP 1
++          IF (S2%TYPE.NE.1000) STOP 2
++          IF (S2%DEFVAL.NE.-99) STOP 3
++          IF (S2%NAME.NE."JANE") STOP 4
++          IF (S2%NIL.NEQV..FALSE.) STOP 5
++
++          S3 = S1
++
++          CALL A
++          
++        END
+diff --git a/gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_2.f b/gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_2.f
+new file mode 100644
+index 00000000000..83512f0f3a2
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_2.f
+@@ -0,0 +1,57 @@
++! { dg-do run }
++! { dg-options "-fdec-sequence" }
++!
++! Test add default SEQUENCE attribute derived types appearing in
++! COMMON blocks and EQUIVALENCE statements.
++!
++! Contributed by Francisco Redondo Marchena <francisco.marchena@codethink.co.uk>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        MODULE SEQ
++          TYPE STRUCT1
++            INTEGER*4     ID
++            INTEGER*4     TYPE
++            INTEGER*8     DEFVAL
++            CHARACTER*(4) NAME
++            LOGICAL*1     NIL
++          END TYPE STRUCT1
++        END MODULE
++
++        SUBROUTINE A
++          USE SEQ
++          TYPE (STRUCT1) S
++          COMMON /BLOCK1/ S
++          IF (S%ID.NE.5) STOP 1
++          IF (S%TYPE.NE.1000) STOP 2
++          IF (S%DEFVAL.NE.-99) STOP 3
++          IF (S%NAME.NE."JANE") STOP 4
++          IF (S%NIL.NEQV..FALSE.) STOP 5
++        END SUBROUTINE
++
++        PROGRAM sequence_att_common
++          USE SEQ
++          IMPLICIT NONE
++          TYPE (STRUCT1) S1
++          TYPE (STRUCT1) S2
++          TYPE (STRUCT1) S3
++
++          EQUIVALENCE (S1,S2)
++          COMMON /BLOCK1/ S3
++
++          S1%ID = 5
++          S1%TYPE = 1000
++          S1%DEFVAL = -99
++          S1%NAME = "JANE"
++          S1%NIL = .FALSE.
++
++          IF (S2%ID.NE.5) STOP 1
++          IF (S2%TYPE.NE.1000) STOP 2
++          IF (S2%DEFVAL.NE.-99) STOP 3
++          IF (S2%NAME.NE."JANE") STOP 4
++          IF (S2%NIL.NEQV..FALSE.) STOP 5
++
++          S3 = S1
++
++          CALL A
++          
++        END
+diff --git a/gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_3.f b/gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_3.f
+new file mode 100644
+index 00000000000..26cd59f9090
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_add_SEQUENCE_to_COMMON_block_by_default_3.f
+@@ -0,0 +1,57 @@
++! { dg-do compile }
++! { dg-options "-fdec -fno-dec-sequence" }
++!
++! Test add default SEQUENCE attribute derived types appearing in
++! COMMON blocks and EQUIVALENCE statements.
++!
++! Contributed by Francisco Redondo Marchena <francisco.marchena@codethink.co.uk>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        MODULE SEQ
++          TYPE STRUCT1
++            INTEGER*4     ID
++            INTEGER*4     TYPE
++            INTEGER*8     DEFVAL
++            CHARACTER*(4) NAME
++            LOGICAL*1     NIL
++          END TYPE STRUCT1
++        END MODULE
++
++        SUBROUTINE A
++          USE SEQ
++          TYPE (STRUCT1) S ! { dg-error "Derived type variable" }
++          COMMON /BLOCK1/ S
++          IF (S%ID.NE.5) STOP 1
++          IF (S%TYPE.NE.1000) STOP 2
++          IF (S%DEFVAL.NE.-99) STOP 3
++          IF (S%NAME.NE."JANE") STOP 4
++          IF (S%NIL.NEQV..FALSE.) STOP 5
++        END SUBROUTINE
++
++        PROGRAM sequence_att_common
++          USE SEQ
++          IMPLICIT NONE
++          TYPE (STRUCT1) S1
++          TYPE (STRUCT1) S2
++          TYPE (STRUCT1) S3 ! { dg-error "Derived type variable" }
++
++          EQUIVALENCE (S1,S2) ! { dg-error "Derived type variable" }
++          COMMON /BLOCK1/ S3
++
++          S1%ID = 5
++          S1%TYPE = 1000
++          S1%DEFVAL = -99
++          S1%NAME = "JANE"
++          S1%NIL = .FALSE.
++
++          IF (S2%ID.NE.5) STOP 1
++          IF (S2%TYPE.NE.1000) STOP 2
++          IF (S2%DEFVAL.NE.-99) STOP 3
++          IF (S2%NAME.NE."JANE") STOP 4
++          IF (S2%NIL.NEQV..FALSE.) STOP 5
++
++          S3 = S1
++
++          CALL A
++          
++        END
+-- 
+2.27.0
+

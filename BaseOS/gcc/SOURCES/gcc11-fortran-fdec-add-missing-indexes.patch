@@ -1,0 +1,181 @@
+From 7001d522d0273658d9e1fb12ca104d56bfcae34d Mon Sep 17 00:00:00 2001
+From: Mark Eggleston <markeggleston@gcc.gnu.org>
+Date: Fri, 22 Jan 2021 15:06:08 +0000
+Subject: [PATCH 10/10] Fill in missing array dimensions using the lower bound
+
+Use -fdec-add-missing-indexes to enable feature. Also enabled by fdec.
+---
+ gcc/fortran/lang.opt                  |  8 ++++++++
+ gcc/fortran/options.c                 |  1 +
+ gcc/fortran/resolve.c                 | 24 ++++++++++++++++++++++++
+ gcc/testsuite/gfortran.dg/array_6.f90 | 23 +++++++++++++++++++++++
+ gcc/testsuite/gfortran.dg/array_7.f90 | 23 +++++++++++++++++++++++
+ gcc/testsuite/gfortran.dg/array_8.f90 | 23 +++++++++++++++++++++++
+ 6 files changed, 102 insertions(+)
+ create mode 100644 gcc/testsuite/gfortran.dg/array_6.f90
+ create mode 100644 gcc/testsuite/gfortran.dg/array_7.f90
+ create mode 100644 gcc/testsuite/gfortran.dg/array_8.f90
+
+diff --git a/gcc/fortran/lang.opt b/gcc/fortran/lang.opt
+index 019c798cf09..f27de88ea3f 100644
+--- a/gcc/fortran/lang.opt
++++ b/gcc/fortran/lang.opt
+@@ -281,6 +281,10 @@ Wmissing-include-dirs
+ Fortran
+ ; Documented in C/C++
+ 
++Wmissing-index
++Fortran Var(warn_missing_index) Warning LangEnabledBy(Fortran,Wall)
++Warn that the lower bound of a missing index will be used.
++
+ Wuse-without-only
+ Fortran Var(warn_use_without_only) Warning
+ Warn about USE statements that have no ONLY qualifier.
+@@ -460,6 +464,10 @@ fdec
+ Fortran Var(flag_dec)
+ Enable all DEC language extensions.
+ 
++fdec-add-missing-indexes
++Fortran Var(flag_dec_add_missing_indexes)
++Enable the addition of missing indexes using their lower bounds.
++
+ fdec-blank-format-item
+ Fortran Var(flag_dec_blank_format_item)
+ Enable the use of blank format items in format strings.
+diff --git a/gcc/fortran/options.c b/gcc/fortran/options.c
+index 050f56fdc25..c3b2822685d 100644
+--- a/gcc/fortran/options.c
++++ b/gcc/fortran/options.c
+@@ -84,6 +84,7 @@ set_dec_flags (int value)
+   SET_BITFLAG (flag_dec_non_logical_if, value, value);
+   SET_BITFLAG (flag_dec_promotion, value, value);
+   SET_BITFLAG (flag_dec_sequence, value, value);
++  SET_BITFLAG (flag_dec_add_missing_indexes, value, value);
+ }
+ 
+ /* Finalize DEC flags.  */
+diff --git a/gcc/fortran/resolve.c b/gcc/fortran/resolve.c
+index fe7d0cc5944..0efeedab46e 100644
+--- a/gcc/fortran/resolve.c
++++ b/gcc/fortran/resolve.c
+@@ -4806,6 +4806,30 @@ compare_spec_to_ref (gfc_array_ref *ar)
+   if (ar->type == AR_FULL)
+     return true;
+ 
++  if (flag_dec_add_missing_indexes && as->rank > ar->dimen)
++    {
++      /* Add in the missing dimensions, assuming they are the lower bound
++	 of that dimension if not specified.  */
++      int j;
++      if (warn_missing_index)
++	{
++	  gfc_warning (OPT_Wmissing_index, "Using the lower bound for "
++		       "unspecified dimensions in array reference at %L",
++		       &ar->where);
++	}
++      /* Other parts of the code iterate ar->start and ar->end from 0 to
++	 ar->dimen, so it is safe to assume slots from ar->dimen upwards
++	 are unused (i.e. there are no gaps; the specified indexes are
++	 contiguous and start at zero.  */
++      for(j = ar->dimen; j <= as->rank; j++)
++	{
++	  ar->start[j] = gfc_copy_expr (as->lower[j]);
++	  ar->end[j]   = gfc_copy_expr (as->lower[j]);
++	  ar->dimen_type[j] = DIMEN_ELEMENT;
++	}
++      ar->dimen = as->rank;
++    }
++
+   if (as->rank != ar->dimen)
+     {
+       gfc_error ("Rank mismatch in array reference at %L (%d/%d)",
+diff --git a/gcc/testsuite/gfortran.dg/array_6.f90 b/gcc/testsuite/gfortran.dg/array_6.f90
+new file mode 100644
+index 00000000000..5c26e18ab3e
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/array_6.f90
+@@ -0,0 +1,23 @@
++! { dg-do run }
++! { dg-options "-fdec -Wmissing-index" }!
++! Checks that under-specified arrays (referencing arrays with fewer
++! dimensions than the array spec) generates a warning.
++!
++! Contributed by Jim MacArthur <jim.macarthur@codethink.co.uk>
++! Updated by Mark Eggleston <mark.eggleston@codethink.co.uk>
++!
++
++program under_specified_array
++    integer chessboard(8,8)
++    integer chessboard3d(8,8,3:5)
++    chessboard(3,1) = 5
++    chessboard(3,2) = 55
++    chessboard3d(4,1,3) = 6
++    chessboard3d(4,1,4) = 66
++    chessboard3d(4,4,3) = 7
++    chessboard3d(4,4,4) = 77
++  
++    if (chessboard(3).ne.5) stop 1  ! { dg-warning "Using the lower bound for unspecified dimensions in array reference" }
++    if (chessboard3d(4).ne.6) stop 2  ! { dg-warning "Using the lower bound for unspecified dimensions in array reference" }
++    if (chessboard3d(4,4).ne.7) stop 3  ! { dg-warning "Using the lower bound for unspecified dimensions in array reference" }
++end program
+diff --git a/gcc/testsuite/gfortran.dg/array_7.f90 b/gcc/testsuite/gfortran.dg/array_7.f90
+new file mode 100644
+index 00000000000..5588a5bd02d
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/array_7.f90
+@@ -0,0 +1,23 @@
++! { dg-do run }
++! { dg-options "-fdec-add-missing-indexes -Wmissing-index" }!
++! Checks that under-specified arrays (referencing arrays with fewer
++! dimensions than the array spec) generates a warning.
++!
++! Contributed by Jim MacArthur <jim.macarthur@codethink.co.uk>
++! Updated by Mark Eggleston <mark.eggleston@codethink.co.uk>
++!
++
++program under_specified_array
++    integer chessboard(8,8)
++    integer chessboard3d(8,8,3:5)
++    chessboard(3,1) = 5
++    chessboard(3,2) = 55
++    chessboard3d(4,1,3) = 6
++    chessboard3d(4,1,4) = 66
++    chessboard3d(4,4,3) = 7
++    chessboard3d(4,4,4) = 77
++  
++    if (chessboard(3).ne.5) stop 1  ! { dg-warning "Using the lower bound for unspecified dimensions in array reference" }
++    if (chessboard3d(4).ne.6) stop 2  ! { dg-warning "Using the lower bound for unspecified dimensions in array reference" }
++    if (chessboard3d(4,4).ne.7) stop 3  ! { dg-warning "Using the lower bound for unspecified dimensions in array reference" }
++end program
+diff --git a/gcc/testsuite/gfortran.dg/array_8.f90 b/gcc/testsuite/gfortran.dg/array_8.f90
+new file mode 100644
+index 00000000000..f0d2ef5e37d
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/array_8.f90
+@@ -0,0 +1,23 @@
++! { dg-do compile }
++! { dg-options "-fdec -fno-dec-add-missing-indexes" }!
++! Checks that under-specified arrays (referencing arrays with fewer
++! dimensions than the array spec) generates a warning.
++!
++! Contributed by Jim MacArthur <jim.macarthur@codethink.co.uk>
++! Updated by Mark Eggleston <mark.eggleston@codethink.co.uk>
++!
++
++program under_specified_array
++    integer chessboard(8,8)
++    integer chessboard3d(8,8,3:5)
++    chessboard(3,1) = 5
++    chessboard(3,2) = 55
++    chessboard3d(4,1,3) = 6
++    chessboard3d(4,1,4) = 66
++    chessboard3d(4,4,3) = 7
++    chessboard3d(4,4,4) = 77
++  
++    if (chessboard(3).ne.5) stop 1  ! { dg-error "Rank mismatch" }
++    if (chessboard3d(4).ne.6) stop 2  ! { dg-error "Rank mismatch" }
++    if (chessboard3d(4,4).ne.7) stop 3  ! { dg-error "Rank mismatch" }
++end program
+-- 
+2.27.0
+

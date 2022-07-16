@@ -1,0 +1,185 @@
+From 8bcc0f85ed1718c0dd9033ad4a34df181aabaffe Mon Sep 17 00:00:00 2001
+From: Mark Eggleston <markeggleston@gcc.gnu.org>
+Date: Fri, 22 Jan 2021 13:11:06 +0000
+Subject: [PATCH 05/10] Allow old-style initializers in derived types
+
+This allows simple declarations in derived types and structures, such as:
+    LOGICAL*1      NIL      /0/
+Only single value expressions are allowed at the moment.
+
+Use -fdec-old-init to enable. Also enabled by -fdec.
+---
+ gcc/fortran/decl.c                            | 27 +++++++++++++++----
+ gcc/fortran/lang.opt                          |  4 +++
+ gcc/fortran/options.c                         |  1 +
+ ...ec_derived_types_initialised_old_style_1.f | 25 +++++++++++++++++
+ ...ec_derived_types_initialised_old_style_2.f | 25 +++++++++++++++++
+ ...ec_derived_types_initialised_old_style_3.f | 26 ++++++++++++++++++
+ 6 files changed, 103 insertions(+), 5 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_1.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_2.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_3.f
+
+diff --git a/gcc/fortran/decl.c b/gcc/fortran/decl.c
+index 723915822f3..5c8c1b7981b 100644
+--- a/gcc/fortran/decl.c
++++ b/gcc/fortran/decl.c
+@@ -2827,12 +2827,29 @@ variable_decl (int elem)
+          but not components of derived types.  */
+       else if (gfc_current_state () == COMP_DERIVED)
+ 	{
+-	  gfc_error ("Invalid old style initialization for derived type "
+-		     "component at %C");
+-	  m = MATCH_ERROR;
+-	  goto cleanup;
++	  if (flag_dec_old_init)
++	    {
++	      /* Attempt to match an old-style initializer which is a simple
++		 integer or character expression; this will not work with
++		 multiple values. */
++	      m = gfc_match_init_expr (&initializer);
++	      if (m == MATCH_ERROR)
++		goto cleanup;
++	      else if (m == MATCH_YES)
++		{
++		  m = gfc_match ("/");
++		  if (m != MATCH_YES)
++		    goto cleanup;
++		}
++	    }
++	  else
++	    {
++	      gfc_error ("Invalid old style initialization for derived type "
++			 "component at %C");
++	      m = MATCH_ERROR;
++	      goto cleanup;
++	    }
+ 	}
+-
+       /* For structure components, read the initializer as a special
+          expression and let the rest of this function apply the initializer
+          as usual.  */
+diff --git a/gcc/fortran/lang.opt b/gcc/fortran/lang.opt
+index d527c106bd6..25cc948699b 100644
+--- a/gcc/fortran/lang.opt
++++ b/gcc/fortran/lang.opt
+@@ -493,6 +493,10 @@ fdec-non-integer-index
+ Fortran Var(flag_dec_non_integer_index)
+ Enable support for non-integer substring indexes.
+ 
++fdec-old-init
++Fortran Var(flag_dec_old_init)
++Enable support for old style initializers in derived types.
++
+ fdec-structure
+ Fortran Var(flag_dec_structure)
+ Enable support for DEC STRUCTURE/RECORD.
+diff --git a/gcc/fortran/options.c b/gcc/fortran/options.c
+index 9a042f64881..d6bd36c3a8a 100644
+--- a/gcc/fortran/options.c
++++ b/gcc/fortran/options.c
+@@ -79,6 +79,7 @@ set_dec_flags (int value)
+   SET_BITFLAG (flag_dec_char_conversions, value, value);
+   SET_BITFLAG (flag_dec_duplicates, value, value);
+   SET_BITFLAG (flag_dec_non_integer_index, value, value);
++  SET_BITFLAG (flag_dec_old_init, value, value);
+ }
+ 
+ /* Finalize DEC flags.  */
+diff --git a/gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_1.f b/gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_1.f
+new file mode 100644
+index 00000000000..eac4f9bfcf1
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_1.f
+@@ -0,0 +1,25 @@
++! { dg-do run }
++! { dg-options "-fdec" }
++!
++! Test old style initializers in derived types
++!
++! Contributed by Jim MacArthur <jim.macarthur@codethink.co.uk>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        PROGRAM spec_in_var
++          TYPE STRUCT1
++            INTEGER*4      ID       /8/
++            INTEGER*4      TYPE     /5/
++            INTEGER*8      DEFVAL   /0/
++            CHARACTER*(5)  NAME     /'tests'/
++            LOGICAL*1      NIL      /0/
++          END TYPE STRUCT1
++
++          TYPE (STRUCT1) SINST
++
++          IF(SINST%ID.NE.8) STOP 1
++          IF(SINST%TYPE.NE.5) STOP 2
++          IF(SINST%DEFVAL.NE.0) STOP 3
++          IF(SINST%NAME.NE.'tests') STOP 4
++          IF(SINST%NIL) STOP 5
++        END
+diff --git a/gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_2.f b/gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_2.f
+new file mode 100644
+index 00000000000..d904c8b2974
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_2.f
+@@ -0,0 +1,25 @@
++! { dg-do run }
++! { dg-options "-std=legacy -fdec-old-init" }
++!
++! Test old style initializers in derived types
++!
++! Contributed by Jim MacArthur <jim.macarthur@codethink.co.uk>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        PROGRAM spec_in_var
++          TYPE STRUCT1
++            INTEGER*4      ID       /8/
++            INTEGER*4      TYPE     /5/
++            INTEGER*8      DEFVAL   /0/
++            CHARACTER*(5)  NAME     /'tests'/
++            LOGICAL*1      NIL      /0/
++          END TYPE STRUCT1
++
++          TYPE (STRUCT1) SINST
++
++          IF(SINST%ID.NE.8) STOP 1
++          IF(SINST%TYPE.NE.5) STOP 2
++          IF(SINST%DEFVAL.NE.0) STOP 3
++          IF(SINST%NAME.NE.'tests') STOP 4
++          IF(SINST%NIL) STOP 5
++        END
+diff --git a/gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_3.f b/gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_3.f
+new file mode 100644
+index 00000000000..58c2b4b66cf
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_derived_types_initialised_old_style_3.f
+@@ -0,0 +1,26 @@
++! { dg-do compile }
++! { dg-options "-std=legacy -fdec -fno-dec-old-init" }
++!
++! Test old style initializers in derived types
++!
++! Contributed by Jim MacArthur <jim.macarthur@codethink.co.uk>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++
++        PROGRAM spec_in_var
++          TYPE STRUCT1
++            INTEGER*4      ID       /8/ ! { dg-error "Invalid old style initialization" }
++            INTEGER*4      TYPE     /5/ ! { dg-error "Invalid old style initialization" }
++            INTEGER*8      DEFVAL   /0/ ! { dg-error "Invalid old style initialization" }
++            CHARACTER*(5)  NAME     /'tests'/ ! { dg-error "Invalid old style initialization" }
++            LOGICAL*1      NIL      /0/ ! { dg-error "Invalid old style initialization" }
++          END TYPE STRUCT1
++
++          TYPE (STRUCT1) SINST
++
++          IF(SINST%ID.NE.8) STOP 1 ! { dg-error "'id' at \\(1\\) is not a member" }
++          IF(SINST%TYPE.NE.5) STOP 2 ! { dg-error "'type' at \\(1\\) is not a member" }
++          IF(SINST%DEFVAL.NE.0) STOP 3  ! { dg-error "'defval' at \\(1\\) is not a member" }
++          IF(SINST%NAME.NE.'tests') STOP 4 ! { dg-error "'name' at \\(1\\) is not a member" }
++          IF(SINST%NIL) STOP 5 ! { dg-error "'nil' at \\(1\\) is not a member" }
++        END
+-- 
+2.27.0
+

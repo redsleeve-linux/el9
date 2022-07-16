@@ -1,0 +1,179 @@
+diff --git a/analysis.cxx b/analysis.cxx
+index a7a579e..d0d6a4f 100644
+--- a/analysis.cxx
++++ b/analysis.cxx
+@@ -7,6 +7,7 @@
+ // later version.
+ 
+ #include "config.h"
++#include "session.h"
+ 
+ #ifdef HAVE_DYNINST
+ 
+@@ -46,6 +47,8 @@ analysis::analysis(string name)
+ 	char *name_str = strdup(name.c_str());
+ 	sts = NULL;
+ 	co = NULL;
++	SymtabAPI::Symtab *symTab;
++	bool isParsable;
+ 
+ 	// Use cached information if available
+ 	if (cached_info.find(name) != cached_info.end()) {
+@@ -56,6 +59,9 @@ analysis::analysis(string name)
+ 
+ 	// Not not seen before
+ 	// Create a new binary code object from the filename argument
++	isParsable = SymtabAPI::Symtab::openFile(symTab, name_str);
++	if(!isParsable) goto cleanup;
++
+ 	sts = new SymtabCodeSource(name_str);
+ 	if(!sts) goto cleanup;
+ 
+@@ -143,39 +149,40 @@ static const MachRegister dyninst_register_64[] = {
+ static const MachRegister dyninst_register_32[1]; // No 32-bit support
+ 
+ #elif defined(__powerpc__)
++/* For ppc64 still use the ppc32 register names */
+ static const MachRegister dyninst_register_64[] = {
+-    ppc64::r0,
+-    ppc64::r1,
+-    ppc64::r2,
+-    ppc64::r3,
+-    ppc64::r4,
+-    ppc64::r5,
+-    ppc64::r6,
+-    ppc64::r7,
+-    ppc64::r8,
+-    ppc64::r9,
+-    ppc64::r10,
+-    ppc64::r11,
+-    ppc64::r12,
+-    ppc64::r13,
+-    ppc64::r14,
+-    ppc64::r15,
+-    ppc64::r16,
+-    ppc64::r17,
+-    ppc64::r18,
+-    ppc64::r19,
+-    ppc64::r20,
+-    ppc64::r21,
+-    ppc64::r22,
+-    ppc64::r23,
+-    ppc64::r24,
+-    ppc64::r25,
+-    ppc64::r26,
+-    ppc64::r27,
+-    ppc64::r28,
+-    ppc64::r29,
+-    ppc64::r30,
+-    ppc64::r31
++    ppc32::r0,
++    ppc32::r1,
++    ppc32::r2,
++    ppc32::r3,
++    ppc32::r4,
++    ppc32::r5,
++    ppc32::r6,
++    ppc32::r7,
++    ppc32::r8,
++    ppc32::r9,
++    ppc32::r10,
++    ppc32::r11,
++    ppc32::r12,
++    ppc32::r13,
++    ppc32::r14,
++    ppc32::r15,
++    ppc32::r16,
++    ppc32::r17,
++    ppc32::r18,
++    ppc32::r19,
++    ppc32::r20,
++    ppc32::r21,
++    ppc32::r22,
++    ppc32::r23,
++    ppc32::r24,
++    ppc32::r25,
++    ppc32::r26,
++    ppc32::r27,
++    ppc32::r28,
++    ppc32::r29,
++    ppc32::r30,
++    ppc32::r31
+ };
+ 
+ static const MachRegister dyninst_register_32[] = {
+@@ -218,14 +225,26 @@ static const MachRegister dyninst_register_32[] = {
+ typedef map<string, LivenessAnalyzer*> precomputed_liveness;
+ static precomputed_liveness cached_liveness;
+ 
+-int liveness(string executable,
++int liveness(systemtap_session& s,
++	     target_symbol *e,
++	     string executable,
+ 	     Dwarf_Addr addr,
+ 	     location_context ctx)
+ {
++  try{
++	// Doing this inside a try/catch because dyninst may require
++	// too much memory to parse the binary.
+ 	// should cache the executable names like the other things
+ 	analysis func_to_analyze(executable);
+ 	MachRegister r;
+ 
++	// Punt if unsuccessful in parsing binary
++	if (!func_to_analyze.co){
++		s.print_warning(_F("liveness analysis unable to parse binary %s",
++				   executable.c_str()), e->tok);
++		return 0;
++	}
++
+ 	// Determine whether 32-bit or 64-bit code as the register names are different in dyninst
+ 	int reg_width = func_to_analyze.co->cs()->getAddressWidth();
+ 
+@@ -282,6 +301,11 @@ int liveness(string executable,
+ 	bool used;
+ 	la->query(iloc, LivenessAnalyzer::Before, r, used);
+ 	return (used ? 1 : -1);
++  } catch (std::bad_alloc & ex){
++    s.print_warning(_F("unable to allocate memory for liveness analysis of %s",
++				   executable.c_str()), e->tok);
++    return 0;
++  }
+ }
+ 
+ #endif // HAVE_DYNINST
+diff --git a/analysis.h b/analysis.h
+index 9b6d115..6bea675 100644
+--- a/analysis.h
++++ b/analysis.h
+@@ -17,13 +17,15 @@
+ 
+ #ifdef HAVE_DYNINST
+ 
+-extern int liveness(std::string executable,
++extern int liveness(systemtap_session& s,
++		    target_symbol *e,
++		    std::string executable,
+ 		    Dwarf_Addr location,
+ 		    location_context ctx);
+ 
+ #else
+ 
+-#define liveness(executable, location, var) (0)
++#define liveness(session, target, executable, location, var) (0)
+ 
+ #endif // HAVE_DYNINST
+ #endif // ANALYSIS_H
+diff --git a/tapsets.cxx b/tapsets.cxx
+index 60794bb..8fc5146 100644
+--- a/tapsets.cxx
++++ b/tapsets.cxx
+@@ -4732,7 +4732,7 @@ dwarf_var_expanding_visitor::visit_target_symbol (target_symbol *e)
+ 
+       // Now that have location information check if change to variable has any effect
+       if (lvalue) {
+-	      if (liveness(q.dw.mod_info->elf_path, addr, ctx) < 0) {
++	      if (liveness(q.sess, e, q.dw.mod_info->elf_path, addr, ctx) < 0) {
+ 		      q.sess.print_warning(_F("write at %p will have no effect",
+ 					      (void *)addr), e->tok);
+ 	      }

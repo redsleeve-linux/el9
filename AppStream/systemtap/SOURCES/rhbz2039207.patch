@@ -1,0 +1,80 @@
+commit 5abded54b
+Author: Stan Cox <scox@redhat.com>
+Date:   Fri Jan 28 15:28:27 2022 -0500
+
+    Attempt to access string in userspace if kernel access fails
+    
+    Add kernel_or_user_string_quoted(_utf16 _utf32) tapsets to handle
+    situations where a kernelspace access was assumed but string is in
+    userspace.
+
+diff --git a/tapset/linux/conversions.stp b/tapset/linux/conversions.stp
+index 82f535f6c..d3d3a0b5a 100644
+--- a/tapset/linux/conversions.stp
++++ b/tapset/linux/conversions.stp
+@@ -72,6 +72,17 @@ function kernel_string_quoted:string (addr:long)
+ 		    (unsigned long)(uintptr_t)STAP_ARG_addr);
+ %}
+ 
++/**
++ * sfunction kernel_or_user_string_quoted - Retrieves and quotes string from kernel or user memory
++ *
++ * @addr: the kernel or user memory address to retrieve the string from
++ *
++ * Similar to kernel_string_quoted except user memory is a fallback method
++ */
++function kernel_or_user_string_quoted:string (addr:long) {
++  try { return string_quoted(kernel_string(addr)) } catch { return string_quoted(user_string(addr)) }
++}
++
+ /**
+  * sfunction kernel_string_n - Retrieves string of given length from kernel memory
+  * @addr: The kernel address to retrieve the string from
+@@ -160,6 +171,16 @@ function kernel_string_quoted_utf32:string (addr:long) {
+   try { return string_quoted(kernel_string_utf32(addr)) } catch { return sprintf("0x%x", addr) }
+ }
+ 
++/**
++ * sfunction kernel_or_user_string_quoted_utf32 - Retrieves and quotes UTF-32 string from kernel or user memory
++ *
++ * @addr: the kernel or user memory address to retrieve the string from
++ *
++ * Similar to kernel_string_quoted_utf32 except user memory is a fallback method
++ */
++function kernel_or_user_string_quoted_utf32:string (addr:long) {
++ try { return string_quoted(kernel_string_utf32(addr)) } catch { return string_quoted(user_string_utf32(addr)) }
++}
+ 
+ /**
+  * sfunction kernel_string_utf16 - Retrieves UTF-16 string from kernel memory
+@@ -242,6 +263,17 @@ function kernel_string_quoted_utf16:string (addr:long) {
+   try { return string_quoted(kernel_string_utf16(addr)) } catch { return sprintf("0x%x", addr) }
+ }
+ 
++/**
++ * sfunction kernel_or_user_string_quoted_utf16 - Retrieves and quotes UTF-16 string from kernel or user memory
++ *
++ * @addr: the kernel or user memory address to retrieve the string from
++ *
++ * Similar to kernel_string_quoted_utf16 except uses user memory as a fallback method
++ */
++function kernel_or_user_string_quoted_utf16:string (addr:long) {
++ try { return string_quoted(kernel_string_utf16(addr)) } catch { return string_quoted(user_string_utf16(addr)) }
++}
++
+ 
+ /**
+  * sfunction kernel_long - Retrieves a long value stored in kernel memory
+diff --git a/tapsets.cxx b/tapsets.cxx
+index 8fc5146e2..8b8f1cad5 100644
+--- a/tapsets.cxx
++++ b/tapsets.cxx
+@@ -3757,7 +3757,7 @@ dwarf_pretty_print::print_chars (Dwarf_Die* start_type, target_symbol* e,
+       return false;
+     }
+ 
+-  string function = userspace_p ? "user_string_quoted" : "kernel_string_quoted";
++  string function = userspace_p ? "user_string_quoted" : "kernel_or_user_string_quoted";
+   Dwarf_Word size = (Dwarf_Word) -1;
+   dwarf_formudata (dwarf_attr_integrate (&type, DW_AT_byte_size, &attr), &size);
+   switch (size)
