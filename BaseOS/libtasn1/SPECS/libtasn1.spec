@@ -1,7 +1,7 @@
 Summary:	The ASN.1 library used in GNUTLS
 Name:		libtasn1
 Version:	4.16.0
-Release:	7%{?dist}
+Release:	7%{?dist}.redsleeve
 
 # The libtasn1 library is LGPLv2+, utilities are GPLv3+
 License:	GPLv3+ and LGPLv2+
@@ -16,7 +16,7 @@ BuildRequires:	gnupg2
 BuildRequires:	gcc
 BuildRequires:	bison, pkgconfig, help2man
 BuildRequires:	autoconf, automake, libtool
-BuildRequires:	valgrind-devel
+#BuildRequires:	valgrind-devel
 BuildRequires: make
 # Wildcard bundling exception https://fedorahosted.org/fpc/ticket/174
 Provides: bundled(gnulib) = 20130324
@@ -95,6 +95,9 @@ make check
 
 
 %changelog
+* Thu Jul 21 2022 Jacco Ligthart <jacco@redsleeve.org> - .4.16.0-7redsleeve
+- no valgrind on arm
+
 * Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com> - 4.16.0-7
 - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags
   Related: rhbz#1991688

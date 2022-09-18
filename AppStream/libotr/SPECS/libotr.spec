@@ -2,9 +2,10 @@
 Summary: Off-The-Record Messaging library and toolkit
 Name: libotr
 Version: 4.1.1
-Release: 13%{?dist}
+Release: 13%{?dist}.redsleeve
 License: GPLv2 and LGPLv2
 Source0: http://otr.cypherpunks.ca/%{name}-%{version}.tar.gz
+Patch1: 0006-include-socket.h
 Url: http://otr.cypherpunks.ca/
 Provides: libotr-toolkit = %{version}
 Obsoletes: libotr-toolkit < %{version}
@@ -33,6 +34,7 @@ The devel package contains the libotr library and include files.
 
 %prep
 %setup -q
+%patch1 -p1
 
 %if %{snapshot}
 aclocal
@@ -72,6 +74,9 @@ rm -rf $RPM_BUILD_ROOT%{_libdir}/*.la
 
 
 %changelog
+* Tue Aug 30 2022 Jacco Ligthart <jacco@redsleeve.org> - 4.1.1-13.redsleeve
+- added small patch against FTBFS
+
 * Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com> - 4.1.1-13
 - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags
   Related: rhbz#1991688

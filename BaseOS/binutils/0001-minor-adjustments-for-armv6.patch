@@ -1,0 +1,76 @@
+From 75819a6219f883ba9065bf1dc17691596c9191d3 Mon Sep 17 00:00:00 2001
+From: Jacco Ligthart <jacco@redsleeve.org>
+Date: Wed, 20 Jul 2022 23:49:01 +0000
+Subject: [PATCH] minor adjustments for armv6
+
+---
+ SOURCES/binutils-armv6.patch | 25 +++++++++++++++++++++++++
+ SPECS/binutils.spec          |  6 +++++-
+ 2 files changed, 30 insertions(+), 1 deletion(-)
+ create mode 100644 SOURCES/binutils-armv6.patch
+
+diff --git a/SOURCES/binutils-armv6.patch b/SOURCES/binutils-armv6.patch
+new file mode 100644
+index 0000000..9ba7ffd
+--- /dev/null
++++ b/SOURCES/binutils-armv6.patch
+@@ -0,0 +1,25 @@
++diff -ru binutils-2.30/ld/configure.tgt binutils-2.30-rock/ld/configure.tgt
++--- binutils-2.30/ld/configure.tgt	2021-04-25 04:02:21.308705685 +0200
+++++ binutils-2.30-rock/ld/configure.tgt	2021-04-25 03:46:48.039031480 +0200
++@@ -174,8 +174,8 @@
++ 			targ_extra_libpath=$targ_extra_emuls
++ 			;;
++ arm*-*-linux-*)		targ_emul=armelf_linux
++-			targ_extra_emuls="armelf armelfb armelfb_linux"
++-			targ_extra_libpath="armelfb_linux"
+++			targ_extra_emuls="armelf armelf_linux_eabi armelfb armelfb_linux"
+++			targ_extra_libpath="armelf_linux_eabi armelfb_linux"
++ 			;;
++ arm*b-*-nacl*)		targ_emul=armelfb_nacl
++ 			targ_extra_emuls="armelf_nacl"
++diff -ru binutils-2.30/bfd/doc/Makefile.in binutils-2.30-rock/bfd/doc/Makefile.in
++--- binutils-2.30/bfd/doc/Makefile.in	2021-04-25 04:01:40.936807315 +0200
+++++ binutils-2.30-rock/bfd/doc/Makefile.in	2021-04-25 03:56:15.013627770 +0200
++@@ -171,6 +171,7 @@
++ CC = @CC@
++ CCDEPMODE = @CCDEPMODE@
++ CC_FOR_BUILD = @CC_FOR_BUILD@
+++CFLAGS_FOR_BUILD = -march=armv6 -mfpu=vfp -mfloat-abi=hard
++ CFLAGS = @CFLAGS@
++ COREFILE = @COREFILE@
++ COREFLAG = @COREFLAG@
+diff --git a/SPECS/binutils.spec b/SPECS/binutils.spec
+index 48b3dae..2ac8228 100644
+--- a/SPECS/binutils.spec
++++ b/SPECS/binutils.spec
+@@ -39,7 +39,7 @@
+ Summary: A GNU collection of binary utilities
+ Name: binutils%{?name_cross}%{?_with_debug:-debug}
+ Version: 2.35.2
+-Release: 17%{?dist}
++Release: 17%{?dist}.redsleeve
+ License: GPLv3+
+ URL: https://sourceware.org/binutils
+ 
+@@ -402,6 +402,7 @@ Patch51: binutils-x86-AMX-insns.patch
+ # Lifetime: Fixed in 2.38.
+ Patch52: binutils-gas-Use-the-directory-name-in-.file-0.patch
+ 
++Patch1000: binutils-armv6.patch
+ #----------------------------------------------------------------------------
+ 
+ Provides: bundled(libiberty)
+@@ -990,6 +991,9 @@ exit 0
+ 
+ #----------------------------------------------------------------------------
+ %changelog
++* Wed Jul 20 2022 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-17.redsleeve
++- minor adjustments for armv6
++
+ * Mon Jan 24 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-17
+ - Add upstream patch to use the directory name in .file 0, fixes ccache FTBFS (#2043970)
+ 
+-- 
+2.31.1
+

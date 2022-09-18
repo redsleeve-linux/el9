@@ -10,7 +10,7 @@ Version:   3.0.9
 %global golang_arches   %{ix86} x86_64 %{arm} aarch64 ppc64le s390x
 %global gccgo_arches    %{mips}
 %if 0%{?rhel} >= 9
-%global golang_arches   x86_64 aarch64 ppc64le s390x
+%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
 %endif
 # Go sources can contain arch-specific files and our macros will package the
 # correct files for each architecture. Therefore, move gopath to _libdir and
@@ -35,7 +35,7 @@ Version:   3.0.9
 ExclusiveArch: %{golang_arches} %{gccgo_arches}
 
 Name:      go-rpm-macros
-Release:   9%{?dist}
+Release:   9%{?dist}.redsleeve
 Summary:   Build-stage rpm automation for Go packages
 
 License:   GPLv3+
@@ -242,6 +242,9 @@ sed -i "s,golist,%{golist_execdir}/golist,g" %{buildroot}%{_bindir}/go-rpm-integ
 %{_spectemplatedir}/*.spec
 
 %changelog
+* Thu Jul 21 2022 Jaccco Ligthart <jacco@redsleeve.org> 3.0.9-9.redsleeve
+- added arm to golang_arches
+
 * Tue Jan 18 2022 David Benoit <dbenoit@redhat.com> 3.0.9-9
 - Delete remove-fedora-dependency-automation.patch
 - Bundle golist in /usr/libexec

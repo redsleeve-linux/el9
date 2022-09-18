@@ -31,7 +31,7 @@
 
 Name:           ocaml
 Version:        4.11.1
-Release:        4%{?dist}.2
+Release:        4%{?dist}.2.redsleeve
 
 Summary:        OCaml compiler and programming environment
 
@@ -196,7 +196,12 @@ make=make
     OC_CFLAGS="$CFLAGS" \
     OC_LDFLAGS="$LDFLAGS" \
     --libdir=%{_libdir}/ocaml \
+%ifarch armv6hl
+    AS="as -meabi=5" \
+    --host armv6hl-redhat-linux-gnueabi
+%else
     --host=`./build-aux/config.guess`
+%endif
 $make world
 %if %{native_compiler}
 $make opt
@@ -378,6 +383,9 @@ rm -f $RPM_BUILD_ROOT%{_libdir}/ocaml/eventlog_metadata
 
 
 %changelog
+* Thu Aug 18 2022 Jacco Ligthart <jacco@redssleeve.org> - 4.11.1-4.2.redsleeve
+- fixed host for armv6hl
+
 * Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com> - 4.11.1-4.2
 - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags
   Related: rhbz#1991688

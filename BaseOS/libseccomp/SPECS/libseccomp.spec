@@ -1,6 +1,6 @@
 Name:           libseccomp
 Version:        2.5.2
-Release:        2%{?dist}
+Release:        2%{?dist}.redsleeve
 Summary:        Enhanced seccomp library
 License:        LGPLv2
 URL:            https://github.com/seccomp/libseccomp
@@ -15,7 +15,7 @@ BuildRequires:  gcc
 BuildRequires:  gperf
 BuildRequires:  make
 
-%ifnarch riscv64 s390
+%ifnarch riscv64 s390 %{arm}
 # Versions prior to 3.13.0-4 do not work on ARM with newer glibc 2.25.0-6
 # See https://bugzilla.redhat.com/show_bug.cgi?id=1466017
 BuildRequires:  valgrind >= 1:3.13.0-4
@@ -93,6 +93,9 @@ rm -f tests/36-sim-ipc_syscalls.tests tests/37-sim-ipc_syscalls_be.tests
 %{_libdir}/libseccomp.a
 
 %changelog
+* Thu Jul 21 2022 Jacco Ligthart <jacco@redsleeve.org> - 2.5.2-2.redsleeve
+- no valgrind on arm
+
 * Fri Nov 05 2021 Zoltan Fridrich <zfridric@redhat.com> - 2.5.2-2
 - fix devel-usability test
 - rebase to 2.5.2

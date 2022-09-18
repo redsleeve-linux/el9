@@ -1,6 +1,6 @@
 Name:		librdkafka
 Version:	1.6.1
-Release:	102%{?dist}
+Release:	102%{?dist}.redsleeve
 Summary:	The Apache Kafka C library
 
 License:	BSD
@@ -57,6 +57,9 @@ using librdkafka.
     --enable-lz4-ext \
     --enable-ssl \
     --enable-gssapi \
+%ifarch %{arm}
+    --LDFLAGS="-latomic" \
+%endif
     --enable-sasl
 
 %make_build
@@ -87,6 +90,9 @@ find %{buildroot} -name '*-static.pc' -delete -print
 
 
 %changelog
+* Fri Sep 02 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.6.1-102.redsleeve
+- added -latomic for linking
+
 * Tue Feb 08 2022 Sergio Arroutbi <sarroutb@redhat.com> - 1.6.1-102
 - Changes for tests to compile and run appropriately
   Related: rhbz#2032923

@@ -1,10 +1,11 @@
 Name: HdrHistogram_c
 Version: 0.11.0
-Release: 6%{?dist}
+Release: 6%{?dist}.redsleeve
 Summary: C port of the HdrHistogram 
 License: BSD and Public Domain
 URL: https://github.com/HdrHistogram/%{name}
 Source0: https://github.com/HdrHistogram/%{name}/archive/%{version}/%{name}-%{version}.tar.gz
+Patch1000: HdrHistogram-atomic.patch
 
 BuildRequires: gcc g++ cmake zlib-devel
 
@@ -21,7 +22,7 @@ developing applications that use %{name}.
 
 
 %prep
-%autosetup -n %{name}-%{version}
+%autosetup -p2 -n %{name}-%{version}
 
 
 %build
@@ -64,6 +65,9 @@ find $RPM_BUILD_ROOT
 
 
 %changelog
+* Wed Sep 07 2022 Jacco Ligthart <jacco@redsleeve.org> - 0.11.0-6.redsleeve
+- added a small patch to link to atomic
+
 * Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com> - 0.11.0-6
 - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags
   Related: rhbz#1991688

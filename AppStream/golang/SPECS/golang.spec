@@ -29,7 +29,7 @@
 # Define GOROOT macros
 %global goroot          %{_prefix}/lib/%{name}
 %global gopath          %{_datadir}/gocode
-%global golang_arches   x86_64 aarch64 ppc64le s390x
+%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
 %global golibdir        %{_libdir}/%{name}
 
 # Golang build options.
@@ -101,7 +101,7 @@
 
 Name:           golang
 Version:        %{go_version}
-Release:        1%{?dist}
+Release:        1%{?dist}.redsleeve
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD and Public Domain
@@ -525,6 +525,9 @@ cd ..
 %endif
 
 %changelog
+* Wed Aug 10 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.17.12-1.redsleeve
+- added arm to golang_arches
+
 * Wed Jul 20 2022 David Benoit <dbenoit@redhat.com> - 1.17.12-1
 - Update Go to version 1.17.12
 - Resolves: rhbz#2109183

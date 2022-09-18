@@ -1,0 +1,87 @@
+From 42d5e1abfb7bebeca193449f93931afe6c3ace13 Mon Sep 17 00:00:00 2001
+From: Jacco Ligthart <jacco@redsleeve.org>
+Date: Fri, 22 Jul 2022 20:40:05 +0000
+Subject: [PATCH] small patch for arm
+
+---
+ SOURCES/RHBZ2026858.patch | 26 ++++++++++++++++++++++++++
+ SPECS/systemtap.spec      |  9 ++++++++-
+ 2 files changed, 34 insertions(+), 1 deletion(-)
+ create mode 100644 SOURCES/RHBZ2026858.patch
+
+diff --git a/SOURCES/RHBZ2026858.patch b/SOURCES/RHBZ2026858.patch
+new file mode 100644
+index 0000000..39c7b64
+--- /dev/null
++++ b/SOURCES/RHBZ2026858.patch
+@@ -0,0 +1,26 @@
++From 34facf7ee6b43dae66cc109973a4eda42e439163 Mon Sep 17 00:00:00 2001
++From: "Frank Ch. Eigler" <fche@redhat.com>
++Date: Wed, 1 Dec 2021 10:59:27 -0500
++Subject: [PATCH] RHBZ2026858: on __arm__ (arm32), use STAP_SDT_ARG_CONSTRAINT
++ = g
++
++---
++ includes/sys/sdt.h | 2 ++
++ 1 file changed, 2 insertions(+)
++
++diff --git a/includes/sys/sdt.h b/includes/sys/sdt.h
++index 9ecb1cb6f..28d236d91 100644
++--- a/includes/sys/sdt.h
+++++ b/includes/sys/sdt.h
++@@ -100,6 +100,8 @@
++ # ifndef STAP_SDT_ARG_CONSTRAINT
++ # if defined __powerpc__
++ # define STAP_SDT_ARG_CONSTRAINT        nZr
+++# elif defined __arm__
+++# define STAP_SDT_ARG_CONSTRAINT        g
++ # else
++ # define STAP_SDT_ARG_CONSTRAINT        nor
++ # endif
++-- 
++2.27.0
++
+diff --git a/SPECS/systemtap.spec b/SPECS/systemtap.spec
+index de025df..f34feeb 100644
+--- a/SPECS/systemtap.spec
++++ b/SPECS/systemtap.spec
+@@ -118,7 +118,7 @@ m     stapdev  stapdev
+ 
+ Name: systemtap
+ Version: 4.6
+-Release: 13%{?release_override}%{?dist}
++Release: 13%{?release_override}%{?dist}.redsleeve
+ # for version, see also configure.ac
+ 
+ 
+@@ -164,6 +164,8 @@ Patch7: rhbz2039207.patch
+ Patch8: rhbz2058908.patch
+ Patch9: rhbz2083727.patch
+ 
++Patch1000: RHBZ2026858.patch
++
+ # Build*
+ BuildRequires: make
+ BuildRequires: gcc-c++
+@@ -594,6 +596,8 @@ systemtap-runtime-virthost machine to execute systemtap scripts.
+ %patch8 -p1
+ %patch9 -p1
+ 
++%patch1000 -p1
++
+ %build
+ 
+ # Enable/disable the dyninst pure-userspace backend
+@@ -1289,6 +1293,9 @@ exit 0
+ 
+ # PRERELEASE
+ %changelog
++* Fri Jul 22 2022 Jacco Ligthart <jacco@redsleeve.org> - 4.6-13.redsleeve
++- small patch for arm
++
+ * Thu May 12 2022 Frank Ch. Eigler <fche@redhat.com> - 4.6-13
+ - rhbz2083727: fix kernel module .return probes
+ 
+-- 
+2.31.1
+

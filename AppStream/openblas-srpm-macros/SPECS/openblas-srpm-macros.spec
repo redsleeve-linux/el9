@@ -1,6 +1,6 @@
 Name:           openblas-srpm-macros
 Version:        2
-Release:        11%{?dist}
+Release:        11%{?dist}.redsleeve
 Summary:        OpenBLAS architecture macros
 License:        MIT
 Source0:        macros.openblas-srpm
@@ -27,6 +27,9 @@ install -m0644 %SOURCE0 %{buildroot}%{macrosdir}/macros.openblas-srpm
 
 
 %changelog
+* Thu Jul 21 2022 Jacco Ligthart <jacco@redsleeve.org> - 2-11.redsleeve
+- changed armv7 to arm
+
 * Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com> - 2-11
 - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags
   Related: rhbz#1991688

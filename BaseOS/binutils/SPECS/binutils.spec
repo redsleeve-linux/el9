@@ -39,7 +39,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?name_cross}%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 17%{?dist}
+Release: 17%{?dist}.redsleeve
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -402,6 +402,7 @@ Patch51: binutils-x86-AMX-insns.patch
 # Lifetime: Fixed in 2.38.
 Patch52: binutils-gas-Use-the-directory-name-in-.file-0.patch
 
+Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 Provides: bundled(libiberty)
@@ -990,6 +991,9 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
+* Wed Jul 20 2022 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-17.redsleeve
+- minor adjustments for armv6
+
 * Mon Jan 24 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-17
 - Add upstream patch to use the directory name in .file 0, fixes ccache FTBFS (#2043970)
 

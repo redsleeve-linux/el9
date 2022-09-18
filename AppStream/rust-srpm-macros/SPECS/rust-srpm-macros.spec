@@ -1,6 +1,6 @@
 Name:           rust-srpm-macros
 Version:        17
-Release:        4%{?dist}
+Release:        4%{?dist}.redsleeve
 Summary:        RPM macros for building Rust source packages
 
 License:        MIT
@@ -16,6 +16,7 @@ BuildArch:      noarch
 %autosetup -n rust2rpm-v%{version} -p1
 # https://pagure.io/koji/issue/659
 sed -i -e 's/i686/%%{ix86}/' data/macros.rust-srpm
+sed -i -e 's/armv7hl/%%{arm}/' data/macros.rust-srpm
 
 %install
 install -D -p -m 0644 -t %{buildroot}%{_rpmmacrodir} data/macros.rust-srpm
@@ -25,6 +26,9 @@ install -D -p -m 0644 -t %{buildroot}%{_rpmmacrodir} data/macros.rust-srpm
 %{_rpmmacrodir}/macros.rust-srpm
 
 %changelog
+* Thu Jul 21 2022 Jacco Ligthart <jacco@redsleeve.org> - 17-4.redsleeve
+- changed armv7 to arm
+
 * Tue Aug 10 2021 Mohan Boddu <mboddu@redhat.com> - 17-4
 - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags
   Related: rhbz#1991688

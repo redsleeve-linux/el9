@@ -1,7 +1,7 @@
 Summary:        A high-performance implementation of MPI
 Name:           mpich
 Version:        3.4.2
-Release:        1%{?dist}
+Release:        1%{?dist}.redsleeve
 License:        MIT
 URL:            https://www.mpich.org/
 
@@ -28,7 +28,7 @@ BuildRequires:  automake
 BuildRequires:  libtool
 # For ./maint/extractcvars
 BuildRequires:  perl(lib)
-%ifnarch s390 %{mips}
+%ifnarch s390 %{mips} %{arm}
 BuildRequires:  valgrind-devel
 %endif
 # For %%{python3_sitearch}
@@ -251,6 +251,9 @@ make check VERBOSE=1 \
 %{python3_sitearch}/%{name}.pth
 
 %changelog
+* Sun Aug 21 2022 Jacco Ligthart <jacco@redsleeve.org> - 3.4.2-1.redsleeve
+- no valgrind for %{arm}
+
 * Sat Nov 27 2021 Honggang Li <honli@redhat.com> - 3.4.2-1
 - Update to latest version 3.4.2
 - Related: rhbz#2015398

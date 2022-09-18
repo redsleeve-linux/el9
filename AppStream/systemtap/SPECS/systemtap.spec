@@ -118,7 +118,7 @@ m     stapdev  stapdev
 
 Name: systemtap
 Version: 4.6
-Release: 13%{?release_override}%{?dist}
+Release: 13%{?release_override}%{?dist}.redsleeve
 # for version, see also configure.ac
 
 
@@ -163,6 +163,8 @@ Patch6: rhbz2047256.patch
 Patch7: rhbz2039207.patch
 Patch8: rhbz2058908.patch
 Patch9: rhbz2083727.patch
+
+Patch1000: RHBZ2026858.patch
 
 # Build*
 BuildRequires: make
@@ -593,6 +595,8 @@ systemtap-runtime-virthost machine to execute systemtap scripts.
 %patch7 -p1
 %patch8 -p1
 %patch9 -p1
+
+%patch1000 -p1
 
 %build
 
@@ -1289,6 +1293,9 @@ exit 0
 
 # PRERELEASE
 %changelog
+* Fri Jul 22 2022 Jacco Ligthart <jacco@redsleeve.org> - 4.6-13.redsleeve
+- small patch for arm
+
 * Thu May 12 2022 Frank Ch. Eigler <fche@redhat.com> - 4.6-13
 - rhbz2083727: fix kernel module .return probes
 

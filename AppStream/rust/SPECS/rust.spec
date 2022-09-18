@@ -1,6 +1,6 @@
 # Only x86_64 and i686 are Tier 1 platforms at this time.
 # https://doc.rust-lang.org/nightly/rustc/platform-support.html
-%global rust_arches x86_64 i686 aarch64 ppc64le s390x
+%global rust_arches x86_64 i686 aarch64 ppc64le s390x armv6hl
 
 # The channel can be stable, beta, or nightly
 %{!?channel: %global channel stable}
@@ -79,7 +79,7 @@
 
 Name:           rust
 Version:        1.58.1
-Release:        1%{?dist}
+Release:        1%{?dist}.redsleeve
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -117,6 +117,9 @@ Patch102:       rustc-1.58.0-no-default-pie.patch
   local abi = "gnu"
   if arch == "armv7hl" then
     arch = "armv7"
+    abi = "gnueabihf"
+  elseif arch == "armv6hl" then
+    arch = "arm"
     abi = "gnueabihf"
   elseif arch == "ppc64" then
     arch = "powerpc64"
@@ -970,6 +973,9 @@ end}
 
 
 %changelog
+* Sat Jul 23 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.58.1-1.redsleeve
+- added armv6 to rust_arches
+
 * Thu Jan 20 2022 Josh Stone <jistone@redhat.com> - 1.58.1-1
 - Update to 1.58.1.
 

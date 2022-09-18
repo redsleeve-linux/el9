@@ -31,7 +31,7 @@
 Name:           openmpi%{?_cc_name_suffix}
 Epoch:          1
 Version:        4.1.1
-Release:        5%{?dist}
+Release:        5%{?dist}.redsleeve
 Summary:        Open Message Passing Interface
 License:        BSD and MIT and Romio
 URL:            http://www.open-mpi.org/
@@ -53,7 +53,9 @@ BuildRequires:  libtool
 BuildRequires:  perl(Data::Dumper)
 BuildRequires:  perl(File::Find)
 %endif
+%ifnarch %{arm}
 BuildRequires:  valgrind-devel
+%endif
 %if %{with rdma}
 BuildRequires:  opensm-devel > 3.3.0
 BuildRequires:  rdma-core-devel
@@ -187,8 +189,10 @@ OpenMPI support for Python 3.
 	--enable-mpi-java \
 	--enable-mpi1-compatibility \
 	--with-sge \
+%ifnarch %{arm}
 	--with-valgrind \
 	--enable-memchecker \
+%endif
 	--with-hwloc=/usr \
 %if !0%{?el7}
 	--with-libevent=external \
@@ -358,6 +362,9 @@ make check
 
 
 %changelog
+* Sun Aug 21 2022 Jacco Ligthart <jacco@redsleeve.org> - 4.1.1-5.redsleeve
+- no valgrind and memchecker for %{arm}
+
 * Thu Feb 17 2022 Honggang Li <honli@redhat.com> - 4.1.1-5
 - Revert v4.1.2
 - Add Epoch tag
