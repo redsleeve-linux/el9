@@ -21,7 +21,7 @@
 Name:           systemd
 Url:            https://www.freedesktop.org/wiki/Software/systemd
 Version:        250
-Release:        6%{?dist}.redsleeve
+Release:        6%{?dist}.1
 # For a breakdown of the licensing, see README
 License:        LGPLv2+ and MIT and GPLv2+
 Summary:        System and Service Manager
@@ -133,6 +133,10 @@ Patch0052: 0052-kernel-install-search-harder-for-kernel-image-initrd.patch
 Patch0053: 0053-kernel-install-add-new-inspect-verb-showing-paths-an.patch
 Patch0054: 0054-bus-Use-OrderedSet-for-introspection.patch
 Patch0055: 0055-udev-net_id-avoid-slot-based-names-only-for-single-f.patch
+Patch0056: 0056-shutdown-get-only-active-md-arrays.patch
+Patch0057: 0057-test-lvm-2.03.15-dropped-the-static-autoactivation.patch
+Patch0058: 0058-ci-limit-which-env-variables-we-pass-through-sudo.patch
+Patch0059: 0059-shared-Fix-memory-leak-in-bus_append_execute_propert.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -184,7 +188,7 @@ BuildRequires:  libseccomp-devel
 BuildRequires:  meson >= 0.43
 BuildRequires:  gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires:  valgrind-devel
+BuildRequires:  valgrind-devel
 BuildRequires:  pkgconfig(bash-completion)
 BuildRequires:  pkgconfig(tss2-esys)
 BuildRequires:  pkgconfig(tss2-rc)
@@ -914,8 +918,11 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 %files standalone-sysusers -f .file-list-standalone-sysusers
 
 %changelog
-* Fri Jul 15 2022 Jacco Ligthart <jacco@redsleeve.org> - 250-6.redsleeve
-- removed valgrind
+* Wed Jul 20 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-6.1
+- shutdown: get only active md arrays. (#2087677)
+- test: lvm 2.03.15 dropped the static autoactivation (#2087677)
+- ci: limit which env variables we pass through `sudo` (#2087677)
+- shared: Fix memory leak in bus_append_execute_property() (#2087677)
 
 * Thu Apr 07 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-6
 - udev/net_id: avoid slot based names only for single function devices (#2070097)
