@@ -17,12 +17,9 @@ URL: https://www.python.org/
 #global prerel ...
 %global upstream_version %{general_version}%{?prerel}
 Version: %{general_version}%{?prerel:~%{prerel}}
-Release: 2%{?dist}.redsleeve
+Release: 3%{?dist}
 License: Python
 
-%ifarch armv6hl
-%define _gnu "-gnueabihf"
-%endif
 
 # ==================================
 # Conditionals controlling the build
@@ -401,6 +398,52 @@ Patch329: 00329-fips.patch
 # Python/importlib_external.h to this patch but it'd make rebasing
 # a nightmare because it's basically a binary file.
 Patch353: 00353-architecture-names-upstream-downstream.patch
+
+# 00378 #
+# Support expat 2.4.5
+#
+# Curly brackets were never allowed in namespace URIs
+# according to RFC 3986, and so-called namespace-validating
+# XML parsers have the right to reject them a invalid URIs.
+#
+# libexpat >=2.4.5 has become strcter in that regard due to
+# related security issues; with ET.XML instantiating a
+# namespace-aware parser under the hood, this test has no
+# future in CPython.
+#
+# References:
+# - https://datatracker.ietf.org/doc/html/rfc3968
+# - https://www.w3.org/TR/xml-names/
+#
+# Also, test_minidom.py: Support Expat >=2.4.5
+#
+# The patch has diverged from upstream as the python test
+# suite was relying on checking the expat version, whereas
+# in RHEL fixes get backported instead of rebasing packages.
+#
+# Upstream: https://bugs.python.org/issue46811
+Patch378: 00378-support-expat-2-4-5.patch
+
+# 00387 # 87d28f3f0f0c9165c67b2a156134c614c6f6dcf5
+# CVE-2020-10735: Prevent DoS by very large int()
+#
+# gh-95778: CVE-2020-10735: Prevent DoS by very large int() (GH-96504)
+#
+# Converting between `int` and `str` in bases other than 2
+# (binary), 4, 8 (octal), 16 (hexadecimal), or 32 such as base 10 (decimal) now
+# raises a `ValueError` if the number of digits in string form is above a
+# limit to avoid potential denial of service attacks due to the algorithmic
+# complexity. This is a mitigation for CVE-2020-10735
+# (https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2020-10735).
+#
+# This new limit can be configured or disabled by environment variable, command
+# line flag, or :mod:`sys` APIs. See the `Integer String Conversion Length
+# Limitation` documentation.  The default limit is 4300
+# digits in string form.
+#
+# Patch by Gregory P. Smith [Google] and Christian Heimes [Red Hat] with feedback
+# from Victor Stinner, Thomas Wouters, Steve Dower, Ned Deily, and Mark Dickinson.
+Patch387: 00387-cve-2020-10735-prevent-dos-by-very-large-int.patch
 
 # (New patches go here ^^^)
 #
@@ -1000,10 +1043,10 @@ InstallPython() {
 %endif # with gdb_hooks
 
   # Rename the -devel script that differs on different arches to arch specific name
-#  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
-#  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
-#    %{buildroot}%{_bindir}/python${LDVersion}-config
-#    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
+  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
+  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
+    %{buildroot}%{_bindir}/python${LDVersion}-config
+    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
 
   # Make python3-devel multilib-ready
   mv %{buildroot}%{_includedir}/python${LDVersion}/pyconfig.h \
@@ -1188,7 +1231,7 @@ ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python
 ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python%{pybasever}
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python-config
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-config
-#ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
+ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
 # There were also executables with %%{LDVERSION_optimized} in RHEL 8,
 # but since Python 3.8 %%{LDVERSION_optimized} == %%{pybasever}.
 # We list both in the %%files section to assert this.
@@ -1196,7 +1239,7 @@ ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-p
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python-debug
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}
 ln -s %{_bindir}/python%{LDVERSION_debug}-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-config
-#ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
+ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
 %endif
 %endif
 
@@ -1278,12 +1321,6 @@ CheckPython() {
     %endif
     %ifarch %{mips64}
     -x test_ctypes \
-    %endif
-    %ifarch %{arm}
-    -x test_gdb \
-    -x test_minidom \
-    -x test_xml_etree \
-    -x test_xml_etree_c \
     %endif
 
   echo FINISHED: CHECKING OF PYTHON FOR CONFIGURATION: $ConfName
@@ -1586,7 +1623,7 @@ CheckPython optimized
 
 %{_bindir}/python%{pybasever}-config
 %{_bindir}/python%{LDVERSION_optimized}-config
-#%{_bindir}/python%{LDVERSION_optimized}-*-config
+%{_bindir}/python%{LDVERSION_optimized}-*-config
 %{_libdir}/libpython%{LDVERSION_optimized}.so
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}.pc
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}-embed.pc
@@ -1597,8 +1634,8 @@ CheckPython optimized
 %{_libexecdir}/platform-python-config
 %{_libexecdir}/platform-python%{pybasever}-config
 %{_libexecdir}/platform-python%{LDVERSION_optimized}-config
-#%{_libexecdir}/platform-python%{pybasever}-*-config
-#%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
+%{_libexecdir}/platform-python%{pybasever}-*-config
+%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
 %endif
 
 
@@ -1758,7 +1795,7 @@ CheckPython optimized
 %{pylibdir}/config-%{LDVERSION_debug}-%{platform_triplet}
 %{_includedir}/python%{LDVERSION_debug}
 %{_bindir}/python%{LDVERSION_debug}-config
-#%{_bindir}/python%{LDVERSION_debug}-*-config
+%{_bindir}/python%{LDVERSION_debug}-*-config
 %{_libdir}/libpython%{LDVERSION_debug}.so
 %{_libdir}/libpython%{LDVERSION_debug}.so.%{py_SOVERSION}
 %{_libdir}/pkgconfig/python-%{LDVERSION_debug}.pc
@@ -1768,7 +1805,7 @@ CheckPython optimized
 %{_libexecdir}/platform-python-debug
 %{_libexecdir}/platform-python%{LDVERSION_debug}
 %{_libexecdir}/platform-python%{LDVERSION_debug}-config
-#%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
+%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
 %endif
 
 # Analog of the -tools subpackage's files:
@@ -1809,8 +1846,10 @@ CheckPython optimized
 # ======================================================
 
 %changelog
-* Fri Jul 22 2022 Jacco Ligthart <jacco@redsleeve.org> - 3.9.10-2.redsleeve
-- three minor changes for armv6
+* Fri Sep 23 2022 Charalampos Stratakis <cstratak@redhat.com> - 3.9.10-3
+- Security fix for CVE-2020-10735
+- Fix the test suite support for Expat >= 2.4.5
+Resolves: rhbz#1834423
 
 * Wed Feb 09 2022 Charalampos Stratakis <cstratak@redhat.com> - 3.9.10-2
 - Fix undefined behavior in Modules/_hashopenssl.c
