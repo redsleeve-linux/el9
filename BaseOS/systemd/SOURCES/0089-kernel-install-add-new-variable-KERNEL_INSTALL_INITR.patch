@@ -1,0 +1,77 @@
+From 931ae9749924a396a78044f8b1536085ff574ae6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 18 Jan 2022 17:40:13 +0100
+Subject: [PATCH] kernel-install: add new variable
+ $KERNEL_INSTALL_INITRD_GENERATOR
+
+The idea is that when not set, we do whatever we did in the past. But
+with a new setting of initrd_generator=mkosi-initrd, mkosi-initrd will
+generate an initrd.
+
+(cherry picked from commit 5c1b257faf87cb4f93aee8866f45a8cb98230af9)
+
+Related: #2065061
+---
+ man/kernel-install.xml            | 6 +++++-
+ src/kernel-install/install.conf   | 1 +
+ src/kernel-install/kernel-install | 5 ++++-
+ 3 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/man/kernel-install.xml b/man/kernel-install.xml
+index 83255bb932..bb76074d2e 100644
+--- a/man/kernel-install.xml
++++ b/man/kernel-install.xml
+@@ -171,11 +171,15 @@
+     <para><varname>KERNEL_INSTALL_BOOT_ROOT=</varname> is set for the plugins to the root directory (mount point, usually) of the hierarchy
+     where boot-loader entries, kernel images, and associated resources should be placed. Can be overridden by setting <varname>BOOT_ROOT=</varname>.</para>
+ 
+-    <para><varname>KERNEL_INSTALL_LAYOUT=bls|other|...</varname> specifies the installation layout.
++    <para><varname>KERNEL_INSTALL_LAYOUT=bls|other|...</varname> is set for the plugins to specify the installation layout.
+     Defaults to <option>bls</option> if <filename>$BOOT/<replaceable>MACHINE-ID</replaceable></filename> exists, or <option>other</option> otherwise.
+     Additional layout names may be defined by convention. If a plugin uses a special layout,
+     it's encouraged to declare its own layout name and configure <varname>layout=</varname> in <filename>install.conf</filename> upon initial installation.</para>
+ 
++    <para><varname>KERNEL_INSTALL_INITRD_GENERATOR=...</varname> is set for plugins to select the initrd generator.
++    This should be configured as <varname>initrd_generator=</varname> in <filename>install.conf</filename>.
++    </para>
++
+     <variablelist>
+       <varlistentry>
+         <term>bls</term>
+diff --git a/src/kernel-install/install.conf b/src/kernel-install/install.conf
+index e4802e6fae..43b6e7d792 100644
+--- a/src/kernel-install/install.conf
++++ b/src/kernel-install/install.conf
+@@ -8,3 +8,4 @@
+ # See kernel-install(8) for details.
+ 
+ #layout=bls|other|...
++#initrd_generator=dracut|...
+diff --git a/src/kernel-install/kernel-install b/src/kernel-install/kernel-install
+index e56483ef96..fe457c1070 100755
+--- a/src/kernel-install/kernel-install
++++ b/src/kernel-install/kernel-install
+@@ -80,6 +80,9 @@ fi
+ KERNEL_VERSION="$1"
+ shift
+ 
++layout=
++initrd_generator=
++
+ if [ -r "/etc/kernel/install.conf" ]; then
+     . /etc/kernel/install.conf
+ elif [ -r "/usr/lib/kernel/install.conf" ]; then
+@@ -123,12 +126,12 @@ if [ -z "$layout" ]; then
+     fi
+ fi
+ 
+-
+ ENTRY_DIR_ABS="$BOOT_ROOT/$MACHINE_ID/$KERNEL_VERSION"
+ 
+ export KERNEL_INSTALL_MACHINE_ID="$MACHINE_ID"
+ export KERNEL_INSTALL_BOOT_ROOT="$BOOT_ROOT"
+ export KERNEL_INSTALL_LAYOUT="$layout"
++export KERNEL_INSTALL_INITRD_GENERATOR="$initrd_generator"
+ 
+ [ "$layout" = "bls" ]
+ MAKE_ENTRY_DIR_ABS=$?

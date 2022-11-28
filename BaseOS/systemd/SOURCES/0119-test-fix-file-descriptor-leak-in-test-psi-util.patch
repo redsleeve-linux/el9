@@ -1,0 +1,42 @@
+From 12274971840068b3effb7a933d62f1b5fe8009e1 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 22 Feb 2022 21:46:41 +0900
+Subject: [PATCH] test: fix file descriptor leak in test-psi-util
+
+Fixes an issue reported in #22576.
+
+(cherry picked from commit be99883e131ef422f8278ec1d099520996a78bb0)
+Related: #2087652
+---
+ src/test/test-psi-util.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/test/test-psi-util.c b/src/test/test-psi-util.c
+index ed465b807e..111671c5a9 100644
+--- a/src/test/test-psi-util.c
++++ b/src/test/test-psi-util.c
+@@ -1,20 +1,23 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
+ #include "alloc-util.h"
++#include "fd-util.h"
+ #include "fileio.h"
+ #include "fs-util.h"
+ #include "parse-util.h"
+ #include "psi-util.h"
+ #include "tests.h"
++#include "tmpfile-util.h"
+ 
+ TEST(read_mem_pressure) {
+         _cleanup_(unlink_tempfilep) char path[] = "/tmp/pressurereadtestXXXXXX";
++        _cleanup_close_ int fd = -1;
+         ResourcePressure rp;
+ 
+         if (geteuid() != 0)
+                 return (void) log_tests_skipped("not root");
+ 
+-        assert_se(mkstemp(path));
++        assert_se((fd = mkostemp_safe(path)) >= 0);
+ 
+         assert_se(read_resource_pressure("/verylikelynonexistentpath", PRESSURE_TYPE_SOME, &rp) < 0);
+         assert_se(read_resource_pressure(path, PRESSURE_TYPE_SOME, &rp) < 0);

@@ -1,0 +1,1088 @@
+From f7660c55adcf3e6a7eec251c474edc0cbb19e26d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 23 Mar 2022 10:48:13 +0100
+Subject: [PATCH] strv: declare iterator of FOREACH_STRING() in the loop
+
+Same idea as 03677889f0ef42cdc534bf3b31265a054b20a354.
+
+No functional change intended. The type of the iterator is generally changed to
+be 'const char*' instead of 'char*'. Despite the type commonly used, modifying
+the string was not allowed.
+
+I adjusted the naming of some short variables for clarity and reduced the scope
+of some variable declarations in code that was being touched anyway.
+
+(cherry picked from commit 5980d463048f25411c55da2f6387cdc8eaeef4c8)
+
+Related: #2082131
+---
+ src/activate/activate.c               |  1 -
+ src/basic/fs-util.c                   |  1 -
+ src/basic/os-util.c                   |  2 --
+ src/basic/strv.h                      |  2 +-
+ src/basic/unit-file.c                 |  1 -
+ src/boot/bootctl.c                    |  9 ++++-----
+ src/cgtop/cgtop.c                     |  1 -
+ src/core/apparmor-setup.c             |  1 -
+ src/core/efi-random.c                 | 11 +++++------
+ src/core/execute.c                    |  1 -
+ src/core/timer.c                      |  2 --
+ src/core/unit.c                       |  1 -
+ src/getty-generator/getty-generator.c |  4 +---
+ src/home/homectl.c                    | 17 +++--------------
+ src/home/homed-manager.c              |  1 -
+ src/libsystemd/sd-device/sd-device.c  |  6 +-----
+ src/locale/localed.c                  |  2 +-
+ src/login/logind-user.c               |  1 -
+ src/nspawn/nspawn-cgroup.c            |  1 -
+ src/nspawn/nspawn-mount.c             |  4 ++--
+ src/nspawn/nspawn.c                   |  5 ++---
+ src/partition/repart.c                |  3 +--
+ src/portable/portable.c               |  1 -
+ src/resolve/resolved-resolv-conf.c    |  2 --
+ src/resolve/test-resolved-etc-hosts.c |  1 -
+ src/run/run.c                         |  2 --
+ src/shared/bootspec.c                 |  3 ++-
+ src/shared/chown-recursive.c          |  1 -
+ src/shared/discover-image.c           |  2 +-
+ src/shared/dissect-image.c            |  1 -
+ src/shared/machine-id-setup.c         |  2 +-
+ src/shared/mount-setup.c              |  4 ----
+ src/shared/netif-util.c               |  7 ++++---
+ src/shared/pager.c                    |  2 +-
+ src/shared/psi-util.c                 |  2 --
+ src/shared/switch-root.c              | 11 +++++------
+ src/shared/tests.c                    | 11 +++++------
+ src/systemctl/systemctl-edit.c        |  8 ++++----
+ src/systemctl/systemctl-sysv-compat.c | 25 ++++++++++++-------------
+ src/test/test-bpf-devices.c           |  1 -
+ src/test/test-ellipsize.c             |  8 ++------
+ src/test/test-env-file.c              |  2 --
+ src/test/test-execute.c               | 16 ++++++----------
+ src/test/test-fileio.c                |  1 -
+ src/test/test-gpt.c                   |  6 +-----
+ src/test/test-libcrypt-util.c         |  2 --
+ src/test/test-loop-block.c            |  1 -
+ src/test/test-mount-util.c            |  1 -
+ src/test/test-stat-util.c             |  2 --
+ src/test/test-strv.c                  |  4 +---
+ src/test/test-utf8.c                  |  3 ---
+ src/tmpfiles/offline-passwd.c         |  2 --
+ 52 files changed, 66 insertions(+), 145 deletions(-)
+
+diff --git a/src/activate/activate.c b/src/activate/activate.c
+index 0c32152671..b625d97f2e 100644
+--- a/src/activate/activate.c
++++ b/src/activate/activate.c
+@@ -124,7 +124,6 @@ static int open_sockets(int *epoll_fd, bool accept) {
+ 
+ static int exec_process(const char *name, char **argv, int start_fd, size_t n_fds) {
+         _cleanup_strv_free_ char **envp = NULL;
+-        const char *var;
+         char **s;
+         int r;
+ 
+diff --git a/src/basic/fs-util.c b/src/basic/fs-util.c
+index 552986f546..2ee7c23f68 100644
+--- a/src/basic/fs-util.c
++++ b/src/basic/fs-util.c
+@@ -570,7 +570,6 @@ int get_files_in_directory(const char *path, char ***list) {
+ }
+ 
+ static int getenv_tmp_dir(const char **ret_path) {
+-        const char *n;
+         int r, ret = 0;
+ 
+         assert(ret_path);
+diff --git a/src/basic/os-util.c b/src/basic/os-util.c
+index 75c8500e51..a6e4d09473 100644
+--- a/src/basic/os-util.c
++++ b/src/basic/os-util.c
+@@ -170,8 +170,6 @@ int open_extension_release(const char *root, const char *extension, char **ret_p
+                         }
+                 }
+         } else {
+-                const char *p;
+-
+                 FOREACH_STRING(p, "/etc/os-release", "/usr/lib/os-release") {
+                         r = chase_symlinks(p, root, CHASE_PREFIX_ROOT,
+                                            ret_path ? &q : NULL,
+diff --git a/src/basic/strv.h b/src/basic/strv.h
+index 092d40c84b..27d4450468 100644
+--- a/src/basic/strv.h
++++ b/src/basic/strv.h
+@@ -207,7 +207,7 @@ void strv_print(char * const *l);
+         })
+ 
+ #define _FOREACH_STRING(uniq, x, y, ...)                                \
+-        for (char **UNIQ_T(l, uniq) = STRV_MAKE(({ x = y; }), ##__VA_ARGS__); \
++        for (const char *x, * const*UNIQ_T(l, uniq) = STRV_MAKE_CONST(({ x = y; }), ##__VA_ARGS__); \
+              x;                                                         \
+              x = *(++UNIQ_T(l, uniq)))
+ 
+diff --git a/src/basic/unit-file.c b/src/basic/unit-file.c
+index faea92f66d..96826e2940 100644
+--- a/src/basic/unit-file.c
++++ b/src/basic/unit-file.c
+@@ -237,7 +237,6 @@ bool lookup_paths_timestamp_hash_same(const LookupPaths *lp, uint64_t timestamp_
+ }
+ 
+ static int directory_name_is_valid(const char *name) {
+-        const char *suffix;
+ 
+         /* Accept a directory whose name is a valid unit file name ending in .wants/, .requires/ or .d/ */
+ 
+diff --git a/src/boot/bootctl.c b/src/boot/bootctl.c
+index 1bcb4d1689..9427a0e4ce 100644
+--- a/src/boot/bootctl.c
++++ b/src/boot/bootctl.c
+@@ -1044,12 +1044,11 @@ static int remove_variables(sd_id128_t uuid, const char *path, bool in_order) {
+ }
+ 
+ static int remove_loader_variables(void) {
+-        const char *variable;
+         int r = 0;
+ 
+         /* Remove all persistent loader variables we define */
+ 
+-        FOREACH_STRING(variable,
++        FOREACH_STRING(var,
+                        EFI_LOADER_VARIABLE(LoaderConfigTimeout),
+                        EFI_LOADER_VARIABLE(LoaderConfigTimeoutOneShot),
+                        EFI_LOADER_VARIABLE(LoaderEntryDefault),
+@@ -1058,15 +1057,15 @@ static int remove_loader_variables(void) {
+ 
+                 int q;
+ 
+-                q = efi_set_variable(variable, NULL, 0);
++                q = efi_set_variable(var, NULL, 0);
+                 if (q == -ENOENT)
+                         continue;
+                 if (q < 0) {
+-                        log_warning_errno(q, "Failed to remove EFI variable %s: %m", variable);
++                        log_warning_errno(q, "Failed to remove EFI variable %s: %m", var);
+                         if (r >= 0)
+                                 r = q;
+                 } else
+-                        log_info("Removed EFI variable %s.", variable);
++                        log_info("Removed EFI variable %s.", var);
+         }
+ 
+         return r;
+diff --git a/src/cgtop/cgtop.c b/src/cgtop/cgtop.c
+index e5ab904c4f..b023e71757 100644
+--- a/src/cgtop/cgtop.c
++++ b/src/cgtop/cgtop.c
+@@ -510,7 +510,6 @@ static int refresh_one(
+ }
+ 
+ static int refresh(const char *root, Hashmap *a, Hashmap *b, unsigned iteration) {
+-        const char *c;
+         int r;
+ 
+         FOREACH_STRING(c, SYSTEMD_CGROUP_CONTROLLER, "cpu", "cpuacct", "memory", "io", "blkio", "pids") {
+diff --git a/src/core/apparmor-setup.c b/src/core/apparmor-setup.c
+index 304a3e6aac..3426a10358 100644
+--- a/src/core/apparmor-setup.c
++++ b/src/core/apparmor-setup.c
+@@ -24,7 +24,6 @@ int mac_apparmor_setup(void) {
+ #if HAVE_APPARMOR
+         _cleanup_(aa_policy_cache_unrefp) aa_policy_cache *policy_cache = NULL;
+         _cleanup_(aa_features_unrefp) aa_features *features = NULL;
+-        const char *current_file;
+         _cleanup_free_ char *current_profile = NULL, *cache_dir_path = NULL;
+         int r;
+ 
+diff --git a/src/core/efi-random.c b/src/core/efi-random.c
+index a0b89d1379..e8d8ccd117 100644
+--- a/src/core/efi-random.c
++++ b/src/core/efi-random.c
+@@ -20,24 +20,23 @@
+  * is suitably validated. */
+ 
+ static void lock_down_efi_variables(void) {
+-        const char *p;
+         int r;
+ 
+         /* Paranoia: let's restrict access modes of these a bit, so that unprivileged users can't use them to
+          * identify the system or gain too much insight into what we might have credited to the entropy
+          * pool. */
+-        FOREACH_STRING(p,
++        FOREACH_STRING(path,
+                        EFIVAR_PATH(EFI_LOADER_VARIABLE(LoaderRandomSeed)),
+                        EFIVAR_PATH(EFI_LOADER_VARIABLE(LoaderSystemToken))) {
+ 
+-                r = chattr_path(p, 0, FS_IMMUTABLE_FL, NULL);
++                r = chattr_path(path, 0, FS_IMMUTABLE_FL, NULL);
+                 if (r == -ENOENT)
+                         continue;
+                 if (r < 0)
+-                        log_warning_errno(r, "Failed to drop FS_IMMUTABLE_FL from %s, ignoring: %m", p);
++                        log_warning_errno(r, "Failed to drop FS_IMMUTABLE_FL from %s, ignoring: %m", path);
+ 
+-                if (chmod(p, 0600) < 0)
+-                        log_warning_errno(errno, "Failed to reduce access mode of %s, ignoring: %m", p);
++                if (chmod(path, 0600) < 0)
++                        log_warning_errno(errno, "Failed to reduce access mode of %s, ignoring: %m", path);
+         }
+ }
+ 
+diff --git a/src/core/execute.c b/src/core/execute.c
+index 8a1d070e26..3cafd0f17d 100644
+--- a/src/core/execute.c
++++ b/src/core/execute.c
+@@ -2917,7 +2917,6 @@ static int setup_credentials(
+                 uid_t uid) {
+ 
+         _cleanup_free_ char *p = NULL, *q = NULL;
+-        const char *i;
+         int r;
+ 
+         assert(context);
+diff --git a/src/core/timer.c b/src/core/timer.c
+index b439802bc2..23f466c630 100644
+--- a/src/core/timer.c
++++ b/src/core/timer.c
+@@ -100,8 +100,6 @@ static int timer_add_default_dependencies(Timer *t) {
+                         return r;
+ 
+                 LIST_FOREACH(value, v, t->values) {
+-                        const char *target;
+-
+                         if (v->base != TIMER_CALENDAR)
+                                 continue;
+ 
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 0eade13ee9..3d30f3807c 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -4104,7 +4104,6 @@ int unit_patch_contexts(Unit *u) {
+ 
+                 if ((ec->root_image || !LIST_IS_EMPTY(ec->mount_images)) &&
+                     (cc->device_policy != CGROUP_DEVICE_POLICY_AUTO || cc->device_allow)) {
+-                        const char *p;
+ 
+                         /* When RootImage= or MountImages= is specified, the following devices are touched. */
+                         FOREACH_STRING(p, "/dev/loop-control", "/dev/mapper/control") {
+diff --git a/src/getty-generator/getty-generator.c b/src/getty-generator/getty-generator.c
+index 59bdfc496b..4e8162a319 100644
+--- a/src/getty-generator/getty-generator.c
++++ b/src/getty-generator/getty-generator.c
+@@ -215,9 +215,7 @@ static int run(const char *dest, const char *dest_early, const char *dest_late)
+                         return r;
+         }
+ 
+-        /* Automatically add in a serial getty on the first
+-         * virtualizer console */
+-        const char *j;
++        /* Automatically add in a serial getty on the first virtualizer console */
+         FOREACH_STRING(j,
+                        "hvc0",
+                        "xvc0",
+diff --git a/src/home/homectl.c b/src/home/homectl.c
+index 1e3c96f5ad..ac7b00889d 100644
+--- a/src/home/homectl.c
++++ b/src/home/homectl.c
+@@ -2961,8 +2961,6 @@ static int parse_argv(int argc, char *argv[]) {
+ 
+                 case ARG_DISK_SIZE:
+                         if (isempty(optarg)) {
+-                                const char *prop;
+-
+                                 FOREACH_STRING(prop, "diskSize", "diskSizeRelative", "rebalanceWeight") {
+                                         r = drop_from_identity(prop);
+                                         if (r < 0)
+@@ -3464,9 +3462,7 @@ static int parse_argv(int argc, char *argv[]) {
+                         break;
+                 }
+ 
+-                case ARG_PKCS11_TOKEN_URI: {
+-                        const char *p;
+-
++                case ARG_PKCS11_TOKEN_URI:
+                         if (streq(optarg, "list"))
+                                 return pkcs11_list_tokens();
+ 
+@@ -3500,11 +3496,8 @@ static int parse_argv(int argc, char *argv[]) {
+ 
+                         strv_uniq(arg_pkcs11_token_uri);
+                         break;
+-                }
+-
+-                case ARG_FIDO2_DEVICE: {
+-                        const char *p;
+ 
++                case ARG_FIDO2_DEVICE:
+                         if (streq(optarg, "list"))
+                                 return fido2_list_devices();
+ 
+@@ -3534,7 +3527,6 @@ static int parse_argv(int argc, char *argv[]) {
+ 
+                         strv_uniq(arg_fido2_device);
+                         break;
+-                }
+ 
+                 case ARG_FIDO2_WITH_PIN: {
+                         bool lock_with_pin;
+@@ -3569,9 +3561,7 @@ static int parse_argv(int argc, char *argv[]) {
+                         break;
+                 }
+ 
+-                case ARG_RECOVERY_KEY: {
+-                        const char *p;
+-
++                case ARG_RECOVERY_KEY:
+                         r = parse_boolean(optarg);
+                         if (r < 0)
+                                 return log_error_errno(r, "Failed to parse --recovery-key= argument: %s", optarg);
+@@ -3585,7 +3575,6 @@ static int parse_argv(int argc, char *argv[]) {
+                         }
+ 
+                         break;
+-                }
+ 
+                 case ARG_AUTO_RESIZE_MODE:
+                         if (isempty(optarg)) {
+diff --git a/src/home/homed-manager.c b/src/home/homed-manager.c
+index c1ec555cac..a02248a6de 100644
+--- a/src/home/homed-manager.c
++++ b/src/home/homed-manager.c
+@@ -482,7 +482,6 @@ static int manager_enumerate_records(Manager *m) {
+ static int search_quota(uid_t uid, const char *exclude_quota_path) {
+         struct stat exclude_st = {};
+         dev_t previous_devno = 0;
+-        const char *where;
+         int r;
+ 
+         /* Checks whether the specified UID owns any files on the files system, but ignore any file system
+diff --git a/src/libsystemd/sd-device/sd-device.c b/src/libsystemd/sd-device/sd-device.c
+index b163a0fb6b..af11730f33 100644
+--- a/src/libsystemd/sd-device/sd-device.c
++++ b/src/libsystemd/sd-device/sd-device.c
+@@ -322,7 +322,6 @@ _public_ int sd_device_new_from_subsystem_sysname(
+                 const char *subsystem,
+                 const char *sysname) {
+ 
+-        const char *s;
+         char *name;
+         int r;
+ 
+@@ -331,7 +330,6 @@ _public_ int sd_device_new_from_subsystem_sysname(
+         assert_return(path_is_normalized(sysname), -EINVAL);
+ 
+         if (streq(subsystem, "subsystem")) {
+-
+                 FOREACH_STRING(s, "/sys/subsystem/", "/sys/bus/", "/sys/class/") {
+                         r = device_strjoin_new(s, sysname, NULL, NULL, ret);
+                         if (r < 0)
+@@ -341,7 +339,6 @@ _public_ int sd_device_new_from_subsystem_sysname(
+                 }
+ 
+         } else  if (streq(subsystem, "module")) {
+-
+                 r = device_strjoin_new("/sys/module/", sysname, NULL, NULL, ret);
+                 if (r < 0)
+                         return r;
+@@ -353,9 +350,8 @@ _public_ int sd_device_new_from_subsystem_sysname(
+ 
+                 sep = strchr(sysname, ':');
+                 if (sep && sep[1] != '\0') { /* Require ":" and something non-empty after that. */
+-                        const char *subsys;
+ 
+-                        subsys = memdupa_suffix0(sysname, sep - sysname);
++                        const char *subsys = memdupa_suffix0(sysname, sep - sysname);
+                         sep++;
+ 
+                         FOREACH_STRING(s, "/sys/subsystem/", "/sys/bus/") {
+diff --git a/src/locale/localed.c b/src/locale/localed.c
+index c228385d0e..f3e6ef2db1 100644
+--- a/src/locale/localed.c
++++ b/src/locale/localed.c
+@@ -475,7 +475,7 @@ static int method_set_locale(sd_bus_message *m, void *userdata, sd_bus_error *er
+ 
+ static int method_set_vc_keyboard(sd_bus_message *m, void *userdata, sd_bus_error *error) {
+         Context *c = userdata;
+-        const char *name, *keymap, *keymap_toggle;
++        const char *keymap, *keymap_toggle;
+         int convert, interactive, r;
+ 
+         assert(m);
+diff --git a/src/login/logind-user.c b/src/login/logind-user.c
+index 6d250be321..74739b4242 100644
+--- a/src/login/logind-user.c
++++ b/src/login/logind-user.c
+@@ -626,7 +626,6 @@ int user_check_linger_file(User *u) {
+ }
+ 
+ static bool user_unit_active(User *u) {
+-        const char *i;
+         int r;
+ 
+         assert(u->service);
+diff --git a/src/nspawn/nspawn-cgroup.c b/src/nspawn/nspawn-cgroup.c
+index d472e80c03..d8e1fe0907 100644
+--- a/src/nspawn/nspawn-cgroup.c
++++ b/src/nspawn/nspawn-cgroup.c
+@@ -22,7 +22,6 @@
+ 
+ static int chown_cgroup_path(const char *path, uid_t uid_shift) {
+         _cleanup_close_ int fd = -1;
+-        const char *fn;
+ 
+         fd = open(path, O_RDONLY|O_CLOEXEC|O_DIRECTORY);
+         if (fd < 0)
+diff --git a/src/nspawn/nspawn-mount.c b/src/nspawn/nspawn-mount.c
+index 40773d90c1..678fde3669 100644
+--- a/src/nspawn/nspawn-mount.c
++++ b/src/nspawn/nspawn-mount.c
+@@ -408,7 +408,7 @@ int tmpfs_patch_options(
+ }
+ 
+ int mount_sysfs(const char *dest, MountSettingsMask mount_settings) {
+-        const char *full, *top, *x;
++        const char *full, *top;
+         int r;
+         unsigned long extra_flags = 0;
+ 
+@@ -468,7 +468,7 @@ int mount_sysfs(const char *dest, MountSettingsMask mount_settings) {
+         /* Create mountpoint for cgroups. Otherwise we are not allowed since we
+          * remount /sys read-only.
+          */
+-        x = prefix_roota(top, "/fs/cgroup");
++        const char *x = prefix_roota(top, "/fs/cgroup");
+         (void) mkdir_p(x, 0755);
+ 
+         return mount_nofollow_verbose(LOG_ERR, NULL, top, NULL,
+diff --git a/src/nspawn/nspawn.c b/src/nspawn/nspawn.c
+index 9225c8f162..1333a8702a 100644
+--- a/src/nspawn/nspawn.c
++++ b/src/nspawn/nspawn.c
+@@ -2564,7 +2564,7 @@ static int setup_hostname(void) {
+ 
+ static int setup_journal(const char *directory) {
+         _cleanup_free_ char *d = NULL;
+-        const char *dirname, *p, *q;
++        const char *p, *q;
+         sd_id128_t this_id;
+         bool try;
+         int r;
+@@ -3513,7 +3513,6 @@ static int inner_child(
+         (void) fdset_close_others(fds);
+ 
+         if (arg_start_mode == START_BOOT) {
+-                const char *init;
+                 char **a;
+                 size_t m;
+ 
+@@ -4604,7 +4603,7 @@ static int load_settings(void) {
+         _cleanup_(settings_freep) Settings *settings = NULL;
+         _cleanup_fclose_ FILE *f = NULL;
+         _cleanup_free_ char *p = NULL;
+-        const char *fn, *i;
++        const char *fn;
+         int r;
+ 
+         if (arg_oci_bundle)
+diff --git a/src/partition/repart.c b/src/partition/repart.c
+index 0862a37a8d..509cf69b5d 100644
+--- a/src/partition/repart.c
++++ b/src/partition/repart.c
+@@ -4561,9 +4561,8 @@ static int acquire_root_devno(
+ }
+ 
+ static int find_root(char **ret, int *ret_fd) {
+-        const char *p;
+-        int r;
+         _cleanup_free_ char *device = NULL;
++        int r;
+ 
+         assert(ret);
+         assert(ret_fd);
+diff --git a/src/portable/portable.c b/src/portable/portable.c
+index be311f94c4..bdc10da36f 100644
+--- a/src/portable/portable.c
++++ b/src/portable/portable.c
+@@ -1568,7 +1568,6 @@ int portable_detach(
+ 
+         SET_FOREACH(item, unit_files) {
+                 _cleanup_free_ char *md = NULL;
+-                const char *suffix;
+ 
+                 if (unlinkat(dirfd(d), item, 0) < 0) {
+                         log_debug_errno(errno, "Can't remove unit file %s/%s: %m", where, item);
+diff --git a/src/resolve/resolved-resolv-conf.c b/src/resolve/resolved-resolv-conf.c
+index e9785ab964..ee86cf75a0 100644
+--- a/src/resolve/resolved-resolv-conf.c
++++ b/src/resolve/resolved-resolv-conf.c
+@@ -51,8 +51,6 @@ int manager_check_resolv_conf(const Manager *m) {
+ }
+ 
+ static bool file_is_our_own(const struct stat *st) {
+-        const char *path;
+-
+         assert(st);
+ 
+         FOREACH_STRING(path,
+diff --git a/src/resolve/test-resolved-etc-hosts.c b/src/resolve/test-resolved-etc-hosts.c
+index cc55a980ad..f15e025b7b 100644
+--- a/src/resolve/test-resolved-etc-hosts.c
++++ b/src/resolve/test-resolved-etc-hosts.c
+@@ -45,7 +45,6 @@ static void test_parse_etc_hosts(void) {
+ 
+         int fd;
+         _cleanup_fclose_ FILE *f;
+-        const char *s;
+ 
+         fd = mkostemp_safe(t);
+         assert_se(fd >= 0);
+diff --git a/src/run/run.c b/src/run/run.c
+index e75b027542..2ae629f595 100644
+--- a/src/run/run.c
++++ b/src/run/run.c
+@@ -1702,8 +1702,6 @@ static int start_transient_trigger(
+ }
+ 
+ static bool shall_make_executable_absolute(void) {
+-        const char *f;
+-
+         if (strv_isempty(arg_cmdline))
+                 return false;
+         if (arg_transport != BUS_TRANSPORT_LOCAL)
+diff --git a/src/shared/bootspec.c b/src/shared/bootspec.c
+index 0076092c2a..a17375eb4c 100644
+--- a/src/shared/bootspec.c
++++ b/src/shared/bootspec.c
+@@ -1207,7 +1207,8 @@ int find_esp_and_warn(
+                 goto found;
+         }
+ 
+-        FOREACH_STRING(path, "/efi", "/boot", "/boot/efi") {
++        FOREACH_STRING(_path, "/efi", "/boot", "/boot/efi") {
++                path = _path;
+ 
+                 r = verify_esp(path, true, unprivileged_mode, ret_part, ret_pstart, ret_psize, ret_uuid);
+                 if (r >= 0)
+diff --git a/src/shared/chown-recursive.c b/src/shared/chown-recursive.c
+index 7c9a3050b4..05a7a10ce4 100644
+--- a/src/shared/chown-recursive.c
++++ b/src/shared/chown-recursive.c
+@@ -21,7 +21,6 @@ static int chown_one(
+                 gid_t gid,
+                 mode_t mask) {
+ 
+-        const char *n;
+         int r;
+ 
+         assert(fd >= 0);
+diff --git a/src/shared/discover-image.c b/src/shared/discover-image.c
+index 268d910214..1d432328e7 100644
+--- a/src/shared/discover-image.c
++++ b/src/shared/discover-image.c
+@@ -85,7 +85,7 @@ DEFINE_HASH_OPS_WITH_VALUE_DESTRUCTOR(image_hash_ops, char, string_hash_func, st
+ 
+ static char **image_settings_path(Image *image) {
+         _cleanup_strv_free_ char **l = NULL;
+-        const char *fn, *s;
++        const char *fn;
+         unsigned i = 0;
+ 
+         assert(image);
+diff --git a/src/shared/dissect-image.c b/src/shared/dissect-image.c
+index 39a7f4c3f2..b38f16c37a 100644
+--- a/src/shared/dissect-image.c
++++ b/src/shared/dissect-image.c
+@@ -3042,7 +3042,6 @@ int dissected_image_acquire_metadata(DissectedImage *m, DissectImageFlags extra_
+ 
+                         case META_HAS_INIT_SYSTEM: {
+                                 bool found = false;
+-                                const char *init;
+ 
+                                 FOREACH_STRING(init,
+                                                "/usr/lib/systemd/systemd",  /* systemd on /usr merged system */
+diff --git a/src/shared/machine-id-setup.c b/src/shared/machine-id-setup.c
+index e483675a75..df4ac419cb 100644
+--- a/src/shared/machine-id-setup.c
++++ b/src/shared/machine-id-setup.c
+@@ -197,7 +197,7 @@ finish:
+ 
+ int machine_id_commit(const char *root) {
+         _cleanup_close_ int fd = -1, initial_mntns_fd = -1;
+-        const char *etc_machine_id, *sync_path;
++        const char *etc_machine_id;
+         sd_id128_t id;
+         int r;
+ 
+diff --git a/src/shared/mount-setup.c b/src/shared/mount-setup.c
+index 7917968497..7eadff3ace 100644
+--- a/src/shared/mount-setup.c
++++ b/src/shared/mount-setup.c
+@@ -126,9 +126,6 @@ bool mount_point_is_api(const char *path) {
+ }
+ 
+ bool mount_point_ignore(const char *path) {
+-
+-        const char *i;
+-
+         /* These are API file systems that might be mounted by other software, we just list them here so that
+          * we know that we should ignore them. */
+         FOREACH_STRING(i,
+@@ -518,7 +515,6 @@ int mount_setup(bool loaded_policy, bool leave_propagation) {
+          * use the same label for all their files. */
+         if (loaded_policy) {
+                 usec_t before_relabel, after_relabel;
+-                const char *i;
+                 int n_extra;
+ 
+                 before_relabel = now(CLOCK_MONOTONIC);
+diff --git a/src/shared/netif-util.c b/src/shared/netif-util.c
+index 603d4de109..7605427052 100644
+--- a/src/shared/netif-util.c
++++ b/src/shared/netif-util.c
+@@ -39,14 +39,15 @@ int net_get_type_string(sd_device *device, uint16_t iftype, char **ret) {
+ }
+ 
+ const char *net_get_persistent_name(sd_device *device) {
+-        const char *name, *field;
+-
+         assert(device);
+ 
+         /* fetch some persistent data unique (on this machine) to this device */
+-        FOREACH_STRING(field, "ID_NET_NAME_ONBOARD", "ID_NET_NAME_SLOT", "ID_NET_NAME_PATH", "ID_NET_NAME_MAC")
++        FOREACH_STRING(field, "ID_NET_NAME_ONBOARD", "ID_NET_NAME_SLOT", "ID_NET_NAME_PATH", "ID_NET_NAME_MAC") {
++                const char *name;
++
+                 if (sd_device_get_property_value(device, field, &name) >= 0)
+                         return name;
++        }
+ 
+         return NULL;
+ }
+diff --git a/src/shared/pager.c b/src/shared/pager.c
+index 9426d3ef98..1a93deb628 100644
+--- a/src/shared/pager.c
++++ b/src/shared/pager.c
+@@ -144,7 +144,7 @@ void pager_open(PagerFlags flags) {
+         if (r < 0)
+                 return;
+         if (r == 0) {
+-                const char *less_charset, *exe;
++                const char *less_charset;
+ 
+                 /* In the child start the pager */
+ 
+diff --git a/src/shared/psi-util.c b/src/shared/psi-util.c
+index 009095e8c3..8bdd0d4a85 100644
+--- a/src/shared/psi-util.c
++++ b/src/shared/psi-util.c
+@@ -106,8 +106,6 @@ int read_resource_pressure(const char *path, PressureType type, ResourcePressure
+ }
+ 
+ int is_pressure_supported(void) {
+-        const char *p;
+-
+         /* The pressure files, both under /proc and in cgroups, will exist
+          * even if the kernel has PSI support disabled; we have to read
+          * the file to make sure it doesn't return -EOPNOTSUPP */
+diff --git a/src/shared/switch-root.c b/src/shared/switch-root.c
+index 99cd574197..1a444841fa 100644
+--- a/src/shared/switch-root.c
++++ b/src/shared/switch-root.c
+@@ -33,7 +33,6 @@ int switch_root(const char *new_root,
+         _cleanup_free_ char *resolved_old_root_after = NULL;
+         _cleanup_close_ int old_root_fd = -1;
+         bool old_root_remove;
+-        const char *i;
+         int r;
+ 
+         assert(new_root);
+@@ -64,12 +63,12 @@ int switch_root(const char *new_root,
+         if (mount(NULL, "/", NULL, MS_REC|MS_PRIVATE, NULL) < 0)
+                 return log_error_errno(errno, "Failed to set \"/\" mount propagation to private: %m");
+ 
+-        FOREACH_STRING(i, "/sys", "/dev", "/run", "/proc") {
++        FOREACH_STRING(path, "/sys", "/dev", "/run", "/proc") {
+                 _cleanup_free_ char *chased = NULL;
+ 
+-                r = chase_symlinks(i, new_root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &chased, NULL);
++                r = chase_symlinks(path, new_root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &chased, NULL);
+                 if (r < 0)
+-                        return log_error_errno(r, "Failed to resolve %s/%s: %m", new_root, i);
++                        return log_error_errno(r, "Failed to resolve %s/%s: %m", new_root, path);
+                 if (r > 0) {
+                         /* Already exists. Let's see if it is a mount point already. */
+                         r = path_is_mount_point(chased, NULL, 0);
+@@ -81,8 +80,8 @@ int switch_root(const char *new_root,
+                          /* Doesn't exist yet? */
+                         (void) mkdir_p_label(chased, 0755);
+ 
+-                if (mount(i, chased, NULL, mount_flags, NULL) < 0)
+-                        return log_error_errno(errno, "Failed to mount %s to %s: %m", i, chased);
++                if (mount(path, chased, NULL, mount_flags, NULL) < 0)
++                        return log_error_errno(errno, "Failed to mount %s to %s: %m", path, chased);
+         }
+ 
+         /* Do not fail if base_filesystem_create() fails. Not all switch roots are like base_filesystem_create() wants
+diff --git a/src/shared/tests.c b/src/shared/tests.c
+index b00006b41a..f5d9536411 100644
+--- a/src/shared/tests.c
++++ b/src/shared/tests.c
+@@ -307,16 +307,15 @@ const char *ci_environment(void) {
+          * just the general CI environment type, but also whether we're sanitizing or not, etc. The caller is
+          * expected to use strstr on the returned value. */
+         static const char *ans = POINTER_MAX;
+-        const char *p;
+         int r;
+ 
+         if (ans != POINTER_MAX)
+                 return ans;
+ 
+         /* We allow specifying the environment with $CITYPE. Nobody uses this so far, but we are ready. */
+-        p = getenv("CITYPE");
+-        if (!isempty(p))
+-                return (ans = p);
++        const char *citype = getenv("CITYPE");
++        if (!isempty(citype))
++                return (ans = citype);
+ 
+         if (getenv_bool("TRAVIS") > 0)
+                 return (ans = "travis");
+@@ -327,12 +326,12 @@ const char *ci_environment(void) {
+         if (getenv("AUTOPKGTEST_ARTIFACTS") || getenv("AUTOPKGTEST_TMP"))
+                 return (ans = "autopkgtest");
+ 
+-        FOREACH_STRING(p, "CI", "CONTINOUS_INTEGRATION") {
++        FOREACH_STRING(var, "CI", "CONTINOUS_INTEGRATION") {
+                 /* Those vars are booleans according to Semaphore and Travis docs:
+                  * https://docs.travis-ci.com/user/environment-variables/#default-environment-variables
+                  * https://docs.semaphoreci.com/ci-cd-environment/environment-variables/#ci
+                  */
+-                r = getenv_bool(p);
++                r = getenv_bool(var);
+                 if (r > 0)
+                         return (ans = "unknown"); /* Some other unknown thing */
+                 if (r == 0)
+diff --git a/src/systemctl/systemctl-edit.c b/src/systemctl/systemctl-edit.c
+index b59a67ac22..a97aa7be4c 100644
+--- a/src/systemctl/systemctl-edit.c
++++ b/src/systemctl/systemctl-edit.c
+@@ -320,7 +320,7 @@ static int run_editor(char **paths) {
+         if (r == 0) {
+                 char **editor_args = NULL, **tmp_path, **original_path;
+                 size_t n_editor_args = 0, i = 1, argc;
+-                const char **args, *editor, *p;
++                const char **args, *editor;
+ 
+                 argc = strv_length(paths)/2 + 1;
+ 
+@@ -358,9 +358,9 @@ static int run_editor(char **paths) {
+                 if (n_editor_args > 0)
+                         execvp(args[0], (char* const*) args);
+ 
+-                FOREACH_STRING(p, "editor", "nano", "vim", "vi") {
+-                        args[0] = p;
+-                        execvp(p, (char* const*) args);
++                FOREACH_STRING(name, "editor", "nano", "vim", "vi") {
++                        args[0] = name;
++                        execvp(name, (char* const*) args);
+                         /* We do not fail if the editor doesn't exist because we want to try each one of them
+                          * before failing. */
+                         if (errno != ENOENT) {
+diff --git a/src/systemctl/systemctl-sysv-compat.c b/src/systemctl/systemctl-sysv-compat.c
+index a78fa1e04c..017dba2034 100644
+--- a/src/systemctl/systemctl-sysv-compat.c
++++ b/src/systemctl/systemctl-sysv-compat.c
+@@ -18,9 +18,8 @@
+ 
+ int talk_initctl(char rl) {
+ #if HAVE_SYSV_COMPAT
+-        struct init_request request;
+         _cleanup_close_ int fd = -1;
+-        const char *p;
++        const char *path;
+         int r;
+ 
+         /* Try to switch to the specified SysV runlevel. Returns == 0 if the operation does not apply on this
+@@ -29,19 +28,19 @@ int talk_initctl(char rl) {
+         if (rl == 0)
+                 return 0;
+ 
+-        FOREACH_STRING(p, "/run/initctl", "/dev/initctl") {
+-                fd = open(p, O_WRONLY|O_NONBLOCK|O_CLOEXEC|O_NOCTTY);
+-                if (fd >= 0 || errno != ENOENT)
+-                        break;
+-        }
+-        if (fd < 0) {
+-                if (errno == ENOENT)
+-                        return 0;
++        FOREACH_STRING(_path, "/run/initctl", "/dev/initctl") {
++                path = _path;
+ 
+-                return log_error_errno(errno, "Failed to open initctl fifo: %m");
++                fd = open(path, O_WRONLY|O_NONBLOCK|O_CLOEXEC|O_NOCTTY);
++                if (fd < 0 && errno != ENOENT)
++                        return log_error_errno(errno, "Failed to open %s: %m", path);
++                if (fd >= 0)
++                        break;
+         }
++        if (fd < 0)
++                return 0;
+ 
+-        request = (struct init_request) {
++        struct init_request request = {
+                 .magic = INIT_MAGIC,
+                 .sleeptime = 0,
+                 .cmd = INIT_CMD_RUNLVL,
+@@ -50,7 +49,7 @@ int talk_initctl(char rl) {
+ 
+         r = loop_write(fd, &request, sizeof(request), false);
+         if (r < 0)
+-                return log_error_errno(r, "Failed to write to %s: %m", p);
++                return log_error_errno(r, "Failed to write to %s: %m", path);
+ 
+         return 1;
+ #else
+diff --git a/src/test/test-bpf-devices.c b/src/test/test-bpf-devices.c
+index bbaa7b3605..587591cf04 100644
+--- a/src/test/test-bpf-devices.c
++++ b/src/test/test-bpf-devices.c
+@@ -30,7 +30,6 @@ static void test_policy_closed(const char *cgroup_path, BPFProgram **installed_p
+         r = bpf_devices_apply_policy(&prog, CGROUP_DEVICE_POLICY_CLOSED, true, cgroup_path, installed_prog);
+         assert_se(r >= 0);
+ 
+-        const char *s;
+         FOREACH_STRING(s, "/dev/null",
+                           "/dev/zero",
+                           "/dev/full",
+diff --git a/src/test/test-ellipsize.c b/src/test/test-ellipsize.c
+index b840355f5e..7317193363 100644
+--- a/src/test/test-ellipsize.c
++++ b/src/test/test-ellipsize.c
+@@ -64,18 +64,14 @@ static void test_ellipsize_mem_one(const char *s, size_t old_length, size_t new_
+ }
+ 
+ TEST(ellipsize_mem) {
+-        const char *s;
+-        ssize_t l, k;
+-
+         FOREACH_STRING(s,
+                        "_XXXXXXXXXXX_", /* ASCII */
+                        "_aąęółśćńżźć_", /* two-byte utf-8 */
+                        "გამარჯობა",     /* multi-byte utf-8 */
+                        "你好世界",       /* wide characters */
+                        "你გą世óoó界")    /* a mix */
+-
+-                for (l = strlen(s); l >= 0; l--)
+-                        for (k = strlen(s) + 1; k >= 0; k--)
++                for (ssize_t l = strlen(s); l >= 0; l--)
++                        for (ssize_t k = strlen(s) + 1; k >= 0; k--)
+                                 test_ellipsize_mem_one(s, l, k);
+ }
+ 
+diff --git a/src/test/test-env-file.c b/src/test/test-env-file.c
+index 7b132447bf..f97206b4d6 100644
+--- a/src/test/test-env-file.c
++++ b/src/test/test-env-file.c
+@@ -166,8 +166,6 @@ TEST(load_env_file_6) {
+ }
+ 
+ TEST(write_and_load_env_file) {
+-        const char *v;
+-
+         /* Make sure that our writer, parser and the shell agree on what our env var files mean */
+ 
+         FOREACH_STRING(v,
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index 49629c6bc2..0760df6603 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -190,19 +190,15 @@ static bool check_user_has_group_with_same_name(const char *name) {
+ }
+ 
+ static bool is_inaccessible_available(void) {
+-        const char *p;
+-
+         FOREACH_STRING(p,
+-                "/run/systemd/inaccessible/reg",
+-                "/run/systemd/inaccessible/dir",
+-                "/run/systemd/inaccessible/chr",
+-                "/run/systemd/inaccessible/blk",
+-                "/run/systemd/inaccessible/fifo",
+-                "/run/systemd/inaccessible/sock"
+-        ) {
++                       "/run/systemd/inaccessible/reg",
++                       "/run/systemd/inaccessible/dir",
++                       "/run/systemd/inaccessible/chr",
++                       "/run/systemd/inaccessible/blk",
++                       "/run/systemd/inaccessible/fifo",
++                       "/run/systemd/inaccessible/sock")
+                 if (access(p, F_OK) < 0)
+                         return false;
+-        }
+ 
+         return true;
+ }
+diff --git a/src/test/test-fileio.c b/src/test/test-fileio.c
+index 087d76f760..4f91d94709 100644
+--- a/src/test/test-fileio.c
++++ b/src/test/test-fileio.c
+@@ -1003,7 +1003,6 @@ TEST(read_full_file_offset_size) {
+ }
+ 
+ static void test_read_virtual_file_one(size_t max_size) {
+-        const char *filename;
+         int r;
+ 
+         log_info("/* %s (max_size=%zu) */", __func__, max_size);
+diff --git a/src/test/test-gpt.c b/src/test/test-gpt.c
+index ab26d5d096..05da7a9e48 100644
+--- a/src/test/test-gpt.c
++++ b/src/test/test-gpt.c
+@@ -11,16 +11,13 @@
+ #include "util.h"
+ 
+ TEST(gpt_types_against_architectures) {
+-        const char *prefix;
+         int r;
+ 
+         /* Dumps a table indicating for which architectures we know we have matching GPT partition
+          * types. Also validates whether we can properly categorize the entries. */
+ 
+         FOREACH_STRING(prefix, "root-", "usr-")
+-                for (int a = 0; a < _ARCHITECTURE_MAX; a++) {
+-                        const char *suffix;
+-
++                for (int a = 0; a < _ARCHITECTURE_MAX; a++)
+                         FOREACH_STRING(suffix, "", "-verity", "-verity-sig") {
+                                 _cleanup_free_ char *joined = NULL;
+                                 sd_id128_t id;
+@@ -48,7 +45,6 @@ TEST(gpt_types_against_architectures) {
+ 
+                                 assert_se(gpt_partition_type_uuid_to_arch(id) == a);
+                         }
+-                }
+ }
+ 
+ DEFINE_TEST_MAIN(LOG_INFO);
+diff --git a/src/test/test-libcrypt-util.c b/src/test/test-libcrypt-util.c
+index ebd520f7ba..f88a9f9b24 100644
+--- a/src/test/test-libcrypt-util.c
++++ b/src/test/test-libcrypt-util.c
+@@ -39,7 +39,6 @@ static int test_hash_password(void) {
+         /* As a warm-up exercise, check if we can hash passwords. */
+ 
+         bool have_sane_hash = false;
+-        const char *hash;
+ 
+         FOREACH_STRING(hash,
+                        "ew3bU1.hoKk4o",
+@@ -68,7 +67,6 @@ static void test_hash_password_full(void) {
+         log_info("/* %s */", __func__);
+ 
+         _cleanup_free_ void *cd_data = NULL;
+-        const char *i;
+         int cd_size = 0;
+ 
+         log_info("sizeof(struct crypt_data): %zu bytes", sizeof(struct crypt_data));
+diff --git a/src/test/test-loop-block.c b/src/test/test-loop-block.c
+index 1642f82e40..9c8c55bca2 100644
+--- a/src/test/test-loop-block.c
++++ b/src/test/test-loop-block.c
+@@ -114,7 +114,6 @@ int main(int argc, char *argv[]) {
+         _cleanup_(dissected_image_unrefp) DissectedImage *dissected = NULL;
+         _cleanup_(umount_and_rmdir_and_freep) char *mounted = NULL;
+         pthread_t threads[N_THREADS];
+-        const char *fs;
+         sd_id128_t id;
+         int r;
+ 
+diff --git a/src/test/test-mount-util.c b/src/test/test-mount-util.c
+index 74d352268e..7e06fc419c 100644
+--- a/src/test/test-mount-util.c
++++ b/src/test/test-mount-util.c
+@@ -128,7 +128,6 @@ TEST(mount_flags_to_string) {
+ TEST(bind_remount_recursive) {
+         _cleanup_(rm_rf_physical_and_freep) char *tmp = NULL;
+         _cleanup_free_ char *subdir = NULL;
+-        const char *p;
+ 
+         if (geteuid() != 0 || have_effective_cap(CAP_SYS_ADMIN) <= 0) {
+                 (void) log_tests_skipped("not running privileged");
+diff --git a/src/test/test-stat-util.c b/src/test/test-stat-util.c
+index 7f633ab259..5f744b0288 100644
+--- a/src/test/test-stat-util.c
++++ b/src/test/test-stat-util.c
+@@ -67,7 +67,6 @@ TEST(path_is_fs_type) {
+ }
+ 
+ TEST(path_is_temporary_fs) {
+-        const char *s;
+         int r;
+ 
+         FOREACH_STRING(s, "/", "/run", "/sys", "/sys/", "/proc", "/i-dont-exist", "/var", "/var/lib") {
+@@ -85,7 +84,6 @@ TEST(path_is_temporary_fs) {
+ }
+ 
+ TEST(path_is_read_only_fs) {
+-        const char *s;
+         int r;
+ 
+         FOREACH_STRING(s, "/", "/run", "/sys", "/sys/", "/proc", "/i-dont-exist", "/var", "/var/lib") {
+diff --git a/src/test/test-strv.c b/src/test/test-strv.c
+index 94581fc832..0ece342521 100644
+--- a/src/test/test-strv.c
++++ b/src/test/test-strv.c
+@@ -924,12 +924,10 @@ TEST(foreach_string) {
+                 "waldo",
+                 NULL
+         };
+-        const char *x;
+-        unsigned i = 0;
+ 
++        unsigned i = 0;
+         FOREACH_STRING(x, "foo", "bar", "waldo")
+                 assert_se(streq_ptr(t[i++], x));
+-
+         assert_se(i == 3);
+ 
+         FOREACH_STRING(x, "zzz")
+diff --git a/src/test/test-utf8.c b/src/test/test-utf8.c
+index 7337b81227..f070c171fe 100644
+--- a/src/test/test-utf8.c
++++ b/src/test/test-utf8.c
+@@ -144,7 +144,6 @@ TEST(utf8_escape_non_printable) {
+ }
+ 
+ TEST(utf8_escape_non_printable_full) {
+-        const char *s;
+         FOREACH_STRING(s,
+                        "goo goo goo",       /* ASCII */
+                        "\001 \019\20\a",    /* control characters */
+@@ -210,8 +209,6 @@ TEST(utf8_console_width) {
+ }
+ 
+ TEST(utf8_to_utf16) {
+-        const char *p;
+-
+         FOREACH_STRING(p,
+                        "abc",
+                        "zażółcić gęślą jaźń",
+diff --git a/src/tmpfiles/offline-passwd.c b/src/tmpfiles/offline-passwd.c
+index 8ba3fea984..c847266ed4 100644
+--- a/src/tmpfiles/offline-passwd.c
++++ b/src/tmpfiles/offline-passwd.c
+@@ -39,7 +39,6 @@ static int populate_uid_cache(const char *root, Hashmap **ret) {
+         /* The directory list is hardcoded here: /etc is the standard, and rpm-ostree uses /usr/lib. This
+          * could be made configurable, but I don't see the point right now. */
+ 
+-        const char *fname;
+         FOREACH_STRING(fname, "/etc/passwd", "/usr/lib/passwd") {
+                 _cleanup_fclose_ FILE *f = NULL;
+ 
+@@ -78,7 +77,6 @@ static int populate_gid_cache(const char *root, Hashmap **ret) {
+         if (!cache)
+                 return -ENOMEM;
+ 
+-        const char *fname;
+         FOREACH_STRING(fname, "/etc/group", "/usr/lib/group") {
+                 _cleanup_fclose_ FILE *f = NULL;
+ 

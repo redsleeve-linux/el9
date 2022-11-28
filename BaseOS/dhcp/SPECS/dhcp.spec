@@ -15,7 +15,7 @@
 Summary:  Dynamic host configuration protocol software
 Name:     dhcp
 Version:  4.4.2
-Release:  15.b1%{?dist}.redsleeve
+Release:  17.b1%{?dist}
 
 # NEVER CHANGE THE EPOCH on this package.  The previous maintainer (prior to
 # dcantrell maintaining the package) made incorrect use of the epoch and
@@ -33,35 +33,37 @@ Source6:  dhcpd.service
 Source7:  dhcpd6.service
 Source8:  dhcrelay.service
 
-Patch1 : 0001-change-bug-url.patch
-Patch2 : 0002-additional-dhclient-options.patch
-Patch3 : 0003-Handle-releasing-interfaces-requested-by-sbin-ifup.patch
-Patch4 : 0004-Support-unicast-BOOTP-for-IBM-pSeries-systems-and-ma.patch
-Patch5 : 0005-Change-default-requested-options.patch
-Patch6 : 0006-Various-man-page-only-fixes.patch
-Patch7 : 0007-Change-paths-to-conform-to-our-standards.patch
-Patch8 : 0008-Make-sure-all-open-file-descriptors-are-closed-on-ex.patch
-Patch9 : 0009-Fix-garbage-in-format-string-error.patch
-Patch10 : 0010-Handle-null-timeout.patch
-Patch11 : 0011-Drop-unnecessary-capabilities.patch
-Patch12 : 0012-RFC-3442-Classless-Static-Route-Option-for-DHCPv4-51.patch
-Patch13 : 0013-DHCPv6-over-PPP-support-626514.patch
-Patch14 : 0014-IPoIB-support-660681.patch
-Patch15 : 0015-Add-GUID-DUID-to-dhcpd-logs-1064416.patch
-Patch16 : 0016-Turn-on-creating-sending-of-DUID.patch
-Patch17 : 0017-Send-unicast-request-release-via-correct-interface.patch
-Patch18 : 0018-No-subnet-declaration-for-iface-should-be-info-not-e.patch
-Patch19 : 0019-dhclient-write-DUID_LLT-even-in-stateless-mode-11563.patch
-Patch20 : 0020-Discover-all-hwaddress-for-xid-uniqueness.patch
-Patch21 : 0021-Load-leases-DB-in-non-replay-mode-only.patch
-Patch22 : 0022-dhclient-make-sure-link-local-address-is-ready-in-st.patch
-Patch23 : 0023-option-97-pxe-client-id.patch
-Patch24 : 0024-Detect-system-time-changes.patch
-Patch25 : 0025-bind-Detect-system-time-changes.patch
-Patch26 : 0026-Add-dhclient-5-B-option-description.patch
-Patch27:  0027-Add-missed-sd-notify-patch-to-manage-dhcpd-with-syst.patch
-Patch28:  0028-Fix-for-CVE-2021-25217.patch
-Patch29:  0029-Use-system-getaddrinfo-for-dhcp.patch
+Patch1: 0001-change-bug-url.patch
+Patch2: 0002-additional-dhclient-options.patch
+Patch3: 0003-Handle-releasing-interfaces-requested-by-sbin-ifup.patch
+Patch4: 0004-Support-unicast-BOOTP-for-IBM-pSeries-systems-and-ma.patch
+Patch5: 0005-Change-default-requested-options.patch
+Patch6: 0006-Various-man-page-only-fixes.patch
+Patch7: 0007-Change-paths-to-conform-to-our-standards.patch
+Patch8: 0008-Make-sure-all-open-file-descriptors-are-closed-on-ex.patch
+Patch9: 0009-Fix-garbage-in-format-string-error.patch
+Patch10: 0010-Handle-null-timeout.patch
+Patch11: 0011-Drop-unnecessary-capabilities.patch
+Patch12: 0012-RFC-3442-Classless-Static-Route-Option-for-DHCPv4-51.patch
+Patch13: 0013-DHCPv6-over-PPP-support-626514.patch
+Patch14: 0014-IPoIB-support-660681.patch
+Patch15: 0015-Add-GUID-DUID-to-dhcpd-logs-1064416.patch
+Patch16: 0016-Turn-on-creating-sending-of-DUID.patch
+Patch17: 0017-Send-unicast-request-release-via-correct-interface.patch
+Patch18: 0018-No-subnet-declaration-for-iface-should-be-info-not-e.patch
+Patch19: 0019-dhclient-write-DUID_LLT-even-in-stateless-mode-11563.patch
+Patch20: 0020-Discover-all-hwaddress-for-xid-uniqueness.patch
+Patch21: 0021-Load-leases-DB-in-non-replay-mode-only.patch
+Patch22: 0022-dhclient-make-sure-link-local-address-is-ready-in-st.patch
+Patch23: 0023-option-97-pxe-client-id.patch
+Patch24: 0024-Detect-system-time-changes.patch
+Patch25: 0025-bind-Detect-system-time-changes.patch
+Patch26: 0026-Add-dhclient-5-B-option-description.patch
+Patch27: 0027-Add-missed-sd-notify-patch-to-manage-dhcpd-with-syst.patch
+Patch28: 0028-Fix-for-CVE-2021-25217.patch
+Patch29: 0029-Use-system-getaddrinfo-for-dhcp.patch
+Patch30: CVE-2021-25220.patch
+Patch31: omshell-hmac-sha512-support.patch
 
 
 BuildRequires: autoconf
@@ -226,10 +228,6 @@ sed -i -e 's|/var/db/|%{_localstatedir}/lib/dhcpd/|g' contrib/dhcp-lease-list.pl
 %build
 #libtoolize --copy --force
 autoreconf --verbose --force --install
-
-%ifarch %{arm}
-export LIBS=-latomic
-%endif
 
 CFLAGS="%{optflags} -fno-strict-aliasing -fcommon" \
 %configure \
@@ -516,11 +514,14 @@ done
 %endif
 
 %changelog
-* Thu Jul 21 2022 Jacco Ligthart <jacco@redsleeve.org> 4.4.2-15.b1.el9.redsleeve
-- added atomic libs for arm
-
-* Tue May 17 2022 CentOS Sources <bugs@centos.org> - 4.4.2-15.b1.el9.centos
+* Tue Nov 15 2022 CentOS Sources <bugs@centos.org> - 4.4.2-17.b1.el9.centos
 - Apply debranding changes
+
+* Tue May 10 2022 Martin Osvald <mosvald@redhat.com> - 12:4.4.2-17.b1
+- omshell: add support for hmac-sha512 algorithm (#2083553)
+
+* Thu Apr 14 2022 Martin Osvald <mosvald@redhat.com> - 12:4.4.2-16.b1
+- Fix for CVE-2021-25220
 
 * Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com> - 12:4.4.2-15.b1
 - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags

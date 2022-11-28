@@ -1,0 +1,68 @@
+From 8a52c3a1797084956ddcd2acfb65a4023a4f0655 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=BD=D0=B0=D0=B1?= <nabijaczleweli@nabijaczleweli.xyz>
+Date: Mon, 20 Dec 2021 14:57:39 +0100
+Subject: [PATCH] kernel-install: don't pull out KERNEL_IMAGE
+
+It's part of the pack directly passed to scripts on add and ignored on
+remove
+
+(cherry picked from commit af319a4b14bd05cd4c8460487f2c6d7a31b35640)
+
+Related: #2065061
+---
+ src/kernel-install/kernel-install | 21 ++++++++++-----------
+ 1 file changed, 10 insertions(+), 11 deletions(-)
+
+diff --git a/src/kernel-install/kernel-install b/src/kernel-install/kernel-install
+index 2e8f382d5f..097d6557f2 100755
+--- a/src/kernel-install/kernel-install
++++ b/src/kernel-install/kernel-install
+@@ -72,15 +72,14 @@ else
+     [ $# -ge 1 ] && shift
+ fi
+ 
+-KERNEL_VERSION="$1"
+-KERNEL_IMAGE="$2"
+-[ $# -ge 2 ] && shift 2
+-
+-if [ -z "$COMMAND" ] || [ -z "$KERNEL_VERSION" ]; then
++if [ $# -lt 1 ]; then
+     echo "Not enough arguments" >&2
+     exit 1
+ fi
+ 
++KERNEL_VERSION="$1"
++shift
++
+ if [ -r "/etc/kernel/install.conf" ]; then
+     . /etc/kernel/install.conf
+ elif [ -r "/usr/lib/kernel/install.conf" ]; then
+@@ -147,13 +146,13 @@ IFS="
+ 
+ case "$COMMAND" in
+     add)
+-        if [ -z "$KERNEL_IMAGE" ]; then
+-            echo "Command 'add' requires an argument" >&2
++        if [ $# -lt 1 ]; then
++            echo "Command 'add' requires a kernel image" >&2
+             exit 1
+         fi
+ 
+-        if ! [ -f "$KERNEL_IMAGE" ]; then
+-            echo "Kernel image argument $KERNEL_IMAGE not a file" >&2
++        if ! [ -f "$1" ]; then
++            echo "Kernel image argument $1 not a file" >&2
+             exit 1
+         fi
+ 
+@@ -170,8 +169,8 @@ case "$COMMAND" in
+         fi
+ 
+         for f in $PLUGINS; do
+-            [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && echo "+$f add $KERNEL_VERSION $ENTRY_DIR_ABS $KERNEL_IMAGE $*"
+-            "$f" add "$KERNEL_VERSION" "$ENTRY_DIR_ABS" "$KERNEL_IMAGE" "$@"
++            [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && echo "+$f add $KERNEL_VERSION $ENTRY_DIR_ABS $*"
++            "$f" add "$KERNEL_VERSION" "$ENTRY_DIR_ABS" "$@"
+             err=$?
+             [ $err -eq $skip_remaining ] && break
+             ret=$(( ret + err ))

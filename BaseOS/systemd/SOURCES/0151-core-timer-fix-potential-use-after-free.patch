@@ -1,0 +1,25 @@
+From e9acfceb104c8f9ccec8b468b5d111844285f43a Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 10 May 2022 14:10:17 +0900
+Subject: [PATCH] core/timer: fix potential use-after-free
+
+(cherry picked from commit 756491af392a99c4286d876b0041535e50df80ad)
+
+Related: #2087652
+---
+ src/core/timer.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/timer.c b/src/core/timer.c
+index 0dc49dd46b..b439802bc2 100644
+--- a/src/core/timer.c
++++ b/src/core/timer.c
+@@ -68,7 +68,7 @@ static void timer_done(Unit *u) {
+         t->monotonic_event_source = sd_event_source_disable_unref(t->monotonic_event_source);
+         t->realtime_event_source = sd_event_source_disable_unref(t->realtime_event_source);
+ 
+-        free(t->stamp_path);
++        t->stamp_path = mfree(t->stamp_path);
+ }
+ 
+ static int timer_verify(Timer *t) {

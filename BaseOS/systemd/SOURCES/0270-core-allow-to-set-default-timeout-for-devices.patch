@@ -1,0 +1,115 @@
+From fa06a45fa2dc0b7d15dc1394e679a9043fa2fee4 Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Sat, 16 Jul 2022 09:49:12 +0200
+Subject: [PATCH] core: allow to set default timeout for devices
+
+Fixes: #19879
+(cherry picked from commit a0fe19f9f791c05af236265954b1d73e8fcf5468)
+
+Resolves: #2116681
+---
+ src/core/dbus-manager.c | 1 +
+ src/core/device.c       | 2 +-
+ src/core/main.c         | 4 ++++
+ src/core/manager.c      | 1 +
+ src/core/manager.h      | 1 +
+ src/core/system.conf.in | 1 +
+ 6 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/dbus-manager.c b/src/core/dbus-manager.c
+index 0ce2d73857..9d47d9c8a7 100644
+--- a/src/core/dbus-manager.c
++++ b/src/core/dbus-manager.c
+@@ -2706,6 +2706,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
+         SD_BUS_PROPERTY("DefaultTimeoutStartUSec", "t", bus_property_get_usec, offsetof(Manager, default_timeout_start_usec), SD_BUS_VTABLE_PROPERTY_CONST),
+         SD_BUS_PROPERTY("DefaultTimeoutStopUSec", "t", bus_property_get_usec, offsetof(Manager, default_timeout_stop_usec), SD_BUS_VTABLE_PROPERTY_CONST),
+         SD_BUS_PROPERTY("DefaultTimeoutAbortUSec", "t", property_get_default_timeout_abort_usec, 0, 0),
++        SD_BUS_PROPERTY("DefaultDeviceTimeoutUSec", "t", bus_property_get_usec, offsetof(Manager, default_device_timeout_usec), SD_BUS_VTABLE_PROPERTY_CONST),
+         SD_BUS_PROPERTY("DefaultRestartUSec", "t", bus_property_get_usec, offsetof(Manager, default_restart_usec), SD_BUS_VTABLE_PROPERTY_CONST),
+         SD_BUS_PROPERTY("DefaultStartLimitIntervalUSec", "t", bus_property_get_usec, offsetof(Manager, default_start_limit_interval), SD_BUS_VTABLE_PROPERTY_CONST),
+         /* The following two items are obsolete alias */
+diff --git a/src/core/device.c b/src/core/device.c
+index d2c5febd3f..cb6021cbd8 100644
+--- a/src/core/device.c
++++ b/src/core/device.c
+@@ -101,7 +101,7 @@ static void device_init(Unit *u) {
+          * indefinitely for plugged in devices, something which cannot
+          * happen for the other units since their operations time out
+          * anyway. */
+-        u->job_running_timeout = u->manager->default_timeout_start_usec;
++        u->job_running_timeout = u->manager->default_device_timeout_usec;
+ 
+         u->ignore_on_isolate = true;
+ 
+diff --git a/src/core/main.c b/src/core/main.c
+index 03efaa03be..7dedc5163b 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -132,6 +132,7 @@ static usec_t arg_default_restart_usec;
+ static usec_t arg_default_timeout_start_usec;
+ static usec_t arg_default_timeout_stop_usec;
+ static usec_t arg_default_timeout_abort_usec;
++static usec_t arg_default_device_timeout_usec;
+ static bool arg_default_timeout_abort_set;
+ static usec_t arg_default_start_limit_interval;
+ static unsigned arg_default_start_limit_burst;
+@@ -725,6 +726,7 @@ static int parse_config_file(void) {
+                 { "Manager", "DefaultTimeoutStartSec",       config_parse_sec,                   0, &arg_default_timeout_start_usec        },
+                 { "Manager", "DefaultTimeoutStopSec",        config_parse_sec,                   0, &arg_default_timeout_stop_usec         },
+                 { "Manager", "DefaultTimeoutAbortSec",       config_parse_default_timeout_abort, 0, NULL                                   },
++                { "Manager", "DefaultDeviceTimeoutSec",      config_parse_sec,                   0, &arg_default_device_timeout_usec       },
+                 { "Manager", "DefaultRestartSec",            config_parse_sec,                   0, &arg_default_restart_usec              },
+                 { "Manager", "DefaultStartLimitInterval",    config_parse_sec,                   0, &arg_default_start_limit_interval      }, /* obsolete alias */
+                 { "Manager", "DefaultStartLimitIntervalSec", config_parse_sec,                   0, &arg_default_start_limit_interval      },
+@@ -809,6 +811,7 @@ static void set_manager_defaults(Manager *m) {
+         m->default_timeout_stop_usec = arg_default_timeout_stop_usec;
+         m->default_timeout_abort_usec = arg_default_timeout_abort_usec;
+         m->default_timeout_abort_set = arg_default_timeout_abort_set;
++        m->default_device_timeout_usec = arg_default_device_timeout_usec;
+         m->default_restart_usec = arg_default_restart_usec;
+         m->default_start_limit_interval = arg_default_start_limit_interval;
+         m->default_start_limit_burst = arg_default_start_limit_burst;
+@@ -2437,6 +2440,7 @@ static void reset_arguments(void) {
+         arg_default_timeout_stop_usec = DEFAULT_TIMEOUT_USEC;
+         arg_default_timeout_abort_usec = DEFAULT_TIMEOUT_USEC;
+         arg_default_timeout_abort_set = false;
++        arg_default_device_timeout_usec = DEFAULT_TIMEOUT_USEC;
+         arg_default_start_limit_interval = DEFAULT_START_LIMIT_INTERVAL;
+         arg_default_start_limit_burst = DEFAULT_START_LIMIT_BURST;
+         arg_runtime_watchdog = 0;
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 5b7f5f55aa..8057bafe61 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -806,6 +806,7 @@ int manager_new(LookupScope scope, ManagerTestRunFlags test_run_flags, Manager *
+                 .default_timeout_start_usec = DEFAULT_TIMEOUT_USEC,
+                 .default_timeout_stop_usec = DEFAULT_TIMEOUT_USEC,
+                 .default_restart_usec = DEFAULT_RESTART_USEC,
++                .default_device_timeout_usec = DEFAULT_TIMEOUT_USEC,
+ 
+                 .original_log_level = -1,
+                 .original_log_target = _LOG_TARGET_INVALID,
+diff --git a/src/core/manager.h b/src/core/manager.h
+index 281d2a2138..e7a15e6b25 100644
+--- a/src/core/manager.h
++++ b/src/core/manager.h
+@@ -354,6 +354,7 @@ struct Manager {
+         ExecOutput default_std_output, default_std_error;
+ 
+         usec_t default_restart_usec, default_timeout_start_usec, default_timeout_stop_usec;
++        usec_t default_device_timeout_usec;
+         usec_t default_timeout_abort_usec;
+         bool default_timeout_abort_set;
+ 
+diff --git a/src/core/system.conf.in b/src/core/system.conf.in
+index 5913b5b0e4..7a150a482f 100644
+--- a/src/core/system.conf.in
++++ b/src/core/system.conf.in
+@@ -44,6 +44,7 @@
+ #DefaultTimeoutStartSec=90s
+ #DefaultTimeoutStopSec=90s
+ #DefaultTimeoutAbortSec=
++#DefaultDeviceTimeoutSec=90s
+ #DefaultRestartSec=100ms
+ #DefaultStartLimitIntervalSec=10s
+ #DefaultStartLimitBurst=5

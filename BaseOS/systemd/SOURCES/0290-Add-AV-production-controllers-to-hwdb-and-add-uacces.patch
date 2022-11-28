@@ -1,0 +1,196 @@
+From 41d06ed98ecbe4f65cfffc3877fbe4c87fadc6b4 Mon Sep 17 00:00:00 2001
+From: Be <be@mixxx.org>
+Date: Fri, 27 Aug 2021 22:30:50 -0500
+Subject: [PATCH] Add AV production controllers to hwdb and add uaccess
+
+This adds support for AV production controller devices, such
+as DJ tables, music-oriented key pads, and others.
+
+The USB vendor and product IDs come from Mixxx, Ctlra, and
+Ardour.
+
+Fixes #20533
+
+Co-developed-by: Georges Basile Stavracas Neto <georges.stavracas@gmail.com>
+(cherry picked from commit f2c36c0e2445fa95ba109017d4b768b2fd825c43)
+
+Related: #2087778
+---
+ hwdb.d/70-av-production.hwdb  | 123 ++++++++++++++++++++++++++++++++++
+ hwdb.d/meson.build            |   1 +
+ hwdb.d/parse_hwdb.py          |   1 +
+ src/login/70-uaccess.rules.in |   9 +++
+ 4 files changed, 134 insertions(+)
+ create mode 100644 hwdb.d/70-av-production.hwdb
+
+diff --git a/hwdb.d/70-av-production.hwdb b/hwdb.d/70-av-production.hwdb
+new file mode 100644
+index 0000000000..17ac1b4fb6
+--- /dev/null
++++ b/hwdb.d/70-av-production.hwdb
+@@ -0,0 +1,123 @@
++# This file is part of systemd.
++#
++# Database for AV production controllers that should be accessible to the seat owner.
++#
++# This covers DJ tables, and music-oriented key pads
++#
++# To add local entries, copy this file to
++#   /etc/udev/hwdb.d/
++# and add your rules there. To load the new rules execute (as root):
++#   systemd-hwdb update
++#   udevadm trigger
++
++################
++# Ableton
++################
++# Push 2
++usb:v2982p1967*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++################
++# Eks
++################
++# Otus
++usb:v1157p0300*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++#############################
++# Hercules (Guillemot Corp)
++#############################
++# DJ Console MP3e2
++usb:v06F8pB105*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# DJ Console MP3 LE / Glow
++usb:v06F8pB120*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# DJ Console Mk2
++usb:v06F8pB100*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# DJ Console Mk4
++usb:v06F8pB107*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++#####################
++# Native Instruments
++#####################
++
++# Maschine 2
++usb:v17CCp1140*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Maschine 2 Mikro
++usb:v17CCp1110*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Maschine 2 Studio
++usb:v17CCp1300*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Maschine Jam
++usb:v17CCp1500*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Maschine 3
++usb:v17CCp1600*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol D2
++usb:v17CCp1400*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol F1
++usb:v17CCp1120*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol S2 Mk2
++usb:v17CCp1320*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol S2 Mk3
++usb:v17CCp1710*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol S3
++usb:v17CCp1900*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol S4 Mk2
++usb:v17CCp1310*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol S4 Mk3
++usb:v17CCp1720*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol S5
++usb:v17CCp1420*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol S8
++usb:v17CCp1370*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol X1 Mk2
++usb:v17CCp1220*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol Z1
++usb:v17CCp1210*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++# Traktor Kontrol Z2
++usb:v17CCp1130*
++ ID_AV_PRODUCTION_CONTROLLER=1
++
++####################
++# Pioneer
++####################
++# CDJ 2000 NXS 2
++usb:v2B73p0005*
++ ID_AV_PRODUCTION_CONTROLLER=1
+diff --git a/hwdb.d/meson.build b/hwdb.d/meson.build
+index fc72ebb2bd..8f6a8a4486 100644
+--- a/hwdb.d/meson.build
++++ b/hwdb.d/meson.build
+@@ -28,6 +28,7 @@ hwdb_files_test = files('''
+         60-seat.hwdb
+         60-sensor.hwdb
+         70-analyzers.hwdb
++        70-av-production.hwdb
+         70-cameras.hwdb
+         70-joystick.hwdb
+         70-mouse.hwdb
+diff --git a/hwdb.d/parse_hwdb.py b/hwdb.d/parse_hwdb.py
+index 194a71ac08..93179b675c 100755
+--- a/hwdb.d/parse_hwdb.py
++++ b/hwdb.d/parse_hwdb.py
+@@ -135,6 +135,7 @@ def property_grammar():
+              ('MOUSE_WHEEL_CLICK_COUNT', INTEGER),
+              ('MOUSE_WHEEL_CLICK_COUNT_HORIZONTAL', INTEGER),
+              ('ID_AUTOSUSPEND', Or((Literal('0'), Literal('1')))),
++             ('ID_AV_PRODUCTION_CONTROLLER', Or((Literal('0'), Literal('1')))),
+              ('ID_PERSIST', Or((Literal('0'), Literal('1')))),
+              ('ID_PDA', Or((Literal('0'), Literal('1')))),
+              ('ID_INPUT', Or((Literal('0'), Literal('1')))),
+diff --git a/src/login/70-uaccess.rules.in b/src/login/70-uaccess.rules.in
+index 052194b6c9..a3301be1bc 100644
+--- a/src/login/70-uaccess.rules.in
++++ b/src/login/70-uaccess.rules.in
+@@ -87,4 +87,13 @@ ENV{ID_SIGNAL_ANALYZER}=="?*", ENV{DEVTYPE}=="usb_device", TAG+="uaccess"
+ # rfkill / radio killswitches
+ KERNEL=="rfkill", SUBSYSTEM=="misc", TAG+="uaccess"
+ 
++# AV production controllers
++# Most of these devices use HID for the knobs, faders, buttons, encoders, and jog wheels.
++SUBSYSTEM=="hidraw", ENV{ID_AV_PRODUCTION_CONTROLLER}=="1", TAG+="uaccess"
++
++# Some devices use vendor defined protocols on USB Bulk endpoints for controllers.
++# Other devices transfer graphics to screens on the device through USB Bulk endpoints.
++# This also allows accessing HID devices with the libusb backend of hidapi.
++SUBSYSTEM=="usb", ENV{ID_AV_PRODUCTION_CONTROLLER}=="1", TAG+="uaccess"
++
+ LABEL="uaccess_end"

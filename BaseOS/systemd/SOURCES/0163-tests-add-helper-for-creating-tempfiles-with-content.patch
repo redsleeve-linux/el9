@@ -1,0 +1,248 @@
+From ad50f15e51f4f2ffc4ebbfab10a3e1c5739c9ce6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 7 Mar 2022 15:06:57 +0100
+Subject: [PATCH] tests: add helper for creating tempfiles with content
+
+I put it in tests because I think we're most likely to use it in tests.
+If necessary, it can be moved somewhere else later.
+
+(cherry picked from commit 367c47c886af7d915e23de8d6aae0a1c135c0350)
+
+Related: #2082131
+---
+ src/shared/tests.c          | 19 +++++++++
+ src/shared/tests.h          |  2 +
+ src/test/test-env-file.c    | 77 +++++++++----------------------------
+ src/test/test-socket-util.c | 19 +++------
+ 4 files changed, 44 insertions(+), 73 deletions(-)
+
+diff --git a/src/shared/tests.c b/src/shared/tests.c
+index f5d9536411..307f796fe2 100644
+--- a/src/shared/tests.c
++++ b/src/shared/tests.c
+@@ -25,6 +25,7 @@
+ #include "cgroup-util.h"
+ #include "env-file.h"
+ #include "env-util.h"
++#include "fd-util.h"
+ #include "fs-util.h"
+ #include "log.h"
+ #include "namespace-util.h"
+@@ -33,6 +34,7 @@
+ #include "random-util.h"
+ #include "strv.h"
+ #include "tests.h"
++#include "tmpfile-util.h"
+ 
+ char* setup_fake_runtime_dir(void) {
+         char t[] = "/tmp/fake-xdg-runtime-XXXXXX", *p;
+@@ -133,6 +135,23 @@ int log_tests_skipped_errno(int r, const char *message) {
+         return EXIT_TEST_SKIP;
+ }
+ 
++int write_tmpfile(char *pattern, const char *contents) {
++        _cleanup_close_ int fd = -1;
++
++        assert(pattern);
++        assert(contents);
++
++        fd = mkostemp_safe(pattern);
++        if (fd < 0)
++                return fd;
++
++        ssize_t l = strlen(contents);
++        errno = 0;
++        if (write(fd, contents, l) != l)
++                return errno_or_else(EIO);
++        return 0;
++}
++
+ bool have_namespaces(void) {
+         siginfo_t si = {};
+         pid_t pid;
+diff --git a/src/shared/tests.h b/src/shared/tests.h
+index ef6acd368e..ade527590b 100644
+--- a/src/shared/tests.h
++++ b/src/shared/tests.h
+@@ -30,6 +30,8 @@ void test_setup_logging(int level);
+ int log_tests_skipped(const char *message);
+ int log_tests_skipped_errno(int r, const char *message);
+ 
++int write_tmpfile(char *pattern, const char *contents);
++
+ bool have_namespaces(void);
+ 
+ /* We use the small but non-trivial limit here */
+diff --git a/src/test/test-env-file.c b/src/test/test-env-file.c
+index f97206b4d6..886a8e4bc8 100644
+--- a/src/test/test-env-file.c
++++ b/src/test/test-env-file.c
+@@ -55,18 +55,11 @@
+ 
+ 
+ TEST(load_env_file_1) {
+-        _cleanup_strv_free_ char **data = NULL;
+-        int r;
+-
+         _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-load-env-file.XXXXXX";
+-        _cleanup_close_ int fd;
+-
+-        fd = mkostemp_safe(name);
+-        assert_se(fd >= 0);
+-        assert_se(write(fd, env_file_1, strlen(env_file_1)) == strlen(env_file_1));
++        assert_se(write_tmpfile(name, env_file_1) == 0);
+ 
+-        r = load_env_file(NULL, name, &data);
+-        assert_se(r == 0);
++        _cleanup_strv_free_ char **data = NULL;
++        assert_se(load_env_file(NULL, name, &data) == 0);
+         assert_se(streq(data[0], "a=a"));
+         assert_se(streq(data[1], "b=bc"));
+         assert_se(streq(data[2], "d=de  f"));
+@@ -77,50 +70,30 @@ TEST(load_env_file_1) {
+ }
+ 
+ TEST(load_env_file_2) {
+-        _cleanup_strv_free_ char **data = NULL;
+-        int r;
+-
+         _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-load-env-file.XXXXXX";
+-        _cleanup_close_ int fd;
++        assert_se(write_tmpfile(name, env_file_2) == 0);
+ 
+-        fd = mkostemp_safe(name);
+-        assert_se(fd >= 0);
+-        assert_se(write(fd, env_file_2, strlen(env_file_2)) == strlen(env_file_2));
+-
+-        r = load_env_file(NULL, name, &data);
+-        assert_se(r == 0);
++        _cleanup_strv_free_ char **data = NULL;
++        assert_se(load_env_file(NULL, name, &data) == 0);
+         assert_se(streq(data[0], "a=a"));
+         assert_se(data[1] == NULL);
+ }
+ 
+ TEST(load_env_file_3) {
+-        _cleanup_strv_free_ char **data = NULL;
+-        int r;
+-
+         _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-load-env-file.XXXXXX";
+-        _cleanup_close_ int fd;
+-
+-        fd = mkostemp_safe(name);
+-        assert_se(fd >= 0);
+-        assert_se(write(fd, env_file_3, strlen(env_file_3)) == strlen(env_file_3));
++        assert_se(write_tmpfile(name, env_file_3) == 0);
+ 
+-        r = load_env_file(NULL, name, &data);
+-        assert_se(r == 0);
++        _cleanup_strv_free_ char **data = NULL;
++        assert_se(load_env_file(NULL, name, &data) == 0);
+         assert_se(data == NULL);
+ }
+ 
+ TEST(load_env_file_4) {
+-        _cleanup_strv_free_ char **data = NULL;
+         _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-load-env-file.XXXXXX";
+-        _cleanup_close_ int fd;
+-        int r;
+-
+-        fd = mkostemp_safe(name);
+-        assert_se(fd >= 0);
+-        assert_se(write(fd, env_file_4, strlen(env_file_4)) == strlen(env_file_4));
++        assert_se(write_tmpfile(name, env_file_4) == 0);
+ 
+-        r = load_env_file(NULL, name, &data);
+-        assert_se(r == 0);
++        _cleanup_strv_free_ char **data = NULL;
++        assert_se(load_env_file(NULL, name, &data) == 0);
+         assert_se(streq(data[0], "HWMON_MODULES=coretemp f71882fg"));
+         assert_se(streq(data[1], "MODULE_0=coretemp"));
+         assert_se(streq(data[2], "MODULE_1=f71882fg"));
+@@ -128,36 +101,22 @@ TEST(load_env_file_4) {
+ }
+ 
+ TEST(load_env_file_5) {
+-        _cleanup_strv_free_ char **data = NULL;
+-        int r;
+-
+         _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-load-env-file.XXXXXX";
+-        _cleanup_close_ int fd;
+-
+-        fd = mkostemp_safe(name);
+-        assert_se(fd >= 0);
+-        assert_se(write(fd, env_file_5, strlen(env_file_5)) == strlen(env_file_5));
++        assert_se(write_tmpfile(name, env_file_5) == 0);
+ 
+-        r = load_env_file(NULL, name, &data);
+-        assert_se(r == 0);
++        _cleanup_strv_free_ char **data = NULL;
++        assert_se(load_env_file(NULL, name, &data) == 0);
+         assert_se(streq(data[0], "a="));
+         assert_se(streq(data[1], "b="));
+         assert_se(data[2] == NULL);
+ }
+ 
+ TEST(load_env_file_6) {
+-        _cleanup_strv_free_ char **data = NULL;
+-        int r;
+-
+         _cleanup_(unlink_tempfilep) char name[] = "/tmp/test-load-env-file.XXXXXX";
+-        _cleanup_close_ int fd;
++        assert_se(write_tmpfile(name, env_file_6) == 0);
+ 
+-        fd = mkostemp_safe(name);
+-        assert_se(fd >= 0);
+-        assert_se(write(fd, env_file_6, strlen(env_file_6)) == strlen(env_file_6));
+-
+-        r = load_env_file(NULL, name, &data);
+-        assert_se(r == 0);
++        _cleanup_strv_free_ char **data = NULL;
++        assert_se(load_env_file(NULL, name, &data) == 0);
+         assert_se(streq(data[0], "a= n t x y '"));
+         assert_se(streq(data[1], "b=$'"));
+         assert_se(streq(data[2], "c= \\n\\t\\$\\`\\\\\n"));
+diff --git a/src/test/test-socket-util.c b/src/test/test-socket-util.c
+index 9ee651a5fa..3245516f9a 100644
+--- a/src/test/test-socket-util.c
++++ b/src/test/test-socket-util.c
+@@ -228,17 +228,12 @@ TEST(passfd_read) {
+ 
+         if (r == 0) {
+                 /* Child */
+-                char tmpfile[] = "/tmp/test-socket-util-passfd-read-XXXXXX";
+-                _cleanup_close_ int tmpfd = -1;
+-
+                 pair[0] = safe_close(pair[0]);
+ 
+-                tmpfd = mkostemp_safe(tmpfile);
+-                assert_se(tmpfd >= 0);
+-                assert_se(write(tmpfd, file_contents, strlen(file_contents)) == (ssize_t) strlen(file_contents));
+-                tmpfd = safe_close(tmpfd);
++                char tmpfile[] = "/tmp/test-socket-util-passfd-read-XXXXXX";
++                assert_se(write_tmpfile(tmpfile, file_contents) == 0);
+ 
+-                tmpfd = open(tmpfile, O_RDONLY);
++                _cleanup_close_ int tmpfd = open(tmpfile, O_RDONLY);
+                 assert_se(tmpfd >= 0);
+                 assert_se(unlink(tmpfile) == 0);
+ 
+@@ -277,16 +272,12 @@ TEST(passfd_contents_read) {
+                 /* Child */
+                 struct iovec iov = IOVEC_INIT_STRING(wire_contents);
+                 char tmpfile[] = "/tmp/test-socket-util-passfd-contents-read-XXXXXX";
+-                _cleanup_close_ int tmpfd = -1;
+ 
+                 pair[0] = safe_close(pair[0]);
+ 
+-                tmpfd = mkostemp_safe(tmpfile);
+-                assert_se(tmpfd >= 0);
+-                assert_se(write(tmpfd, file_contents, strlen(file_contents)) == (ssize_t) strlen(file_contents));
+-                tmpfd = safe_close(tmpfd);
++                assert_se(write_tmpfile(tmpfile, file_contents) == 0);
+ 
+-                tmpfd = open(tmpfile, O_RDONLY);
++                _cleanup_close_ int tmpfd = open(tmpfile, O_RDONLY);
+                 assert_se(tmpfd >= 0);
+                 assert_se(unlink(tmpfile) == 0);
+ 

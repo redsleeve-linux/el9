@@ -1,0 +1,117 @@
+From b9724ced388bef0a53be49c4ce45db2c8352f186 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 14 Jun 2022 09:03:00 +0900
+Subject: [PATCH] test: import hostnamed tests from debian/ubuntu test suite
+
+(cherry picked from commit 39f4546199d6394014cf79b76b9ff22d3c149c54)
+
+Related: #2087652
+---
+ test/TEST-71-HOSTNAME/Makefile  |  1 +
+ test/TEST-71-HOSTNAME/test.sh   | 10 +++++++
+ test/units/testsuite-71.service | 10 +++++++
+ test/units/testsuite-71.sh      | 52 +++++++++++++++++++++++++++++++++
+ 4 files changed, 73 insertions(+)
+ create mode 120000 test/TEST-71-HOSTNAME/Makefile
+ create mode 100755 test/TEST-71-HOSTNAME/test.sh
+ create mode 100644 test/units/testsuite-71.service
+ create mode 100755 test/units/testsuite-71.sh
+
+diff --git a/test/TEST-71-HOSTNAME/Makefile b/test/TEST-71-HOSTNAME/Makefile
+new file mode 120000
+index 0000000000..e9f93b1104
+--- /dev/null
++++ b/test/TEST-71-HOSTNAME/Makefile
+@@ -0,0 +1 @@
++../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-71-HOSTNAME/test.sh b/test/TEST-71-HOSTNAME/test.sh
+new file mode 100755
+index 0000000000..7b3d2d12d4
+--- /dev/null
++++ b/test/TEST-71-HOSTNAME/test.sh
+@@ -0,0 +1,10 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -e
++
++TEST_DESCRIPTION="test hostnamed"
++
++# shellcheck source=test/test-functions
++. "${TEST_BASE_DIR:?}/test-functions"
++
++do_test "$@"
+diff --git a/test/units/testsuite-71.service b/test/units/testsuite-71.service
+new file mode 100644
+index 0000000000..019e8bff24
+--- /dev/null
++++ b/test/units/testsuite-71.service
+@@ -0,0 +1,10 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Unit]
++Description=TEST-71-HOSTNAME
++
++[Service]
++ExecStartPre=rm -f /failed /testok
++ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
++StandardOutput=journal+console
++StandardError=journal+console
++Type=oneshot
+diff --git a/test/units/testsuite-71.sh b/test/units/testsuite-71.sh
+new file mode 100755
+index 0000000000..34fcaad961
+--- /dev/null
++++ b/test/units/testsuite-71.sh
+@@ -0,0 +1,52 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++
++set -eux
++set -o pipefail
++
++# shellcheck source=test/units/assert.sh
++. "$(dirname "$0")"/assert.sh
++
++restore_hostname() {
++    if [[ -e /tmp/hostname.bak ]]; then
++        mv /tmp/hostname.bak /etc/hostname
++    else
++        rm -f /etc/hostname
++    fi
++}
++
++test_hostname() {
++    local orig=
++
++    if [[ -f /etc/hostname ]]; then
++        cp /etc/hostname /tmp/hostname.bak
++        orig=$(cat /etc/hostname)
++    fi
++
++    trap restore_hostname RETURN
++
++    # should activate daemon and work
++    if [[ -n "$orig" ]]; then
++        assert_in "Static hostname: $orig" "$(hostnamectl)"
++    fi
++    assert_in "Kernel: $(uname -s) $(uname -r)" "$(hostnamectl)"
++
++    # change hostname
++    assert_rc 0 hostnamectl set-hostname testhost
++    assert_eq "$(cat /etc/hostname)" "testhost"
++    assert_in "Static hostname: testhost" "$(hostnamectl)"
++
++    if [[ -n "$orig" ]]; then
++        # reset to original
++        assert_rc 0 hostnamectl set-hostname "$orig"
++        assert_eq "$(cat /etc/hostname)" "$orig"
++        assert_in "Static hostname: $orig" "$(hostnamectl)"
++    fi
++}
++
++: >/failed
++
++test_hostname
++
++touch /testok
++rm /failed

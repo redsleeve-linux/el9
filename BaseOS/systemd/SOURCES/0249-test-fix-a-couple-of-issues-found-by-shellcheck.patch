@@ -1,0 +1,75 @@
+From de9aa9da870f1f5fd1457dd70fd13c221e8b39b3 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 17 Jun 2022 15:28:17 +0200
+Subject: [PATCH] test: fix a couple of issues found by shellcheck
+
+(cherry picked from commit 72f0e89c0da3584d5d0a0124d791b02f0f04e769)
+
+Related: #2087652
+---
+ test/units/testsuite-02.sh | 4 ++--
+ test/units/testsuite-38.sh | 8 ++++----
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/test/units/testsuite-02.sh b/test/units/testsuite-02.sh
+index 54927a6377..8ebcc575ee 100755
+--- a/test/units/testsuite-02.sh
++++ b/test/units/testsuite-02.sh
+@@ -61,7 +61,7 @@ for task in "${TEST_LIST[@]}"; do
+                 # Task has finished, report its result and drop it from the queue
+                 wait "${running[$key]}" && ec=0 || ec=$?
+                 report_result "$key" $ec
+-                unset running["$key"]
++                unset "running[$key]"
+                 # Break from inner for loop and outer while loop to skip
+                 # the sleep below when we find a free slot in the queue
+                 break 2
+@@ -85,7 +85,7 @@ for key in "${!running[@]}"; do
+     echo "Waiting for test '$key' to finish"
+     wait ${running[$key]} && ec=0 || ec=$?
+     report_result "$key" $ec
+-    unset running["$key"]
++    unset "running[$key]"
+ done
+ 
+ set -x
+diff --git a/test/units/testsuite-38.sh b/test/units/testsuite-38.sh
+index 438990d1c5..c5f9bcc22c 100755
+--- a/test/units/testsuite-38.sh
++++ b/test/units/testsuite-38.sh
+@@ -17,7 +17,7 @@ dbus_freeze() {
+     local name object_path suffix
+ 
+     suffix="${1##*.}"
+-    name="${1%.$suffix}"
++    name="${1%".$suffix"}"
+     object_path="/org/freedesktop/systemd1/unit/${name//-/_2d}_2e${suffix}"
+ 
+     busctl call \
+@@ -31,7 +31,7 @@ dbus_thaw() {
+     local name object_path suffix
+ 
+     suffix="${1##*.}"
+-    name="${1%.$suffix}"
++    name="${1%".$suffix"}"
+     object_path="/org/freedesktop/systemd1/unit/${name//-/_2d}_2e${suffix}"
+ 
+     busctl call \
+@@ -65,7 +65,7 @@ dbus_can_freeze() {
+     local name object_path suffix
+ 
+     suffix="${1##*.}"
+-    name="${1%.$suffix}"
++    name="${1%".$suffix"}"
+     object_path="/org/freedesktop/systemd1/unit/${name//-/_2d}_2e${suffix}"
+ 
+     busctl get-property \
+@@ -79,7 +79,7 @@ check_freezer_state() {
+     local name object_path suffix
+ 
+     suffix="${1##*.}"
+-    name="${1%.$suffix}"
++    name="${1%".$suffix"}"
+     object_path="/org/freedesktop/systemd1/unit/${name//-/_2d}_2e${suffix}"
+ 
+     for _ in {0..10}; do

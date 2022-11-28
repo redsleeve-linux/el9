@@ -1,10 +1,10 @@
-%global DATE 20220127
-%global gitrev 2fa6e5c54e782377faa4c9c1f0e0b16db27f266c
-%global gcc_version 11.2.1
+%global DATE 20220421
+%global gitrev 1d3172725999deb0dca93ac70393ed9a0ad0da3f
+%global gcc_version 11.3.1
 %global gcc_major 11
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 9
+%global gcc_release 2
 %global nvptx_tools_gitrev 5f6f343a302d620b0868edab376c00b15741e39e
 %global newlib_cygwin_gitrev 50e2a63b04bdd018484605fbb954fd1bd5147fa0
 %global _unpackaged_files_terminate_build 0
@@ -116,7 +116,7 @@
 Summary: Various compilers (C, C++, Objective-C, ...)
 Name: gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.4%{?dist}.redsleeve
+Release: %{gcc_release}.1%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -271,9 +271,11 @@ Patch18: gcc11-Wbidi-chars.patch
 Patch19: gcc11-dg-ice-fixes.patch
 Patch20: gcc11-relocatable-pch.patch
 Patch21: gcc11-dejagnu-multiline.patch
-Patch22: gcc11-libsanitizer-pthread.patch
 Patch23: gcc11-pie.patch
 Patch24: gcc11-bind-now.patch
+Patch25: gcc11-pr105331.patch
+# This can go once we rebase from GCC 11.
+Patch26: gcc11-rh2106262.patch
 
 Patch100: gcc11-fortran-fdec-duplicates.patch
 Patch101: gcc11-fortran-flogical-as-integer.patch
@@ -823,9 +825,10 @@ so that there cannot be any synchronization problems.
 %patch19 -p1 -b .ice~
 %patch20 -p1 -b .pch~
 %patch21 -p1 -b .dejagnu-multiline~
-%patch22 -p1 -b .libsanitizer-pthread~
 %patch23 -p1 -b .pie~
 %patch24 -p1 -b .now~
+%patch25 -p0 -b .pr105331~
+%patch26 -p1 -b .rh2106262~
 
 %if 0%{?rhel} >= 9
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -1108,9 +1111,6 @@ CONFIGURE_OPTS="\
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
-%endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch mips mipsel
 	--with-arch=mips32r2 --with-fp-32=xx \
@@ -3274,8 +3274,82 @@ end
 %{ANNOBIN_GCC_PLUGIN_DIR}/gcc-annobin.so.0.0.0
 
 %changelog
-* Fri Jul 15 2022 Jacco Ligthart <jacco@redsleeve.org> 11.2.1-9.4.redsleeve
-- added config options for armv6hl
+* Tue Jul 12 2022 Marek Polacek <polacek@redhat.com> 11.3.1-2.1
+- fix handling of invalid ranges in std::regex (#2106262)
+
+* Thu Apr 21 2022 Jakub Jelinek <jakub@redhat.com> 11.3.1-2
+- update from releases/gcc-11-branch (#2077536)
+  - GCC 11.3 release
+  - PRs c++/98249, c++/99893, c++/100608, c++/101051, c++/101532, c++/101677,
+	c++/101717, c++/101894, c++/102869, c++/103105, c++/103328,
+	c++/103341, c++/103455, c++/103706, c++/103885, c++/103943,
+	c++/104008, c++/104079, c++/104225, c++/104507, c++/104565,
+	c++/105003, c++/105064, c++/105143, c++/105186, c++/105256, c/101585,
+	debug/105203, fortran/102992, fortran/104210, fortran/104228,
+	fortran/104570, fortran/105138, gcov-profile/105282, ipa/103083,
+	ipa/103432, jit/100613, libstdc++/90943, libstdc++/100516,
+	libstdc++/103630, libstdc++/103638, libstdc++/103650,
+	libstdc++/103955, libstdc++/104098, libstdc++/104301,
+	libstdc++/104542, libstdc++/104859, libstdc++/105021,
+	libstdc++/105027, middle-end/104497, middle-end/105165,
+	rtl-optimization/104985, rtl-optimization/105028,
+	rtl-optimization/105211, target/80556, target/100106, target/104117,
+	target/104474, target/104853, target/104894, target/105214,
+	target/105257, tree-optimization/99121, tree-optimization/104880,
+	tree-optimization/105053, tree-optimization/105070,
+	tree-optimization/105189, tree-optimization/105198,
+	tree-optimization/105226, tree-optimization/105232,
+	tree-optimization/105235
+- fix bogus -Wuninitialized warning on va_arg with complex types on x86_64
+  (PR target/105331)
+- remove bogus assertion in std::from_chars (PR libstdc++/105324)
+
+* Mon Apr  4 2022 David Malcolm <dmalcolm@redhat.com> - 11.2.1-10
+- update from releases/gcc-11-branch (#2063255)
+  - PRs ada/98724, ada/104258, ada/104767, ada/104861, c++/58646, c++/59950,
+	c++/61611, c++/95036, c++/100468, c++/101030, c++/101095, c++/101371,
+	c++/101515, c++/101767, c++/102045, c++/102123, c++/102538,
+	c++/102740, c++/102990, c++/103057, c++/103186, c++/103291,
+	c++/103299, c++/103337, c++/103711, c++/103769, c++/103968,
+	c++/104107, c++/104108, c++/104284, c++/104410, c++/104472,
+	c++/104513, c++/104568, c++/104667, c++/104806, c++/104847,
+	c++/104944, c++/104994, c++/105035, c++/105061, c/82283, c/84685,
+	c/104510, c/104711, d/104659, d/105004, debug/104337, debug/104517,
+	debug/104557, fortran/66193, fortran/99585, fortran/100337,
+	fortran/103790, fortran/104211, fortran/104311, fortran/104331,
+	fortran/104430, fortran/104619, fortran/104811, go/100537,
+	libgomp/104385, libstdc++/101231, libstdc++/102358, libstdc++/103904,
+	libstdc++/104442, lto/104237, lto/104333, lto/104617,
+	middle-end/95115, middle-end/99578, middle-end/100464,
+	middle-end/100680, middle-end/100775, middle-end/100786,
+	middle-end/104307, middle-end/104402, middle-end/104446,
+	middle-end/104786, middle-end/104971, middle-end/105032,
+	preprocessor/104147, rtl-optimization/104544, rtl-optimization/104589,
+	rtl-optimization/104777, rtl-optimization/104814, sanitizer/102656,
+	sanitizer/104449, sanitizer/105093, target/79754, target/87496,
+	target/99708, target/99754, target/100784, target/101324,
+	target/102140, target/102952, target/102957, target/103307,
+	target/103627, target/103925, target/104090, target/104208,
+	target/104219, target/104253, target/104362, target/104448,
+	target/104451, target/104453, target/104458, target/104462,
+	target/104469, target/104502, target/104674, target/104681,
+	target/104688, target/104775, target/104890, target/104910,
+	target/104923, target/104963, target/104998, target/105000,
+	target/105052, target/105058, target/105068, testsuite/103556,
+	testsuite/103586, testsuite/104730, testsuite/104759,
+	testsuite/105055, tree-optimization/45178, tree-optimization/100834,
+	tree-optimization/101636, tree-optimization/102819,
+	tree-optimization/102893, tree-optimization/103169,
+	tree-optimization/103361, tree-optimization/103489,
+	tree-optimization/103544, tree-optimization/103596,
+	tree-optimization/103641, tree-optimization/103864,
+	tree-optimization/104263, tree-optimization/104288,
+	tree-optimization/104511, tree-optimization/104601,
+	tree-optimization/104675, tree-optimization/104782,
+	tree-optimization/104931, tree-optimization/105094
+- fix x86 vector initialization expansion fallback (PR target/105123)
+- drop patch 22 (gcc11-libsanitizer-pthread.patch;
+  upstreamed as r11-9607-ga8dd74bfb921ed)
 
 * Thu Feb 10 2022 Marek Polacek <polacek@redhat.com> 11.2.1-9.4
 - add --enable-host-bind-now, use it (#2044917)

@@ -1,0 +1,69 @@
+From ab458e74eccf14550711ca024e9176fba7993abc Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 18 Feb 2022 23:09:18 +0100
+Subject: [PATCH] systemctl: make `--timestamp=` affect the `show` verb as well
+
+Currently the `--timestamp=` option has no effect on timestamps shown by
+`systemctl show`, let's fix that.
+
+Spotted in #22567.
+
+Before:
+```
+$ systemctl show --timestamp=us+utc systemd-journald | grep Timestamp=
+ExecMainStartTimestamp=Sat 2021-12-11 15:25:57 CET
+StateChangeTimestamp=Sat 2021-12-11 15:25:57 CET
+InactiveExitTimestamp=Sat 2021-12-11 15:25:57 CET
+ActiveEnterTimestamp=Sat 2021-12-11 15:25:57 CET
+ActiveExitTimestamp=Sat 2021-12-11 15:25:57 CET
+InactiveEnterTimestamp=Sat 2021-12-11 15:25:57 CET
+ConditionTimestamp=Sat 2021-12-11 15:25:57 CET
+AssertTimestamp=Sat 2021-12-11 15:25:57 CET
+```
+
+After:
+```
+$ systemctl show --timestamp=us+utc systemd-journald | grep Timestamp=
+ExecMainStartTimestamp=Sat 2021-12-11 14:25:57.177848 UTC
+StateChangeTimestamp=Sat 2021-12-11 14:25:57.196714 UTC
+InactiveExitTimestamp=Sat 2021-12-11 14:25:57.177871 UTC
+ActiveEnterTimestamp=Sat 2021-12-11 14:25:57.196714 UTC
+ActiveExitTimestamp=Sat 2021-12-11 14:25:57.144677 UTC
+InactiveEnterTimestamp=Sat 2021-12-11 14:25:57.176331 UTC
+ConditionTimestamp=Sat 2021-12-11 14:25:57.176980 UTC
+AssertTimestamp=Sat 2021-12-11 14:25:57.176980 UTC
+
+```
+
+(cherry picked from commit a59e5c625da5a6e0c46e493d55f2f4212e9457ca)
+
+Related: #2017035
+---
+ src/systemctl/systemctl-show.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/systemctl/systemctl-show.c b/src/systemctl/systemctl-show.c
+index 9b23471990..7a6655da74 100644
+--- a/src/systemctl/systemctl-show.c
++++ b/src/systemctl/systemctl-show.c
+@@ -1001,6 +1001,20 @@ static int print_property(const char *name, const char *expected_value, sd_bus_m
+                 }
+                 break;
+ 
++        case SD_BUS_TYPE_UINT64:
++                if (endswith(name, "Timestamp")) {
++                        uint64_t timestamp;
++
++                        r = sd_bus_message_read_basic(m, bus_type, &timestamp);
++                        if (r < 0)
++                                return r;
++
++                        bus_print_property_value(name, expected_value, flags, FORMAT_TIMESTAMP_STYLE(timestamp, arg_timestamp_style));
++
++                        return 1;
++                }
++                break;
++
+         case SD_BUS_TYPE_STRUCT:
+ 
+                 if (contents[0] == SD_BUS_TYPE_UINT32 && streq(name, "Job")) {

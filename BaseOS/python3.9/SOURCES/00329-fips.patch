@@ -1,47 +1,7 @@
-From 355e975a386b60d787b98cc4cd08b98f876ff858 Mon Sep 17 00:00:00 2001
-From: "Miss Islington (bot)"
- <31488909+miss-islington@users.noreply.github.com>
-Date: Mon, 7 Feb 2022 00:08:10 -0800
-Subject: [PATCH 01/11] bpo-40479: Fix undefined behavior in
- Modules/_hashopenssl.c (GH-31153)
-
-va_end() must be called before returning.
-(cherry picked from commit 59e004af63742361b67d1e1ae70229ff0db1059d)
-
-Co-authored-by: Zackery Spytz <zspytz@gmail.com>
----
- .../Core and Builtins/2022-02-06-23-08-30.bpo-40479.zED3Zu.rst   | 1 +
- Modules/_hashopenssl.c                                           | 1 +
- 2 files changed, 2 insertions(+)
- create mode 100644 Misc/NEWS.d/next/Core and Builtins/2022-02-06-23-08-30.bpo-40479.zED3Zu.rst
-
-diff --git a/Misc/NEWS.d/next/Core and Builtins/2022-02-06-23-08-30.bpo-40479.zED3Zu.rst b/Misc/NEWS.d/next/Core and Builtins/2022-02-06-23-08-30.bpo-40479.zED3Zu.rst
-new file mode 100644
-index 00000000000..52701d53d8f
---- /dev/null
-+++ b/Misc/NEWS.d/next/Core and Builtins/2022-02-06-23-08-30.bpo-40479.zED3Zu.rst
-@@ -0,0 +1 @@
-+Add a missing call to ``va_end()`` in ``Modules/_hashopenssl.c``.
-diff --git a/Modules/_hashopenssl.c b/Modules/_hashopenssl.c
-index a4889450821..4873bb11aa0 100644
---- a/Modules/_hashopenssl.c
-+++ b/Modules/_hashopenssl.c
-@@ -311,6 +311,7 @@ _setException(PyObject *exc, const char* altmsg, ...)
-         } else {
-             PyErr_FormatV(exc, altmsg, vargs);
-         }
-+        va_end(vargs);
-         return NULL;
-     }
-     va_end(vargs);
--- 
-2.34.1
-
-
-From b906713972396823c9e2e04421f9dbcfdc6a6c94 Mon Sep 17 00:00:00 2001
+From a350f1e323977baffc6d709c0dc877c7f3faba73 Mon Sep 17 00:00:00 2001
 From: Petr Viktorin <encukou@gmail.com>
 Date: Wed, 11 Aug 2021 16:51:03 +0200
-Subject: [PATCH 02/11] Backport PyModule_AddObjectRef as
+Subject: [PATCH 01/10] Backport PyModule_AddObjectRef as
  _PyModule_AddObjectRef
 
 Having PyModule_AddObjectRef available should make backporting
@@ -111,13 +71,13 @@ index 13482c6..fca1083 100644
  PyModule_AddIntConstant(PyObject *m, const char *name, long value)
  {
 -- 
-2.34.1
+2.37.3
 
 
-From c67b383ffd3ccacedacbeb91c3bdeaf5f829ca09 Mon Sep 17 00:00:00 2001
+From 500314edea579965f5641d8ebdce8c8899fe2838 Mon Sep 17 00:00:00 2001
 From: Petr Viktorin <encukou@gmail.com>
 Date: Fri, 13 Aug 2021 13:16:43 +0200
-Subject: [PATCH 03/11] _hashopenssl: Uncomment and use initialization function
+Subject: [PATCH 02/10] _hashopenssl: Uncomment and use initialization function
  list
 
 This simplifies backporting of future changes.
@@ -129,10 +89,10 @@ We use this change instead of Python 3.10's:
  1 file changed, 5 insertions(+), 25 deletions(-)
 
 diff --git a/Modules/_hashopenssl.c b/Modules/_hashopenssl.c
-index a488945..62cf769 100644
+index 4db058c..56dfff9 100644
 --- a/Modules/_hashopenssl.c
 +++ b/Modules/_hashopenssl.c
-@@ -2216,7 +2216,6 @@ hashlib_init_hmactype(PyObject *module)
+@@ -2227,7 +2227,6 @@ hashlib_init_hmactype(PyObject *module)
      return 0;
  }
  
@@ -140,7 +100,7 @@ index a488945..62cf769 100644
  static PyModuleDef_Slot hashlib_slots[] = {
      /* OpenSSL 1.0.2 and LibreSSL */
      {Py_mod_exec, hashlib_openssl_legacy_init},
-@@ -2227,7 +2226,6 @@ static PyModuleDef_Slot hashlib_slots[] = {
+@@ -2238,7 +2237,6 @@ static PyModuleDef_Slot hashlib_slots[] = {
      {Py_mod_exec, hashlib_md_meth_names},
      {0, NULL}
  };
@@ -148,7 +108,7 @@ index a488945..62cf769 100644
  
  static struct PyModuleDef _hashlibmodule = {
      PyModuleDef_HEAD_INIT,
-@@ -2255,29 +2253,11 @@ PyInit__hashlib(void)
+@@ -2266,29 +2264,11 @@ PyInit__hashlib(void)
          return NULL;
      }
  
@@ -184,13 +144,13 @@ index a488945..62cf769 100644
  
      return m;
 -- 
-2.34.1
+2.37.3
 
 
-From c49c1416d22fffc78204d66987f40e6d17a95c01 Mon Sep 17 00:00:00 2001
+From 76402d145bb24912f92d4013b8464e87b1493b45 Mon Sep 17 00:00:00 2001
 From: Christian Heimes <christian@python.org>
 Date: Sat, 27 Mar 2021 14:55:03 +0100
-Subject: [PATCH 04/11] bpo-40645: use C implementation of HMAC (GH-24920,
+Subject: [PATCH 03/10] bpo-40645: use C implementation of HMAC (GH-24920,
  GH-25063, GH-26079)
 
 This backports the feature and 2 subsequent bugfixes
@@ -621,7 +581,7 @@ index 0000000..a9ab1c0
 +The :mod:`hmac` module now uses OpenSSL's HMAC implementation when digestmod
 +argument is a hash name or builtin hash function.
 diff --git a/Modules/_hashopenssl.c b/Modules/_hashopenssl.c
-index 62cf769..71ac832 100644
+index 56dfff9..ca9fea9 100644
 --- a/Modules/_hashopenssl.c
 +++ b/Modules/_hashopenssl.c
 @@ -260,6 +260,8 @@ typedef struct {
@@ -765,7 +725,7 @@ index 62cf769..71ac832 100644
          return NULL;
      }
  
-@@ -2106,6 +2145,8 @@ hashlib_traverse(PyObject *m, visitproc visit, void *arg)
+@@ -2117,6 +2156,8 @@ hashlib_traverse(PyObject *m, visitproc visit, void *arg)
  #ifdef PY_OPENSSL_HAS_SHAKE
      Py_VISIT(state->EVPXOFtype);
  #endif
@@ -774,7 +734,7 @@ index 62cf769..71ac832 100644
      return 0;
  }
  
-@@ -2118,10 +2159,14 @@ hashlib_clear(PyObject *m)
+@@ -2129,10 +2170,14 @@ hashlib_clear(PyObject *m)
  #ifdef PY_OPENSSL_HAS_SHAKE
      Py_CLEAR(state->EVPXOFtype);
  #endif
@@ -789,7 +749,7 @@ index 62cf769..71ac832 100644
      return 0;
  }
  
-@@ -2216,6 +2261,79 @@ hashlib_init_hmactype(PyObject *module)
+@@ -2227,6 +2272,79 @@ hashlib_init_hmactype(PyObject *module)
      return 0;
  }
  
@@ -869,7 +829,7 @@ index 62cf769..71ac832 100644
  static PyModuleDef_Slot hashlib_slots[] = {
      /* OpenSSL 1.0.2 and LibreSSL */
      {Py_mod_exec, hashlib_openssl_legacy_init},
-@@ -2224,6 +2342,8 @@ static PyModuleDef_Slot hashlib_slots[] = {
+@@ -2235,6 +2353,8 @@ static PyModuleDef_Slot hashlib_slots[] = {
      {Py_mod_exec, hashlib_init_evpxoftype},
      {Py_mod_exec, hashlib_init_hmactype},
      {Py_mod_exec, hashlib_md_meth_names},
@@ -967,13 +927,13 @@ index 68aa765..4466ec4 100644
 -/*[clinic end generated code: output=b6b280e46bf0b139 input=a9049054013a1b77]*/
 +/*[clinic end generated code: output=7ff9aad0bd53e7ce input=a9049054013a1b77]*/
 -- 
-2.34.1
+2.37.3
 
 
-From f7ce31ebf3200952dadff556bfcbf2876139c823 Mon Sep 17 00:00:00 2001
+From 668a5b57d6454ff1a0e5c4db80002321e38cadfd Mon Sep 17 00:00:00 2001
 From: Charalampos Stratakis <cstratak@redhat.com>
 Date: Thu, 12 Dec 2019 16:58:31 +0100
-Subject: [PATCH 05/11] Expose blake2b and blake2s hashes from OpenSSL
+Subject: [PATCH 04/10] Expose blake2b and blake2s hashes from OpenSSL
 
 These aren't as powerful as Python's own implementation, but they can be
 used under FIPS.
@@ -984,10 +944,10 @@ used under FIPS.
  3 files changed, 148 insertions(+), 1 deletion(-)
 
 diff --git a/Lib/test/test_hashlib.py b/Lib/test/test_hashlib.py
-index 969e5e4..5b46016 100644
+index f845c7a..7aaeb76 100644
 --- a/Lib/test/test_hashlib.py
 +++ b/Lib/test/test_hashlib.py
-@@ -354,6 +354,12 @@ class HashLibTestCase(unittest.TestCase):
+@@ -363,6 +363,12 @@ class HashLibTestCase(unittest.TestCase):
          # 2 is for hashlib.name(...) and hashlib.new(name, ...)
          self.assertGreaterEqual(len(constructors), 2)
          for hash_object_constructor in constructors:
@@ -1001,7 +961,7 @@ index 969e5e4..5b46016 100644
              computed = m.hexdigest() if not shake else m.hexdigest(length)
              self.assertEqual(
 diff --git a/Modules/_hashopenssl.c b/Modules/_hashopenssl.c
-index 71ac832..0b2c65e 100644
+index ca9fea9..9d98d20 100644
 --- a/Modules/_hashopenssl.c
 +++ b/Modules/_hashopenssl.c
 @@ -1138,6 +1138,41 @@ _hashlib_openssl_sha512_impl(PyObject *module, PyObject *data_obj,
@@ -1046,7 +1006,7 @@ index 71ac832..0b2c65e 100644
  #ifdef PY_OPENSSL_HAS_SHA3
  
  /*[clinic input]
-@@ -2124,6 +2159,8 @@ static struct PyMethodDef EVP_functions[] = {
+@@ -2135,6 +2170,8 @@ static struct PyMethodDef EVP_functions[] = {
      _HASHLIB_OPENSSL_SHA256_METHODDEF
      _HASHLIB_OPENSSL_SHA384_METHODDEF
      _HASHLIB_OPENSSL_SHA512_METHODDEF
@@ -1177,13 +1137,13 @@ index 4466ec4..54c22b2 100644
 -/*[clinic end generated code: output=7ff9aad0bd53e7ce input=a9049054013a1b77]*/
 +/*[clinic end generated code: output=fab05055e982f112 input=a9049054013a1b77]*/
 -- 
-2.34.1
+2.37.3
 
 
-From b8956168975170b8e7a797b6aa23e0d356f5ebec Mon Sep 17 00:00:00 2001
+From 1613c11b882e192456592a6adb63f73351f82829 Mon Sep 17 00:00:00 2001
 From: Petr Viktorin <pviktori@redhat.com>
 Date: Thu, 1 Aug 2019 17:57:05 +0200
-Subject: [PATCH 06/11] Use a stronger hash in multiprocessing handshake
+Subject: [PATCH 05/10] Use a stronger hash in multiprocessing handshake
 
 Adapted from patch by David Malcolm,
 https://bugs.python.org/issue17258
@@ -1225,13 +1185,13 @@ index 510e4b5..b68f2fb 100644
      response = connection.recv_bytes(256)        # reject large message
      if response != WELCOME:
 -- 
-2.34.1
+2.37.3
 
 
-From 20d86957b863e80d1f71b5681fccdb1fd16128b9 Mon Sep 17 00:00:00 2001
+From c0413586c6fb26bd4b7c4d5c40094ceeffb74612 Mon Sep 17 00:00:00 2001
 From: Petr Viktorin <pviktori@redhat.com>
 Date: Thu, 25 Jul 2019 17:19:06 +0200
-Subject: [PATCH 07/11] Disable Python's hash implementations in FIPS mode,
+Subject: [PATCH 06/10] Disable Python's hash implementations in FIPS mode,
  forcing OpenSSL
 
 ---
@@ -1271,7 +1231,7 @@ index ffa3be0..3e3f4dd 100644
  def __get_builtin_constructor(name):
      cache = __builtin_constructor_cache
 diff --git a/Lib/test/test_hashlib.py b/Lib/test/test_hashlib.py
-index 5b46016..72fdc67 100644
+index 7aaeb76..fa4a8d7 100644
 --- a/Lib/test/test_hashlib.py
 +++ b/Lib/test/test_hashlib.py
 @@ -35,14 +35,15 @@ else:
@@ -1295,7 +1255,7 @@ index 5b46016..72fdc67 100644
  
  try:
      from _hashlib import HASH, HASHXOF, openssl_md_meth_names, get_fips_mode
-@@ -116,6 +117,12 @@ class HashLibTestCase(unittest.TestCase):
+@@ -118,6 +119,12 @@ class HashLibTestCase(unittest.TestCase):
          except ModuleNotFoundError as error:
              if self._warn_on_extension_import and module_name in builtin_hashes:
                  warnings.warn('Did a C extension fail to compile? %s' % error)
@@ -1411,10 +1371,10 @@ index 56ae7a5..45fb403 100644
 +    if (_Py_hashlib_fips_error(exc, name)) return NULL; \
 +} while (0)
 diff --git a/setup.py b/setup.py
-index c6023e1..371674c 100644
+index 0bec170..479f4b5 100644
 --- a/setup.py
 +++ b/setup.py
-@@ -2313,7 +2313,7 @@ class PyBuildExt(build_ext):
+@@ -2315,7 +2315,7 @@ class PyBuildExt(build_ext):
                             sources=sources,
                             depends=depends))
  
@@ -1423,7 +1383,7 @@ index c6023e1..371674c 100644
          # Detect SSL support for the socket module (via _ssl)
          config_vars = sysconfig.get_config_vars()
  
-@@ -2333,16 +2333,14 @@ class PyBuildExt(build_ext):
+@@ -2335,16 +2335,14 @@ class PyBuildExt(build_ext):
          openssl_libs = split_var('OPENSSL_LIBS', '-l')
          if not openssl_libs:
              # libssl and libcrypto not found
@@ -1442,7 +1402,7 @@ index c6023e1..371674c 100644
  
          # OpenSSL 1.0.2 uses Kerberos for KRB5 ciphers
          krb5_h = find_file(
-@@ -2352,12 +2350,20 @@ class PyBuildExt(build_ext):
+@@ -2354,12 +2352,20 @@ class PyBuildExt(build_ext):
          if krb5_h:
              ssl_incs.extend(krb5_h)
  
@@ -1466,7 +1426,7 @@ index c6023e1..371674c 100644
                  depends=[
                      'socketmodule.h',
                      '_ssl/debughelpers.c',
-@@ -2370,9 +2376,7 @@ class PyBuildExt(build_ext):
+@@ -2372,9 +2378,7 @@ class PyBuildExt(build_ext):
  
          self.add(Extension('_hashlib', ['_hashopenssl.c'],
                             depends=['hashlib.h'],
@@ -1477,7 +1437,7 @@ index c6023e1..371674c 100644
  
      def detect_hash_builtins(self):
          # By default we always compile these even when OpenSSL is available
-@@ -2429,6 +2433,7 @@ class PyBuildExt(build_ext):
+@@ -2431,6 +2435,7 @@ class PyBuildExt(build_ext):
                      '_blake2/blake2b_impl.c',
                      '_blake2/blake2s_impl.c'
                  ],
@@ -1486,13 +1446,13 @@ index c6023e1..371674c 100644
              ))
  
 -- 
-2.34.1
+2.37.3
 
 
-From 76d17b46469d642f2acda31bb5e9e636d69fe945 Mon Sep 17 00:00:00 2001
+From 205bd746c16c7f8ac09251316c62bf78d6c31611 Mon Sep 17 00:00:00 2001
 From: Charalampos Stratakis <cstratak@redhat.com>
 Date: Fri, 29 Jan 2021 14:16:21 +0100
-Subject: [PATCH 08/11] Use python's fall back crypto implementations only if
+Subject: [PATCH 07/10] Use python's fall back crypto implementations only if
  we are not in FIPS mode
 
 ---
@@ -1605,10 +1565,10 @@ index 3e3f4dd..b842f5f 100644
  
  for __func_name in __always_supported:
 diff --git a/Lib/test/test_hashlib.py b/Lib/test/test_hashlib.py
-index 72fdc67..ac9c057 100644
+index fa4a8d7..ec6c883 100644
 --- a/Lib/test/test_hashlib.py
 +++ b/Lib/test/test_hashlib.py
-@@ -167,7 +167,13 @@ class HashLibTestCase(unittest.TestCase):
+@@ -171,7 +171,13 @@ class HashLibTestCase(unittest.TestCase):
                          constructors.add(constructor)
  
          def add_builtin_constructor(name):
@@ -1623,7 +1583,7 @@ index 72fdc67..ac9c057 100644
              self.constructors_to_test[name].add(constructor)
  
          _md5 = self._conditional_import_module('_md5')
-@@ -257,6 +263,20 @@ class HashLibTestCase(unittest.TestCase):
+@@ -266,6 +272,20 @@ class HashLibTestCase(unittest.TestCase):
      def test_new_upper_to_lower(self):
          self.assertEqual(hashlib.new("SHA256").name, "sha256")
  
@@ -1644,7 +1604,7 @@ index 72fdc67..ac9c057 100644
      def test_get_builtin_constructor(self):
          get_builtin_constructor = getattr(hashlib,
                                            '__get_builtin_constructor')
-@@ -1052,6 +1072,7 @@ class KDFTests(unittest.TestCase):
+@@ -1061,6 +1081,7 @@ class KDFTests(unittest.TestCase):
                  iterations=1, dklen=None)
              self.assertEqual(out, self.pbkdf2_results['sha1'][0][0])
  
@@ -1653,13 +1613,13 @@ index 72fdc67..ac9c057 100644
      def test_pbkdf2_hmac_py(self):
          self._test_pbkdf2_hmac(builtin_hashlib.pbkdf2_hmac, builtin_hashes)
 -- 
-2.34.1
+2.37.3
 
 
-From 95c861dda1659f5bc47d56bed8d096f4debbe281 Mon Sep 17 00:00:00 2001
+From 016e7dbfd92bd24b5f7cb613786fb99456ca6069 Mon Sep 17 00:00:00 2001
 From: Charalampos Stratakis <cstratak@redhat.com>
 Date: Wed, 31 Jul 2019 15:43:43 +0200
-Subject: [PATCH 09/11] Test equivalence of hashes for the various digests with
+Subject: [PATCH 08/10] Test equivalence of hashes for the various digests with
  usedforsecurity=True/False
 
 ---
@@ -1699,7 +1659,7 @@ index 0000000..1f99dd7
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/Lib/test/test_hashlib.py b/Lib/test/test_hashlib.py
-index ac9c057..0aa0129 100644
+index ec6c883..0fd036f 100644
 --- a/Lib/test/test_hashlib.py
 +++ b/Lib/test/test_hashlib.py
 @@ -20,6 +20,7 @@ import warnings
@@ -1722,7 +1682,7 @@ index ac9c057..0aa0129 100644
  try:
      import _blake2
  except ImportError:
-@@ -96,6 +102,11 @@ def read_vectors(hash_name):
+@@ -98,6 +104,11 @@ def read_vectors(hash_name):
              parts[0] = bytes.fromhex(parts[0])
              yield parts
  
@@ -1734,8 +1694,8 @@ index ac9c057..0aa0129 100644
  
  class HashLibTestCase(unittest.TestCase):
      supported_hash_names = ( 'md5', 'MD5', 'sha1', 'SHA1',
-@@ -138,15 +149,21 @@ class HashLibTestCase(unittest.TestCase):
-         for algorithm in algorithms:
+@@ -142,15 +153,21 @@ class HashLibTestCase(unittest.TestCase):
+                 continue
              self.constructors_to_test[algorithm] = set()
  
 +        def _add_constructor(algorithm, constructor):
@@ -1758,7 +1718,7 @@ index ac9c057..0aa0129 100644
  
          _hashlib = self._conditional_import_module('_hashlib')
          self._hashlib = _hashlib
-@@ -158,13 +175,7 @@ class HashLibTestCase(unittest.TestCase):
+@@ -162,13 +179,7 @@ class HashLibTestCase(unittest.TestCase):
              for algorithm, constructors in self.constructors_to_test.items():
                  constructor = getattr(_hashlib, 'openssl_'+algorithm, None)
                  if constructor:
@@ -1773,7 +1733,7 @@ index ac9c057..0aa0129 100644
  
          def add_builtin_constructor(name):
              try:
-@@ -337,6 +348,8 @@ class HashLibTestCase(unittest.TestCase):
+@@ -346,6 +357,8 @@ class HashLibTestCase(unittest.TestCase):
                  self.assertIn(h.name, self.supported_hash_names)
              else:
                  self.assertNotIn(h.name, self.supported_hash_names)
@@ -1782,7 +1742,7 @@ index ac9c057..0aa0129 100644
              self.assertEqual(
                  h.name,
                  hashlib.new(h.name, usedforsecurity=False).name
-@@ -383,8 +396,10 @@ class HashLibTestCase(unittest.TestCase):
+@@ -392,8 +405,10 @@ class HashLibTestCase(unittest.TestCase):
          for hash_object_constructor in constructors:
  
              # OpenSSL's blake2s & blake2d don't support `key`
@@ -1795,7 +1755,7 @@ index ac9c057..0aa0129 100644
                  return
  
              m = hash_object_constructor(data, **kwargs)
-@@ -965,6 +980,15 @@ class HashLibTestCase(unittest.TestCase):
+@@ -974,6 +989,15 @@ class HashLibTestCase(unittest.TestCase):
          ):
              HASHXOF()
  
@@ -1812,13 +1772,13 @@ index ac9c057..0aa0129 100644
  class KDFTests(unittest.TestCase):
  
 -- 
-2.34.1
+2.37.3
 
 
-From 62cf5b80d205ff6d6e719286feccca6bd6fdd862 Mon Sep 17 00:00:00 2001
+From 7c7a3260746d06d5f319944dc40d51f7642d92dc Mon Sep 17 00:00:00 2001
 From: Petr Viktorin <pviktori@redhat.com>
 Date: Mon, 26 Aug 2019 19:39:48 +0200
-Subject: [PATCH 10/11] Guard against Python HMAC in FIPS mode
+Subject: [PATCH 09/10] Guard against Python HMAC in FIPS mode
 
 ---
  Lib/hmac.py           | 13 +++++++++----
@@ -1929,13 +1889,13 @@ index adf52ad..41e6a14 100644
      def test_realcopy_old(self):
          # Testing if the copy method created a real copy.
 -- 
-2.34.1
+2.37.3
 
 
-From ff7f518d32b7f1c47f35b841da78f5869470e381 Mon Sep 17 00:00:00 2001
+From 0db6e1bad3663006fe9352819bbbb53bfc5637be Mon Sep 17 00:00:00 2001
 From: Petr Viktorin <encukou@gmail.com>
 Date: Wed, 25 Aug 2021 16:44:43 +0200
-Subject: [PATCH 11/11] Disable hash-based PYCs in FIPS mode
+Subject: [PATCH 10/10] Disable hash-based PYCs in FIPS mode
 
 If FIPS mode is on, we can't use siphash-based HMAC
 (_Py_KeyedHash), so:
@@ -1975,15 +1935,13 @@ index bba3642..02db901 100644
          return PycInvalidationMode.CHECKED_HASH
      else:
 diff --git a/Lib/test/support/__init__.py b/Lib/test/support/__init__.py
-index 4ced130..11818ac 100644
+index 6dc0813..b9d5f9a 100644
 --- a/Lib/test/support/__init__.py
 +++ b/Lib/test/support/__init__.py
-@@ -3249,3 +3249,17 @@ def clear_ignored_deprecations(*tokens: object) -> None:
-     if warnings.filters != new_filters:
-         warnings.filters[:] = new_filters
+@@ -3296,6 +3296,20 @@ def clear_ignored_deprecations(*tokens: object) -> None:
          warnings._filters_mutated()
-+
-+
+ 
+ 
 +def fails_in_fips_mode(expected_error):
 +    import _hashlib
 +    if _hashlib.get_fips_mode():
@@ -1996,6 +1954,11 @@ index 4ced130..11818ac 100644
 +        def _decorator(func):
 +            return func
 +    return _decorator
++
++
+ @contextlib.contextmanager
+ def adjust_int_max_str_digits(max_digits):
+     """Temporarily change the integer string conversion length limit."""
 diff --git a/Lib/test/test_cmd_line_script.py b/Lib/test/test_cmd_line_script.py
 index 7cb1370..61df232 100644
 --- a/Lib/test/test_cmd_line_script.py
@@ -2017,10 +1980,10 @@ index 7cb1370..61df232 100644
          with support.temp_dir() as script_dir:
              script_name = _make_test_script(script_dir, '__main__')
 diff --git a/Lib/test/test_compileall.py b/Lib/test/test_compileall.py
-index 6e1f4b2..ec6b165 100644
+index ab647d6..7d50f07 100644
 --- a/Lib/test/test_compileall.py
 +++ b/Lib/test/test_compileall.py
-@@ -773,14 +773,23 @@ class CommandLineTestsBase:
+@@ -758,14 +758,23 @@ class CommandLineTestsBase:
          out = self.assertRunOK('badfilename')
          self.assertRegex(out, b"Can't list 'badfilename'")
  
@@ -2121,7 +2084,7 @@ diff --git a/Lib/test/test_py_compile.py b/Lib/test/test_py_compile.py
 index b2d3dcf..7e4b0c5 100644
 --- a/Lib/test/test_py_compile.py
 +++ b/Lib/test/test_py_compile.py
-@@ -139,13 +139,16 @@ class PyCompileTestsBase:
+@@ -141,13 +141,16 @@ class PyCompileTestsBase:
              importlib.util.cache_from_source(bad_coding)))
  
      def test_source_date_epoch(self):
@@ -2139,7 +2102,7 @@ index b2d3dcf..7e4b0c5 100644
              expected_flags = 0b11
          else:
              expected_flags = 0b00
-@@ -176,7 +179,8 @@ class PyCompileTestsBase:
+@@ -178,7 +181,8 @@ class PyCompileTestsBase:
          # Specifying optimized bytecode should lead to a path reflecting that.
          self.assertIn('opt-2', py_compile.compile(self.source_path, optimize=2))
  
@@ -2149,7 +2112,7 @@ index b2d3dcf..7e4b0c5 100644
          py_compile.compile(
              self.source_path,
              invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH,
-@@ -185,6 +189,9 @@ class PyCompileTestsBase:
+@@ -187,6 +191,9 @@ class PyCompileTestsBase:
              flags = importlib._bootstrap_external._classify_pyc(
                  fp.read(), 'test', {})
          self.assertEqual(flags, 0b11)
@@ -2160,7 +2123,7 @@ index b2d3dcf..7e4b0c5 100644
              self.source_path,
              invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
 diff --git a/Lib/test/test_zipimport.py b/Lib/test/test_zipimport.py
-index 2e24388..11e7978 100644
+index b7347a3..09ea990 100644
 --- a/Lib/test/test_zipimport.py
 +++ b/Lib/test/test_zipimport.py
 @@ -186,6 +186,7 @@ class UncompressedZipImportTestCase(ImportHooksBaseTestCase):
@@ -2211,5 +2174,5 @@ index 8358d70..1b7fb85 100644
          uint64_t x;
          char data[sizeof(uint64_t)];
 -- 
-2.34.1
+2.37.3
 

@@ -1,0 +1,322 @@
+From 98997b288819f4dac7b2ca19c199d71e733bfa92 Mon Sep 17 00:00:00 2001
+From: Grigori Goronzy <greg@chown.ath.cx>
+Date: Wed, 16 Feb 2022 22:13:42 +0100
+Subject: [PATCH] tpm2: support policies with PIN
+
+Modify TPM2 authentication policy to optionally include an authValue, i.e.
+a password/PIN. We use the "PIN" terminology since it's used by other
+systems such as Windows, even though the PIN is not necessarily numeric.
+
+The pin is hashed via SHA256 to allow for arbitrary length PINs.
+
+v2: fix tpm2_seal in sd-repart
+v3: applied review feedback
+(cherry picked from commit 2f5a892aa0d70aa4f1f10c8dba495ad52bc02bc3)
+
+Related: #2087652
+---
+ src/cryptenroll/cryptenroll-tpm2.c            |  4 +-
+ src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c |  2 +-
+ src/cryptsetup/cryptsetup-tpm2.c              |  2 +-
+ src/partition/repart.c                        |  2 +-
+ src/shared/creds-util.c                       |  2 +
+ src/shared/tpm2-util.c                        | 76 ++++++++++++++++++-
+ src/shared/tpm2-util.h                        |  8 +-
+ 7 files changed, 85 insertions(+), 11 deletions(-)
+
+diff --git a/src/cryptenroll/cryptenroll-tpm2.c b/src/cryptenroll/cryptenroll-tpm2.c
+index 801014af11..f5f6b87d0f 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.c
++++ b/src/cryptenroll/cryptenroll-tpm2.c
+@@ -80,7 +80,7 @@ int enroll_tpm2(struct crypt_device *cd,
+ 
+         assert_se(node = crypt_get_device_name(cd));
+ 
+-        r = tpm2_seal(device, pcr_mask, &secret, &secret_size, &blob, &blob_size, &hash, &hash_size, &pcr_bank, &primary_alg);
++        r = tpm2_seal(device, pcr_mask, NULL, &secret, &secret_size, &blob, &blob_size, &hash, &hash_size, &pcr_bank, &primary_alg);
+         if (r < 0)
+                 return r;
+ 
+@@ -97,7 +97,7 @@ int enroll_tpm2(struct crypt_device *cd,
+ 
+         /* Quick verification that everything is in order, we are not in a hurry after all. */
+         log_debug("Unsealing for verification...");
+-        r = tpm2_unseal(device, pcr_mask, pcr_bank, primary_alg, blob, blob_size, hash, hash_size, &secret2, &secret2_size);
++        r = tpm2_unseal(device, pcr_mask, pcr_bank, primary_alg, blob, blob_size, hash, hash_size, NULL, &secret2, &secret2_size);
+         if (r < 0)
+                 return r;
+ 
+diff --git a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
+index 3d39dfa884..de189c7bed 100644
+--- a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
+@@ -41,7 +41,7 @@ int acquire_luks2_key(
+                         pcr_mask, pcr_bank,
+                         primary_alg,
+                         key_data, key_data_size,
+-                        policy_hash, policy_hash_size,
++                        policy_hash, policy_hash_size, NULL,
+                         ret_decrypted_key, ret_decrypted_key_size);
+ }
+ 
+diff --git a/src/cryptsetup/cryptsetup-tpm2.c b/src/cryptsetup/cryptsetup-tpm2.c
+index cb139518a7..05d76a684d 100644
+--- a/src/cryptsetup/cryptsetup-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tpm2.c
+@@ -64,7 +64,7 @@ int acquire_tpm2_key(
+                 blob = loaded_blob;
+         }
+ 
+-        return tpm2_unseal(device, pcr_mask, pcr_bank, primary_alg, blob, blob_size, policy_hash, policy_hash_size, ret_decrypted_key, ret_decrypted_key_size);
++        return tpm2_unseal(device, pcr_mask, pcr_bank, primary_alg, blob, blob_size, policy_hash, policy_hash_size, NULL, ret_decrypted_key, ret_decrypted_key_size);
+ }
+ 
+ int find_tpm2_auto_data(
+diff --git a/src/partition/repart.c b/src/partition/repart.c
+index 2f70796e58..adfec0b9f3 100644
+--- a/src/partition/repart.c
++++ b/src/partition/repart.c
+@@ -2655,7 +2655,7 @@ static int partition_encrypt(
+                 uint16_t pcr_bank, primary_alg;
+                 int keyslot;
+ 
+-                r = tpm2_seal(arg_tpm2_device, arg_tpm2_pcr_mask, &secret, &secret_size, &blob, &blob_size, &hash, &hash_size, &pcr_bank, &primary_alg);
++                r = tpm2_seal(arg_tpm2_device, arg_tpm2_pcr_mask, NULL, &secret, &secret_size, &blob, &blob_size, &hash, &hash_size, &pcr_bank, &primary_alg);
+                 if (r < 0)
+                         return log_error_errno(r, "Failed to seal to TPM2: %m");
+ 
+diff --git a/src/shared/creds-util.c b/src/shared/creds-util.c
+index 4d0681bc10..c4dcc396ac 100644
+--- a/src/shared/creds-util.c
++++ b/src/shared/creds-util.c
+@@ -534,6 +534,7 @@ int encrypt_credential_and_warn(
+ 
+                 r = tpm2_seal(tpm2_device,
+                               tpm2_pcr_mask,
++                              NULL,
+                               &tpm2_key,
+                               &tpm2_key_size,
+                               &tpm2_blob,
+@@ -803,6 +804,7 @@ int decrypt_credential_and_warn(
+                                 le32toh(t->blob_size),
+                                 t->policy_hash_and_blob + le32toh(t->blob_size),
+                                 le32toh(t->policy_hash_size),
++                                NULL,
+                                 &tpm2_key,
+                                 &tpm2_key_size);
+                 if (r < 0)
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 70a2929432..aca7b69ab5 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -14,6 +14,7 @@
+ #include "hexdecoct.h"
+ #include "memory-util.h"
+ #include "random-util.h"
++#include "sha256.h"
+ #include "time-util.h"
+ 
+ static void *libtss2_esys_dl = NULL;
+@@ -30,10 +31,12 @@ TSS2_RC (*sym_Esys_GetRandom)(ESYS_CONTEXT *esysContext, ESYS_TR shandle1, ESYS_
+ TSS2_RC (*sym_Esys_Initialize)(ESYS_CONTEXT **esys_context,  TSS2_TCTI_CONTEXT *tcti, TSS2_ABI_VERSION *abiVersion) = NULL;
+ TSS2_RC (*sym_Esys_Load)(ESYS_CONTEXT *esysContext, ESYS_TR parentHandle, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3, const TPM2B_PRIVATE *inPrivate, const TPM2B_PUBLIC *inPublic, ESYS_TR *objectHandle) = NULL;
+ TSS2_RC (*sym_Esys_PCR_Read)(ESYS_CONTEXT *esysContext, ESYS_TR shandle1,ESYS_TR shandle2, ESYS_TR shandle3, const TPML_PCR_SELECTION *pcrSelectionIn, UINT32 *pcrUpdateCounter, TPML_PCR_SELECTION **pcrSelectionOut, TPML_DIGEST **pcrValues);
++TSS2_RC (*sym_Esys_PolicyAuthValue)(ESYS_CONTEXT *esysContext, ESYS_TR policySession, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3) = NULL;
+ TSS2_RC (*sym_Esys_PolicyGetDigest)(ESYS_CONTEXT *esysContext, ESYS_TR policySession, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3, TPM2B_DIGEST **policyDigest) = NULL;
+ TSS2_RC (*sym_Esys_PolicyPCR)(ESYS_CONTEXT *esysContext, ESYS_TR policySession, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3, const TPM2B_DIGEST *pcrDigest, const TPML_PCR_SELECTION *pcrs) = NULL;
+ TSS2_RC (*sym_Esys_StartAuthSession)(ESYS_CONTEXT *esysContext, ESYS_TR tpmKey, ESYS_TR bind, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3, const TPM2B_NONCE *nonceCaller, TPM2_SE sessionType, const TPMT_SYM_DEF *symmetric, TPMI_ALG_HASH authHash, ESYS_TR *sessionHandle) = NULL;
+ TSS2_RC (*sym_Esys_Startup)(ESYS_CONTEXT *esysContext, TPM2_SU startupType) = NULL;
++TSS2_RC (*sym_Esys_TR_SetAuth)(ESYS_CONTEXT *esysContext, ESYS_TR handle, TPM2B_AUTH const *authValue) = NULL;
+ TSS2_RC (*sym_Esys_Unseal)(ESYS_CONTEXT *esysContext, ESYS_TR itemHandle, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3, TPM2B_SENSITIVE_DATA **outData) = NULL;
+ 
+ const char* (*sym_Tss2_RC_Decode)(TSS2_RC rc) = NULL;
+@@ -58,10 +61,12 @@ int dlopen_tpm2(void) {
+                         DLSYM_ARG(Esys_Initialize),
+                         DLSYM_ARG(Esys_Load),
+                         DLSYM_ARG(Esys_PCR_Read),
++                        DLSYM_ARG(Esys_PolicyAuthValue),
+                         DLSYM_ARG(Esys_PolicyGetDigest),
+                         DLSYM_ARG(Esys_PolicyPCR),
+                         DLSYM_ARG(Esys_StartAuthSession),
+                         DLSYM_ARG(Esys_Startup),
++                        DLSYM_ARG(Esys_TR_SetAuth),
+                         DLSYM_ARG(Esys_Unseal));
+         if (r < 0)
+                 return r;
+@@ -594,6 +599,7 @@ static int tpm2_make_pcr_session(
+                 ESYS_CONTEXT *c,
+                 uint32_t pcr_mask,
+                 uint16_t pcr_bank, /* If UINT16_MAX, pick best bank automatically, otherwise specify bank explicitly. */
++                bool use_pin,
+                 ESYS_TR *ret_session,
+                 TPM2B_DIGEST **ret_policy_digest,
+                 TPMI_ALG_HASH *ret_pcr_bank) {
+@@ -669,6 +675,21 @@ static int tpm2_make_pcr_session(
+                 goto finish;
+         }
+ 
++        if (use_pin) {
++                rc = sym_Esys_PolicyAuthValue(
++                                c,
++                                session,
++                                ESYS_TR_NONE,
++                                ESYS_TR_NONE,
++                                ESYS_TR_NONE);
++                if (rc != TSS2_RC_SUCCESS) {
++                        r = log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
++                                            "Failed to add authValue policy to TPM: %s",
++                                            sym_Tss2_RC_Decode(rc));
++                        goto finish;
++                }
++        }
++
+         if (DEBUG_LOGGING || ret_policy_digest) {
+                 log_debug("Acquiring policy digest.");
+ 
+@@ -717,9 +738,22 @@ finish:
+         return r;
+ }
+ 
++static void hash_pin(const char *pin, size_t len, uint8_t ret_digest[static SHA256_DIGEST_SIZE]) {
++        struct sha256_ctx hash;
++
++        assert(pin);
++
++        sha256_init_ctx(&hash);
++        sha256_process_bytes(pin, len, &hash);
++        sha256_finish_ctx(&hash, ret_digest);
++
++        explicit_bzero_safe(&hash, sizeof(hash));
++}
++
+ int tpm2_seal(
+                 const char *device,
+                 uint32_t pcr_mask,
++                const char *pin,
+                 void **ret_secret,
+                 size_t *ret_secret_size,
+                 void **ret_blob,
+@@ -782,7 +816,8 @@ int tpm2_seal(
+         if (r < 0)
+                 return r;
+ 
+-        r = tpm2_make_pcr_session(c.esys_context, pcr_mask, UINT16_MAX, NULL, &policy_digest, &pcr_bank);
++        r = tpm2_make_pcr_session(c.esys_context, pcr_mask, UINT16_MAX, !!pin, NULL, &policy_digest,
++                                  &pcr_bank);
+         if (r < 0)
+                 goto finish;
+ 
+@@ -813,6 +848,10 @@ int tpm2_seal(
+                 .size = sizeof(hmac_sensitive.sensitive),
+                 .sensitive.data.size = 32,
+         };
++        if (pin) {
++                hash_pin(pin, strlen(pin), hmac_sensitive.sensitive.userAuth.buffer);
++                hmac_sensitive.sensitive.userAuth.size = SHA256_DIGEST_SIZE;
++        }
+         assert(sizeof(hmac_sensitive.sensitive.data.buffer) >= hmac_sensitive.sensitive.data.size);
+ 
+         (void) tpm2_credit_random(c.esys_context);
+@@ -910,6 +949,7 @@ int tpm2_seal(
+         r = 0;
+ 
+ finish:
++        explicit_bzero_safe(&hmac_sensitive, sizeof(hmac_sensitive));
+         primary = flush_context_verbose(c.esys_context, primary);
+         return r;
+ }
+@@ -923,6 +963,7 @@ int tpm2_unseal(
+                 size_t blob_size,
+                 const void *known_policy_hash,
+                 size_t known_policy_hash_size,
++                const char *pin,
+                 void **ret_secret,
+                 size_t *ret_secret_size) {
+ 
+@@ -978,7 +1019,7 @@ int tpm2_unseal(
+         if (r < 0)
+                 return r;
+ 
+-        r = tpm2_make_pcr_session(c.esys_context, pcr_mask, pcr_bank, &session, &policy_digest, NULL);
++        r = tpm2_make_pcr_session(c.esys_context, pcr_mask, pcr_bank, !!pin, &session, &policy_digest, NULL);
+         if (r < 0)
+                 goto finish;
+ 
+@@ -1005,11 +1046,38 @@ int tpm2_unseal(
+                         &public,
+                         &hmac_key);
+         if (rc != TSS2_RC_SUCCESS) {
+-                r = log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+-                                    "Failed to load HMAC key in TPM: %s", sym_Tss2_RC_Decode(rc));
++                /* If we're in dictionary attack lockout mode, we should see a lockout error here, which we
++                 * need to translate for the caller. */
++                if (rc == TPM2_RC_LOCKOUT)
++                        r = log_error_errno(
++                                        SYNTHETIC_ERRNO(ENOLCK),
++                                        "TPM2 device is in dictionary attack lockout mode.");
++                else
++                        r = log_error_errno(
++                                        SYNTHETIC_ERRNO(ENOTRECOVERABLE),
++                                        "Failed to load HMAC key in TPM: %s",
++                                        sym_Tss2_RC_Decode(rc));
+                 goto finish;
+         }
+ 
++        if (pin) {
++                TPM2B_AUTH auth = {
++                        .size = SHA256_DIGEST_SIZE
++                };
++
++                hash_pin(pin, strlen(pin), auth.buffer);
++
++                rc = sym_Esys_TR_SetAuth(c.esys_context, hmac_key, &auth);
++                explicit_bzero_safe(&auth, sizeof(auth));
++                if (rc != TSS2_RC_SUCCESS) {
++                        r = log_error_errno(
++                                        SYNTHETIC_ERRNO(ENOTRECOVERABLE),
++                                        "Failed to load PIN in TPM: %s",
++                                        sym_Tss2_RC_Decode(rc));
++                        goto finish;
++                }
++        }
++
+         log_debug("Unsealing HMAC key.");
+ 
+         rc = sym_Esys_Unseal(
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index cb57a847e2..784e9fd11e 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -1,6 +1,8 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ #pragma once
+ 
++#include <stdbool.h>
++
+ #include "json.h"
+ #include "macro.h"
+ 
+@@ -20,10 +22,12 @@ extern TSS2_RC (*sym_Esys_GetRandom)(ESYS_CONTEXT *esysContext, ESYS_TR shandle1
+ extern TSS2_RC (*sym_Esys_Initialize)(ESYS_CONTEXT **esys_context,  TSS2_TCTI_CONTEXT *tcti, TSS2_ABI_VERSION *abiVersion);
+ extern TSS2_RC (*sym_Esys_Load)(ESYS_CONTEXT *esysContext, ESYS_TR parentHandle, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3, const TPM2B_PRIVATE *inPrivate, const TPM2B_PUBLIC *inPublic, ESYS_TR *objectHandle);
+ extern TSS2_RC (*sym_Esys_PCR_Read)(ESYS_CONTEXT *esysContext, ESYS_TR shandle1,ESYS_TR shandle2, ESYS_TR shandle3, const TPML_PCR_SELECTION *pcrSelectionIn, UINT32 *pcrUpdateCounter, TPML_PCR_SELECTION **pcrSelectionOut, TPML_DIGEST **pcrValues);
++extern TSS2_RC (*sym_Esys_PolicyAuthValue)(ESYS_CONTEXT *esysContext, ESYS_TR policySession, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3);
+ extern TSS2_RC (*sym_Esys_PolicyGetDigest)(ESYS_CONTEXT *esysContext, ESYS_TR policySession, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3, TPM2B_DIGEST **policyDigest);
+ extern TSS2_RC (*sym_Esys_PolicyPCR)(ESYS_CONTEXT *esysContext, ESYS_TR policySession, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3, const TPM2B_DIGEST *pcrDigest, const TPML_PCR_SELECTION *pcrs);
+ extern TSS2_RC (*sym_Esys_StartAuthSession)(ESYS_CONTEXT *esysContext, ESYS_TR tpmKey, ESYS_TR bind, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3, const TPM2B_NONCE *nonceCaller, TPM2_SE sessionType, const TPMT_SYM_DEF *symmetric, TPMI_ALG_HASH authHash, ESYS_TR *sessionHandle);
+ extern TSS2_RC (*sym_Esys_Startup)(ESYS_CONTEXT *esysContext, TPM2_SU startupType);
++extern TSS2_RC (*sym_Esys_TR_SetAuth)(ESYS_CONTEXT *esysContext, ESYS_TR handle, TPM2B_AUTH const *authValue);
+ extern TSS2_RC (*sym_Esys_Unseal)(ESYS_CONTEXT *esysContext, ESYS_TR itemHandle, ESYS_TR shandle1, ESYS_TR shandle2, ESYS_TR shandle3, TPM2B_SENSITIVE_DATA **outData);
+ 
+ extern const char* (*sym_Tss2_RC_Decode)(TSS2_RC rc);
+@@ -35,8 +39,8 @@ extern TSS2_RC (*sym_Tss2_MU_TPM2B_PUBLIC_Unmarshal)(uint8_t const buffer[], siz
+ 
+ int dlopen_tpm2(void);
+ 
+-int tpm2_seal(const char *device, uint32_t pcr_mask, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, void **ret_pcr_hash, size_t *ret_pcr_hash_size, uint16_t *ret_pcr_bank, uint16_t *ret_primary_alg);
+-int tpm2_unseal(const char *device, uint32_t pcr_mask, uint16_t pcr_bank, uint16_t primary_alg, const void *blob, size_t blob_size, const void *pcr_hash, size_t pcr_hash_size, void **ret_secret, size_t *ret_secret_size);
++int tpm2_seal(const char *device, uint32_t pcr_mask, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, void **ret_pcr_hash, size_t *ret_pcr_hash_size, uint16_t *ret_pcr_bank, uint16_t *ret_primary_alg);
++int tpm2_unseal(const char *device, uint32_t pcr_mask, uint16_t pcr_bank, uint16_t primary_alg, const void *blob, size_t blob_size, const void *pcr_hash, size_t pcr_hash_size, const char *pin, void **ret_secret, size_t *ret_secret_size);
+ 
+ #endif
+ 

@@ -1,0 +1,549 @@
+From 87df0601074b024ab591534e0e78b2d1e7013a8d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 9 Mar 2022 22:29:19 +0100
+Subject: [PATCH] shared/specifier: fix %u/%U/%g/%G when called as unprivileged
+ user
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We would resolve those specifiers to the calling user/group. This is mostly OK
+when done in the manager, because the manager generally operates as root
+in system mode, and a non-root in user mode. It would still be wrong if
+called with --test though. But in systemctl, this would be generally wrong,
+since we can call 'systemctl --system' as a normal user, either for testing
+or even for actual operation with '--root=…'.
+
+When operating in --global mode, %u/%U/%g/%G should return an error.
+
+The information whether we're operating in system mode, user mode, or global
+mode is passed as the data pointer to specifier_group_name(), specifier_user_name(),
+specifier_group_id(), specifier_user_id(). We can't use userdata, because
+it's already used for other things.
+
+(cherry picked from commit 172e9cc3ee3dcca288d04c744984a9a3b2a0d008)
+
+Related: #2082131
+---
+ src/core/unit-printf.c        |   4 +-
+ src/shared/install-printf.c   |   9 ++-
+ src/shared/install-printf.h   |   7 ++-
+ src/shared/install.c          |   9 +--
+ src/shared/specifier.c        |  52 ++++++++++++++---
+ src/shared/specifier.h        |  10 ++--
+ src/test/test-load-fragment.c | 101 +++++++++++++++++++---------------
+ src/test/test-specifier.c     |   3 +-
+ src/tmpfiles/tmpfiles.c       |  53 +++++++++---------
+ test/test-systemctl-enable.sh |  11 ++--
+ test/test-systemd-tmpfiles.py |   8 +--
+ 11 files changed, 163 insertions(+), 104 deletions(-)
+
+diff --git a/src/core/unit-printf.c b/src/core/unit-printf.c
+index 46c383b841..3086356419 100644
+--- a/src/core/unit-printf.c
++++ b/src/core/unit-printf.c
+@@ -190,7 +190,7 @@ int unit_name_printf(const Unit *u, const char* format, char **ret) {
+ 
+                 COMMON_SYSTEM_SPECIFIERS,
+ 
+-                COMMON_CREDS_SPECIFIERS,
++                COMMON_CREDS_SPECIFIERS(u->manager->unit_file_scope),
+                 {}
+         };
+ 
+@@ -256,7 +256,7 @@ int unit_full_printf_full(const Unit *u, const char *format, size_t max_length,
+ 
+                 COMMON_SYSTEM_SPECIFIERS,
+ 
+-                COMMON_CREDS_SPECIFIERS,
++                COMMON_CREDS_SPECIFIERS(u->manager->unit_file_scope),
+ 
+                 COMMON_TMP_SPECIFIERS,
+                 {}
+diff --git a/src/shared/install-printf.c b/src/shared/install-printf.c
+index 6ff4198ac9..963102674b 100644
+--- a/src/shared/install-printf.c
++++ b/src/shared/install-printf.c
+@@ -103,7 +103,12 @@ static int specifier_last_component(char specifier, const void *data, const char
+         return 0;
+ }
+ 
+-int install_name_printf(const UnitFileInstallInfo *i, const char *format, const char *root, char **ret) {
++int install_name_printf(
++                UnitFileScope scope,
++                const UnitFileInstallInfo *i,
++                const char *format,
++                const char *root,
++                char **ret) {
+         /* This is similar to unit_name_printf() */
+ 
+         const Specifier table[] = {
+@@ -115,7 +120,7 @@ int install_name_printf(const UnitFileInstallInfo *i, const char *format, const
+ 
+                 COMMON_SYSTEM_SPECIFIERS,
+ 
+-                COMMON_CREDS_SPECIFIERS,
++                COMMON_CREDS_SPECIFIERS(scope),
+                 {}
+         };
+ 
+diff --git a/src/shared/install-printf.h b/src/shared/install-printf.h
+index 5ca9406797..d2cccdf66d 100644
+--- a/src/shared/install-printf.h
++++ b/src/shared/install-printf.h
+@@ -4,4 +4,9 @@
+ #include "install.h"
+ #include "unit-name.h"
+ 
+-int install_name_printf(const UnitFileInstallInfo *i, const char *format, const char *root, char **ret);
++int install_name_printf(
++                UnitFileScope scope,
++                const UnitFileInstallInfo *i,
++                const char *format,
++                const char *root,
++                char **ret);
+diff --git a/src/shared/install.c b/src/shared/install.c
+index bfdeee48bf..8d82cb6b16 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -1160,7 +1160,7 @@ static int config_parse_also(
+                 if (r == 0)
+                         break;
+ 
+-                r = install_name_printf(info, word, info->root, &printed);
++                r = install_name_printf(ctx->scope, info, word, info->root, &printed);
+                 if (r < 0)
+                         return log_syntax(unit, LOG_WARNING, filename, line, r,
+                                           "Failed to resolve unit name in Also=\"%s\": %m", word);
+@@ -1191,6 +1191,7 @@ static int config_parse_default_instance(
+                 void *data,
+                 void *userdata) {
+ 
++        InstallContext *ctx = ASSERT_PTR(data);
+         UnitFileInstallInfo *info = ASSERT_PTR(userdata);
+         _cleanup_free_ char *printed = NULL;
+         int r;
+@@ -1208,7 +1209,7 @@ static int config_parse_default_instance(
+                 return log_syntax(unit, LOG_WARNING, filename, line, 0,
+                                   "DefaultInstance= only makes sense for template units, ignoring.");
+ 
+-        r = install_name_printf(info, rvalue, info->root, &printed);
++        r = install_name_printf(ctx->scope, info, rvalue, info->root, &printed);
+         if (r < 0)
+                 return log_syntax(unit, LOG_WARNING, filename, line, r,
+                                   "Failed to resolve instance name in DefaultInstance=\"%s\": %m", rvalue);
+@@ -1780,7 +1781,7 @@ static int install_info_symlink_alias(
+         STRV_FOREACH(s, info->aliases) {
+                 _cleanup_free_ char *alias_path = NULL, *dst = NULL, *dst_updated = NULL;
+ 
+-                q = install_name_printf(info, *s, info->root, &dst);
++                q = install_name_printf(scope, info, *s, info->root, &dst);
+                 if (q < 0) {
+                         unit_file_changes_add(changes, n_changes, q, *s, NULL);
+                         return q;
+@@ -1867,7 +1868,7 @@ static int install_info_symlink_wants(
+         STRV_FOREACH(s, list) {
+                 _cleanup_free_ char *path = NULL, *dst = NULL;
+ 
+-                q = install_name_printf(info, *s, info->root, &dst);
++                q = install_name_printf(scope, info, *s, info->root, &dst);
+                 if (q < 0) {
+                         unit_file_changes_add(changes, n_changes, q, *s, NULL);
+                         return q;
+diff --git a/src/shared/specifier.c b/src/shared/specifier.c
+index a917378427..ac353a651c 100644
+--- a/src/shared/specifier.c
++++ b/src/shared/specifier.c
+@@ -21,6 +21,7 @@
+ #include "specifier.h"
+ #include "string-util.h"
+ #include "strv.h"
++#include "unit-file.h"
+ #include "user-util.h"
+ 
+ /*
+@@ -253,9 +254,15 @@ int specifier_os_image_version(char specifier, const void *data, const char *roo
+ }
+ 
+ int specifier_group_name(char specifier, const void *data, const char *root, const void *userdata, char **ret) {
++        UnitFileScope scope = PTR_TO_INT(data);
+         char *t;
+ 
+-        t = gid_to_name(getgid());
++        assert(ret);
++
++        if (scope == UNIT_FILE_GLOBAL)
++                return -EINVAL;
++
++        t = gid_to_name(scope == UNIT_FILE_USER ? getgid() : 0);
+         if (!t)
+                 return -ENOMEM;
+ 
+@@ -264,23 +271,42 @@ int specifier_group_name(char specifier, const void *data, const char *root, con
+ }
+ 
+ int specifier_group_id(char specifier, const void *data, const char *root, const void *userdata, char **ret) {
+-        if (asprintf(ret, UID_FMT, getgid()) < 0)
++        UnitFileScope scope = PTR_TO_INT(data);
++        gid_t gid;
++
++        assert(ret);
++
++        if (scope == UNIT_FILE_GLOBAL)
++                return -EINVAL;
++
++        gid = scope == UNIT_FILE_USER ? getgid() : 0;
++
++        if (asprintf(ret, UID_FMT, gid) < 0)
+                 return -ENOMEM;
+ 
+         return 0;
+ }
+ 
+ int specifier_user_name(char specifier, const void *data, const char *root, const void *userdata, char **ret) {
++        UnitFileScope scope = PTR_TO_INT(data);
++        uid_t uid;
+         char *t;
+ 
+-        /* If we are UID 0 (root), this will not result in NSS, otherwise it might. This is good, as we want to be able
+-         * to run this in PID 1, where our user ID is 0, but where NSS lookups are not allowed.
++        assert(ret);
+ 
+-         * We don't use getusername_malloc() here, because we don't want to look at $USER, to remain consistent with
+-         * specifer_user_id() below.
++        if (scope == UNIT_FILE_GLOBAL)
++                return -EINVAL;
++
++        uid = scope == UNIT_FILE_USER ? getuid() : 0;
++
++        /* If we are UID 0 (root), this will not result in NSS, otherwise it might. This is good, as we want
++         * to be able to run this in PID 1, where our user ID is 0, but where NSS lookups are not allowed.
++
++         * We don't use getusername_malloc() here, because we don't want to look at $USER, to remain
++         * consistent with specifer_user_id() below.
+          */
+ 
+-        t = uid_to_name(getuid());
++        t = uid_to_name(uid);
+         if (!t)
+                 return -ENOMEM;
+ 
+@@ -289,7 +315,17 @@ int specifier_user_name(char specifier, const void *data, const char *root, cons
+ }
+ 
+ int specifier_user_id(char specifier, const void *data, const char *root, const void *userdata, char **ret) {
+-        if (asprintf(ret, UID_FMT, getuid()) < 0)
++        UnitFileScope scope = PTR_TO_INT(data);
++        uid_t uid;
++
++        assert(ret);
++
++        if (scope == UNIT_FILE_GLOBAL)
++                return -EINVAL;
++
++        uid = scope == UNIT_FILE_USER ? getuid() : 0;
++
++        if (asprintf(ret, UID_FMT, uid) < 0)
+                 return -ENOMEM;
+ 
+         return 0;
+diff --git a/src/shared/specifier.h b/src/shared/specifier.h
+index c433ee2d63..3c619a6c8f 100644
+--- a/src/shared/specifier.h
++++ b/src/shared/specifier.h
+@@ -80,11 +80,11 @@ int specifier_var_tmp_dir(char specifier, const void *data, const char *root, co
+         { 'w', specifier_os_version_id,   NULL }, \
+         { 'W', specifier_os_variant_id,   NULL }
+ 
+-#define COMMON_CREDS_SPECIFIERS                   \
+-        { 'g', specifier_group_name,      NULL }, \
+-        { 'G', specifier_group_id,        NULL }, \
+-        { 'u', specifier_user_name,       NULL }, \
+-        { 'U', specifier_user_id,         NULL }
++#define COMMON_CREDS_SPECIFIERS(scope)                          \
++        { 'g', specifier_group_name,      INT_TO_PTR(scope) },  \
++        { 'G', specifier_group_id,        INT_TO_PTR(scope) },  \
++        { 'u', specifier_user_name,       INT_TO_PTR(scope) },  \
++        { 'U', specifier_user_id,         INT_TO_PTR(scope) }
+ 
+ #define COMMON_TMP_SPECIFIERS                     \
+         { 'T', specifier_tmp_dir,         NULL }, \
+diff --git a/src/test/test-load-fragment.c b/src/test/test-load-fragment.c
+index c579be4150..9df53cec2b 100644
+--- a/src/test/test-load-fragment.c
++++ b/src/test/test-load-fragment.c
+@@ -526,59 +526,74 @@ TEST(install_printf, .sd_booted = true) {
+         assert_se(user = uid_to_name(getuid()));
+         assert_se(asprintf(&uid, UID_FMT, getuid()) >= 0);
+ 
+-#define expect(src, pattern, result)                                    \
++#define expect(scope, src, pattern, result)                             \
+         do {                                                            \
+-                _cleanup_free_ char *t = NULL;                          \
+-                _cleanup_free_ char                                     \
+-                        *d1 = strdup(i.name),                           \
+-                        *d2 = strdup(i.path);                           \
+-                assert_se(install_name_printf(&src, pattern, NULL, &t) >= 0 || !result); \
++                _cleanup_free_ char *t = NULL,                          \
++                        *d1 = ASSERT_PTR(strdup(i.name)),               \
++                        *d2 = ASSERT_PTR(strdup(i.path));               \
++                int r = install_name_printf(scope, &src, pattern, NULL, &t); \
++                assert_se(result ? r >= 0 : r < 0);                     \
+                 memzero(i.name, strlen(i.name));                        \
+                 memzero(i.path, strlen(i.path));                        \
+-                assert_se(d1 && d2);                                    \
+                 if (result) {                                           \
+                         printf("%s\n", t);                              \
+                         assert_se(streq(t, result));                    \
+-                } else assert_se(t == NULL);                            \
++                } else                                                  \
++                        assert_se(!t);                                  \
+                 strcpy(i.name, d1);                                     \
+                 strcpy(i.path, d2);                                     \
+         } while (false)
+ 
+-        expect(i, "%n", "name.service");
+-        expect(i, "%N", "name");
+-        expect(i, "%p", "name");
+-        expect(i, "%i", "");
+-        expect(i, "%j", "name");
+-        expect(i, "%g", group);
+-        expect(i, "%G", gid);
+-        expect(i, "%u", user);
+-        expect(i, "%U", uid);
+-
+-        expect(i, "%m", mid);
+-        expect(i, "%b", bid);
+-        expect(i, "%H", host);
+-
+-        expect(i2, "%g", group);
+-        expect(i2, "%G", gid);
+-        expect(i2, "%u", user);
+-        expect(i2, "%U", uid);
+-
+-        expect(i3, "%n", "name@inst.service");
+-        expect(i3, "%N", "name@inst");
+-        expect(i3, "%p", "name");
+-        expect(i3, "%g", group);
+-        expect(i3, "%G", gid);
+-        expect(i3, "%u", user);
+-        expect(i3, "%U", uid);
+-
+-        expect(i3, "%m", mid);
+-        expect(i3, "%b", bid);
+-        expect(i3, "%H", host);
+-
+-        expect(i4, "%g", group);
+-        expect(i4, "%G", gid);
+-        expect(i4, "%u", user);
+-        expect(i4, "%U", uid);
++        expect(UNIT_FILE_SYSTEM, i, "%n", "name.service");
++        expect(UNIT_FILE_SYSTEM, i, "%N", "name");
++        expect(UNIT_FILE_SYSTEM, i, "%p", "name");
++        expect(UNIT_FILE_SYSTEM, i, "%i", "");
++        expect(UNIT_FILE_SYSTEM, i, "%j", "name");
++        expect(UNIT_FILE_SYSTEM, i, "%g", "root");
++        expect(UNIT_FILE_SYSTEM, i, "%G", "0");
++        expect(UNIT_FILE_SYSTEM, i, "%u", "root");
++        expect(UNIT_FILE_SYSTEM, i, "%U", "0");
++
++        expect(UNIT_FILE_SYSTEM, i, "%m", mid);
++        expect(UNIT_FILE_SYSTEM, i, "%b", bid);
++        expect(UNIT_FILE_SYSTEM, i, "%H", host);
++
++        expect(UNIT_FILE_SYSTEM, i2, "%g", "root");
++        expect(UNIT_FILE_SYSTEM, i2, "%G", "0");
++        expect(UNIT_FILE_SYSTEM, i2, "%u", "root");
++        expect(UNIT_FILE_SYSTEM, i2, "%U", "0");
++
++        expect(UNIT_FILE_USER, i2, "%g", group);
++        expect(UNIT_FILE_USER, i2, "%G", gid);
++        expect(UNIT_FILE_USER, i2, "%u", user);
++        expect(UNIT_FILE_USER, i2, "%U", uid);
++
++        /* gcc-12.0.1-0.9.fc36.x86_64 insist that streq(…, NULL) is called,
++         * even though the call is inside of a conditional where the pointer is checked. :( */
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wnonnull"
++        expect(UNIT_FILE_GLOBAL, i2, "%g", NULL);
++        expect(UNIT_FILE_GLOBAL, i2, "%G", NULL);
++        expect(UNIT_FILE_GLOBAL, i2, "%u", NULL);
++        expect(UNIT_FILE_GLOBAL, i2, "%U", NULL);
++#pragma GCC diagnostic pop
++
++        expect(UNIT_FILE_SYSTEM, i3, "%n", "name@inst.service");
++        expect(UNIT_FILE_SYSTEM, i3, "%N", "name@inst");
++        expect(UNIT_FILE_SYSTEM, i3, "%p", "name");
++        expect(UNIT_FILE_USER, i3, "%g", group);
++        expect(UNIT_FILE_USER, i3, "%G", gid);
++        expect(UNIT_FILE_USER, i3, "%u", user);
++        expect(UNIT_FILE_USER, i3, "%U", uid);
++
++        expect(UNIT_FILE_SYSTEM, i3, "%m", mid);
++        expect(UNIT_FILE_SYSTEM, i3, "%b", bid);
++        expect(UNIT_FILE_SYSTEM, i3, "%H", host);
++
++        expect(UNIT_FILE_USER, i4, "%g", group);
++        expect(UNIT_FILE_USER, i4, "%G", gid);
++        expect(UNIT_FILE_USER, i4, "%u", user);
++        expect(UNIT_FILE_USER, i4, "%U", uid);
+ }
+ 
+ static uint64_t make_cap(int cap) {
+diff --git a/src/test/test-specifier.c b/src/test/test-specifier.c
+index a45d1bd0b9..dd47f0285e 100644
+--- a/src/test/test-specifier.c
++++ b/src/test/test-specifier.c
+@@ -7,6 +7,7 @@
+ #include "string-util.h"
+ #include "strv.h"
+ #include "tests.h"
++#include "unit-file.h"
+ 
+ static void test_specifier_escape_one(const char *a, const char *b) {
+         _cleanup_free_ char *x = NULL;
+@@ -45,7 +46,7 @@ TEST(specifier_escape_strv) {
+ static const Specifier specifier_table[] = {
+         COMMON_SYSTEM_SPECIFIERS,
+ 
+-        COMMON_CREDS_SPECIFIERS,
++        COMMON_CREDS_SPECIFIERS(UNIT_FILE_USER),
+         { 'h', specifier_user_home,       NULL },
+ 
+         COMMON_TMP_SPECIFIERS,
+diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
+index fcab51c208..aa7ff73a36 100644
+--- a/src/tmpfiles/tmpfiles.c
++++ b/src/tmpfiles/tmpfiles.c
+@@ -204,31 +204,6 @@ STATIC_DESTRUCTOR_REGISTER(arg_image, freep);
+ static int specifier_machine_id_safe(char specifier, const void *data, const char *root, const void *userdata, char **ret);
+ static int specifier_directory(char specifier, const void *data, const char *root, const void *userdata, char **ret);
+ 
+-static const Specifier specifier_table[] = {
+-        { 'a', specifier_architecture,    NULL },
+-        { 'b', specifier_boot_id,         NULL },
+-        { 'B', specifier_os_build_id,     NULL },
+-        { 'H', specifier_host_name,       NULL },
+-        { 'l', specifier_short_host_name, NULL },
+-        { 'm', specifier_machine_id_safe, NULL },
+-        { 'o', specifier_os_id,           NULL },
+-        { 'v', specifier_kernel_release,  NULL },
+-        { 'w', specifier_os_version_id,   NULL },
+-        { 'W', specifier_os_variant_id,   NULL },
+-
+-        { 'h', specifier_user_home,       NULL },
+-
+-        { 'C', specifier_directory,       UINT_TO_PTR(DIRECTORY_CACHE) },
+-        { 'L', specifier_directory,       UINT_TO_PTR(DIRECTORY_LOGS) },
+-        { 'S', specifier_directory,       UINT_TO_PTR(DIRECTORY_STATE) },
+-        { 't', specifier_directory,       UINT_TO_PTR(DIRECTORY_RUNTIME) },
+-
+-        COMMON_CREDS_SPECIFIERS,
+-
+-        COMMON_TMP_SPECIFIERS,
+-        {}
+-};
+-
+ static int specifier_machine_id_safe(char specifier, const void *data, const char *root, const void *userdata, char **ret) {
+         int r;
+ 
+@@ -2743,7 +2718,7 @@ static bool should_include_path(const char *path) {
+         return false;
+ }
+ 
+-static int specifier_expansion_from_arg(Item *i) {
++static int specifier_expansion_from_arg(const Specifier *specifier_table, Item *i) {
+         int r;
+ 
+         assert(i);
+@@ -2951,6 +2926,30 @@ static int parse_line(
+         assert(line >= 1);
+         assert(buffer);
+ 
++        const Specifier specifier_table[] = {
++                { 'a', specifier_architecture,    NULL },
++                { 'b', specifier_boot_id,         NULL },
++                { 'B', specifier_os_build_id,     NULL },
++                { 'H', specifier_host_name,       NULL },
++                { 'l', specifier_short_host_name, NULL },
++                { 'm', specifier_machine_id_safe, NULL },
++                { 'o', specifier_os_id,           NULL },
++                { 'v', specifier_kernel_release,  NULL },
++                { 'w', specifier_os_version_id,   NULL },
++                { 'W', specifier_os_variant_id,   NULL },
++
++                { 'h', specifier_user_home,       NULL },
++
++                { 'C', specifier_directory,       UINT_TO_PTR(DIRECTORY_CACHE)   },
++                { 'L', specifier_directory,       UINT_TO_PTR(DIRECTORY_LOGS)    },
++                { 'S', specifier_directory,       UINT_TO_PTR(DIRECTORY_STATE)   },
++                { 't', specifier_directory,       UINT_TO_PTR(DIRECTORY_RUNTIME) },
++
++                COMMON_CREDS_SPECIFIERS(arg_user ? UNIT_FILE_USER : UNIT_FILE_SYSTEM),
++                COMMON_TMP_SPECIFIERS,
++                {}
++        };
++
+         r = extract_many_words(
+                         &buffer,
+                         NULL,
+@@ -3155,7 +3154,7 @@ static int parse_line(
+         if (!should_include_path(i.path))
+                 return 0;
+ 
+-        r = specifier_expansion_from_arg(&i);
++        r = specifier_expansion_from_arg(specifier_table, &i);
+         if (r == -ENXIO)
+                 return log_unresolvable_specifier(fname, line);
+         if (r < 0) {
+diff --git a/test/test-systemctl-enable.sh b/test/test-systemctl-enable.sh
+index da1fffe944..8ac1342b91 100644
+--- a/test/test-systemctl-enable.sh
++++ b/test/test-systemctl-enable.sh
+@@ -500,9 +500,10 @@ check_alias t '' && { echo "Expected failure" >&2; exit 1; }
+ check_alias T '' && { echo "Expected failure" >&2; exit 1; }
+ check_alias V '' && { echo "Expected failure" >&2; exit 1; }
+ 
+-# FIXME: we use the calling user instead of root :(
+-check_alias g root || :
+-check_alias G 0 || :
++check_alias g root
++check_alias G 0
++check_alias u root
++check_alias U 0
+ 
+ check_alias i ""
+ 
+@@ -521,10 +522,6 @@ check_alias N 'some-some-link6@'
+ 
+ check_alias p 'some-some-link6'
+ 
+-# FIXME: we use the calling user instead of root :(
+-check_alias u root || :
+-check_alias U 0 || :
+-
+ check_alias v "$(uname -r)"
+ 
+ check_alias % '%' && { echo "Expected failure because % is not legal in unit name" >&2; exit 1; }
+diff --git a/test/test-systemd-tmpfiles.py b/test/test-systemd-tmpfiles.py
+index 3376029463..ba42b3fa37 100755
+--- a/test/test-systemd-tmpfiles.py
++++ b/test/test-systemd-tmpfiles.py
+@@ -98,13 +98,13 @@ def test_valid_specifiers(*, user):
+         test_content('f {} - - - - %b', '{}'.format(id128.get_boot().hex), user=user)
+     test_content('f {} - - - - %H', '{}'.format(socket.gethostname()), user=user)
+     test_content('f {} - - - - %v', '{}'.format(os.uname().release), user=user)
+-    test_content('f {} - - - - %U', '{}'.format(os.getuid()), user=user)
+-    test_content('f {} - - - - %G', '{}'.format(os.getgid()), user=user)
++    test_content('f {} - - - - %U', '{}'.format(os.getuid() if user else 0), user=user)
++    test_content('f {} - - - - %G', '{}'.format(os.getgid() if user else 0), user=user)
+ 
+-    puser = pwd.getpwuid(os.getuid())
++    puser = pwd.getpwuid(os.getuid() if user else 0)
+     test_content('f {} - - - - %u', '{}'.format(puser.pw_name), user=user)
+ 
+-    pgroup = grp.getgrgid(os.getgid())
++    pgroup = grp.getgrgid(os.getgid() if user else 0)
+     test_content('f {} - - - - %g', '{}'.format(pgroup.gr_name), user=user)
+ 
+     # Note that %h is the only specifier in which we look the environment,

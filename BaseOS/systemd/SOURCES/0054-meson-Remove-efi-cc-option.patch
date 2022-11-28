@@ -1,0 +1,96 @@
+From 38afe3074812ab355bc20a36d41871f1b4f4386b Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Wed, 29 Dec 2021 15:02:04 +0100
+Subject: [PATCH] meson: Remove efi-cc option
+
+Changing the efi compiler this way doesn't really work. The gnu-efi
+header checks as well as supported compiler flag checks use the
+regular cc that meson detects. Changing the compiler this way will
+end up with bad compiler flags. For the very same reason, this does
+not work with a cross-compiler without going through proper meson
+cross-compilation steps either.
+
+The proper way to build systemd-boot with a different compiler is to
+use a different build folder and then just use the proper ninja build
+target to only build the bootloader/stub.
+
+(cherry picked from commit 52adf0e91ef00d21a2e83f7669d0823667ce6b6c)
+
+Related: #2017035
+---
+ meson_options.txt        |  2 --
+ src/boot/efi/meson.build | 14 ++++----------
+ 2 files changed, 4 insertions(+), 12 deletions(-)
+
+diff --git a/meson_options.txt b/meson_options.txt
+index 401f0933d7..62cdeb4201 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -414,8 +414,6 @@ option('dbus', type : 'combo', choices : ['auto', 'true', 'false'],
+ 
+ option('gnu-efi', type : 'combo', choices : ['auto', 'true', 'false'],
+        description : 'gnu-efi support for sd-boot')
+-option('efi-cc', type : 'array',
+-       description : 'the compiler to use for EFI modules')
+ # Note that LLD does not support PE/COFF relocations
+ # https://lists.llvm.org/pipermail/llvm-dev/2021-March/149234.html
+ option('efi-ld', type : 'combo', choices : ['auto', 'bfd', 'gold'],
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index 6a0c8da9ba..11e6bf2dd0 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -44,10 +44,6 @@ if not cc.has_header_symbol('efi.h', 'EFI_IMAGE_MACHINE_X64',
+ endif
+ 
+ objcopy = find_program('objcopy')
+-efi_cc = get_option('efi-cc')
+-if efi_cc.length() == 0
+-        efi_cc = cc.cmd_array()
+-endif
+ 
+ efi_ld = get_option('efi-ld')
+ if efi_ld == 'auto'
+@@ -62,7 +58,7 @@ efi_libdir = ''
+ foreach dir : [get_option('efi-libdir'),
+                '/usr/lib/gnuefi' / efi_arch[0],
+                run_command('realpath', '-e',
+-                        '/usr/lib' / run_command(efi_cc, '-print-multi-os-directory').stdout().strip()).stdout().strip()]
++                        '/usr/lib' / run_command(cc.cmd_array(), '-print-multi-os-directory').stdout().strip()).stdout().strip()]
+         if dir != '' and fs.is_dir(dir)
+                 efi_libdir = dir
+                 break
+@@ -275,15 +271,13 @@ if run_command('grep', '-q', '__CTOR_LIST__', efi_lds).returncode() == 0
+         ]
+ endif
+ 
+-efi_cc_version = run_command(efi_cc, '--version').stdout().split('\n')[0]
+-if efi_cc_version.contains('clang') and efi_cc_version.split('.')[0].split(' ')[-1].to_int() <= 10
++if cc.get_id() == 'clang' and cc.version().split('.')[0].to_int() <= 10
+         # clang <= 10 doesn't pass -T to the linker and then even complains about it being unused
+         efi_ldflags += ['-Wl,-T,' + efi_lds, '-Wno-unused-command-line-argument']
+ endif
+ 
+ summary({
+         'EFI machine type' :                efi_arch[0],
+-        'EFI CC' :                          '@0@'.format(' '.join(efi_cc)),
+         'EFI LD' :                          efi_ld,
+         'EFI lds' :                         efi_lds,
+         'EFI crt0' :                        efi_crt0,
+@@ -368,7 +362,7 @@ foreach file : fundamental_source_paths + common_sources + systemd_boot_sources
+         o_file = custom_target(file.split('/')[-1] + '.o',
+                                input : file,
+                                output : file.split('/')[-1] + '.o',
+-                               command : [efi_cc, '-c', '@INPUT@', '-o', '@OUTPUT@', efi_cflags],
++                               command : [cc.cmd_array(), '-c', '@INPUT@', '-o', '@OUTPUT@', efi_cflags],
+                                depend_files : efi_headers + fundamental_headers)
+         if (fundamental_source_paths + common_sources + systemd_boot_sources).contains(file)
+                 systemd_boot_objects += o_file
+@@ -389,7 +383,7 @@ foreach tuple : [['systemd_boot.so', systemd_boot_efi_name, systemd_boot_objects
+                 tuple[0],
+                 input : tuple[2],
+                 output : tuple[0],
+-                command : [efi_cc, '-o', '@OUTPUT@', efi_ldflags, efi_cflags, tuple[2], '-lefi', '-lgnuefi', '-lgcc'],
++                command : [cc.cmd_array(), '-o', '@OUTPUT@', efi_ldflags, efi_cflags, tuple[2], '-lefi', '-lgnuefi', '-lgcc'],
+                 install : tuple[3],
+                 install_dir : bootlibdir)
+ 

@@ -1,0 +1,104 @@
+From f990ee961a75791adfdea2f5efb35017a51a310e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 8 Mar 2022 10:08:05 +0100
+Subject: [PATCH] basic/env-file: make load-env-file deduplicate entries with
+ the same key
+
+We generally assume parsing like the shell would do it, so the last value
+should win when there are repeats.
+
+(cherry picked from commit 25407ad2a785d10b1aadff0c99829ea0cf51082b)
+
+Related: #2082131
+---
+ src/basic/env-file.c     | 31 ++++++++++++++++++++-----------
+ src/test/test-env-file.c |  5 +++++
+ src/test/test-os-util.c  |  3 +--
+ 3 files changed, 26 insertions(+), 13 deletions(-)
+
+diff --git a/src/basic/env-file.c b/src/basic/env-file.c
+index 599b73bc22..0353f3f2a0 100644
+--- a/src/basic/env-file.c
++++ b/src/basic/env-file.c
+@@ -415,30 +415,39 @@ static int load_env_file_push_pairs(
+                 const char *key, char *value,
+                 void *userdata,
+                 int *n_pushed) {
+-        char ***m = userdata;
++        char ***m = ASSERT_PTR(userdata);
++        bool added = false;
+         int r;
+ 
+         r = check_utf8ness_and_warn(filename, line, key, value);
+         if (r < 0)
+                 return r;
+ 
++        /* Check if the key is present */
++        for (char **t = *m; t && *t; t += 2)
++                if (streq(t[0], key)) {
++                        if (value)
++                                r = free_and_replace(t[1], value);
++                        else
++                                r = free_and_strdup(t+1, "");
++                        goto finish;
++                }
++
+         r = strv_extend(m, key);
+         if (r < 0)
+                 return -ENOMEM;
+ 
+-        if (!value) {
+-                r = strv_extend(m, "");
+-                if (r < 0)
+-                        return -ENOMEM;
+-        } else {
++        if (value)
+                 r = strv_push(m, value);
+-                if (r < 0)
+-                        return r;
+-        }
++        else
++                r = strv_extend(m, "");
++        added = true;
++ finish:
++        if (r < 0)
++                return r;
+ 
+-        if (n_pushed)
++        if (n_pushed && added)
+                 (*n_pushed)++;
+-
+         return 0;
+ }
+ 
+diff --git a/src/test/test-env-file.c b/src/test/test-env-file.c
+index 886a8e4bc8..461a0f0810 100644
+--- a/src/test/test-env-file.c
++++ b/src/test/test-env-file.c
+@@ -9,7 +9,12 @@
+ #include "tests.h"
+ #include "tmpfile-util.h"
+ 
++/* In case of repeating keys, later entries win. */
++
+ #define env_file_1                              \
++        "a=a\n"                                 \
++        "a=b\n"                                 \
++        "a=b\n"                                 \
+         "a=a\n"                                 \
+         "b=b\\\n"                               \
+         "c\n"                                   \
+diff --git a/src/test/test-os-util.c b/src/test/test-os-util.c
+index 5f82748783..d6336c53e9 100644
+--- a/src/test/test-os-util.c
++++ b/src/test/test-os-util.c
+@@ -67,8 +67,7 @@ TEST(load_os_release_pairs) {
+ 
+         _cleanup_strv_free_ char **pairs = NULL;
+         assert_se(load_os_release_pairs(NULL, &pairs) == 0);
+-        assert_se(strv_equal(pairs, STRV_MAKE("ID", "ignored", // FIXME
+-                                              "ID", "the-id",
++        assert_se(strv_equal(pairs, STRV_MAKE("ID", "the-id",
+                                               "NAME", "the-name")));
+ 
+         assert_se(unsetenv("SYSTEMD_OS_RELEASE") == 0);

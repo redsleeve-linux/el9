@@ -1,0 +1,46 @@
+From 776aab7656db605a856d2d3e9225f23779da5483 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 6 May 2022 14:01:22 +0900
+Subject: [PATCH] core/slice: make slice_freezer_action() return 0 if freezing
+ state is unchanged
+
+Fixes #23278.
+
+(cherry picked from commit d171e72e7afa11b238ba20758384d223b0c76e39)
+
+Related: #2087652
+---
+ src/core/slice.c | 6 +-----
+ src/core/unit.c  | 2 ++
+ 2 files changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/src/core/slice.c b/src/core/slice.c
+index 2e43c00119..c453aa033e 100644
+--- a/src/core/slice.c
++++ b/src/core/slice.c
+@@ -389,11 +389,7 @@ static int slice_freezer_action(Unit *s, FreezerAction action) {
+                         return r;
+         }
+ 
+-        r = unit_cgroup_freezer_action(s, action);
+-        if (r < 0)
+-                return r;
+-
+-        return 1;
++        return unit_cgroup_freezer_action(s, action);
+ }
+ 
+ static int slice_freeze(Unit *s) {
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 9cbed08987..aac87dcc7a 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -5822,6 +5822,8 @@ static int unit_freezer_action(Unit *u, FreezerAction action) {
+         if (r <= 0)
+                 return r;
+ 
++        assert(IN_SET(u->freezer_state, FREEZER_FREEZING, FREEZER_THAWING));
++
+         return 1;
+ }
+ 

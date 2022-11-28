@@ -1,0 +1,44 @@
+From 97c96647418ffbadf3d964d76a5f54a9c54535c1 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 14 Jun 2022 09:04:00 +0900
+Subject: [PATCH] locale-util: fix memleak on failure
+
+(cherry picked from commit 065058e63b566e21af737150ecd12bff57b97124)
+
+Related: #2087652
+---
+ src/basic/locale-util.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/basic/locale-util.c b/src/basic/locale-util.c
+index 7f1a2f15f7..abbebc7666 100644
+--- a/src/basic/locale-util.c
++++ b/src/basic/locale-util.c
+@@ -156,7 +156,7 @@ static int add_locales_from_archive(Set *locales) {
+         return r;
+ }
+ 
+-static int add_locales_from_libdir (Set *locales) {
++static int add_locales_from_libdir(Set *locales) {
+         _cleanup_closedir_ DIR *dir = NULL;
+         int r;
+ 
+@@ -183,7 +183,7 @@ static int add_locales_from_libdir (Set *locales) {
+ }
+ 
+ int get_locales(char ***ret) {
+-        _cleanup_set_free_ Set *locales = NULL;
++        _cleanup_set_free_free_ Set *locales = NULL;
+         _cleanup_strv_free_ char **l = NULL;
+         int r;
+ 
+@@ -203,6 +203,9 @@ int get_locales(char ***ret) {
+         if (!l)
+                 return -ENOMEM;
+ 
++        /* Now, all elements are owned by strv 'l'. Hence, do not call set_free_free(). */
++        locales = set_free(locales);
++
+         r = getenv_bool("SYSTEMD_LIST_NON_UTF8_LOCALES");
+         if (r == -ENXIO || r == 0) {
+                 char **a, **b;

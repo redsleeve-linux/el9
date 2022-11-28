@@ -1,0 +1,37 @@
+From 37b398e2a3d6cd225a3121843540a033f4415b80 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 17 Jun 2022 17:29:22 +0200
+Subject: [PATCH] test: check journal directly instead of capturing console
+ output
+
+(cherry picked from commit 8cda7b91ff267fc21325d4886980e243389a7566)
+
+Related: #2087652
+---
+ test/TEST-52-HONORFIRSTSHUTDOWN/test.sh | 13 ++++---------
+ 1 file changed, 4 insertions(+), 9 deletions(-)
+
+diff --git a/test/TEST-52-HONORFIRSTSHUTDOWN/test.sh b/test/TEST-52-HONORFIRSTSHUTDOWN/test.sh
+index 936e801c51..6a1ec9ca29 100755
+--- a/test/TEST-52-HONORFIRSTSHUTDOWN/test.sh
++++ b/test/TEST-52-HONORFIRSTSHUTDOWN/test.sh
+@@ -14,15 +14,10 @@ TEST_NO_QEMU=1
+ # could turn into a reboot if the test fails.
+ NSPAWN_TIMEOUT=60
+ 
+-# Remove this file if it exists. This is used along with
+-# the make target "finish". Since concrete confirmation is
+-# only found from the console during the poweroff.
+-rm -f /tmp/honorfirstshutdown.log >/dev/null
+-
+ check_result_nspawn_hook() {
+-    grep -q "Shutdown is already active. Skipping emergency action request" /tmp/honorfirstshutdown.log
++    local workspace="${1:?}"
++
++    "${JOURNALCTL:?}" -D "${workspace:?}/var/log/journal" --grep "Shutdown is already active. Skipping emergency action request" --no-pager
+ }
+ 
+-# Note: don't use a pipe in the following expression, as it breaks the trap
+-#       handlers we have defined in test/test-functions.
+-do_test "$@" > >(tee /tmp/honorfirstshutdown.log)
++do_test "$@"

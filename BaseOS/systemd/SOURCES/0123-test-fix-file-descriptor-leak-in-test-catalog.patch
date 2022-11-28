@@ -1,0 +1,34 @@
+From d947339b49eb7935ce282e808a7e75a6098d088a Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 22 Feb 2022 21:11:51 +0900
+Subject: [PATCH] test: fix file descriptor leak in test-catalog
+
+Fixes an issue reported in #22576.
+
+(cherry picked from commit 62d4b3b36e9aba9e605ba042a75c374155b6e18b)
+Related: #2087652
+---
+ src/libsystemd/sd-journal/test-catalog.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/libsystemd/sd-journal/test-catalog.c b/src/libsystemd/sd-journal/test-catalog.c
+index 316c3b1634..ad06221175 100644
+--- a/src/libsystemd/sd-journal/test-catalog.c
++++ b/src/libsystemd/sd-journal/test-catalog.c
+@@ -196,6 +196,7 @@ static void test_catalog_file_lang(void) {
+ 
+ int main(int argc, char *argv[]) {
+         _cleanup_(unlink_tempfilep) char database[] = "/tmp/test-catalog.XXXXXX";
++        _cleanup_close_ int fd = -1;
+         _cleanup_free_ char *text = NULL;
+         int r;
+ 
+@@ -218,7 +219,7 @@ int main(int argc, char *argv[]) {
+         test_catalog_import_merge();
+         test_catalog_import_merge_no_body();
+ 
+-        assert_se(mkostemp_safe(database) >= 0);
++        assert_se((fd = mkostemp_safe(database)) >= 0);
+ 
+         test_catalog_update(database);
+ 

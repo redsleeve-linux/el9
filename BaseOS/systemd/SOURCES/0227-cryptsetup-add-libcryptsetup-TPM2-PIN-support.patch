@@ -1,0 +1,218 @@
+From 1b7d251ab836ba703913eda149f05bd03559c483 Mon Sep 17 00:00:00 2001
+From: Grigori Goronzy <greg@chown.ath.cx>
+Date: Fri, 18 Feb 2022 12:00:12 +0100
+Subject: [PATCH] cryptsetup: add libcryptsetup TPM2 PIN support
+
+This is unfinished: we don't have any way to actually query for PINs
+interactively this way. It is similar to FIDO2 and PKCS#11 in this
+regard.
+
+Nonetheless, this code is capable of validating and dumping tokens, so
+it is already useful as-is.
+
+(cherry picked from commit 1f895adac287b5f1b6b854caa586093616ccc172)
+
+Related: #2087652
+---
+ .../cryptsetup-token-systemd-tpm2.c           | 18 +++++++++--
+ src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c | 32 +++++++++++++++++--
+ src/cryptsetup/cryptsetup-tokens/luks2-tpm2.h |  6 +++-
+ 3 files changed, 51 insertions(+), 5 deletions(-)
+
+diff --git a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+index e2d28a5dda..23df974999 100644
+--- a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+@@ -6,8 +6,10 @@
+ #include "cryptsetup-token.h"
+ #include "cryptsetup-token-util.h"
+ #include "hexdecoct.h"
++#include "json.h"
+ #include "luks2-tpm2.h"
+ #include "memory-util.h"
++#include "strv.h"
+ #include "tpm2-util.h"
+ #include "version.h"
+ 
+@@ -78,7 +80,8 @@ _public_ int cryptsetup_token_open(
+         if (usrptr)
+                 params = *(systemd_tpm2_plugin_params *)usrptr;
+ 
+-        r = parse_luks2_tpm2_data(json, params.search_pcr_mask, &pcr_mask, &pcr_bank, &primary_alg, &base64_blob, &hex_policy_hash);
++        TPM2Flags flags = 0;
++        r = parse_luks2_tpm2_data(json, params.search_pcr_mask, &pcr_mask, &pcr_bank, &primary_alg, &base64_blob, &hex_policy_hash, &flags);
+         if (r < 0)
+                 return log_debug_open_error(cd, r);
+ 
+@@ -101,6 +104,7 @@ _public_ int cryptsetup_token_open(
+                         blob_size,
+                         policy_hash,
+                         policy_hash_size,
++                        flags,
+                         &decrypted_key,
+                         &decrypted_key_size);
+         if (r < 0)
+@@ -135,6 +139,7 @@ _public_ void cryptsetup_token_dump(
+                 const char *json /* validated 'systemd-tpm2' token if cryptsetup_token_validate is defined */) {
+ 
+         int r;
++        TPM2Flags flags = 0;
+         uint32_t pcr_mask;
+         uint16_t pcr_bank, primary_alg;
+         size_t decoded_blob_size;
+@@ -144,7 +149,7 @@ _public_ void cryptsetup_token_dump(
+ 
+         assert(json);
+ 
+-        r = parse_luks2_tpm2_data(json, UINT32_MAX, &pcr_mask, &pcr_bank, &primary_alg, &base64_blob, &hex_policy_hash);
++        r = parse_luks2_tpm2_data(json, UINT32_MAX, &pcr_mask, &pcr_bank, &primary_alg, &base64_blob, &hex_policy_hash, &flags);
+         if (r < 0)
+                 return (void) crypt_log_debug_errno(cd, r, "Failed to parse " TOKEN_NAME " metadata: %m.");
+ 
+@@ -171,6 +176,7 @@ _public_ void cryptsetup_token_dump(
+         crypt_log(cd, "\ttpm2-primary-alg:  %s\n", strna(tpm2_primary_alg_to_string(primary_alg)));
+         crypt_log(cd, "\ttpm2-blob:  %s\n", blob_str);
+         crypt_log(cd, "\ttpm2-policy-hash:" CRYPT_DUMP_LINE_SEP "%s\n", policy_hash_str);
++        crypt_log(cd, "\ttpm2-pin: %s\n", true_false(flags & TPM2_FLAGS_USE_PIN));
+ }
+ 
+ /*
+@@ -268,5 +274,13 @@ _public_ int cryptsetup_token_validate(
+         if (r < 0)
+                 return crypt_log_debug_errno(cd, r, "Invalid base64 data in 'tpm2-policy-hash' field: %m");
+ 
++        w = json_variant_by_key(v, "tpm2-pin");
++        if (w) {
++                if (!json_variant_is_boolean(w)) {
++                        crypt_log_debug(cd, "TPM2 PIN policy is not a boolean.");
++                        return 1;
++                }
++        }
++
+         return 0;
+ }
+diff --git a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
+index de189c7bed..0d6e4bc0f8 100644
+--- a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
+@@ -1,11 +1,15 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
+ #include "alloc-util.h"
++#include "ask-password-api.h"
++#include "env-util.h"
+ #include "hexdecoct.h"
+ #include "json.h"
++#include "log.h"
+ #include "luks2-tpm2.h"
+ #include "parse-util.h"
+ #include "random-util.h"
++#include "strv.h"
+ #include "tpm2-util.h"
+ 
+ int acquire_luks2_key(
+@@ -17,10 +21,12 @@ int acquire_luks2_key(
+                 size_t key_data_size,
+                 const void *policy_hash,
+                 size_t policy_hash_size,
++                TPM2Flags flags,
+                 void **ret_decrypted_key,
+                 size_t *ret_decrypted_key_size) {
+ 
+         _cleanup_free_ char *auto_device = NULL;
++        _cleanup_(erase_and_freep) char *pin_str = NULL;
+         int r;
+ 
+         assert(ret_decrypted_key);
+@@ -36,12 +42,22 @@ int acquire_luks2_key(
+                 device = auto_device;
+         }
+ 
++        r = getenv_steal_erase("PIN", &pin_str);
++        if (r < 0)
++                return log_error_errno(r, "Failed to acquire PIN from environment: %m");
++        if (!r) {
++                /* PIN entry is not supported by plugin, let it fallback, possibly to sd-cryptsetup's
++                 * internal handling. */
++                if (flags & TPM2_FLAGS_USE_PIN)
++                        return -EOPNOTSUPP;
++        }
++
+         return tpm2_unseal(
+                         device,
+                         pcr_mask, pcr_bank,
+                         primary_alg,
+                         key_data, key_data_size,
+-                        policy_hash, policy_hash_size, NULL,
++                        policy_hash, policy_hash_size, pin_str,
+                         ret_decrypted_key, ret_decrypted_key_size);
+ }
+ 
+@@ -53,7 +69,8 @@ int parse_luks2_tpm2_data(
+                 uint16_t *ret_pcr_bank,
+                 uint16_t *ret_primary_alg,
+                 char **ret_base64_blob,
+-                char **ret_hex_policy_hash) {
++                char **ret_hex_policy_hash,
++                TPM2Flags *ret_flags) {
+ 
+         int r;
+         JsonVariant *w, *e;
+@@ -61,6 +78,7 @@ int parse_luks2_tpm2_data(
+         uint16_t pcr_bank = UINT16_MAX, primary_alg = TPM2_ALG_ECC;
+         _cleanup_free_ char *base64_blob = NULL, *hex_policy_hash = NULL;
+         _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
++        TPM2Flags flags = 0;
+ 
+         assert(json);
+         assert(ret_pcr_mask);
+@@ -138,11 +156,21 @@ int parse_luks2_tpm2_data(
+         if (!hex_policy_hash)
+                 return -ENOMEM;
+ 
++        w = json_variant_by_key(v, "tpm2-pin");
++        if (w) {
++                if (!json_variant_is_boolean(w))
++                        return -EINVAL;
++
++                if (json_variant_boolean(w))
++                        flags |= TPM2_FLAGS_USE_PIN;
++        }
++
+         *ret_pcr_mask = pcr_mask;
+         *ret_pcr_bank = pcr_bank;
+         *ret_primary_alg = primary_alg;
+         *ret_base64_blob = TAKE_PTR(base64_blob);
+         *ret_hex_policy_hash = TAKE_PTR(hex_policy_hash);
++        *ret_flags = flags;
+ 
+         return 0;
+ }
+diff --git a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.h b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.h
+index 0c93ea82cc..34c93216ee 100644
+--- a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.h
++++ b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.h
+@@ -2,6 +2,8 @@
+ 
+ #pragma once
+ 
++#include "tpm2-util.h"
++
+ struct crypt_device;
+ 
+ int acquire_luks2_key(
+@@ -13,6 +15,7 @@ int acquire_luks2_key(
+                 size_t key_data_size,
+                 const void *policy_hash,
+                 size_t policy_hash_size,
++                TPM2Flags flags,
+                 void **ret_decrypted_key,
+                 size_t *ret_decrypted_key_size);
+ 
+@@ -23,4 +26,5 @@ int parse_luks2_tpm2_data(
+                 uint16_t *ret_pcr_bank,
+                 uint16_t *ret_primary_alg,
+                 char **ret_base64_blob,
+-                char **ret_hex_policy_hash);
++                char **ret_hex_policy_hash,
++                TPM2Flags *ret_flags);

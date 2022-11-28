@@ -39,7 +39,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?name_cross}%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 17%{?dist}.redsleeve
+Release: 24%{?dist}
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -402,7 +402,32 @@ Patch51: binutils-x86-AMX-insns.patch
 # Lifetime: Fixed in 2.38.
 Patch52: binutils-gas-Use-the-directory-name-in-.file-0.patch
 
-Patch1000: binutils-armv6.patch
+# Purpose:  Stop libtool from inserting useless runpaths into binaries.
+# Lifetime: Who knows.
+Patch53: gcc12-libtool-no-rpath.patch
+
+# Purpose:  Allow the AArch64 RNG extension to be used wihtout ARMv8.5.
+#       In addition stops the assembler from issuing error messages for
+#       unknown AArch64 architectural extensions that are being disabled.
+#       This can happen when compiling with -mcpu=native on a machine which
+#       does not support all of the extensions known to GCC.
+#       See BZ 2071038 for more details.
+# Lifetime: Permanent.
+Patch54: binutils-aarch64-rng.patch
+
+# Purpose:  Allow 'z16' to be used as an alias for the arch14
+#            extensions of the S390 architecture.
+# Lifetime: Fixed in 2.39
+Patch55: binutils-s390-z16.patch
+
+# Purpose:  Add support for generating s390x static PIE binaries.
+# Lifetime: Fixed in 2.37
+Patch56: binutils-s390x-static-PIE.patch
+
+# Purpose:  Fix bogis linker warnings about references to undefined symbols.
+# Lifetime: Fixed in 2.36
+Patch57: binutils-undefined-ref-to-sym.patch
+
 #----------------------------------------------------------------------------
 
 Provides: bundled(libiberty)
@@ -953,6 +978,9 @@ exit 0
 # Strictly speaking ld is a symlink not a ghost file, but %%verify does not support symlinks
 %ghost %{_bindir}/%{?cross}ld
 %{_bindir}/%{?cross}ld.bfd
+# Do not export any Windows tools (if they were built)
+%exclude %{_bindir}/%{?cross}dll*
+%exclude %{_bindir}/%{?cross}wind*
 
 %if %{with docs}
 %{_mandir}/man1/
@@ -970,6 +998,8 @@ exit 0
 %{_libdir}/libctf*
 %exclude %{_libdir}/libbfd.so
 %exclude %{_libdir}/libopcodes.so
+%exclude %{_libdir}/libctf.a
+%exclude %{_libdir}/libctf-nobfd.a
 %endif
 
 %if %{isnative}
@@ -991,8 +1021,26 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
-* Wed Jul 20 2022 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-17.redsleeve
-- minor adjustments for armv6
+* Mon Jun 13 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-24
+- Fix bogus linker warnings about references to undefined symbols.  (#2095926)
+
+* Mon May 23 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-23
+- GAS: AArch64: Do not complain about unknown disabled architecture extensions.  (#2071038)
+
+* Tue May 03 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-22
+- Add support for generating s390x static PIE binaries.  (#2080164)
+
+* Mon Apr 11 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-21
+- Allow z16 to be used as an alias for the arch14 extenstions to the S390 architecture.  (#2073383)
+
+* Tue Apr 05 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-20
+- Allow the AArch64 architecture's RNG extension to be used without ARMv8.5.  (#2071038)
+
+* Wed Mar 30 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-19
+- NVR bump to allow rebuild.  (#2057638)
+
+* Mon Mar 07 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-18
+- Do not export any windows tools (if they were built).  (#2057638)
 
 * Mon Jan 24 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-17
 - Add upstream patch to use the directory name in .file 0, fixes ccache FTBFS (#2043970)

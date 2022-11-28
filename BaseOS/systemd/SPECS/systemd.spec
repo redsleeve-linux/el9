@@ -21,7 +21,7 @@
 Name:           systemd
 Url:            https://www.freedesktop.org/wiki/Software/systemd
 Version:        250
-Release:        6%{?dist}.1.redsleeve
+Release:        12%{?dist}
 # For a breakdown of the licensing, see README
 License:        LGPLv2+ and MIT and GPLv2+
 Summary:        System and Service Manager
@@ -111,32 +111,324 @@ Patch0030: 0030-Net-naming-scheme-for-RHEL-9.0.patch
 Patch0031: 0031-core-decrease-log-level-of-messages-about-use-of-Kil.patch
 Patch0032: 0032-ci-replace-apt-key-with-signed-by.patch
 Patch0033: 0033-ci-fix-clang-13-installation.patch
-Patch0034: 0034-Revert-kernel-install-also-remove-modules.builtin.al.patch
-Patch0035: 0035-Revert-kernel-install-prefer-boot-over-boot-efi-for-.patch
-Patch0036: 0036-kernel-install-50-depmod-port-to-bin-sh.patch
-Patch0037: 0037-kernel-install-90-loaderentry-port-to-bin-sh.patch
-Patch0038: 0038-kernel-install-fix-shellcheck.patch
-Patch0039: 0039-kernel-install-port-to-bin-sh.patch
-Patch0040: 0040-kernel-install-90-loaderentry-error-out-on-nonexiste.patch
-Patch0041: 0041-kernel-install-don-t-pull-out-KERNEL_IMAGE.patch
-Patch0042: 0042-kernel-install-prefer-boot-over-boot-efi-for-BOOT_RO.patch
-Patch0043: 0043-kernel-install-also-remove-modules.builtin.alias.bin.patch
-Patch0044: 0044-kernel-install-add-new-variable-KERNEL_INSTALL_INITR.patch
-Patch0045: 0045-kernel-install-k-i-already-creates-ENTRY_DIR_ABS-no-.patch
-Patch0046: 0046-kernel-install-prefix-errors-with-Error-exit-immedia.patch
-Patch0047: 0047-kernel-install-add-KERNEL_INSTALL_STAGING_AREA-direc.patch
-Patch0048: 0048-kernel-install-add-missing-log-line.patch
-Patch0049: 0049-kernel-install-don-t-try-to-persist-used-machine-ID-.patch
-Patch0050: 0050-kernel-install-add-a-new-ENTRY_TOKEN-variable-for-na.patch
-Patch0051: 0051-kernel-install-only-generate-systemd.boot_id-in-kern.patch
-Patch0052: 0052-kernel-install-search-harder-for-kernel-image-initrd.patch
-Patch0053: 0053-kernel-install-add-new-inspect-verb-showing-paths-an.patch
-Patch0054: 0054-bus-Use-OrderedSet-for-introspection.patch
-Patch0055: 0055-udev-net_id-avoid-slot-based-names-only-for-single-f.patch
-Patch0056: 0056-shutdown-get-only-active-md-arrays.patch
-Patch0057: 0057-test-lvm-2.03.15-dropped-the-static-autoactivation.patch
-Patch0058: 0058-ci-limit-which-env-variables-we-pass-through-sudo.patch
-Patch0059: 0059-shared-Fix-memory-leak-in-bus_append_execute_propert.patch
+Patch0034: 0034-test-check-systemd-RPM-macros.patch
+Patch0035: 0035-test-do-not-assume-x86-64-arch-in-TEST-58-REPART.patch
+Patch0036: 0036-tests-add-repart-tests-for-block-devices-with-1024-2.patch
+Patch0037: 0037-test-accept-both-unpadded-and-padded-partition-sizes.patch
+Patch0038: 0038-test-lvm-2.03.15-dropped-the-static-autoactivation.patch
+Patch0039: 0039-test-accept-GC-ed-units-in-newer-LVM.patch
+Patch0040: 0040-shared-Add-more-dlopen-tests.patch
+Patch0041: 0041-systemctl-Show-how-long-a-service-ran-for-after-it-e.patch
+Patch0042: 0042-time-util-introduce-TIMESTAMP_UNIX.patch
+Patch0043: 0043-systemctl-man-update-docs-for-timestamp.patch
+Patch0044: 0044-systemctl-make-timestamp-affect-the-show-verb-as-wel.patch
+Patch0045: 0045-tests-allow-running-all-the-services-with-SYSTEMD_LO.patch
+Patch0046: 0046-coredump-raise-the-coredump-save-size-on-64bit-syste.patch
+Patch0047: 0047-repart-fix-sector-size-handling.patch
+Patch0048: 0048-mkdir-allow-to-create-directory-whose-path-contains-.patch
+Patch0049: 0049-mkdir-CHASE_NONEXISTENT-cannot-used-in-chase_symlink.patch
+Patch0050: 0050-meson-move-efi-file-lists-closer-to-where-they-are-u.patch
+Patch0051: 0051-meson-move-efi-summary-section-to-src-boot-efi.patch
+Patch0052: 0052-meson-report-SBAT-settings.patch
+Patch0053: 0053-boot-Build-BCD-parser-only-on-arches-supported-by-Wi.patch
+Patch0054: 0054-meson-Remove-efi-cc-option.patch
+Patch0055: 0055-meson-Get-objcopy-location-from-compiler.patch
+Patch0056: 0056-meson-Use-files-for-source-lists-for-boot-and-fundam.patch
+Patch0057: 0057-meson-Use-files-for-tests.patch
+Patch0058: 0058-tests-add-fuzz-bcd.patch
+Patch0059: 0059-meson-Use-files-for-fuzzers.patch
+Patch0060: 0060-meson-Add-check-argument-to-remaining-run_command-ca.patch
+Patch0061: 0061-meson-Use-echo-to-list-files.patch
+Patch0062: 0062-test-add-a-test-for-mkdir_p.patch
+Patch0063: 0063-util-another-set-of-CVE-2021-4034-assert-s.patch
+Patch0064: 0064-basic-update-CIFS-magic.patch
+Patch0065: 0065-shared-be-extra-paranoid-and-check-if-argc-0.patch
+Patch0066: 0066-core-check-if-argc-0-and-argv-0-is-set.patch
+Patch0067: 0067-core-check-argc-argv-uncoditionally.patch
+Patch0068: 0068-test-temporary-workaround-for-21819.patch
+Patch0069: 0069-test-don-t-leak-local-variable-to-outer-scopes.patch
+Patch0070: 0070-tree-wide-don-t-use-strjoina-on-getenv-values.patch
+Patch0071: 0071-man-clarify-Environmentfile-format.patch
+Patch0072: 0072-test-load-fragment-add-a-basic-test-for-config_parse.patch
+Patch0073: 0073-core-execute-use-_cleanup_-in-exec_context_load_envi.patch
+Patch0074: 0074-test-env-file-add-tests-for-quoting-in-env-files.patch
+Patch0075: 0075-core-shorten-long-unit-names-that-are-based-on-paths.patch
+Patch0076: 0076-tests-add-test-case-for-long-unit-names.patch
+Patch0077: 0077-tests-reflect-that-we-can-now-handle-devices-with-ve.patch
+Patch0078: 0078-test-extend-the-hashed-unit-names-coverage-a-bit.patch
+Patch0079: 0079-Revert-kernel-install-also-remove-modules.builtin.al.patch
+Patch0080: 0080-Revert-kernel-install-prefer-boot-over-boot-efi-for-.patch
+Patch0081: 0081-kernel-install-50-depmod-port-to-bin-sh.patch
+Patch0082: 0082-kernel-install-90-loaderentry-port-to-bin-sh.patch
+Patch0083: 0083-kernel-install-fix-shellcheck.patch
+Patch0084: 0084-kernel-install-port-to-bin-sh.patch
+Patch0085: 0085-kernel-install-90-loaderentry-error-out-on-nonexiste.patch
+Patch0086: 0086-kernel-install-don-t-pull-out-KERNEL_IMAGE.patch
+Patch0087: 0087-kernel-install-prefer-boot-over-boot-efi-for-BOOT_RO.patch
+Patch0088: 0088-kernel-install-also-remove-modules.builtin.alias.bin.patch
+Patch0089: 0089-kernel-install-add-new-variable-KERNEL_INSTALL_INITR.patch
+Patch0090: 0090-kernel-install-k-i-already-creates-ENTRY_DIR_ABS-no-.patch
+Patch0091: 0091-kernel-install-prefix-errors-with-Error-exit-immedia.patch
+Patch0092: 0092-kernel-install-add-KERNEL_INSTALL_STAGING_AREA-direc.patch
+Patch0093: 0093-kernel-install-add-missing-log-line.patch
+Patch0094: 0094-kernel-install-don-t-try-to-persist-used-machine-ID-.patch
+Patch0095: 0095-kernel-install-add-a-new-ENTRY_TOKEN-variable-for-na.patch
+Patch0096: 0096-kernel-install-only-generate-systemd.boot_id-in-kern.patch
+Patch0097: 0097-kernel-install-search-harder-for-kernel-image-initrd.patch
+Patch0098: 0098-kernel-install-add-new-inspect-verb-showing-paths-an.patch
+Patch0099: 0099-ci-Mergify-configuration-update.patch
+Patch0100: 0100-ci-Mergify-fix-copy-paste-bug.patch
+Patch0101: 0101-shared-Fix-memory-leak-in-bus_append_execute_propert.patch
+Patch0102: 0102-fuzz-no-longer-skip-empty-files.patch
+Patch0103: 0103-networkctl-open-the-bus-just-once.patch
+Patch0104: 0104-json-align-table.patch
+Patch0105: 0105-fuzz-json-optionally-allow-logging-and-output.patch
+Patch0106: 0106-shared-json-reduce-scope-of-variables.patch
+Patch0107: 0107-fuzz-json-also-do-sorting-and-normalizing-and-other-.patch
+Patch0108: 0108-shared-json-wrap-long-comments.patch
+Patch0109: 0109-shared-json-fix-memory-leak-on-failed-normalization.patch
+Patch0110: 0110-shared-json-add-helper-to-ref-first-unref-second.patch
+Patch0111: 0111-basic-alloc-util-remove-unnecessary-parens.patch
+Patch0112: 0112-fuzz-json-also-try-self-merge-operations.patch
+Patch0113: 0113-shared-json-fix-another-memleak-in-normalization.patch
+Patch0114: 0114-shared-json-fix-memleak-in-sort.patch
+Patch0115: 0115-execute-fix-resource-leak.patch
+Patch0116: 0116-tests-ignore-dbus-broker-launcher.patch
+Patch0117: 0117-core-timer-fix-memleak.patch
+Patch0118: 0118-timedatectl-fix-a-memory-leak.patch
+Patch0119: 0119-test-fix-file-descriptor-leak-in-test-psi-util.patch
+Patch0120: 0120-test-fix-file-descriptor-leak-in-test-tmpfiles.c.patch
+Patch0121: 0121-test-fix-file-descriptor-leak-in-test-fs-util.patch
+Patch0122: 0122-test-fix-file-descriptor-leak-in-test-oomd-util.patch
+Patch0123: 0123-test-fix-file-descriptor-leak-in-test-catalog.patch
+Patch0124: 0124-test-make-masking-of-supplementary-services-configur.patch
+Patch0125: 0125-test-fuzz-our-dbus-interfaces-with-dfuzzer.patch
+Patch0126: 0126-test-skip-TEST-21-DFUZZER-without-ASan.patch
+Patch0127: 0127-core-annotate-Reexecute-as-NoReply.patch
+Patch0128: 0128-test-always-force-a-new-image-for-dfuzzer.patch
+Patch0129: 0129-test-make-dfuzzer-less-verbose.patch
+Patch0130: 0130-test-drop-the-at_exit-coredump-check.patch
+Patch0131: 0131-test-make-the-shutdown-routine-a-bit-more-robust.patch
+Patch0132: 0132-tree-wide-drop-manually-crafted-message-for-missing-.patch
+Patch0133: 0133-test-allow-overriding-QEMU_MEM-when-running-w-ASan.patch
+Patch0134: 0134-test-don-t-test-buses-we-don-t-ship.patch
+Patch0135: 0135-shutdown-get-only-active-md-arrays.patch
+Patch0136: 0136-bus-Use-OrderedSet-for-introspection.patch
+Patch0137: 0137-logind-session-dbus-allow-to-set-display-name-via-db.patch
+Patch0138: 0138-ci-limit-which-env-variables-we-pass-through-sudo.patch
+Patch0139: 0139-ci-Mergify-Add-ci-waived-logic.patch
+Patch0140: 0140-json-use-unsigned-for-refernce-counter.patch
+Patch0141: 0141-macro-check-over-flow-in-reference-counter.patch
+Patch0142: 0142-sd-bus-fix-reference-counter-to-be-incremented.patch
+Patch0143: 0143-sd-bus-introduce-ref-unref-function-for-track_item.patch
+Patch0144: 0144-sd-bus-do-not-read-unused-value.patch
+Patch0145: 0145-sd-bus-do-not-return-negative-errno-when-unknown-nam.patch
+Patch0146: 0146-sd-bus-use-hashmap_contains-and-drop-unnecessary-cas.patch
+Patch0147: 0147-test-shorten-code-a-bit.patch
+Patch0148: 0148-test-add-several-tests-for-track-item.patch
+Patch0149: 0149-core-slice-make-slice_freezer_action-return-0-if-fre.patch
+Patch0150: 0150-core-unit-fix-use-after-free.patch
+Patch0151: 0151-core-timer-fix-potential-use-after-free.patch
+Patch0152: 0152-core-command-argument-can-be-longer-than-PATH_MAX.patch
+Patch0153: 0153-shared-install-consistently-use-lp-as-the-name-for-t.patch
+Patch0154: 0154-shared-specifier-treat-NULL-the-same-as.patch
+Patch0155: 0155-shared-install-do-not-print-aliases-longer-than-UNIT.patch
+Patch0156: 0156-shared-install-printf-drop-now-unused-install_path_p.patch
+Patch0157: 0157-strv-declare-iterator-of-FOREACH_STRING-in-the-loop.patch
+Patch0158: 0158-basic-unit-file-split-out-the-subroutine-for-symlink.patch
+Patch0159: 0159-basic-stat-util-add-null_or_empty_path_with_root.patch
+Patch0160: 0160-shared-install-reuse-the-standard-symlink-verificati.patch
+Patch0161: 0161-shared-install-add-a-bit-more-quoting.patch
+Patch0162: 0162-test-add-test-for-systemctl-link-enable.patch
+Patch0163: 0163-tests-add-helper-for-creating-tempfiles-with-content.patch
+Patch0164: 0164-man-clarify-the-descriptions-of-aliases-and-linked-u.patch
+Patch0165: 0165-basic-add-new-variable-SYSTEMD_OS_RELEASE-to-overrid.patch
+Patch0166: 0166-test-os-util-add-basic-tests-for-os-release-parsing.patch
+Patch0167: 0167-basic-env-file-make-load-env-file-deduplicate-entrie.patch
+Patch0168: 0168-man-os-release-add-a-note-about-repeating-entries.patch
+Patch0169: 0169-shared-specifier-clarify-and-add-test-for-missing-da.patch
+Patch0170: 0170-shared-specifier-provide-proper-error-messages-when-.patch
+Patch0171: 0171-shared-install-provide-proper-error-messages-when-in.patch
+Patch0172: 0172-shared-install-move-scope-into-InstallContext.patch
+Patch0173: 0173-shared-specifier-fix-u-U-g-G-when-called-as-unprivil.patch
+Patch0174: 0174-shared-install-simplify-unit_file_dump_changes.patch
+Patch0175: 0175-shared-install-propagate-errors-about-invalid-aliase.patch
+Patch0176: 0176-shared-install-return-failure-when-enablement-fails-.patch
+Patch0177: 0177-systemctl-fix-silent-failure-when-root-is-not-found.patch
+Patch0178: 0178-shared-install-also-check-for-self-aliases-during-in.patch
+Patch0179: 0179-docs-Correct-WantedBy-regarding-template-units.patch
+Patch0180: 0180-man-fix-invalid-description-of-template-handling-in-.patch
+Patch0181: 0181-shared-install-drop-unnecessary-casts.patch
+Patch0182: 0182-strv-make-iterator-in-STRV_FOREACH-declaread-in-the-.patch
+Patch0183: 0183-core-ExecContext-restrict_filesystems-is-set-of-stri.patch
+Patch0184: 0184-install-when-linking-a-file-create-the-link-first-or.patch
+Patch0185: 0185-shared-install-split-unit_file_-disable-enable-so-_r.patch
+Patch0186: 0186-shared-install-fix-reenable-on-linked-unit-files.patch
+Patch0187: 0187-test-systemctl-enable-extend-the-test-for-repeated-W.patch
+Patch0188: 0188-shared-install-when-we-fail-to-chase-a-symlink-show-.patch
+Patch0189: 0189-shared-install-do-not-try-to-resolve-symlinks-outsid.patch
+Patch0190: 0190-test-systemctl-enable-enhance-the-test-for-unit-file.patch
+Patch0191: 0191-shared-install-skip-unnecessary-chasing-of-symlinks-.patch
+Patch0192: 0192-shared-install-also-remove-symlinks-like-.wants-foo-.patch
+Patch0193: 0193-shared-install-create-relative-symlinks-for-enableme.patch
+Patch0194: 0194-shared-install-when-looking-for-symlinks-in-.wants-..patch
+Patch0195: 0195-shared-install-stop-passing-duplicate-root-argument-.patch
+Patch0196: 0196-basic-unit-file-reverse-negative-conditional.patch
+Patch0197: 0197-shared-install-split-UNIT_FILE_SYMLINK-into-two-stat.patch
+Patch0198: 0198-shared-install-fix-handling-of-a-linked-unit-file.patch
+Patch0199: 0199-test-systemctl-enable-make-shellcheck-happy.patch
+Patch0200: 0200-shared-install-when-creating-symlinks-accept-differe.patch
+Patch0201: 0201-test-systemctl-enable-use-magic-syntax-to-allow-inve.patch
+Patch0202: 0202-test-systemctl-enable-also-use-freshly-built-systemd.patch
+Patch0203: 0203-test-systemctl-enable-disable-the-test-for-a-for-now.patch
+Patch0204: 0204-Rename-UnitFileScope-to-LookupScope.patch
+Patch0205: 0205-core-handle-lookup-paths-being-symlinks.patch
+Patch0206: 0206-shared-install-use-correct-cleanup-function.patch
+Patch0207: 0207-udev-net_id-avoid-slot-based-names-only-for-single-f.patch
+Patch0208: 0208-test-import-logind-test-from-debian-ubuntu-test-suit.patch
+Patch0209: 0209-test-drop-redundant-IMAGE_NAME.patch
+Patch0210: 0210-test-import-timedated-test-from-debian-ubuntu-test-s.patch
+Patch0211: 0211-test-introduce-assert_not_in-helper-function.patch
+Patch0212: 0212-test-drop-unnecessary-no-pager-option.patch
+Patch0213: 0213-test-support-debian-ubuntu-specific-timezone-config-.patch
+Patch0214: 0214-test-import-hostnamed-tests-from-debian-ubuntu-test-.patch
+Patch0215: 0215-locale-util-fix-memleak-on-failure.patch
+Patch0216: 0216-locale-util-check-if-enumerated-locales-are-valid.patch
+Patch0217: 0217-locale-util-align-locale-entries.patch
+Patch0218: 0218-core-inline-an-iterator-variable.patch
+Patch0219: 0219-locale-setup-merge-locale-handling-in-PID1-and-local.patch
+Patch0220: 0220-locale-rename-keymap-util.-ch-localed-util.-ch.patch
+Patch0221: 0221-test-add-one-more-path-to-search-keymaps.patch
+Patch0222: 0222-test-introduce-inst_recursive-helper-function.patch
+Patch0223: 0223-hmac-sha256-move-size-define-to-sha256.h.patch
+Patch0224: 0224-tpm2-support-policies-with-PIN.patch
+Patch0225: 0225-cryptenroll-add-support-for-TPM2-pin.patch
+Patch0226: 0226-cryptsetup-add-support-for-TPM2-pin.patch
+Patch0227: 0227-cryptsetup-add-libcryptsetup-TPM2-PIN-support.patch
+Patch0228: 0228-cryptenroll-add-TPM2-PIN-documentation.patch
+Patch0229: 0229-cryptsetup-add-manual-TPM2-PIN-configuration.patch
+Patch0230: 0230-cryptenroll-add-tests-for-TPM2-unlocking.patch
+Patch0231: 0231-env-util-replace-unsetenv_erase-by-new-getenv_steal_.patch
+Patch0232: 0232-test-install-libxkbcommon-and-x11-keymaps.patch
+Patch0233: 0233-test-install-C.UTF-8-and-English-locales.patch
+Patch0234: 0234-test-import-localed-tests-from-debian-ubuntu-test-su.patch
+Patch0235: 0235-unit-check-for-mount-rate-limiting-before-checking-a.patch
+Patch0236: 0236-tests-make-sure-we-delay-running-mount-start-jobs-wh.patch
+Patch0237: 0237-test-insert-space-in-for-loop.patch
+Patch0238: 0238-test-move-do-at-the-end-of-line.patch
+Patch0239: 0239-test-use-trap-RETURN.patch
+Patch0240: 0240-test-ignore-the-error-about-our-own-libraries-missin.patch
+Patch0241: 0241-test-wrap-binaries-using-systemd-DSOs-when-running-w.patch
+Patch0242: 0242-test-set-ASAN_RT_PATH-along-with-LD_PRELOAD-to-the-A.patch
+Patch0243: 0243-test-drop-all-LD_PRELOAD-related-ASan-workarounds.patch
+Patch0244: 0244-test-don-t-wrap-binaries-built-with-ASan.patch
+Patch0245: 0245-test-send-stdout-stderr-of-testsuite-units-to-journa.patch
+Patch0246: 0246-test-make-the-busy-loop-in-TEST-02-less-verbose.patch
+Patch0247: 0247-test-always-wrap-useradd-userdel-when-running-w-ASan.patch
+Patch0248: 0248-test-don-t-flush-debug-logs-to-the-console.patch
+Patch0249: 0249-test-fix-a-couple-of-issues-found-by-shellcheck.patch
+Patch0250: 0250-test-pass-the-initdir-to-check_result_-qemu-nspawn-h.patch
+Patch0251: 0251-test-run-the-custom-check-hooks-before-common-checks.patch
+Patch0252: 0252-test-check-journal-directly-instead-of-capturing-con.patch
+Patch0253: 0253-test-use-saved-process-PID-instead-of.patch
+Patch0254: 0254-test-account-for-ADDR_NO_RANDOMIZE-if-it-s-set.patch
+Patch0255: 0255-fuzz-bcd-silence-warning-about-always-true-compariso.patch
+Patch0256: 0256-test-disable-test_ntp-on-RHEL.patch
+Patch0257: 0257-core-do-not-filter-out-systemd.unit-and-run-level-sp.patch
+Patch0258: 0258-test-add-a-simple-test-for-daemon-reexec.patch
+Patch0259: 0259-test-install-usr-libexec-vi-as-well.patch
+Patch0260: 0260-test-resize-the-terminal-automagically-with-INTERACT.patch
+Patch0261: 0261-test-create-an-ASan-wrapper-for-getent-and-su.patch
+Patch0262: 0262-test-mark-partition-bootable.patch
+Patch0263: 0263-test-bump-the-data-partition-size-if-we-don-t-strip-.patch
+Patch0264: 0264-test-use-PBKDF2-with-capped-iterations-instead-of-Ar.patch
+Patch0265: 0265-locale-drop-unnecessary-allocation.patch
+Patch0266: 0266-Revert-shared-install-create-relative-symlinks-for-e.patch
+Patch0267: 0267-glyph-util-add-new-glyphs-for-up-down-arrows.patch
+Patch0268: 0268-tree-wide-allow-ASCII-fallback-for-in-logs.patch
+Patch0269: 0269-tree-wide-allow-ASCII-fallback-for-in-logs.patch
+Patch0270: 0270-core-allow-to-set-default-timeout-for-devices.patch
+Patch0271: 0271-man-document-DefaultDeviceTimeoutSec.patch
+Patch0272: 0272-man-update-dbus-docs.patch
+Patch0273: 0273-hwdb-60-keyboard-Fix-volume-button-mapping-on-Asus-T.patch
+Patch0274: 0274-hwdb-CH-Pro-Pedals-not-classified-correctly-due-to-n.patch
+Patch0275: 0275-hwdb-Add-accel-orientation-quirk-for-the-GPD-Pocket-.patch
+Patch0276: 0276-hostname-Allow-overriding-the-chassis-type-from-hwdb.patch
+Patch0277: 0277-hwdb-Add-Microsoft-Surface-Pro-1-chassis-quirk.patch
+Patch0278: 0278-hwdb-treat-logitech-craft-keyboard-as-a-keyboard.patch
+Patch0279: 0279-test-frequency-in-mouse-DPI-is-optional.patch
+Patch0280: 0280-hwdb-add-two-Elecom-trackballs.patch
+Patch0281: 0281-hwdb-add-new-database-file-for-PDA-devices.patch
+Patch0282: 0282-hwdb-add-support-for-Surface-Laptop-2-3-22303.patch
+Patch0283: 0283-hwdb-add-HP-calculators.patch
+Patch0284: 0284-hwbd-60-sensor.hwdb-Add-Pipo-W2Pro.patch
+Patch0285: 0285-hwdb-60-keyboard-Support-the-buttons-on-CZC-P10T-tab.patch
+Patch0286: 0286-hwdb-add-CST-Laser-Trackball-22583.patch
+Patch0287: 0287-hwdb-Force-release-calculator-key-on-all-HP-OMEN-lap.patch
+Patch0288: 0288-Add-support-for-NEC-VersaPro-VG-S.patch
+Patch0289: 0289-Fix-mic-mute-on-Acer-TravelMate-B311-31-22677.patch
+Patch0290: 0290-Add-AV-production-controllers-to-hwdb-and-add-uacces.patch
+Patch0291: 0291-hwdb-Add-AV-production-access-to-Elgado-Stream-Deck-.patch
+Patch0292: 0292-Add-HP-Elitebook-2760p-support-22766.patch
+Patch0293: 0293-hwdb-Add-mic-mute-key-mapping-for-HP-Elite-x360.patch
+Patch0294: 0294-hwdb-fix-parser-to-work-with-newer-pyparsing.patch
+Patch0295: 0295-hwdb-update-for-v251.patch
+Patch0296: 0296-hwdb-update-autosuspend-entries.patch
+Patch0297: 0297-hwdb-drop-boilerplate-about-match-patterns-being-uns.patch
+Patch0298: 0298-hwdb-Update-60-keyboard.hwdb-23074.patch
+Patch0299: 0299-hwdb-60-keyboard-Add-Acer-Aspire-One-AO532h-keymappi.patch
+Patch0300: 0300-hwdb-60-keyboard-Add-HP-Compaq-KBR0133.patch
+Patch0301: 0301-hwdb-add-resolutions-for-the-Vaio-FE14-touchpad-2313.patch
+Patch0302: 0302-hwdb-Remap-micmute-to-f20-for-ASUS-WMI-hotkeys.patch
+Patch0303: 0303-hwdb-Fix-rotation-for-HP-Pro-Tablet-408-G1.patch
+Patch0304: 0304-hwdb-add-keyboard-mapping-for-HP-ProBook-11G2.patch
+Patch0305: 0305-hwdb-make-sure-ninja-update-hwdb-works-on-f35.patch
+Patch0306: 0306-hwbd-run-update-hwdb-for-v251-rc2.patch
+Patch0307: 0307-hwdb-run-ninja-update-hwdb-autosuspend-for-v251-rc2.patch
+Patch0308: 0308-Fix-orientation-detection-for-Asus-Transformer-T100T.patch
+Patch0309: 0309-Fix-orientation-detection-for-HP-Pavilion-X2-10-k010.patch
+Patch0310: 0310-fix-typo.patch
+Patch0311: 0311-Adding-a-description-of-the-keyboard-shortcut-Fn-F12.patch
+Patch0312: 0312-hwdb-run-update-hwdb.patch
+Patch0313: 0313-hwdb-add-rammus-accelerometer-support.patch
+Patch0314: 0314-Add-support-to-set-autosuspend-delay-via-hwdb.patch
+Patch0315: 0315-Set-autosuspend-delay-for-Fibocom-LG850-GL.patch
+Patch0316: 0316-Add-HUION-Inspiroy-H420X-to-hwdb.patch
+Patch0317: 0317-hwdb-run-update-hwdb-for-v251-rc3.patch
+Patch0318: 0318-hwdb-add-touchpad-parameters-for-Lenovo-T15g-Gen1-23.patch
+Patch0319: 0319-hwdb-Add-accel-orientation-for-the-I15-TG.patch
+Patch0320: 0320-hwdb-fix-accelerometer-mount-matrix-for-Aquarius-NS4.patch
+Patch0321: 0321-hwdb-Add-Google-Hangouts-Meet-speakermic.patch
+Patch0322: 0322-hwdb-update-via-ninja-C-build-update-hwdb.patch
+Patch0323: 0323-hwdb-Add-Google-Meet-speakermic.patch
+Patch0324: 0324-hwdb-Add-accel-orientation-quirk-for-the-Aya-Neo-Nex.patch
+Patch0325: 0325-hwdb-Add-HP-Dev-One.patch
+Patch0326: 0326-hwdb-analyzers-remove-generic-STM-Device-in-DFU-Mode.patch
+Patch0327: 0327-hwdb-Add-Lenovo-ThinkPad-C13-Yoga.patch
+Patch0328: 0328-Fix-automatic-screen-rotation-for-Asus-Transformer-T.patch
+Patch0329: 0329-hwdb-Add-Acer-Aspire-A317-33-24050.patch
+Patch0330: 0330-Add-ACCEL_MOUNT_MATRIX-for-OXP-Mini.patch
+Patch0331: 0331-Added-DERE-DBook-D10-24173.patch
+Patch0332: 0332-hwdb-analyzers-Clarify-the-type-of-devices-we-want-l.patch
+Patch0333: 0333-hwdb-Add-Greaseweazle-drives-to-the-list-of-analyzer.patch
+Patch0334: 0334-hwdb-Apply-existing-accel-orientation-quirk-to-all-C.patch
+Patch0335: 0335-shared-install-fix-crash-when-reenable-is-called-wit.patch
+Patch0336: 0336-scope-allow-unprivileged-delegation-on-scopes.patch
+Patch0337: 0337-udev-net_id-add-rhel-9.1-naming-scheme.patch
+Patch0338: 0338-core-load-fragment-move-config_parse_sec_fix_0-to-sr.patch
+Patch0339: 0339-logind-add-option-to-stop-idle-sessions-after-specif.patch
+Patch0340: 0340-tree-wide-fix-typo.patch
+Patch0341: 0341-test-several-cleanups-for-TEST-35-LOGIN.patch
+Patch0342: 0342-test-start-test-user-session-before-idle-action-sett.patch
+Patch0343: 0343-test-ensure-cleanup-functions-return-success.patch
+Patch0344: 0344-test-add-test-for-org.freedesktop.login1.Session-Set.patch
+Patch0345: 0345-test-add-a-simple-test-for-list-users.patch
+Patch0346: 0346-test-merge-grep-awk-calls.patch
+Patch0347: 0347-test-wait-for-user-service-or-slice-to-be-finished.patch
+Patch0348: 0348-test-terminate-session-and-user-on-cleanup.patch
+Patch0349: 0349-test-do-not-restart-getty-tty2-automatically.patch
+Patch0350: 0350-tests-add-test-for-StopIdleSessionSec-option.patch
+Patch0351: 0351-logind-schedule-idle-check-full-interval-from-now-if.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -188,7 +480,7 @@ BuildRequires:  libseccomp-devel
 BuildRequires:  meson >= 0.43
 BuildRequires:  gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires:  valgrind-devel
+BuildRequires:  valgrind-devel
 BuildRequires:  pkgconfig(bash-completion)
 BuildRequires:  pkgconfig(tss2-esys)
 BuildRequires:  pkgconfig(tss2-rc)
@@ -918,19 +1210,105 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 %files standalone-sysusers -f .file-list-standalone-sysusers
 
 %changelog
-* Tue Sep 27 2022 Jacco Ligthart <jacco@redsleeve.org> - 250-6.1.redsleeve
-- removed valgrind
+* Fri Sep 23 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-12
+- core/load-fragment: move config_parse_sec_fix_0 to src/shared (#2100464)
+- logind: add option to stop idle sessions after specified timeout (#2100464)
+- tree-wide: fix typo (#2100464)
+- test: several cleanups for TEST-35-LOGIN (#2100464)
+- test: start test user session before idle action setting is changed (#2100464)
+- test: ensure cleanup functions return success (#2100464)
+- test: add test for org.freedesktop.login1.Session SetType (#2100464)
+- test: add a simple test for list-users (#2100464)
+- test: merge grep | awk calls (#2100464)
+- test: wait for user service or slice to be finished (#2100464)
+- test: terminate session and user on cleanup (#2100464)
+- test: do not restart getty@tty2 automatically (#2100464)
+- tests: add test for StopIdleSessionSec= option (#2100464)
+- logind: schedule idle check full interval from now if we couldn't figure out atime timestamp (#2100464)
 
-* Wed Jul 20 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-6.1
-- shutdown: get only active md arrays. (#2087677)
-- test: lvm 2.03.15 dropped the static autoactivation (#2087677)
-- ci: limit which env variables we pass through `sudo` (#2087677)
-- shared: Fix memory leak in bus_append_execute_property() (#2087677)
+* Thu Aug 25 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-11
+- scope: allow unprivileged delegation on scopes (#2120604)
+- udev/net_id: add "rhel-9.1" naming scheme (#2121144)
 
-* Thu Apr 07 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-6
-- udev/net_id: avoid slot based names only for single function devices (#2070097)
+* Mon Aug 22 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-10
+- shared/install: fix crash when reenable is called without --root (#2120222)
 
-* Fri Mar 25 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-5
+* Thu Aug 18 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-9
+- Revert "shared/install: create relative symlinks for enablement and aliasing" (#2118668)
+- glyph-util: add new glyphs for up/down arrows (#2118297)
+- tree-wide: allow ASCII fallback for → in logs (#2118297)
+- tree-wide: allow ASCII fallback for … in logs (#2118297)
+- core: allow to set default timeout for devices (#2116681)
+- man: document DefaultDeviceTimeoutSec= (#2116681)
+- man: update dbus docs (#2116681)
+- hwdb: 60-keyboard: Fix volume-button mapping on Asus TF103C (#2087778)
+- hwdb: CH Pro Pedals not classified correctly due to no buttons (#2087778)
+- hwdb: Add accel orientation quirk for the GPD Pocket 3 (#2087778)
+- hostname: Allow overriding the chassis type from hwdb (#2087778)
+- hwdb: Add Microsoft Surface Pro 1 chassis quirk (#2087778)
+- hwdb: treat logitech craft keyboard as a keyboard (#2087778)
+- test: frequency in mouse DPI is optional (#2087778)
+- hwdb: add two Elecom trackballs (#2087778)
+- hwdb: add new database file for PDA devices (#2087778)
+- hwdb: add support for Surface Laptop 2 & 3 (#22303) (#2087778)
+- hwdb: add HP calculators (#2087778)
+- hwbd: 60-sensor.hwdb: Add Pipo W2Pro (#2087778)
+- hwdb: 60-keyboard: Support the buttons on CZC P10T tablet (#2087778)
+- hwdb: add CST Laser Trackball (#22583) (#2087778)
+- hwdb: Force release calculator key on all HP OMEN laptops (#2087778)
+- Add support for NEC VersaPro VG-S (#2087778)
+- Fix mic mute on Acer TravelMate B311-31 (#22677) (#2087778)
+- Add AV production controllers to hwdb and add uaccess (#2087778)
+- hwdb: Add AV production access to Elgado Stream Deck devices (#2087778)
+- Add HP Elitebook 2760p support (#22766) (#2087778)
+- hwdb: Add mic mute key mapping for HP Elite x360 (#2087778)
+- hwdb: fix parser to work with newer pyparsing (#2087778)
+- hwdb: update for v251 (#2087778)
+- hwdb: update autosuspend entries (#2087778)
+- hwdb: drop boilerplate about match patterns being unstable (#2087778)
+- hwdb: Update 60-keyboard.hwdb (#23074) (#2087778)
+- hwdb: 60-keyboard: Add Acer Aspire One AO532h keymappings (#2087778)
+- hwdb 60-keyboard Add HP/Compaq KBR0133 (#2087778)
+- hwdb: add resolutions for the Vaio FE14 touchpad (#23136) (#2087778)
+- hwdb: Remap micmute to f20 for ASUS WMI hotkeys (#2087778)
+- hwdb: Fix rotation for HP Pro Tablet 408 G1 (#2087778)
+- hwdb: add keyboard mapping for HP ProBook 11G2 (#2087778)
+- hwdb: make sure "ninja update-hwdb" works on f35 (#2087778)
+- hwbd: run "update-hwdb" for v251-rc2 (#2087778)
+- hwdb: run "ninja update-hwdb-autosuspend" for v251-rc2 (#2087778)
+- Fix orientation detection for Asus Transformer T100TAF, copied T100TA rule (#2087778)
+- Fix orientation detection for HP Pavilion X2 10-k010nr (#2087778)
+- fix typo (#2087778)
+- Adding a description of the keyboard shortcut Fn+F12 for the HP EliteBook 845 G7 device. (#23253) (#2087778)
+- hwdb: run "update-hwdb" (#2087778)
+- hwdb: add rammus accelerometer support (#2087778)
+- Add support to set autosuspend delay via hwdb (#2087778)
+- Set autosuspend delay for Fibocom LG850-GL (#2087778)
+- Add HUION Inspiroy H420X to hwdb (#2087778)
+- hwdb: run 'update-hwdb' for v251-rc3 (#2087778)
+- hwdb: add touchpad parameters for Lenovo T15g Gen1 (#23373) (#2087778)
+-  hwdb: Add accel orientation for the I15-TG (#2087778)
+- hwdb: fix accelerometer mount matrix for Aquarius NS483 (#2087778)
+- hwdb: Add Google Hangouts Meet speakermic (#2087778)
+- hwdb: update via ninja -C build update-hwdb (#2087778)
+- hwdb: Add Google Meet speakermic (#2087778)
+- hwdb: Add accel orientation quirk for the Aya Neo Next (#2087778)
+- hwdb: Add HP Dev One (#2087778)
+- hwdb: analyzers: remove generic "STM Device in DFU Mode" (#2087778)
+- hwdb: Add Lenovo ThinkPad C13 Yoga (#2087778)
+- Fix automatic screen rotation for Asus Transformer T100TAM (#2087778)
+- hwdb: Add Acer Aspire A317-33 (#24050) (#2087778)
+- Add ACCEL_MOUNT_MATRIX for OXP Mini (#2087778)
+- Added DERE DBook D10 (#24173) (#2087778)
+- hwdb: analyzers: Clarify the type of devices we want listed (#2087778)
+- hwdb: Add Greaseweazle "drives" to the list of analyzers (#2087778)
+- hwdb: Apply existing accel orientation quirk to all Chromebooks (#2087778)
+
+* Wed Jul 20 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-8
+- core: shorten long unit names that are based on paths and append path hash at the end (#2083493)
+- tests: add test case for long unit names (#2083493)
+- tests: reflect that we can now handle devices with very long sysfs paths (#2083493)
+- test: extend the "hashed" unit names coverage a bit (#2083493)
 - Revert "kernel-install: also remove modules.builtin.alias.bin" (#2065061)
 - Revert "kernel-install: prefer /boot over /boot/efi for $BOOT_ROOT" (#2065061)
 - kernel-install: 50-depmod: port to /bin/sh (#2065061)
@@ -951,7 +1329,216 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 - kernel-install: only generate systemd.boot_id= in kernel command line if used for naming the boot loader spec files/dirs (#2065061)
 - kernel-install: search harder for kernel image/initrd drop-in dir (#2065061)
 - kernel-install: add new "inspect" verb, showing paths and parameters we discovered (#2065061)
-- bus: Use OrderedSet for introspection (#2066325)
+- ci(Mergify): configuration update (#2087652)
+- ci(Mergify): fix copy&paste bug (#2087652)
+- shared: Fix memory leak in bus_append_execute_property() (#2087652)
+- fuzz: no longer skip empty files (#2087652)
+- networkctl: open the bus just once (#2087652)
+- json: align table (#2087652)
+- fuzz-json: optionally allow logging and output (#2087652)
+- shared/json: reduce scope of variables (#2087652)
+- fuzz-json: also do sorting and normalizing and other easy calls (#2087652)
+- shared/json: wrap long comments (#2087652)
+- shared/json: fix memory leak on failed normalization (#2087652)
+- shared/json: add helper to ref first, unref second (#2087652)
+- basic/alloc-util: remove unnecessary parens (#2087652)
+- fuzz-json: also try self-merge operations (#2087652)
+- shared/json: fix another memleak in normalization (#2087652)
+- shared/json: fix memleak in sort (#2087652)
+- execute: fix resource leak (#2087652)
+- tests: ignore dbus-broker-launcher (#2087652)
+- core/timer: fix memleak (#2087652)
+- timedatectl: fix a memory leak (#2087652)
+- test: fix file descriptor leak in test-psi-util (#2087652)
+- test: fix file descriptor leak in test-tmpfiles.c (#2087652)
+- test: fix file descriptor leak in test-fs-util (#2087652)
+- test: fix file descriptor leak in test-oomd-util (#2087652)
+- test: fix file descriptor leak in test-catalog (#2087652)
+- test: make masking of supplementary services configurable (#2087652)
+- test: fuzz our dbus interfaces with dfuzzer (#2087652)
+- test: skip TEST-21-DFUZZER without ASan (#2087652)
+- core: annotate Reexecute() as NoReply (#2087652)
+- test: always force a new image for dfuzzer (#2087652)
+- test: make dfuzzer less verbose (#2087652)
+- test: drop the at_exit() coredump check (#2087652)
+- test: make the shutdown routine a bit more "robust" (#2087652)
+- tree-wide: drop manually-crafted message for missing variables (#2087652)
+- test: allow overriding $QEMU_MEM when running w/ ASan (#2087652)
+- test: don't test buses we don't ship (#2087652)
+- shutdown: get only active md arrays. (#2047682)
+- bus: Use OrderedSet for introspection (#2068131)
+- logind-session-dbus: allow to set display name via dbus (#2100340)
+- ci: limit which env variables we pass through `sudo` (#2087652)
+- ci(Mergify): Add `ci-waived` logic (#2087652)
+- json: use unsigned for refernce counter (#2087652)
+- macro: check over flow in reference counter (#2087652)
+- sd-bus: fix reference counter to be incremented (#2087652)
+- sd-bus: introduce ref/unref function for track_item (#2087652)
+- sd-bus: do not read unused value (#2087652)
+- sd-bus: do not return negative errno when unknown name is specified (#2087652)
+- sd-bus: use hashmap_contains() and drop unnecessary cast (#2087652)
+- test: shorten code a bit (#2087652)
+- test: add several tests for track item (#2087652)
+- core/slice: make slice_freezer_action() return 0 if freezing state is unchanged (#2087652)
+- core/unit: fix use-after-free (#2087652)
+- core/timer: fix potential use-after-free (#2087652)
+- core: command argument can be longer than PATH_MAX (#2073994)
+- shared/install: consistently use 'lp' as the name for the LookupPaths instance (#2082131)
+- shared/specifier: treat NULL the same as "" (#2082131)
+- shared/install: do not print aliases longer than UNIT_NAME_MAX (#2082131)
+- shared/install-printf: drop now-unused install_path_printf() (#2082131)
+- strv: declare iterator of FOREACH_STRING() in the loop (#2082131)
+- basic/unit-file: split out the subroutine for symlink verification (#2082131)
+- basic/stat-util: add null_or_empty_path_with_root() (#2082131)
+- shared/install: reuse the standard symlink verification subroutine (#2082131)
+- shared/install: add a bit more quoting (#2082131)
+- test: add test for systemctl link & enable (#2082131)
+- tests: add helper for creating tempfiles with content (#2082131)
+- man: clarify the descriptions of aliases and linked unit files (#2082131)
+- basic: add new variable $SYSTEMD_OS_RELEASE to override location of os-release (#2082131)
+- test-os-util: add basic tests for os-release parsing (#2082131)
+- basic/env-file: make load-env-file deduplicate entries with the same key (#2082131)
+- man/os-release: add a note about repeating entries (#2082131)
+- shared/specifier: clarify and add test for missing data (#2082131)
+- shared/specifier: provide proper error messages when specifiers fail to read files (#2082131)
+- shared/install: provide proper error messages when invalid specifiers are used (#2082131)
+- shared/install: move scope into InstallContext (#2082131)
+- shared/specifier: fix %u/%U/%g/%G when called as unprivileged user (#2082131)
+- shared/install: simplify unit_file_dump_changes() (#2082131)
+- shared/install: propagate errors about invalid aliases and such too (#2082131)
+- shared/install: return failure when enablement fails, but process as much as possible (#2082131)
+- systemctl: fix silent failure when --root is not found (#2082131)
+- shared/install: also check for self-aliases during installation and ignore them (#2082131)
+- docs: Correct WantedBy= regarding template units (#2082131)
+- man: fix invalid description of template handling in WantedBy= (#2082131)
+- shared/install: drop unnecessary casts (#2082131)
+- strv: make iterator in STRV_FOREACH() declaread in the loop (#2082131)
+- core: ExecContext::restrict_filesystems is set of string (#2082131)
+- install: when linking a file, create the link first or abort (#2082131)
+- shared/install: split unit_file_{disable,enable}() so _reenable doesn't do setup twice (#2082131)
+- shared/install: fix reenable on linked unit files (#2082131)
+- test-systemctl-enable: extend the test for repeated WantedBy/RequiredBy (#2082131)
+- shared/install: when we fail to chase a symlink, show some logs (#2082131)
+- shared/install: do not try to resolve symlinks outside of root directory (#2082131)
+- test-systemctl-enable: enhance the test for unit file linking (#2082131)
+- shared/install: skip unnecessary chasing of symlinks in disable (#2082131)
+- shared/install: also remove symlinks like .wants/foo@one.service → ../foo@one.service (#2082131)
+- shared/install: create relative symlinks for enablement and aliasing (#2082131)
+- shared/install: when looking for symlinks in .wants/.requires, ignore symlink target (#2082131)
+- shared/install: stop passing duplicate root argument to install_name_printf() (#2082131)
+- basic/unit-file: reverse negative conditional (#2082131)
+- shared/install: split UNIT_FILE_SYMLINK into two states (#2082131)
+- shared/install: fix handling of a linked unit file (#2082131)
+- test-systemctl-enable: make shellcheck happy (#2082131)
+- shared/install: when creating symlinks, accept different but equivalent symlinks (#2082131)
+- test-systemctl-enable: use magic syntax to allow inverted tests (#2082131)
+- test-systemctl-enable: also use freshly-built systemd-id128 (#2082131)
+- test-systemctl-enable: disable the test for %a for now (#2082131)
+- Rename UnitFileScope to LookupScope (#2082131)
+- core: handle lookup paths being symlinks (#2082131)
+- shared/install: use correct cleanup function (#2082131)
+- udev/net_id: avoid slot based names only for single function devices (#2073003)
+- test: import logind test from debian/ubuntu test suite (#2087652)
+- test: drop redundant IMAGE_NAME= (#2087652)
+- test: import timedated test from debian/ubuntu test suite (#2087652)
+- test: introduce assert_not_in() helper function (#2087652)
+- test: drop unnecessary --no-pager option (#2087652)
+- test: support debian/ubuntu specific timezone config file (#2087652)
+- test: import hostnamed tests from debian/ubuntu test suite (#2087652)
+- locale-util: fix memleak on failure (#2087652)
+- locale-util: check if enumerated locales are valid (#2087652)
+- locale-util: align locale entries (#2087652)
+- core: inline an iterator variable (#2087652)
+- locale-setup: merge locale handling in PID1 and localed (#2087652)
+- locale: rename keymap-util.[ch] -> localed-util.[ch] (#2087652)
+- test: add one more path to search keymaps (#2087652)
+- test: introduce inst_recursive() helper function (#2087652)
+- hmac/sha256: move size define to sha256.h (#2087652)
+- tpm2: support policies with PIN (#2087652)
+- cryptenroll: add support for TPM2 pin (#2087652)
+- cryptsetup: add support for TPM2 pin (#2087652)
+- cryptsetup: add libcryptsetup TPM2 PIN support (#2087652)
+- cryptenroll: add TPM2 PIN documentation (#2087652)
+- cryptsetup: add manual TPM2 PIN configuration (#2087652)
+- cryptenroll: add tests for TPM2 unlocking (#2087652)
+- env-util: replace unsetenv_erase() by new getenv_steal_erase() helper (#2087652)
+- test: install libxkbcommon and x11 keymaps (#2087652)
+- test: install C.UTF-8 and English locales (#2087652)
+- test: import localed tests from debian/ubuntu test suite (#2087652)
+- unit: check for mount rate limiting before checking active state (#2087652)
+- tests: make sure we delay running mount start jobs when /p/s/mountinfo is rate limited (#2087652)
+- test: insert space in for loop (#2087652)
+- test: move "do" at the end of line (#2087652)
+- test: use trap RETURN (#2087652)
+- test: ignore the error about our own libraries missing during image creation (#2087652)
+- test: wrap binaries using systemd DSOs when running w/ ASan (#2087652)
+- test: set $ASAN_RT_PATH along with $LD_PRELOAD to the ASan runtime DSO (#2087652)
+- test: drop all LD_PRELOAD-related ASan workarounds (#2087652)
+- test: don't wrap binaries built with ASan (#2087652)
+- test: send stdout/stderr of testsuite units to journal & console (#2087652)
+- test: make the busy loop in TEST-02 less verbose (#2087652)
+- test: always wrap useradd/userdel when running w/ ASan (#2087652)
+- test: don't flush debug logs to the console (#2087652)
+- test: fix a couple of issues found by shellcheck (#2087652)
+- test: pass the initdir to check_result_{qemu,nspawn} hooks (#2087652)
+- test: run the custom check hooks before common checks (#2087652)
+- test: check journal directly instead of capturing console output (#2087652)
+- test: use saved process PID instead of %% (#2087652)
+- test: account for ADDR_NO_RANDOMIZE if it's set (#2087652)
+- fuzz-bcd: silence warning about always-true comparison (#2087652)
+- test: disable test_ntp on RHEL (#2087652)
+- core: do not filter out systemd.unit= and run-level specifier from kernel command line (#2087652)
+- test: add a simple test for daemon-reexec (#2087652)
+- test: install /usr/libexec/vi as well (#2087652)
+- test: resize the terminal automagically with INTERACTIVE_DEBUG=yes (#2087652)
+- test: create an ASan wrapper for `getent` and `su` (#2087652)
+- test: mark partition bootable (#2087652)
+- test: bump the data partition size if we don't strip binaries (#2087652)
+- test: use PBKDF2 with capped iterations instead of Argon2 (#2087652)
+- locale: drop unnecessary allocation (#2087652)
+
+* Wed Apr 20 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-7
+- test: check systemd RPM macros (#2017035)
+- test: do not assume x86-64 arch in TEST-58-REPART (#2017035)
+- tests: add repart tests for block devices with 1024, 2048, 4096 byte sector sizes (#2017035)
+- test: accept both unpadded and padded partition sizes (#2017035)
+- test: lvm 2.03.15 dropped the static autoactivation (#2017035)
+- test: accept GC'ed units in newer LVM (#2017035)
+- shared: Add more dlopen() tests (#2017035)
+- systemctl: Show how long a service ran for after it exited in status output (#2017035)
+- time-util: introduce TIMESTAMP_UNIX (#2017035)
+- systemctl,man: update docs for `--timestamp=` (#2017035)
+- systemctl: make `--timestamp=` affect the `show` verb as well (#2017035)
+- tests: allow running all the services with SYSTEMD_LOG_LEVEL (#2017035)
+- coredump: raise the coredump save size on 64bit systems to 32G (and lower it to 1G on 32bit systems) (#2017035)
+- repart: fix sector size handling (#2017035)
+- mkdir: allow to create directory whose path contains symlink (#2017035)
+- mkdir: CHASE_NONEXISTENT cannot used in chase_symlinks_and_stat() (#2017035)
+- meson: move efi file lists closer to where they are used (#2017035)
+- meson: move efi summary() section to src/boot/efi (#2017035)
+- meson: report SBAT settings (#2017035)
+- boot: Build BCD parser only on arches supported by Windows (#2017035)
+- meson: Remove efi-cc option (#2017035)
+- meson: Get objcopy location from compiler (#2017035)
+- meson: Use files() for source lists for boot and fundamental (#2017035)
+- meson: Use files() for tests (#2017035)
+- tests: add fuzz-bcd (#2017035)
+- meson: Use files() for fuzzers (#2017035)
+- meson: Add check argument to remaining run_command() calls (#2017035)
+- meson: Use echo to list files (#2017035)
+- test: add a test for mkdir_p() (#2017035)
+- util: another set of CVE-2021-4034 assert()s (#2017035)
+- basic: update CIFS magic (#2017035)
+- shared: be extra paranoid and check if argc > 0 (#2017035)
+- core: check if argc > 0 and argv[0] is set (#2017035)
+- core: check argc/argv uncoditionally (#2017035)
+- test: temporary workaround for #21819 (#2017035)
+- test: don't leak local variable to outer scopes (#2017035)
+- tree-wide: don't use strjoina() on getenv() values (#2017035)
+- man: clarify Environmentfile format (#2017035)
+- test-load-fragment: add a basic test for config_parse_unit_env_file() (#2017035)
+- core/execute: use _cleanup_ in exec_context_load_environment() (#2017035)
+- test-env-file: add tests for quoting in env files (#2017035)
 
 * Wed Feb 23 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-4
 - udev/net-setup-link: change the default MACAddressPolicy to "none" (#2009237)

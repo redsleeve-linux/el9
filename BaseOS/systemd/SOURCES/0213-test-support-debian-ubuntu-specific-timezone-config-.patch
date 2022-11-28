@@ -1,0 +1,64 @@
+From ce027f67d29066f188891c94447e50c12168a693 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 14 Jun 2022 09:02:00 +0900
+Subject: [PATCH] test: support debian/ubuntu specific timezone config file
+
+(cherry picked from commit aab61a8c990a54703ae70ca951d0502860010267)
+
+Related: #2087652
+---
+ test/units/testsuite-45.sh | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/test/units/testsuite-45.sh b/test/units/testsuite-45.sh
+index 2069d2437f..d0f9dd9461 100755
+--- a/test/units/testsuite-45.sh
++++ b/test/units/testsuite-45.sh
+@@ -7,9 +7,24 @@ set -o pipefail
+ # shellcheck source=test/units/assert.sh
+ . "$(dirname "$0")"/assert.sh
+ 
++restore_timezone() {
++    if [[ -f /tmp/timezone.bak ]]; then
++        mv /tmp/timezone.bak /etc/timezone
++    else
++        rm -f /etc/timezone
++    fi
++}
++
+ test_timezone() {
+     local ORIG_TZ=
+ 
++    # Debian/Ubuntu specific file
++    if [[ -f /etc/timezone ]]; then
++        mv /etc/timezone /tmp/timezone.bak
++    fi
++
++    trap restore_timezone EXIT
++
+     if [[ -L /etc/localtime ]]; then
+         ORIG_TZ=$(readlink /etc/localtime | sed 's#^.*zoneinfo/##')
+         echo "original tz: $ORIG_TZ"
+@@ -21,13 +36,22 @@ test_timezone() {
+     echo 'change timezone'
+     assert_eq "$(timedatectl --no-pager set-timezone Europe/Kiev 2>&1)" ""
+     assert_eq "$(readlink /etc/localtime | sed 's#^.*zoneinfo/##')" "Europe/Kiev"
++    if [[ -f /etc/timezone ]]; then
++        assert_eq "$(cat /etc/timezone)" "Europe/Kiev"
++    fi
+     assert_in "Time zone: Europe/Kiev \(EEST, \+0[0-9]00\)" "$(timedatectl)"
+ 
+     if [[ -n "$ORIG_TZ" ]]; then
+         echo 'reset timezone to original'
+         assert_eq "$(timedatectl set-timezone "$ORIG_TZ" 2>&1)" ""
+         assert_eq "$(readlink /etc/localtime | sed 's#^.*zoneinfo/##')" "$ORIG_TZ"
++        if [[ -f /etc/timezone ]]; then
++            assert_eq "$(cat /etc/timezone)" "$ORIG_TZ"
++        fi
+     fi
++
++    restore_timezone
++    trap - EXIT
+ }
+ 
+ restore_adjtime() {

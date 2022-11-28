@@ -1,0 +1,108 @@
+From 4dd51db0381048f15973dc0046fe5fdec1f40aa8 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Thu, 16 Jun 2022 22:16:53 +0200
+Subject: [PATCH] test: send stdout/stderr of testsuite units to journal &
+ console
+
+to make debugging in CIs slightly easier.
+
+(cherry picked from commit ba7abf79a5a2df2a93332fc32e8e3c268c74abc7)
+
+Related: #2087652
+---
+ test/test-functions             | 12 ++++++++++++
+ test/units/testsuite-22.service |  2 --
+ test/units/testsuite-35.service |  2 --
+ test/units/testsuite-45.service |  2 --
+ test/units/testsuite-64.service |  2 --
+ test/units/testsuite-71.service |  2 --
+ test/units/testsuite-73.service |  2 --
+ 7 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index 57d4df3e7e..77d4a0afff 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -2867,6 +2867,18 @@ test_setup() {
+             mask_supporting_services
+         fi
+ 
++        # Send stdout/stderr of testsuite-*.service units to both journal and
++        # console to make debugging in CIs easier
++        # Note: we can't use a dropin for `testsuite-.service`, since that also
++        #       overrides 'sub-units' of some tests that already use a specific
++        #       value for Standard(Output|Error)=
++        #       (e.g. test/units/testsuite-66-deviceisolation.service)
++        if ! get_bool "$INTERACTIVE_DEBUG"; then
++            local dropin_dir="${initdir:?}/etc/systemd/system/testsuite-${TESTID:?}.service.d"
++            mkdir -p "$dropin_dir"
++            printf '[Service]\nStandardOutput=journal+console\nStandardError=journal+console' >"$dropin_dir/99-stdout.conf"
++        fi
++
+         if get_bool "$hook_defined"; then
+             test_append_files "${initdir:?}"
+         fi
+diff --git a/test/units/testsuite-22.service b/test/units/testsuite-22.service
+index b9ecc4c5d6..a5ed660c62 100644
+--- a/test/units/testsuite-22.service
++++ b/test/units/testsuite-22.service
+@@ -9,5 +9,3 @@ Wants=getty-pre.target
+ ExecStartPre=rm -f /failed /testok
+ ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+ Type=oneshot
+-StandardOutput=tty
+-StandardError=tty
+diff --git a/test/units/testsuite-35.service b/test/units/testsuite-35.service
+index 556a57a384..0599f6104e 100644
+--- a/test/units/testsuite-35.service
++++ b/test/units/testsuite-35.service
+@@ -5,6 +5,4 @@ Description=TEST-35-LOGIN
+ [Service]
+ ExecStartPre=rm -f /failed /testok
+ ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-StandardOutput=journal+console
+-StandardError=journal+console
+ Type=oneshot
+diff --git a/test/units/testsuite-45.service b/test/units/testsuite-45.service
+index 79c0a6f117..b16ce9933f 100644
+--- a/test/units/testsuite-45.service
++++ b/test/units/testsuite-45.service
+@@ -5,6 +5,4 @@ Description=TEST-45-TIMEDATE
+ [Service]
+ ExecStartPre=rm -f /failed /testok
+ ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-StandardOutput=journal+console
+-StandardError=journal+console
+ Type=oneshot
+diff --git a/test/units/testsuite-64.service b/test/units/testsuite-64.service
+index 10b61e7e53..f75a3d7aad 100644
+--- a/test/units/testsuite-64.service
++++ b/test/units/testsuite-64.service
+@@ -6,5 +6,3 @@ Description=TEST-64-UDEV
+ ExecStartPre=rm -f /failed /testok
+ ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+ Type=oneshot
+-StandardOutput=journal+console
+-StandardError=journal+console
+diff --git a/test/units/testsuite-71.service b/test/units/testsuite-71.service
+index 019e8bff24..1718629c05 100644
+--- a/test/units/testsuite-71.service
++++ b/test/units/testsuite-71.service
+@@ -5,6 +5,4 @@ Description=TEST-71-HOSTNAME
+ [Service]
+ ExecStartPre=rm -f /failed /testok
+ ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-StandardOutput=journal+console
+-StandardError=journal+console
+ Type=oneshot
+diff --git a/test/units/testsuite-73.service b/test/units/testsuite-73.service
+index bee8c4215d..3ebd24da18 100644
+--- a/test/units/testsuite-73.service
++++ b/test/units/testsuite-73.service
+@@ -5,6 +5,4 @@ Description=TEST-73-LOCALE
+ [Service]
+ ExecStartPre=rm -f /failed /testok
+ ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-StandardOutput=journal+console
+-StandardError=journal+console
+ Type=oneshot

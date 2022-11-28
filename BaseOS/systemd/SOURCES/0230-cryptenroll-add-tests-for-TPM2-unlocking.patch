@@ -1,0 +1,166 @@
+From 6a31abd9fdfe9b08c169b315dd3bc18abbe200b0 Mon Sep 17 00:00:00 2001
+From: Grigori Goronzy <greg@chown.ath.cx>
+Date: Thu, 24 Feb 2022 01:28:29 +0100
+Subject: [PATCH] cryptenroll: add tests for TPM2 unlocking
+
+Add tests for enrolling and unlocking. Various cases are tested:
+
+- Default PCR 7 policy w/o PIN, good and bad cases (wrong PCR)
+- PCR 7 + PIN policy, good and bad cases (wrong PCR, wrong PIN)
+- Non-default PCR 0+7 policy w/o PIN, good and bad cases (wrong PCR 0)
+
+v2: rename test, fix tss2 library installation, fix CI failures
+v3: fix ppc64, load module
+(cherry picked from commit fd8b9248206734b655de503f8bb16c2d154934ed)Q
+
+Related: #2087652
+---
+ test/TEST-70-TPM2/Makefile      |  6 +++++
+ test/TEST-70-TPM2/test.sh       | 40 +++++++++++++++++++++++++++
+ test/test-functions             |  2 +-
+ test/units/testsuite-70.service |  7 +++++
+ test/units/testsuite-70.sh      | 48 +++++++++++++++++++++++++++++++++
+ 5 files changed, 102 insertions(+), 1 deletion(-)
+ create mode 100644 test/TEST-70-TPM2/Makefile
+ create mode 100755 test/TEST-70-TPM2/test.sh
+ create mode 100644 test/units/testsuite-70.service
+ create mode 100755 test/units/testsuite-70.sh
+
+diff --git a/test/TEST-70-TPM2/Makefile b/test/TEST-70-TPM2/Makefile
+new file mode 100644
+index 0000000000..9f65d4ca4f
+--- /dev/null
++++ b/test/TEST-70-TPM2/Makefile
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++
++all setup run clean clean-again:
++	@TEST_BASE_DIR=../ ./test.sh --$@
++
++.PHONY: all setup run clean clean-again
+diff --git a/test/TEST-70-TPM2/test.sh b/test/TEST-70-TPM2/test.sh
+new file mode 100755
+index 0000000000..d716614bcf
+--- /dev/null
++++ b/test/TEST-70-TPM2/test.sh
+@@ -0,0 +1,40 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -e
++
++TEST_DESCRIPTION="cryptenroll/cryptsetup with TPM2 devices"
++IMAGE_NAME="tpm2"
++TEST_NO_NSPAWN=1
++TEST_REQUIRE_INSTALL_TESTS=0
++
++# shellcheck source=test/test-functions
++. "${TEST_BASE_DIR:?}/test-functions"
++
++command -v swtpm >/dev/null 2>&1 || exit 0
++command -v tpm2_pcrextend >/dev/null 2>&1 || exit 0
++
++test_append_files() {
++    (
++        local workspace="${1:?}"
++
++        instmods tpm tpm_tis tpm_ibmvtpm
++        install_dmevent
++        generate_module_dependencies
++        inst_binary tpm2_pcrextend
++    )
++}
++
++machine="$(uname -m)"
++tpmdevice="tpm-tis"
++if [ "$machine" = "ppc64le" ]; then
++    # tpm-spapr support was introduced in qemu 5.0.0. Skip test for old qemu versions.
++    qemu_min_version "5.0.0" || exit 0
++    tpmdevice="tpm-spapr"
++fi
++
++tpmstate=$(mktemp -d)
++swtpm socket --tpm2 --tpmstate dir="$tpmstate" --ctrl type=unixio,path="$tpmstate/sock" &
++trap 'kill %%; rm -rf $tpmstate' SIGINT EXIT
++QEMU_OPTIONS="-chardev socket,id=chrtpm,path=$tpmstate/sock -tpmdev emulator,id=tpm0,chardev=chrtpm -device $tpmdevice,tpmdev=tpm0"
++
++do_test "$@"
+diff --git a/test/test-functions b/test/test-functions
+index 4a6436a74b..050fefaf1b 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -1198,7 +1198,7 @@ install_missing_libraries() {
+     local lib path
+     # A number of dependencies is now optional via dlopen, so the install
+     # script will not pick them up, since it looks at linkage.
+-    for lib in libcryptsetup libidn libidn2 pwquality libqrencode tss2-esys tss2-rc tss2-mu libfido2 libbpf libelf libdw; do
++    for lib in libcryptsetup libidn libidn2 pwquality libqrencode tss2-esys tss2-rc tss2-mu tss2-tcti-device libfido2 libbpf libelf libdw; do
+         ddebug "Searching for $lib via pkg-config"
+         if pkg-config --exists "$lib"; then
+                 path="$(pkg-config --variable=libdir "$lib")"
+diff --git a/test/units/testsuite-70.service b/test/units/testsuite-70.service
+new file mode 100644
+index 0000000000..c13c2d51a3
+--- /dev/null
++++ b/test/units/testsuite-70.service
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Unit]
++Description=TEST-70-TPM2
++
++[Service]
++Type=oneshot
++ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+diff --git a/test/units/testsuite-70.sh b/test/units/testsuite-70.sh
+new file mode 100755
+index 0000000000..f395ef4e5e
+--- /dev/null
++++ b/test/units/testsuite-70.sh
+@@ -0,0 +1,48 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -ex
++
++export SYSTEMD_LOG_LEVEL=debug
++
++
++# Prepare fresh disk image
++img="/var/tmp/test.img"
++dd if=/dev/zero of=$img bs=1024k count=20 status=none
++echo -n passphrase >/tmp/passphrase
++cryptsetup luksFormat -q --use-urandom $img /tmp/passphrase
++
++# Enroll unlock with default PCR policy
++env PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto $img
++/usr/lib/systemd/systemd-cryptsetup attach test-volume $img - tpm2-device=auto,headless=1
++/usr/lib/systemd/systemd-cryptsetup detach test-volume
++
++# Check with wrong PCR
++tpm2_pcrextend 7:sha256=0000000000000000000000000000000000000000000000000000000000000000
++/usr/lib/systemd/systemd-cryptsetup attach test-volume $img - tpm2-device=auto,headless=1 && { echo 'unexpected success'; exit 1; }
++
++# Enroll unlock with PCR+PIN policy
++systemd-cryptenroll --wipe-slot=tpm2 $img
++env PASSWORD=passphrase NEWPIN=123456 systemd-cryptenroll --tpm2-device=auto --tpm2-with-pin=true $img
++env PIN=123456 /usr/lib/systemd/systemd-cryptsetup attach test-volume $img - tpm2-device=auto,headless=1
++/usr/lib/systemd/systemd-cryptsetup detach test-volume
++
++# Check failure with wrong PIN
++env PIN=123457 /usr/lib/systemd/systemd-cryptsetup attach test-volume $img - tpm2-device=auto,headless=1 && { echo 'unexpected success'; exit 1; }
++
++# Check failure with wrong PCR (and correct PIN)
++tpm2_pcrextend 7:sha256=0000000000000000000000000000000000000000000000000000000000000000
++env PIN=123456 /usr/lib/systemd/systemd-cryptsetup attach test-volume $img - tpm2-device=auto,headless=1 && { echo 'unexpected success'; exit 1; }
++
++# Enroll unlock with PCR 0+7
++systemd-cryptenroll --wipe-slot=tpm2 $img
++env PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 $img
++/usr/lib/systemd/systemd-cryptsetup attach test-volume $img - tpm2-device=auto,headless=1
++/usr/lib/systemd/systemd-cryptsetup detach test-volume
++
++# Check with wrong PCR 0
++tpm2_pcrextend 0:sha256=0000000000000000000000000000000000000000000000000000000000000000
++/usr/lib/systemd/systemd-cryptsetup attach test-volume $img - tpm2-device=auto,headless=1 && exit 1
++
++echo OK >/testok
++
++exit 0

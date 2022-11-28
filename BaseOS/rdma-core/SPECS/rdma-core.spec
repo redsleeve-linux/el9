@@ -1,6 +1,6 @@
 Name: rdma-core
-Version: 37.2
-Release: 1%{?dist}.redsleeve
+Version: 41.0
+Release: 3%{?dist}
 Summary: RDMA core userspace libraries and daemons
 
 # Almost everything is licensed under the OFA dual GPLv2, 2 Clause BSD license
@@ -12,14 +12,11 @@ Url: https://github.com/linux-rdma/rdma-core
 Source: https://github.com/linux-rdma/rdma-core/releases/download/v%{version}/%{name}-%{version}.tar.gz
 Patch1: 0001-kernel-boot-Do-not-perform-device-rename-on-OPA-devi.patch
 Patch2: udev-keep-NAME_KERNEL-as-default-interface-naming-co.patch
-Patch3: 0001-tests-Fix-comparing-qp_state-for-iWARP-providers.patch
-Patch4: 0001-bnxt_re-lib-Check-pointer-validity-while-freeing-que.patch
-Patch5: 0001-mlx5-Initialize-wr_data-when-post-a-work-request.patch
 # Do not build static libs by default.
 %define with_static %{?_with_static: 1} %{?!_with_static: 0}
 
 # 32-bit arm is missing required arch-specific memory barriers,
-#ExcludeArch: %{arm}
+ExcludeArch: %{arm}
 
 BuildRequires: binutils
 BuildRequires: cmake >= 2.8.11
@@ -29,7 +26,7 @@ BuildRequires: pkgconfig
 BuildRequires: pkgconfig(libnl-3.0)
 BuildRequires: pkgconfig(libnl-route-3.0)
 BuildRequires: /usr/bin/rst2man
-#BuildRequires: valgrind-devel
+BuildRequires: valgrind-devel
 BuildRequires: systemd
 BuildRequires: systemd-devel
 %if 0%{?fedora} >= 32 || 0%{?rhel} >= 8
@@ -272,9 +269,6 @@ easy, object-oriented access to IB verbs.
 %if 0%{?rhel}
 %patch2 -p1
 %endif
-%patch3 -p1
-%patch4 -p1
-%patch5 -p1
 
 %build
 
@@ -411,9 +405,7 @@ fi
 %config(noreplace) %{_sysconfdir}/rdma/modules/roce.conf
 %config(noreplace) %{_sysconfdir}/udev/rules.d/*
 %dir %{_sysconfdir}/modprobe.d
-%ifnarch %{arm}
 %config(noreplace) %{_sysconfdir}/modprobe.d/mlx4.conf
-%endif
 %config(noreplace) %{_sysconfdir}/modprobe.d/truescale.conf
 %{_unitdir}/rdma-hw.target
 %{_unitdir}/rdma-load-modules@.service
@@ -450,19 +442,17 @@ fi
 %endif
 %{_libdir}/lib*.so
 %{_libdir}/pkgconfig/*.pc
+%{_mandir}/man3/efadv*
 %{_mandir}/man3/ibv_*
 %{_mandir}/man3/rdma*
 %{_mandir}/man3/umad*
 %{_mandir}/man3/*_to_ibv_rate.*
 %{_mandir}/man7/rdma_cm.*
-%ifnarch %{arm}
-%{_mandir}/man3/efadv*
 %{_mandir}/man3/mlx5dv*
 %{_mandir}/man3/mlx4dv*
 %{_mandir}/man7/efadv*
 %{_mandir}/man7/mlx5dv*
 %{_mandir}/man7/mlx4dv*
-%endif
 %{_mandir}/man3/ibnd_*
 
 %files -n infiniband-diags
@@ -536,13 +526,11 @@ fi
 %files -n libibverbs
 %dir %{_sysconfdir}/libibverbs.d
 %dir %{_libdir}/libibverbs
+%{_libdir}/libefa.so.*
 %{_libdir}/libibverbs*.so.*
 %{_libdir}/libibverbs/*.so
-%ifnarch %{arm}
-%{_libdir}/libefa.so.*
 %{_libdir}/libmlx5.so.*
 %{_libdir}/libmlx4.so.*
-%endif
 %config(noreplace) %{_sysconfdir}/libibverbs.d/*.driver
 %doc %{_docdir}/%{name}/libibverbs.md
 
@@ -634,8 +622,9 @@ fi
 %endif
 
 %changelog
-* Thu Jul 21 2022 Jacco Ligthart <jacco@redsleeve.org > - 37.2-1.redsleeve
-- patched for armv6
+* Tue Aug 02 2022 Michal Schmidt <mschmidt@redhat.com> - 41.0-3
+- Rebase to upstream release v41.0
+- Resolves: rhbz#2049521
 
 * Tue Jan 18 2022 Honggang Li <honli@redhat.com> - 37.2-1
 - Rebase to upstream release v37.2

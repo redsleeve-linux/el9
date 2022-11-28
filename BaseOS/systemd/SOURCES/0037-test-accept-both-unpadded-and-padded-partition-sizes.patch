@@ -1,0 +1,31 @@
+From c16ff9acad53e741ee121a21bd2ba5dfce1f459e Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 25 Feb 2022 15:09:07 +0100
+Subject: [PATCH] test: accept both unpadded and padded partition sizes
+
+Since util-linux/util-linux@921c7da55ec78350e4067b3fd6b7de6f299106ee
+libfdisk aligns the last partition (on GPT) for optimal I/O. Let's
+account for that.
+
+Fixes: #22606
+(cherry picked from commit d490188b8f6da658d8086dd53b7db95735e5cca1)
+
+Related: #2017035
+---
+ test/units/testsuite-58.sh | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/test/units/testsuite-58.sh b/test/units/testsuite-58.sh
+index 7aed965fb4..f1b690a71f 100755
+--- a/test/units/testsuite-58.sh
++++ b/test/units/testsuite-58.sh
+@@ -184,7 +184,8 @@ sfdisk --dump "$LOOP" | tee /tmp/testsuite-58-issue-21817.dump
+ losetup -d "$LOOP"
+ 
+ grep -qiF "p1 : start=        2048, size=      102400, type=${root_guid}," /tmp/testsuite-58-issue-21817.dump
+-grep -qF 'p2 : start=      104448, size=      100319,' /tmp/testsuite-58-issue-21817.dump
++# Accept both unpadded (pre-v2.38 util-linux) and padded (v2.38+ util-linux) sizes
++grep -qE "p2 : start=      104448, size=      (100319| 98304)," /tmp/testsuite-58-issue-21817.dump
+ 
+ rm /tmp/testsuite-58-issue-21817.img /tmp/testsuite-58-issue-21817.dump
+ rm -r /tmp/testsuite-58-issue-21817-defs/

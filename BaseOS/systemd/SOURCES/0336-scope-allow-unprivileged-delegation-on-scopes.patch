@@ -1,0 +1,343 @@
+From f23d0328e563fa5534377297153daa098664147f Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekleta@redhat.com>
+Date: Wed, 1 Jun 2022 10:15:06 +0200
+Subject: [PATCH] scope: allow unprivileged delegation on scopes
+
+Previously it was possible to set delegate property for scope, but you
+were not able to allow unprivileged process to manage the scope's cgroup
+hierarchy. This is useful when launching manager process that  will run
+unprivileged but is supposed to manage its own (scope) sub-hierarchy.
+
+Fixes #21683
+
+(cherry picked from commit 03860190fefce8bbea3a6f0e77919b882ade517c)
+
+Resolves: #2120604
+---
+ src/basic/unit-def.c       |   1 +
+ src/basic/unit-def.h       |   1 +
+ src/core/dbus-scope.c      |   6 ++
+ src/core/scope.c           | 130 ++++++++++++++++++++++++++++++++-----
+ src/core/scope.h           |   3 +
+ src/shared/bus-unit-util.c |   5 ++
+ test/units/testsuite-19.sh |  14 ++++
+ 7 files changed, 143 insertions(+), 17 deletions(-)
+
+diff --git a/src/basic/unit-def.c b/src/basic/unit-def.c
+index 2667e61dc4..9408141842 100644
+--- a/src/basic/unit-def.c
++++ b/src/basic/unit-def.c
+@@ -170,6 +170,7 @@ DEFINE_STRING_TABLE_LOOKUP(path_state, PathState);
+ static const char* const scope_state_table[_SCOPE_STATE_MAX] = {
+         [SCOPE_DEAD] = "dead",
+         [SCOPE_RUNNING] = "running",
++        [SCOPE_START_CHOWN] = "start-chown",
+         [SCOPE_ABANDONED] = "abandoned",
+         [SCOPE_STOP_SIGTERM] = "stop-sigterm",
+         [SCOPE_STOP_SIGKILL] = "stop-sigkill",
+diff --git a/src/basic/unit-def.h b/src/basic/unit-def.h
+index f80e554d2b..5fcd51c095 100644
+--- a/src/basic/unit-def.h
++++ b/src/basic/unit-def.h
+@@ -114,6 +114,7 @@ typedef enum PathState {
+ 
+ typedef enum ScopeState {
+         SCOPE_DEAD,
++        SCOPE_START_CHOWN,
+         SCOPE_RUNNING,
+         SCOPE_ABANDONED,
+         SCOPE_STOP_SIGTERM,
+diff --git a/src/core/dbus-scope.c b/src/core/dbus-scope.c
+index 109ad6f2ef..0f59622166 100644
+--- a/src/core/dbus-scope.c
++++ b/src/core/dbus-scope.c
+@@ -186,6 +186,12 @@ int bus_scope_set_property(
+                 r = bus_kill_context_set_transient_property(u, &s->kill_context, name, message, flags, error);
+                 if (r != 0)
+                         return r;
++
++                if (streq(name, "User"))
++                        return bus_set_transient_user_relaxed(u, name, &s->user, message, flags, error);
++
++                if (streq(name, "Group"))
++                        return bus_set_transient_user_relaxed(u, name, &s->group, message, flags, error);
+         }
+ 
+         return 0;
+diff --git a/src/core/scope.c b/src/core/scope.c
+index 63d3288caf..a4da45ac43 100644
+--- a/src/core/scope.c
++++ b/src/core/scope.c
+@@ -6,6 +6,7 @@
+ #include "alloc-util.h"
+ #include "dbus-scope.h"
+ #include "dbus-unit.h"
++#include "exit-status.h"
+ #include "load-dropin.h"
+ #include "log.h"
+ #include "process-util.h"
+@@ -18,9 +19,11 @@
+ #include "strv.h"
+ #include "unit-name.h"
+ #include "unit.h"
++#include "user-util.h"
+ 
+ static const UnitActiveState state_translation_table[_SCOPE_STATE_MAX] = {
+         [SCOPE_DEAD] = UNIT_INACTIVE,
++        [SCOPE_START_CHOWN] = UNIT_ACTIVATING,
+         [SCOPE_RUNNING] = UNIT_ACTIVE,
+         [SCOPE_ABANDONED] = UNIT_ACTIVE,
+         [SCOPE_STOP_SIGTERM] = UNIT_DEACTIVATING,
+@@ -39,6 +42,7 @@ static void scope_init(Unit *u) {
+         s->runtime_max_usec = USEC_INFINITY;
+         s->timeout_stop_usec = u->manager->default_timeout_stop_usec;
+         u->ignore_on_isolate = true;
++        s->user = s->group = NULL;
+ }
+ 
+ static void scope_done(Unit *u) {
+@@ -50,6 +54,9 @@ static void scope_done(Unit *u) {
+         s->controller_track = sd_bus_track_unref(s->controller_track);
+ 
+         s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
++
++        s->user = mfree(s->user);
++        s->group = mfree(s->group);
+ }
+ 
+ static usec_t scope_running_timeout(Scope *s) {
+@@ -107,7 +114,7 @@ static void scope_set_state(Scope *s, ScopeState state) {
+         old_state = s->state;
+         s->state = state;
+ 
+-        if (!IN_SET(state, SCOPE_STOP_SIGTERM, SCOPE_STOP_SIGKILL))
++        if (!IN_SET(state, SCOPE_STOP_SIGTERM, SCOPE_STOP_SIGKILL, SCOPE_START_CHOWN))
+                 s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
+ 
+         if (IN_SET(state, SCOPE_DEAD, SCOPE_FAILED)) {
+@@ -353,26 +360,72 @@ fail:
+         scope_enter_dead(s, SCOPE_FAILURE_RESOURCES);
+ }
+ 
+-static int scope_start(Unit *u) {
+-        Scope *s = SCOPE(u);
++static int scope_enter_start_chown(Scope *s) {
++        Unit *u = UNIT(s);
++        pid_t pid;
+         int r;
+ 
+         assert(s);
++        assert(s->user);
+ 
+-        if (unit_has_name(u, SPECIAL_INIT_SCOPE))
+-                return -EPERM;
++        r = scope_arm_timer(s, usec_add(now(CLOCK_MONOTONIC), u->manager->default_timeout_start_usec));
++        if (r < 0)
++                return r;
+ 
+-        if (s->state == SCOPE_FAILED)
+-                return -EPERM;
++        r = unit_fork_helper_process(u, "(sd-chown-cgroup)", &pid);
++        if (r < 0)
++                goto fail;
+ 
+-        /* We can't fulfill this right now, please try again later */
+-        if (IN_SET(s->state, SCOPE_STOP_SIGTERM, SCOPE_STOP_SIGKILL))
+-                return -EAGAIN;
++        if (r == 0) {
++                uid_t uid = UID_INVALID;
++                gid_t gid = GID_INVALID;
+ 
+-        assert(s->state == SCOPE_DEAD);
++                if (!isempty(s->user)) {
++                        const char *user = s->user;
+ 
+-        if (!u->transient && !MANAGER_IS_RELOADING(u->manager))
+-                return -ENOENT;
++                        r = get_user_creds(&user, &uid, &gid, NULL, NULL, 0);
++                        if (r < 0) {
++                                log_unit_error_errno(UNIT(s), r, "Failed to resolve user \"%s\": %m", user);
++                                _exit(EXIT_USER);
++                        }
++                }
++
++                if (!isempty(s->group)) {
++                        const char *group = s->group;
++
++                        r = get_group_creds(&group, &gid, 0);
++                        if (r < 0) {
++                                log_unit_error_errno(UNIT(s), r, "Failed to resolve group \"%s\": %m", group);
++                                _exit(EXIT_GROUP);
++                        }
++                }
++
++                r = cg_set_access(SYSTEMD_CGROUP_CONTROLLER, u->cgroup_path, uid, gid);
++                if (r < 0) {
++                        log_unit_error_errno(UNIT(s), r, "Failed to adjust control group access: %m");
++                        _exit(EXIT_CGROUP);
++                }
++
++                _exit(EXIT_SUCCESS);
++        }
++
++        r = unit_watch_pid(UNIT(s), pid, true);
++        if (r < 0)
++                goto fail;
++
++        scope_set_state(s, SCOPE_START_CHOWN);
++
++        return 1;
++fail:
++        s->timer_event_source = sd_event_source_disable_unref(s->timer_event_source);
++        return r;
++}
++
++static int scope_enter_running(Scope *s) {
++        Unit *u = UNIT(s);
++        int r;
++
++        assert(s);
+ 
+         (void) bus_scope_track_controller(s);
+ 
+@@ -380,9 +433,6 @@ static int scope_start(Unit *u) {
+         if (r < 0)
+                 return r;
+ 
+-        (void) unit_realize_cgroup(u);
+-        (void) unit_reset_accounting(u);
+-
+         unit_export_state_files(u);
+ 
+         r = unit_attach_pids_to_cgroup(u, u->pids, NULL);
+@@ -416,6 +466,37 @@ static int scope_start(Unit *u) {
+         return 1;
+ }
+ 
++static int scope_start(Unit *u) {
++        Scope *s = SCOPE(u);
++
++        assert(s);
++
++        if (unit_has_name(u, SPECIAL_INIT_SCOPE))
++                return -EPERM;
++
++        if (s->state == SCOPE_FAILED)
++                return -EPERM;
++
++        /* We can't fulfill this right now, please try again later */
++        if (IN_SET(s->state, SCOPE_STOP_SIGTERM, SCOPE_STOP_SIGKILL))
++                return -EAGAIN;
++
++        assert(s->state == SCOPE_DEAD);
++
++        if (!u->transient && !MANAGER_IS_RELOADING(u->manager))
++                return -ENOENT;
++
++        (void) unit_realize_cgroup(u);
++        (void) unit_reset_accounting(u);
++
++        /* We check only for User= option to keep behavior consistent with logic for service units,
++         * i.e. having 'Delegate=true Group=foo' w/o specifing User= has no effect. */
++        if (s->user && unit_cgroup_delegate(u))
++                return scope_enter_start_chown(s);
++
++        return scope_enter_running(s);
++}
++
+ static int scope_stop(Unit *u) {
+         Scope *s = SCOPE(u);
+ 
+@@ -547,7 +628,17 @@ static void scope_notify_cgroup_empty_event(Unit *u) {
+ }
+ 
+ static void scope_sigchld_event(Unit *u, pid_t pid, int code, int status) {
+-        assert(u);
++        Scope *s = SCOPE(u);
++
++        assert(s);
++
++        if (s->state == SCOPE_START_CHOWN) {
++                if (!is_clean_exit(code, status, EXIT_CLEAN_COMMAND, NULL))
++                        scope_enter_dead(s, SCOPE_FAILURE_RESOURCES);
++                else
++                        scope_enter_running(s);
++                return;
++        }
+ 
+         /* If we get a SIGCHLD event for one of the processes we were interested in, then we look for others to
+          * watch, under the assumption that we'll sooner or later get a SIGCHLD for them, as the original
+@@ -585,6 +676,11 @@ static int scope_dispatch_timer(sd_event_source *source, usec_t usec, void *user
+                 scope_enter_dead(s, SCOPE_FAILURE_TIMEOUT);
+                 break;
+ 
++        case SCOPE_START_CHOWN:
++                log_unit_warning(UNIT(s), "User lookup timed out. Entering failed state.");
++                scope_enter_dead(s, SCOPE_FAILURE_TIMEOUT);
++                break;
++
+         default:
+                 assert_not_reached();
+         }
+diff --git a/src/core/scope.h b/src/core/scope.h
+index 03a9ba4324..def1541652 100644
+--- a/src/core/scope.h
++++ b/src/core/scope.h
+@@ -34,6 +34,9 @@ struct Scope {
+         bool was_abandoned;
+ 
+         sd_event_source *timer_event_source;
++
++        char *user;
++        char *group;
+ };
+ 
+ extern const UnitVTable scope_vtable;
+diff --git a/src/shared/bus-unit-util.c b/src/shared/bus-unit-util.c
+index c211fe34d5..33b0b947b7 100644
+--- a/src/shared/bus-unit-util.c
++++ b/src/shared/bus-unit-util.c
+@@ -2130,6 +2130,11 @@ static int bus_append_scope_property(sd_bus_message *m, const char *field, const
+         if (streq(field, "TimeoutStopSec"))
+                 return bus_append_parse_sec_rename(m, field, eq);
+ 
++        /* Scope units don't have execution context but we still want to allow setting these two,
++         * so let's handle them separately. */
++        if (STR_IN_SET(field, "User", "Group"))
++                return bus_append_string(m, field, eq);
++
+         return 0;
+ }
+ 
+diff --git a/test/units/testsuite-19.sh b/test/units/testsuite-19.sh
+index ee4eb8431e..6ce6d3d429 100755
+--- a/test/units/testsuite-19.sh
++++ b/test/units/testsuite-19.sh
+@@ -3,6 +3,16 @@
+ set -eux
+ set -o pipefail
+ 
++test_scope_unpriv_delegation() {
++    useradd test ||:
++    trap "userdel -r test" RETURN
++
++    systemd-run --uid=test -p User=test -p Delegate=yes --slice workload.slice --unit workload0.scope --scope \
++            test -w /sys/fs/cgroup/workload.slice/workload0.scope -a \
++            -w /sys/fs/cgroup/workload.slice/workload0.scope/cgroup.procs -a \
++            -w /sys/fs/cgroup/workload.slice/workload0.scope/cgroup.subtree_control
++}
++
+ if grep -q cgroup2 /proc/filesystems ; then
+     systemd-run --wait --unit=test0.service -p "DynamicUser=1" -p "Delegate=" \
+                 test -w /sys/fs/cgroup/system.slice/test0.service/ -a \
+@@ -31,6 +41,10 @@ if grep -q cgroup2 /proc/filesystems ; then
+ 
+     # And now check again, "io" should have vanished
+     grep -qv io /sys/fs/cgroup/system.slice/cgroup.controllers
++
++    # Check that unprivileged delegation works for scopes
++    test_scope_unpriv_delegation
++
+ else
+     echo "Skipping TEST-19-DELEGATE, as the kernel doesn't actually support cgroup v2" >&2
+ fi

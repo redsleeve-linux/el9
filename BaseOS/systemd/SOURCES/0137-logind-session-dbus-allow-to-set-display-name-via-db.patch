@@ -1,0 +1,160 @@
+From 5cfd162864213c5247d97ea31cfacce98b1caefc Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Fri, 10 Jun 2022 15:07:01 +0200
+Subject: [PATCH] logind-session-dbus: allow to set display name via dbus
+
+Currently, the only way to set display name of a graphical session is to
+pass it to CreateSession(). But modern display managers like gdm start
+the display server as part of the user session, which means that the
+display name isn't known yet when the session is being created. Hence,
+let's make it possible to set it later.
+
+(cherry picked from commit 4885d7490b23e08d8444e5a68927ce9ce8727e5a)
+
+Resolves: #2100340
+---
+ man/org.freedesktop.login1.xml        |  8 ++++++++
+ src/login/logind-session-dbus.c       | 29 +++++++++++++++++++++++++++
+ src/login/logind-session.c            | 20 ++++++++++++++++++
+ src/login/logind-session.h            |  1 +
+ src/login/org.freedesktop.login1.conf |  4 ++++
+ 5 files changed, 62 insertions(+)
+
+diff --git a/man/org.freedesktop.login1.xml b/man/org.freedesktop.login1.xml
+index d25287b18b..c11324ee3b 100644
+--- a/man/org.freedesktop.login1.xml
++++ b/man/org.freedesktop.login1.xml
+@@ -1045,6 +1045,7 @@ node /org/freedesktop/login1/session/1 {
+       TakeControl(in  b force);
+       ReleaseControl();
+       SetType(in  s type);
++      SetDisplay(in  s display);
+       TakeDevice(in  u major,
+                  in  u minor,
+                  out h fd,
+@@ -1142,6 +1143,8 @@ node /org/freedesktop/login1/session/1 {
+ 
+     <variablelist class="dbus-method" generated="True" extra-ref="SetType()"/>
+ 
++    <variablelist class="dbus-method" generated="True" extra-ref="SetDisplay()"/>
++
+     <variablelist class="dbus-method" generated="True" extra-ref="TakeDevice()"/>
+ 
+     <variablelist class="dbus-method" generated="True" extra-ref="ReleaseDevice()"/>
+@@ -1238,6 +1241,11 @@ node /org/freedesktop/login1/session/1 {
+       connection. This should help prevent a session from entering an inconsistent state, for example if the
+       controller crashes. The only argument <varname>type</varname> is the new session type.</para>
+ 
++      <para><function>SetDisplay()</function> allows the display name of the graphical session to be changed. This is
++      useful if the display server is started as part of the session. It can only be called by session's current
++      controller. If <function>TakeControl()</function> has not been called, this method will fail. The only argument
++      <varname>display</varname> is the new display name.</para>
++
+       <para><function>TakeDevice()</function> allows a session controller to get a file descriptor for a
+       specific device. Pass in the major and minor numbers of the character device and
+       <filename>systemd-logind</filename> will return a file descriptor for the device. Only a limited set of
+diff --git a/src/login/logind-session-dbus.c b/src/login/logind-session-dbus.c
+index ff4cd0a631..5480d7b2f4 100644
+--- a/src/login/logind-session-dbus.c
++++ b/src/login/logind-session-dbus.c
+@@ -413,6 +413,30 @@ static int method_set_type(sd_bus_message *message, void *userdata, sd_bus_error
+         return sd_bus_reply_method_return(message, NULL);
+ }
+ 
++static int method_set_display(sd_bus_message *message, void *userdata, sd_bus_error *error) {
++        Session *s = ASSERT_PTR(userdata);
++        const char *display;
++        int r;
++
++        assert(message);
++
++        r = sd_bus_message_read(message, "s", &display);
++        if (r < 0)
++                return r;
++
++        if (!session_is_controller(s, sd_bus_message_get_sender(message)))
++                return sd_bus_error_set(error, BUS_ERROR_NOT_IN_CONTROL, "You must be in control of this session to set display");
++
++        if (!SESSION_TYPE_IS_GRAPHICAL(s->type))
++                return sd_bus_error_set(error, SD_BUS_ERROR_NOT_SUPPORTED, "Setting display is only supported for graphical sessions");
++
++        r = session_set_display(s, display);
++        if (r < 0)
++                return r;
++
++        return sd_bus_reply_method_return(message, NULL);
++}
++
+ static int method_take_device(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+         Session *s = userdata;
+         uint32_t major, minor;
+@@ -901,6 +925,11 @@ static const sd_bus_vtable session_vtable[] = {
+                                 SD_BUS_NO_RESULT,
+                                 method_set_type,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
++        SD_BUS_METHOD_WITH_ARGS("SetDisplay",
++                                SD_BUS_ARGS("s", display),
++                                SD_BUS_NO_RESULT,
++                                method_set_display,
++                                SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD_WITH_ARGS("TakeDevice",
+                                 SD_BUS_ARGS("u", major, "u", minor),
+                                 SD_BUS_RESULT("h", fd, "b", inactive),
+diff --git a/src/login/logind-session.c b/src/login/logind-session.c
+index ab98a5055d..a052596e57 100644
+--- a/src/login/logind-session.c
++++ b/src/login/logind-session.c
+@@ -1044,6 +1044,26 @@ void session_set_type(Session *s, SessionType t) {
+         session_send_changed(s, "Type", NULL);
+ }
+ 
++int session_set_display(Session *s, const char *display) {
++        int r;
++
++        assert(s);
++        assert(display);
++
++        if (streq(s->display, display))
++                return 0;
++
++        r = free_and_strdup(&s->display, display);
++        if (r < 0)
++                return r;
++
++        session_save(s);
++
++        session_send_changed(s, "Display", NULL);
++
++        return 1;
++}
++
+ static int session_dispatch_fifo(sd_event_source *es, int fd, uint32_t revents, void *userdata) {
+         Session *s = userdata;
+ 
+diff --git a/src/login/logind-session.h b/src/login/logind-session.h
+index 5c35071dc5..6b6ac2d573 100644
+--- a/src/login/logind-session.h
++++ b/src/login/logind-session.h
+@@ -137,6 +137,7 @@ int session_set_idle_hint(Session *s, bool b);
+ int session_get_locked_hint(Session *s);
+ void session_set_locked_hint(Session *s, bool b);
+ void session_set_type(Session *s, SessionType t);
++int session_set_display(Session *s, const char *display);
+ int session_create_fifo(Session *s);
+ int session_start(Session *s, sd_bus_message *properties, sd_bus_error *error);
+ int session_stop(Session *s, bool force);
+diff --git a/src/login/org.freedesktop.login1.conf b/src/login/org.freedesktop.login1.conf
+index 95d2ef0f06..6113b64aa7 100644
+--- a/src/login/org.freedesktop.login1.conf
++++ b/src/login/org.freedesktop.login1.conf
+@@ -346,6 +346,10 @@
+                        send_interface="org.freedesktop.login1.User"
+                        send_member="Kill"/>
+ 
++                <allow send_destination="org.freedesktop.login1"
++                       send_interface="org.freedesktop.login1.Session"
++                       send_member="SetDisplay"/>
++
+                 <allow receive_sender="org.freedesktop.login1"/>
+         </policy>
+ 

@@ -1,0 +1,38 @@
+From 0e72d8a8bbed61ffa3cbf2637f1b29ade7af45be Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 21 Jun 2022 10:04:03 +0200
+Subject: [PATCH] test: make dfuzzer less verbose
+
+Otherwise it oversaturates the journal, which in some cases can't keep
+up with the load of messages (due to the performance penalty caused by
+sanitizers), and gets killed by a watchdog.
+
+(cherry picked from commit d3eb4159c9577f0a9ee776d34fcec7ad913d88a5)
+
+Related: #2087652
+---
+ test/units/testsuite-21.sh | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/test/units/testsuite-21.sh b/test/units/testsuite-21.sh
+index 43b5fb6f22..604bf145ca 100755
+--- a/test/units/testsuite-21.sh
++++ b/test/units/testsuite-21.sh
+@@ -72,7 +72,7 @@ mount -t tmpfs -o size=50M tmpfs /var/lib/machines
+ for bus in "${BUS_LIST[@]}"; do
+     echo "Bus: $bus (system)"
+     systemd-run --pipe --wait \
+-                -- dfuzzer -v -b "$PAYLOAD_MAX" -n "$bus"
++                -- dfuzzer -b "$PAYLOAD_MAX" -n "$bus"
+ 
+     # Let's reload the systemd daemon to test (de)serialization as well
+     systemctl daemon-reload
+@@ -83,7 +83,7 @@ umount /var/lib/machines
+ for bus in "${SESSION_BUS_LIST[@]}"; do
+     echo "Bus: $bus (session)"
+     systemd-run --machine 'testuser@.host' --user --pipe --wait \
+-                -- dfuzzer -v -b "$PAYLOAD_MAX" -n "$bus"
++                -- dfuzzer -b "$PAYLOAD_MAX" -n "$bus"
+ 
+     # Let's reload the systemd user daemon to test (de)serialization as well
+     systemctl --machine 'testuser@.host' --user daemon-reload

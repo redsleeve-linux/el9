@@ -1,0 +1,37 @@
+From 70ff2f68c1cf9bdfe79ab4719ee0a051bbcb22eb Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Sun, 17 Apr 2022 19:49:17 +0200
+Subject: [PATCH] test: resize the terminal automagically with
+ INTERACTIVE_DEBUG=yes
+
+(cherry picked from commit 17082e8ac1b5335465876d100774893ba735fca4)
+
+Related: #2087652
+---
+ test/test-functions | 12 +++++-------
+ 1 file changed, 5 insertions(+), 7 deletions(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index 9e171cba30..42ad16050c 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -1678,14 +1678,12 @@ install_debug_tools() {
+         local getty_override="${initdir:?}/etc/systemd/system/serial-getty@.service.d"
+         mkdir -p "$getty_override"
+         echo -e "[Service]\nEnvironment=TERM=linux" >"$getty_override/default-TERM.conf"
++        echo 'export TERM=linux' >>"$initdir/etc/profile"
+ 
+-        cat >"$initdir/etc/motd" <<EOF
+-To adjust the terminal size use:
+-    export COLUMNS=xx
+-    export LINES=yy
+-or
+-    stty cols xx rows yy
+-EOF
++        if command -v resize >/dev/null; then
++            image_install resize
++            echo "resize" >>"$initdir/etc/profile"
++        fi
+     fi
+ }
+ 

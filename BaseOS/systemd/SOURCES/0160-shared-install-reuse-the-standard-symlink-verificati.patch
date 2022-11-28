@@ -1,0 +1,298 @@
+From 5ec751ab9a06dadc62b30dc07e9dd7a41f8da403 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Fri, 4 Mar 2022 18:47:31 +0100
+Subject: [PATCH] shared/install: reuse the standard symlink verification
+ subroutine
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We save a few lines, but the important thing is that we don't have two
+different implementations with slightly different rules used for enablement
+and loading. Fixes #22000.
+
+Tested with:
+- the report in #22000, it now says:
+$ SYSTEMD_LOG_LEVEL=debug systemctl --root=/ enable test.service
+Suspicious symlink /etc/systemd/system/test.service→/etc/systemd/system/myown.d/test.service, treating as alias.
+unit_file_resolve_symlink: self-alias: /etc/systemd/system/test.service → test.service, ignoring.
+running_in_chroot(): Permission denied
+Suspicious symlink /etc/systemd/system/test.service→/etc/systemd/system/myown.d/test.service, treating as alias.
+unit_file_resolve_symlink: self-alias: /etc/systemd/system/test.service → test.service, ignoring.
+Failed to enable unit, refusing to operate on linked unit file test.service
+
+- a symlink to /dev/null:
+...
+unit_file_resolve_symlink: linked unit file: /etc/systemd/system/test3.service → /dev/null
+Failed to enable unit, unit /etc/systemd/system/test3.service is masked.
+
+- the same from the host:
+...
+unit_file_resolve_symlink: linked unit file: /var/lib/machines/rawhide/etc/systemd/system/test3.service → /var/lib/machines/rawhide/dev/null
+Failed to enable unit, unit /var/lib/machines/rawhide/etc/systemd/system/test3.service is masked.
+
+- through the manager:
+$ sudo systemctl enable test.service
+Failed to enable unit: Refusing to operate on alias name or linked unit file: test.service
+$ sudo systemctl enable test3.service
+Failed to enable unit: Unit file /etc/systemd/system/test3.service is masked.
+
+As seen in the first example, the warning is repeated. This is because we call
+the lookup logic twice: first for sysv-compat, and then again for real. I think
+that since this is only for broken setups, and when sysv-compat is enabled, and
+in an infrequent manual operation, at debug level, this is OK.
+
+(cherry picked from commit 047d37dc3d376d912275c14d217f7a0dda9a5f0e)
+
+Related: #2082131
+---
+ src/basic/unit-file.c | 70 +++++++++++++++++++++++++++++++----------
+ src/basic/unit-file.h | 10 ++++++
+ src/shared/install.c  | 72 +++++++------------------------------------
+ 3 files changed, 75 insertions(+), 77 deletions(-)
+
+diff --git a/src/basic/unit-file.c b/src/basic/unit-file.c
+index 25abce932a..f7a10b22c6 100644
+--- a/src/basic/unit-file.c
++++ b/src/basic/unit-file.c
+@@ -260,27 +260,50 @@ static int directory_name_is_valid(const char *name) {
+         return false;
+ }
+ 
+-static int unit_file_resolve_symlink(
++int unit_file_resolve_symlink(
+                 const char *root_dir,
+                 char **search_path,
+                 const char *dir,
+                 int dirfd,
+                 const char *filename,
++                bool resolve_destination_target,
+                 char **ret_destination) {
+ 
+-        _cleanup_free_ char *target = NULL, *simplified = NULL, *dst = NULL;
++        _cleanup_free_ char *target = NULL, *simplified = NULL, *dst = NULL, *_dir = NULL, *_filename = NULL;
+         int r;
+ 
+-        assert(dir);
+-        assert(dirfd >= 0);
++        /* This can be called with either dir+dirfd valid and filename just a name,
++         * or !dir && dirfd==AT_FDCWD, and filename being a full path.
++         *
++         * If resolve_destination_target is true, an absolute path will be returned.
++         * If not, an absolute path is returned for linked unit files, and a relative
++         * path otherwise. */
++
+         assert(filename);
+         assert(ret_destination);
++        assert(dir || path_is_absolute(filename));
++        assert(dirfd >= 0 || dirfd == AT_FDCWD);
+ 
+         r = readlinkat_malloc(dirfd, filename, &target);
+         if (r < 0)
+                 return log_warning_errno(r, "Failed to read symlink %s%s%s: %m",
+                                          dir, dir ? "/" : "", filename);
+ 
++        if (!dir) {
++                r = path_extract_directory(filename, &_dir);
++                if (r < 0)
++                        return r;
++                dir = _dir;
++
++                r = path_extract_filename(filename, &_filename);
++                if (r < 0)
++                        return r;
++                if (r == O_DIRECTORY)
++                        return log_warning_errno(SYNTHETIC_ERRNO(EISDIR),
++                                                 "Unexpected path to a directory \"%s\", refusing.", filename);
++                filename = _filename;
++        }
++
+         bool is_abs = path_is_absolute(target);
+         if (root_dir || !is_abs) {
+                 char *target_abs = path_join(is_abs ? root_dir : dir, target);
+@@ -296,24 +319,36 @@ static int unit_file_resolve_symlink(
+                 return log_warning_errno(r, "Failed to resolve symlink %s/%s pointing to %s: %m",
+                                          dir, filename, target);
+ 
++        assert(path_is_absolute(simplified));
++
+         /* Check if the symlink goes outside of our search path.
+-         * If yes, it's a linked unit file or mask, and we don't care about the target name.
+-         * Let's just store the link source directly.
+-         * If not, let's verify that it's a good symlink. */
++         * If yes, it's a linked unit file or mask, and we don't care about the target name
++         * when loading units, and we return the link *source* (resolve_destination_target == false);
++         * When this is called for installation purposes, we want the final destination,
++         * so we return the *target*.
++         *
++         * Otherwise, let's verify that it's a good alias.
++         */
+         const char *tail = path_startswith_strv(simplified, search_path);
+         if (!tail) {
+                 log_debug("Linked unit file: %s/%s → %s", dir, filename, simplified);
+ 
+-                dst = path_join(dir, filename);
+-                if (!dst)
+-                        return log_oom();
++                if (resolve_destination_target)
++                        dst = TAKE_PTR(simplified);
++                else {
++                        dst = path_join(dir, filename);
++                        if (!dst)
++                                return log_oom();
++                }
+ 
+         } else {
+-                r = path_extract_filename(simplified, &dst);
++                _cleanup_free_ char *target_name = NULL;
++
++                r = path_extract_filename(simplified, &target_name);
+                 if (r < 0)
+                         return r;
+ 
+-                bool self_alias = streq(dst, filename);
++                bool self_alias = streq(target_name, filename);
+ 
+                 if (is_path(tail))
+                         log_full(self_alias ? LOG_DEBUG : LOG_WARNING,
+@@ -324,13 +359,15 @@ static int unit_file_resolve_symlink(
+                 if (r < 0)
+                         return r;
+ 
+-                if (self_alias)
+-                        /* A self-alias that has no effect */
++                if (self_alias && !resolve_destination_target)
++                        /* A self-alias that has no effect when loading, let's just ignore it. */
+                         return log_debug_errno(SYNTHETIC_ERRNO(ELOOP),
+                                                "Unit file self-alias: %s/%s → %s, ignoring.",
+-                                               dir, filename, dst);
++                                               dir, filename, target_name);
++
++                log_debug("Unit file alias: %s/%s → %s", dir, filename, target_name);
+ 
+-                log_debug("Unit file alias: %s/%s → %s", dir, filename, dst);
++                dst = resolve_destination_target ? TAKE_PTR(simplified) : TAKE_PTR(target_name);
+         }
+ 
+         *ret_destination = TAKE_PTR(dst);
+@@ -475,6 +512,7 @@ int unit_file_build_name_map(
+ 
+                                 r = unit_file_resolve_symlink(lp->root_dir, lp->search_path,
+                                                               *dir, dirfd(d), de->d_name,
++                                                              /* resolve_destination_target= */ false,
+                                                               &dst);
+                                 if (r == -ENOMEM)
+                                         return r;
+diff --git a/src/basic/unit-file.h b/src/basic/unit-file.h
+index cc731a9e06..e29e878cfd 100644
+--- a/src/basic/unit-file.h
++++ b/src/basic/unit-file.h
+@@ -44,6 +44,16 @@ int unit_symlink_name_compatible(const char *symlink, const char *target, bool i
+ int unit_validate_alias_symlink_and_warn(const char *filename, const char *target);
+ 
+ bool lookup_paths_timestamp_hash_same(const LookupPaths *lp, uint64_t timestamp_hash, uint64_t *ret_new);
++
++int unit_file_resolve_symlink(
++                const char *root_dir,
++                char **search_path,
++                const char *dir,
++                int dirfd,
++                const char *filename,
++                bool resolve_destination_target,
++                char **ret_destination);
++
+ int unit_file_build_name_map(
+                 const LookupPaths *lp,
+                 uint64_t *cache_timestamp_hash,
+diff --git a/src/shared/install.c b/src/shared/install.c
+index 79e5109ce1..e07ca31797 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -1338,76 +1338,26 @@ static int unit_file_load_or_readlink(
+                 const char *path,
+                 const LookupPaths *lp,
+                 SearchFlags flags) {
+-
+-        _cleanup_free_ char *resolved = NULL;
+         int r;
+ 
+         r = unit_file_load(c, info, path, lp->root_dir, flags);
+         if (r != -ELOOP || (flags & SEARCH_DROPIN))
+                 return r;
+ 
+-        r = chase_symlinks(path, lp->root_dir, CHASE_WARN | CHASE_NONEXISTENT, &resolved, NULL);
+-        if (r >= 0 &&
+-            lp->root_dir &&
+-            path_equal_ptr(path_startswith(resolved, lp->root_dir), "dev/null"))
+-                /* When looking under root_dir, we can't expect /dev/ to be mounted,
+-                 * so let's see if the path is a (possibly dangling) symlink to /dev/null. */
+-                info->type = UNIT_FILE_TYPE_MASKED;
+-
+-        else if (r > 0 && null_or_empty_path(resolved) > 0)
++        /* This is a symlink, let's read and verify it. */
++        r = unit_file_resolve_symlink(lp->root_dir, lp->search_path,
++                                      NULL, AT_FDCWD, path,
++                                      true, &info->symlink_target);
++        if (r < 0)
++                return r;
+ 
++        r = null_or_empty_path_with_root(info->symlink_target, lp->root_dir);
++        if (r < 0 && r != -ENOENT)
++                return log_debug_errno(r, "Failed to stat %s: %m", info->symlink_target);
++        if (r > 0)
+                 info->type = UNIT_FILE_TYPE_MASKED;
+-
+-        else {
+-                _cleanup_free_ char *target = NULL;
+-                const char *bn;
+-                UnitType a, b;
+-
+-                /* This is a symlink, let's read it. We read the link again, because last time
+-                 * we followed the link until resolution, and here we need to do one step. */
+-
+-                r = readlink_malloc(path, &target);
+-                if (r < 0)
+-                        return r;
+-
+-                bn = basename(target);
+-
+-                if (unit_name_is_valid(info->name, UNIT_NAME_PLAIN)) {
+-
+-                        if (!unit_name_is_valid(bn, UNIT_NAME_PLAIN))
+-                                return -EINVAL;
+-
+-                } else if (unit_name_is_valid(info->name, UNIT_NAME_INSTANCE)) {
+-
+-                        if (!unit_name_is_valid(bn, UNIT_NAME_INSTANCE|UNIT_NAME_TEMPLATE))
+-                                return -EINVAL;
+-
+-                } else if (unit_name_is_valid(info->name, UNIT_NAME_TEMPLATE)) {
+-
+-                        if (!unit_name_is_valid(bn, UNIT_NAME_TEMPLATE))
+-                                return -EINVAL;
+-                } else
+-                        return -EINVAL;
+-
+-                /* Enforce that the symlink destination does not
+-                 * change the unit file type. */
+-
+-                a = unit_name_to_type(info->name);
+-                b = unit_name_to_type(bn);
+-                if (a < 0 || b < 0 || a != b)
+-                        return -EINVAL;
+-
+-                if (path_is_absolute(target))
+-                        /* This is an absolute path, prefix the root so that we always deal with fully qualified paths */
+-                        info->symlink_target = path_join(lp->root_dir, target);
+-                else
+-                        /* This is a relative path, take it relative to the dir the symlink is located in. */
+-                        info->symlink_target = file_in_same_dir(path, target);
+-                if (!info->symlink_target)
+-                        return -ENOMEM;
+-
++        else
+                 info->type = UNIT_FILE_TYPE_SYMLINK;
+-        }
+ 
+         return 0;
+ }

@@ -1,0 +1,37 @@
+From c81dea716e04419f8f7b83346015ae8f834ec30c Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Mon, 20 Jun 2022 12:27:39 +0200
+Subject: [PATCH] test: use saved process PID instead of %%
+
+As the `%%` specifier might fail if the current job (i.e. the last
+background job) already finished:
+
+```
+[   61.692196] testsuite-04.sh[656]: ++ systemd-id128 new
+[   61.705407] testsuite-04.sh[263]: + ID=912cb8f8ef304153a123f772bb0fe9e0
+[   61.706318] testsuite-04.sh[657]: + systemd-cat -t 912cb8f8ef304153a123f772bb0fe9e0 bash -c 'echo parent; (echo child) & wait'
+[   61.720940] testsuite-04.sh[263]: + PID=657
+[   61.721126] testsuite-04.sh[263]: + wait %%
+[   61.723014] testsuite-04.sh[263]: /usr/lib/systemd/tests/testdata/units/testsuite-04.sh: line 96: wait: %%: no such job
+```
+
+(cherry picked from commit 08970485003c25ce2c4adfaeea2d58558d311d42)
+
+Related: #2087652
+---
+ test/units/testsuite-04.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/units/testsuite-04.sh b/test/units/testsuite-04.sh
+index 7521a6d2e5..b5468cbea4 100755
+--- a/test/units/testsuite-04.sh
++++ b/test/units/testsuite-04.sh
+@@ -93,7 +93,7 @@ cmp /expected /output
+ ID=$(systemd-id128 new)
+ systemd-cat -t "$ID" bash -c 'echo parent; (echo child) & wait' &
+ PID=$!
+-wait %%
++wait $PID
+ journalctl --sync
+ # We can drop this grep when https://github.com/systemd/systemd/issues/13937
+ # has a fix.

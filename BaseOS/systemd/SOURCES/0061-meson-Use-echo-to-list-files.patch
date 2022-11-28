@@ -1,0 +1,43 @@
+From 5de4b00e4150080e68064fa1de003039a0901468 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Tue, 11 Jan 2022 11:27:27 +0100
+Subject: [PATCH] meson: Use echo to list files
+
+No need to invoke ls when we are just interested in file names.
+Also, the cd to source root makes the output identical to
+"git ls-files" (relative instead of absolute paths).
+
+(cherry picked from commit 3a469802f4d7b0a59fe1644cb53d34aee4e56bab)
+
+Related: #2017035
+---
+ test/fuzz/meson.build | 2 +-
+ test/meson.build      | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/test/fuzz/meson.build b/test/fuzz/meson.build
+index b4766de3eb..39730a615c 100644
+--- a/test/fuzz/meson.build
++++ b/test/fuzz/meson.build
+@@ -19,7 +19,7 @@ if git.found() and fs.exists(project_source_root / '.git')
+                           'ls-files', ':/test/fuzz/*/*',
+                           check: true)
+ else
+-        out = run_command(sh, '-c', 'ls @0@/test/fuzz/*/*'.format(project_source_root), check: true)
++        out = run_command(sh, '-c', 'cd "@0@"; echo test/fuzz/*/*'.format(project_source_root), check: true)
+ endif
+ 
+ fuzz_regression_tests = []
+diff --git a/test/meson.build b/test/meson.build
+index baf94703ea..c5d8d6917b 100644
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -190,7 +190,7 @@ if want_tests != 'false' and dmi_arches.contains(host_machine.cpu_family())
+                         check: true)
+         else
+                 out = run_command(
+-                        sh, '-c', 'ls @0@/test/dmidecode-dumps/*.bin'.format(project_source_root),
++                        sh, '-c', 'cd "@0@"; echo test/dmidecode-dumps/*.bin'.format(project_source_root),
+                         check: true)
+         endif
+ 

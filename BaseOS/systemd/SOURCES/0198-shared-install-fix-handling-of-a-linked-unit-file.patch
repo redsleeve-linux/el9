@@ -1,0 +1,57 @@
+From 13c099caa9ae0389423c403152952c3c548fd146 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 17 Mar 2022 16:02:10 +0100
+Subject: [PATCH] shared/install: fix handling of a linked unit file
+
+When we have a symlink that goes outside of our search path, we should just
+ignore the target file name. But we were verifying it, and rejecting in
+the case where a symlink was created manually.
+
+(cherry picked from commit 48eadb9d9b66f302cda09cdf6d35fead31aaa968)
+
+Related: #2082131
+---
+ src/shared/install.c          |  4 +++-
+ test/test-systemctl-enable.sh | 12 ++++++++----
+ 2 files changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/src/shared/install.c b/src/shared/install.c
+index b33f7d4bc1..d6951b805d 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -1609,7 +1609,9 @@ static int install_info_traverse(
+                                 return -ELOOP;
+                 }
+ 
+-                r = install_info_follow(ctx, i, lp, flags, false);
++                r = install_info_follow(ctx, i, lp, flags,
++                                        /* If linked, don't look at the target name */
++                                        /* ignore_different_name= */ i->type == UNIT_FILE_TYPE_LINKED);
+                 if (r == -EXDEV) {
+                         _cleanup_free_ char *buffer = NULL;
+                         const char *bn;
+diff --git a/test/test-systemctl-enable.sh b/test/test-systemctl-enable.sh
+index 9463433c5b..45f3513de3 100644
+--- a/test/test-systemctl-enable.sh
++++ b/test/test-systemctl-enable.sh
+@@ -216,12 +216,16 @@ cat >"$root/link3.suffix" <<EOF
+ WantedBy=services.target
+ EOF
+ 
++# We wouldn't create such a link ourselves, but it should accept it when present.
+ ln -s "/link3.suffix" "$root/etc/systemd/system/link3.service"
+ 
+-# SYSTEMD_LOG_LEVEL=debug SYSTEMD_LOG_LOCATION=1 "$systemctl" --root="$root" enable 'link3.service'
+-# islink "$root/etc/systemd/system/link3.service" "/link3.suffix"
+-# islink "$root/etc/systemd/system/services.target.wants/link3.service" "../link3.service"
+-# unit_file_load_or_readlink() needs to be fixed to not follow links
++SYSTEMD_LOG_LEVEL=debug SYSTEMD_LOG_LOCATION=1 "$systemctl" --root="$root" enable 'link3.service'
++islink "$root/etc/systemd/system/link3.service" "/link3.suffix"
++islink "$root/etc/systemd/system/services.target.wants/link3.service" "../link3.service"
++
++SYSTEMD_LOG_LEVEL=debug SYSTEMD_LOG_LOCATION=1 "$systemctl" --root="$root" disable 'link3.service'
++test ! -h "$root/etc/systemd/system/link3.service"
++test ! -h "$root/etc/systemd/system/services.target.wants/link3.service"
+ 
+ : -------enable on masked-------------------------------------
+ ln -s "/dev/null" "$root/etc/systemd/system/masked.service"

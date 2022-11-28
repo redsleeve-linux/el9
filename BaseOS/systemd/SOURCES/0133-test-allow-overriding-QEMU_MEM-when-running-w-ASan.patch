@@ -1,0 +1,56 @@
+From 3e31fc66a206c272e7f73581c5ca752b4439fec3 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 21 Jun 2022 12:09:35 +0200
+Subject: [PATCH] test: allow overriding $QEMU_MEM when running w/ ASan
+
+(cherry picked from commit dc350e78fe66ae8698574202b2e30e5d650219ec)
+
+Related: #2087652
+---
+ test/TEST-36-NUMAPOLICY/test.sh | 2 +-
+ test/test-functions             | 5 ++---
+ 2 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/test/TEST-36-NUMAPOLICY/test.sh b/test/TEST-36-NUMAPOLICY/test.sh
+index 5f38bf1009..7909b1dce3 100755
+--- a/test/TEST-36-NUMAPOLICY/test.sh
++++ b/test/TEST-36-NUMAPOLICY/test.sh
+@@ -9,7 +9,7 @@ TEST_NO_NSPAWN=1
+ . "${TEST_BASE_DIR:?}/test-functions"
+ 
+ if qemu_min_version "5.2.0"; then
+-    QEMU_OPTIONS="-object memory-backend-ram,id=mem0,size=${QEMU_MEM:?} -numa node,memdev=mem0,nodeid=0"
++    QEMU_OPTIONS="-object memory-backend-ram,id=mem0,size=${QEMU_MEM:-512M} -numa node,memdev=mem0,nodeid=0"
+ else
+     QEMU_OPTIONS="-numa node,nodeid=0"
+ fi
+diff --git a/test/test-functions b/test/test-functions
+index 079a7249e4..98efd047d7 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -30,7 +30,6 @@ TIMED_OUT=  # will be 1 after run_* if *_TIMEOUT is set and test timed out
+ [[ "$LOOKS_LIKE_SUSE" ]] && FSTYPE="${FSTYPE:-btrfs}" || FSTYPE="${FSTYPE:-ext4}"
+ UNIFIED_CGROUP_HIERARCHY="${UNIFIED_CGROUP_HIERARCHY:-default}"
+ EFI_MOUNT="${EFI_MOUNT:-$(bootctl -x 2>/dev/null || echo /boot)}"
+-QEMU_MEM="${QEMU_MEM:-512M}"
+ # Note that defining a different IMAGE_NAME in a test setup script will only result
+ # in default.img being copied and renamed. It can then be extended by defining
+ # a test_append_files() function. The $1 parameter will be the root directory.
+@@ -255,7 +254,7 @@ if get_bool "$IS_BUILT_WITH_ASAN"; then
+     STRIP_BINARIES=no
+     SKIP_INITRD="${SKIP_INITRD:-yes}"
+     PATH_TO_INIT=$ROOTLIBDIR/systemd-under-asan
+-    QEMU_MEM="2048M"
++    QEMU_MEM="${QEMU_MEM:-2G}"
+     QEMU_SMP="${QEMU_SMP:-4}"
+ 
+     # We need to correctly distinguish between gcc's and clang's ASan DSOs.
+@@ -444,7 +443,7 @@ run_qemu() {
+     qemu_options+=(
+         -smp "$QEMU_SMP"
+         -net none
+-        -m "$QEMU_MEM"
++        -m "${QEMU_MEM:-512M}"
+         -nographic
+         -kernel "$KERNEL_BIN"
+         -drive "format=raw,cache=unsafe,file=$image"

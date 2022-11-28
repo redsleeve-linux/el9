@@ -1,0 +1,44 @@
+From 9c166afe17888b08d1e269cfd83a31838d601534 Mon Sep 17 00:00:00 2001
+From: Evgeny Vereshchagin <evvers@ya.ru>
+Date: Wed, 4 May 2022 11:35:19 +0000
+Subject: [PATCH] timedatectl: fix a memory leak
+
+```
+timedatectl list-timezones --no-pager
+...
+==164329==ERROR: LeakSanitizer: detected memory leaks
+
+Direct leak of 8192 byte(s) in 1 object(s) allocated from:
+    #0 0x7fe8a74b6f8c in reallocarray (/lib64/libasan.so.6+0xaef8c)
+    #1 0x7fe8a63485dc in strv_push ../src/basic/strv.c:419
+    #2 0x7fe8a6349419 in strv_consume ../src/basic/strv.c:490
+    #3 0x7fe8a634958d in strv_extend ../src/basic/strv.c:542
+    #4 0x7fe8a643d787 in bus_message_read_strv_extend ../src/libsystemd/sd-bus/bus-message.c:5606
+    #5 0x7fe8a643db9d in sd_bus_message_read_strv ../src/libsystemd/sd-bus/bus-message.c:5628
+    #6 0x4085fb in list_timezones ../src/timedate/timedatectl.c:314
+    #7 0x7fe8a61ef3e1 in dispatch_verb ../src/shared/verbs.c:103
+    #8 0x410f91 in timedatectl_main ../src/timedate/timedatectl.c:1025
+    #9 0x41111c in run ../src/timedate/timedatectl.c:1043
+    #10 0x411242 in main ../src/timedate/timedatectl.c:1046
+    #11 0x7fe8a489df1f in __libc_start_call_main (/lib64/libc.so.6+0x40f1f)
+```
+
+(cherry picked from commit a2e37d52312806b1847800df2358e61276cda052)
+Related: #2087652
+---
+ src/timedate/timedatectl.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/timedate/timedatectl.c b/src/timedate/timedatectl.c
+index 75ca6195da..31909064cf 100644
+--- a/src/timedate/timedatectl.c
++++ b/src/timedate/timedatectl.c
+@@ -304,7 +304,7 @@ static int list_timezones(int argc, char **argv, void *userdata) {
+         sd_bus *bus = userdata;
+         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+         int r;
+-        char** zones;
++        _cleanup_strv_free_ char **zones = NULL;
+ 
+         r = bus_call_method(bus, bus_timedate, "ListTimezones", &error, &reply, NULL);
+         if (r < 0)

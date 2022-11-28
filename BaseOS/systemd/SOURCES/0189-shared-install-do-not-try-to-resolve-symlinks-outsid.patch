@@ -1,0 +1,42 @@
+From 64fa6f059ae0b491fdb52c7375d59774ff9c237a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 15 Mar 2022 16:35:47 +0100
+Subject: [PATCH] shared/install: do not try to resolve symlinks outside of
+ root directory
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+I linked a file as root, so I had a symlink /root/test.service ← /etc/systemd/system/test.service.
+To my surpise, when running test-systemctl-enable, it failed with a cryptic EACCES.
+The previous commit made the logs a bit better. Strace shows that we
+were trying to follow the symlink without taking --root into account.
+
+It seems that this bug was introduced in 66a19d85a533b15ed32f4066ec880b5a8c06babd:
+before it, we'd do readlink_malloc(), which returned a path relative to root. But
+we only used that path for checking if the path is in remove_symlinks_to set, which
+contains relative paths. So if the path was relative, we'd get a false-negative
+answer, but we didn't go outside of the root. (We need to canonicalize the symlink
+to get a consistent answer.) But after 66a19 we use chase_symlinks(), without taking
+root into account which is completely bogus.
+
+(cherry picked from commit 40276314afc4fb5c35c6b3da3e6185af6ed3886b)
+
+Related: #2082131
+---
+ src/shared/install.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/shared/install.c b/src/shared/install.c
+index ce045d02be..ad0238ab50 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -612,7 +612,7 @@ static int remove_marked_symlinks_fd(
+                                 return -ENOMEM;
+                         path_simplify(p);
+ 
+-                        q = chase_symlinks(p, NULL, CHASE_NONEXISTENT, &dest, NULL);
++                        q = chase_symlinks(p, lp->root_dir, CHASE_NONEXISTENT, &dest, NULL);
+                         if (q == -ENOENT)
+                                 continue;
+                         if (q < 0) {

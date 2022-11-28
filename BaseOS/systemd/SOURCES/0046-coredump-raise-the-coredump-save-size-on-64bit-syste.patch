@@ -1,0 +1,46 @@
+From 19d3bf238c41c756b391fc7e66e5217cde42a896 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 8 Feb 2022 11:52:17 +0100
+Subject: [PATCH] coredump: raise the coredump save size on 64bit systems to
+ 32G (and lower it to 1G on 32bit systems)
+
+Apparently 2G is too low for various real-life systems. But raising it
+universally above 2^32 sounds wrong to me, since that makes no sense on
+32bit systems, that we still support.
+
+Hence, let's raise the limit to 32G on 64bit systems, and *lower* it to
+1G on 32bit systems.
+
+32G is 4 orders of magnitude higher then the old settings. Let's hope
+that's enough for now. Should this not be enough we can raise it
+further.
+
+Fixes: #22076
+(cherry picked from commit e677041e7a6988f73de802db6e49d962d432944b)
+
+Related: #2017035
+---
+ src/coredump/coredump.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/src/coredump/coredump.c b/src/coredump/coredump.c
+index 6a6e9765d4..fd156370b2 100644
+--- a/src/coredump/coredump.c
++++ b/src/coredump/coredump.c
+@@ -48,8 +48,14 @@
+ #include "uid-alloc-range.h"
+ #include "user-util.h"
+ 
+-/* The maximum size up to which we process coredumps */
+-#define PROCESS_SIZE_MAX ((uint64_t) (2LLU*1024LLU*1024LLU*1024LLU))
++/* The maximum size up to which we process coredumps. We use 1G on 32bit systems, and 32G on 64bit systems */
++#if __SIZEOF_POINTER__ == 4
++#define PROCESS_SIZE_MAX ((uint64_t) (1LLU*1024LLU*1024LLU*1024LLU))
++#elif __SIZEOF_POINTER__ == 8
++#define PROCESS_SIZE_MAX ((uint64_t) (32LLU*1024LLU*1024LLU*1024LLU))
++#else
++#error "Unexpected pointer size"
++#endif
+ 
+ /* The maximum size up to which we leave the coredump around on disk */
+ #define EXTERNAL_SIZE_MAX PROCESS_SIZE_MAX
