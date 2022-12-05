@@ -1,5 +1,5 @@
 diff --git a/src/crypto/rsa/pkcs1v15_test.go b/src/crypto/rsa/pkcs1v15_test.go
-index 60c769c..b8aae23 100644
+index a4f2e2dbbe..76701d2e2b 100644
 --- a/src/crypto/rsa/pkcs1v15_test.go
 +++ b/src/crypto/rsa/pkcs1v15_test.go
 @@ -52,6 +52,7 @@ var decryptPKCS1v15Tests = []DecryptPKCS1v15Test{
@@ -41,9 +41,9 @@ index 60c769c..b8aae23 100644
 +	t.Skip("not supported in FIPS mode")
  	// This tests that attempting to decrypt a session key where the
  	// ciphertext is too small doesn't run outside the array bounds.
- 	var keys []*PrivateKey
+ 	ciphertext, err := EncryptPKCS1v15(rand.Reader, &testRSA2048PrivateKey.PublicKey, []byte{1})
 diff --git a/src/crypto/rsa/pss_test.go b/src/crypto/rsa/pss_test.go
-index 2032b4b..fdddfab 100644
+index b547a87c71..99e7882866 100644
 --- a/src/crypto/rsa/pss_test.go
 +++ b/src/crypto/rsa/pss_test.go
 @@ -77,6 +77,7 @@ func TestEMSAPSS(t *testing.T) {
@@ -55,17 +55,16 @@ index 2032b4b..fdddfab 100644
  	if err != nil {
  		t.Fatalf("Failed to open input file: %s", err)
 diff --git a/src/crypto/rsa/rsa_test.go b/src/crypto/rsa/rsa_test.go
-index cfe020e..d918841 100644
+index 9aa67655ab..2f4e666abb 100644
 --- a/src/crypto/rsa/rsa_test.go
 +++ b/src/crypto/rsa/rsa_test.go
-@@ -123,38 +123,29 @@ func testKeyBasics(t *testing.T, priv *PrivateKey) {
+@@ -123,28 +123,29 @@ func testKeyBasics(t *testing.T, priv *PrivateKey) {
  		t.Errorf("private exponent too large")
  	}
  
 -	if boring.Enabled() {
 -		// Cannot call encrypt/decrypt directly. Test via PKCS1v15.
 -		msg := []byte("hi!")
--		// Should not accept keys smaller than 2048 bits (256 bytes)
 -		if priv.Size() >= 256 {
 -			enc, err := EncryptPKCS1v15(rand.Reader, &priv.PublicKey, msg)
 -			if err != nil {
@@ -81,22 +80,13 @@ index cfe020e..d918841 100644
 -				t.Errorf("got:%x want:%x (%+v)", dec, msg, priv)
 -			}
 -		} else {
--			enc, err := EncryptPKCS1v15(rand.Reader, &priv.PublicKey, msg)
--			if err == nil {
--				t.Errorf("EncryptPKCS1v15: Should not accept key of size %v", priv.Size() * 8)
--				return
--			}
--			_ , err = DecryptPKCS1v15(rand.Reader, priv, enc)
--			if err == nil {
--				t.Errorf("DecryptPKCS1v15: Should not accept key of size %v", priv.Size() * 8)
--				return
--			}
+-			t.Logf("skipping check for unsupported key less than 2048 bits")
 -		}
 -		return
 -	}
 +        if boring.Enabled() {
 +                // Cannot call encrypt/decrypt directly. Test via EncryptOAEP.
-+               sha256 := sha256.New()
++		sha256 := sha256.New()
 +                msg := []byte("hi!")
 +                if priv.Size() >= 256 {
 +                        enc, err := EncryptOAEP(sha256, rand.Reader, &priv.PublicKey, msg, nil)
@@ -120,13 +110,13 @@ index cfe020e..d918841 100644
  
  	pub := &priv.PublicKey
  	m := big.NewInt(42)
-@@ -323,6 +314,11 @@ func TestDecryptOAEP(t *testing.T) {
+@@ -312,6 +312,11 @@ func TestDecryptOAEP(t *testing.T) {
  		private.PublicKey = PublicKey{N: n, E: test.e}
  		private.D = d
  
 +		if boring.Enabled() && private.PublicKey.Size() < 256 {
 +			t.Logf("skipping check for unsupported key less than 2048 bits")
-+			continue;
++			continue
 +		}
 +		t.Logf("running check for supported key size")
  		for j, message := range test.msgs {

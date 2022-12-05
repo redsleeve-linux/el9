@@ -1,3 +1,6 @@
+# Do this until the feature is fixed in Fedora.
+%undefine _package_note_flags
+
 # If we should verify tarball signature with GPGv2.
 %global verify_tarball_signature 1
 
@@ -5,11 +8,11 @@
 %global patches_touch_autotools 1
 
 # The source directory.
-%global source_directory 1.10-stable
+%global source_directory 1.12-stable
 
 Name:           libnbd
-Version:        1.10.5
-Release:        1%{?dist}.redsleeve
+Version:        1.12.6
+Release:        1%{?dist}
 Summary:        NBD client library in userspace
 
 License:        LGPLv2+
@@ -26,10 +29,19 @@ Source2:       libguestfs.keyring
 Source3:        copy-patches.sh
 
 # Patches are stored in the upstream repository:
-# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.0/
+# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.1/
 
 # Patches.
-Patch0001:     0001-api-Add-new-API-nbd_set_pread_initialize.patch
+Patch0001:     0001-Add-nbddump-tool.patch
+Patch0002:     0002-dump-Visually-separate-columns-0-7-and-8-15.patch
+Patch0003:     0003-dump-Fix-build-on-i686.patch
+Patch0004:     0004-dump-Fix-tests-on-Debian-10.patch
+Patch0005:     0005-dump-dump-data.sh-Test-requires-nbdkit-1.22.patch
+Patch0006:     0006-copy-Store-the-preferred-block-size-in-the-operation.patch
+Patch0007:     0007-copy-Use-preferred-block-size-for-copying.patch
+Patch0008:     0008-dump-Add-another-example-to-the-manual.patch
+Patch0009:     0009-lib-crypto-Use-GNUTLS_NO_SIGNAL-if-available.patch
+Patch0010:     0010-lib-crypto.c-Ignore-TLS-premature-termination-after-.patch
 
 %if 0%{patches_touch_autotools}
 BuildRequires: autoconf, automake, libtool
@@ -78,7 +90,7 @@ BuildRequires:  util-linux
 # nbdkit for i686.  These are only needed for the test suite so make
 # them optional.  This reduces our test exposure on 32 bit platforms,
 # although there is still Fedora/armv7 and some upstream testing.
-%ifnarch %{ix86} %{arm}
+%ifnarch %{ix86}
 BuildRequires:  qemu-img
 BuildRequires:  nbdkit
 BuildRequires:  nbdkit-data-plugin
@@ -260,9 +272,11 @@ make %{?_smp_mflags} check || {
 %doc README
 %license COPYING.LIB
 %{_bindir}/nbdcopy
+%{_bindir}/nbddump
 %{_bindir}/nbdinfo
 %{_libdir}/libnbd.so.*
 %{_mandir}/man1/nbdcopy.1*
+%{_mandir}/man1/nbddump.1*
 %{_mandir}/man1/nbdinfo.1*
 
 
@@ -317,14 +331,22 @@ make %{?_smp_mflags} check || {
 %files bash-completion
 %dir %{_datadir}/bash-completion/completions
 %{_datadir}/bash-completion/completions/nbdcopy
+%{_datadir}/bash-completion/completions/nbddump
 %{_datadir}/bash-completion/completions/nbdfuse
 %{_datadir}/bash-completion/completions/nbdinfo
 %{_datadir}/bash-completion/completions/nbdsh
 
 
 %changelog
-* Tue Sep 27 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.10.5-1.redsleeve
-- fixed builddeps for arm
+* Thu Jul 28 2022 Richard W.M. Jones <rjones@redhat.com> - 1.12.6-1
+- Rebase to new stable branch version 1.12.6
+  resolves: rhbz#2059288
+- New tool: nbddump
+- nbdcopy: Use preferred block size for copying
+  related: rhbz#2047660
+- Fix remote TLS failures
+  resolves: rhbz#2111524
+  (and 2111813)
 
 * Thu Feb 10 2022 Richard W.M. Jones <rjones@redhat.com> - 1.10.5-1
 - Rebase to new stable branch version 1.10.5

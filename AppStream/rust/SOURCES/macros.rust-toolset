@@ -1,0 +1,51 @@
+# Explicitly use bindir tools, in case others are in the PATH,
+# like the rustup shims in a user's ~/.cargo/bin/.
+#
+# Since cargo 1.31, install only uses $CARGO_HOME/config, ignoring $PWD.
+#   https://github.com/rust-lang/cargo/issues/6397
+# But we can set CARGO_HOME locally, which is a good idea anyway to make sure
+# it never writes to ~/.cargo during rpmbuild.
+%__cargo %{_bindir}/env CARGO_HOME=.cargo %{_bindir}/cargo
+%__rustc %{_bindir}/rustc
+%__rustdoc %{_bindir}/rustdoc
+
+# Enable optimization, debuginfo, and link hardening.
+%__global_rustflags -Copt-level=3 -Cdebuginfo=2 -Clink-arg=-Wl,-z,relro,-z,now
+
+%__global_rustflags_toml [%{lua:
+    for arg in string.gmatch(rpm.expand("%{__global_rustflags}"), "%S+") do
+        print('"' .. arg .. '", ')
+    end}]
+
+%cargo_prep(V:) (\
+%{__mkdir} -p .cargo \
+cat > .cargo/config << EOF \
+[build]\
+rustc = "%{__rustc}"\
+rustdoc = "%{__rustdoc}"\
+rustflags = %{__global_rustflags_toml}\
+\
+[install]\
+root = "%{buildroot}%{_prefix}"\
+\
+[term]\
+verbose = true\
+EOF\
+%if 0%{-V:1}\
+%{__tar} -xoaf %{S:%{-V*}}\
+cat >> .cargo/config << EOF \
+\
+[source.crates-io]\
+replace-with = "vendored-sources"\
+\
+[source.vendored-sources]\
+directory = "./vendor"\
+EOF\
+%endif\
+)
+
+%cargo_build %__cargo build --release %{?_smp_mflags}
+
+%cargo_test %__cargo test --release %{?_smp_mflags} --no-fail-fast
+
+%cargo_install %__cargo install --no-track --path .

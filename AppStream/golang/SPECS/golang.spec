@@ -29,7 +29,7 @@
 # Define GOROOT macros
 %global goroot          %{_prefix}/lib/%{name}
 %global gopath          %{_datadir}/gocode
-%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
+%global golang_arches   x86_64 aarch64 ppc64le s390x
 %global golibdir        %{_libdir}/%{name}
 
 # Golang build options.
@@ -95,19 +95,18 @@
 %global gohostarch  s390x
 %endif
 
-%global go_api 1.17
-%global go_version 1.17.12
+%global go_api 1.18
+%global go_version 1.18.4
 %global pkg_release 1
 
 Name:           golang
 Version:        %{go_version}
-Release:        1%{?dist}.redsleeve
+Release:        3%{?dist}
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD and Public Domain
 URL:            http://golang.org/
 Source0:        https://github.com/golang-fips/go/archive/refs/tags/go%{go_version}-%{pkg_release}-openssl-fips.tar.gz
-
 # make possible to override default traceback level at build time by setting build tag rpm_crashtraceback
 Source1:        fedora.go
 
@@ -144,9 +143,6 @@ Patch215:       go1.5-zoneinfo_testing_only.patch
 
 # Proposed patch by jcajka https://golang.org/cl/86541
 Patch221:       fix_TestScript_list_std.patch
-
-# Port to openssl 3.0
-Patch1952381:   rhbz1952381.patch
 
 Patch223: remove_ed25519vectors_test.patch
 
@@ -241,15 +237,9 @@ Requires:       %{name} = %{version}-%{release}
 %prep
 %setup -q -n go-go%{go_version}-%{pkg_release}-openssl-fips
 
-
 %patch215 -p1
-
 %patch221 -p1
-
-%patch1952381 -p1
-
 %patch223 -p1
-
 %patch224 -p1
 
 cp %{SOURCE1} ./src/runtime/
@@ -434,12 +424,6 @@ export GO_LDFLAGS="-extldflags '$RPM_LD_FLAGS'"
 export CGO_ENABLED=0
 %endif
 
-# work around aarch64 issue
-# https://src.fedoraproject.org/rpms/golang/c/ea99ebaff6b9561243bb43039458771edb691eaf?branch=f32
-%ifarch aarch64
-export CGO_CFLAGS="-mno-outline-atomics"
-%endif
-
 # make sure to not timeout
 export GO_TEST_TIMEOUT_SCALE=2
 
@@ -452,6 +436,9 @@ export GO_TEST_RUN=""
 
 ./run.bash --no-rebuild -v -v -v -k $GO_TEST_RUN
 
+# tests timeout on ppc64le due to
+# https://bugzilla.redhat.com/show_bug.cgi?id=2118776
+%ifnarch ppc64le
 export OPENSSL_FORCE_FIPS_MODE=1
 # Run tests with FIPS enabled.
 pushd crypto
@@ -464,6 +451,8 @@ popd
 pushd crypto/tls
   GOLANG_FIPS=1 go test -v -run "Boring"
 popd
+%endif
+
 %else
 ./run.bash --no-rebuild -v -v -v -k || :
 %endif
@@ -525,22 +514,34 @@ cd ..
 %endif
 
 %changelog
-* Wed Aug 10 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.17.12-1.redsleeve
-- added arm to golang_arches
+* Tue Aug 16 2022 David Benoit <dbenoit@redhat.com> - 1.18.4-3
+- Temporarily disable crypto tests on ppc64le
+- Related: rhbz#2109180
 
-* Wed Jul 20 2022 David Benoit <dbenoit@redhat.com> - 1.17.12-1
-- Update Go to version 1.17.12
-- Resolves: rhbz#2109183
+* Wed Aug 10 2022 Alejandro Sáez <asm@redhat.com> - 1.18.4-2
+- Update to Go 1.18.4
+- Resolves: rhbz#2109180
+- Deprecates keys smaller than 2048 bits in TestDecryptOAEP in boring mode
 
-* Wed Jul 20 2022 David Benoit <dbenoit@redhat.com> - 1.17.7-2
-- Clean up dist-git patches
-- Resolves: rhbz#2109174
+* Fri Aug 05 2022 Alejandro Sáez <asm@redhat.com> - 1.18.4-1
+- Update to Go 1.18.4
+- Resolves: rhbz#2109180
 
-* Thu Feb 17 2022 David Benoit <dbenoit@redhat.com> - 1.17.7-1
-- Rebase to Go 1.17.7
-- Update ecdsa tests to reject SHA1 signatures in boring mode
+* Fri Jun 10 2022 David Benoit <dbenoit@redhat.com> - 1.18.2-2
+- Update deprecated openssl algorithms patch
+- Rebuild against openssl-3.0.1-33
+- Resolves: rhbz#2092136
+- Related: rhbz#2092016
+
+* Mon May 02 2022 David Benoit <dbenoit@redhat.com> - 1.18.2-1
+- Rebase to Go 1.18.2
+- Move to github.com/golang-fips/go
+- Resolves: rhbz#2075169
+- Resolves: rhbz#2060769
+- Resolves: rhbz#2067531
+- Resolves: rhbz#2067536
+- Resolves: rhbz#2067552
 - Resolves: rhbz#2025637
-- Resolves: rhbz#1975396
 
 * Mon Dec 13 2021 Alejandro Sáez <asm@redhat.com> - 1.17.5-1
 - Rebase to Go 1.17.5

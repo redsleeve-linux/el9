@@ -1,20 +1,22 @@
 # Only x86_64 and i686 are Tier 1 platforms at this time.
 # https://doc.rust-lang.org/nightly/rustc/platform-support.html
-%global rust_arches x86_64 i686 aarch64 ppc64le s390x armv6hl
+%global rust_arches x86_64 i686 aarch64 ppc64le s390x
 
 # The channel can be stable, beta, or nightly
 %{!?channel: %global channel stable}
 
 # To bootstrap from scratch, set the channel and date from src/stage0.json
-# e.g. 1.10.0 wants rustc: 1.9.0-2016-05-24
+# e.g. 1.59.0 wants rustc: 1.58.0-2022-01-13
 # or nightly wants some beta-YYYY-MM-DD
-# Note that cargo matches the program version here, not its crate version.
-%global bootstrap_rust 1.57.0
-%global bootstrap_cargo 1.57.0
-%global bootstrap_channel 1.57.0
-%global bootstrap_date 2021-12-02
+%global bootstrap_version 1.61.0
+%global bootstrap_channel 1.61.0
+%global bootstrap_date 2022-05-19
 
 # Only the specified arches will use bootstrap binaries.
+# NOTE: Those binaries used to be uploaded with every new release, but that was
+# a waste of lookaside cache space when they're most often unused.
+# Run "spectool -g rust.spec" after changing this and then "fedpkg upload" to
+# add them to sources. Remember to remove them again after the bootstrap build!
 #global bootstrap_arches %%{rust_arches}
 
 # Define a space-separated list of targets to ship rust-std-static-$triple for
@@ -31,8 +33,9 @@
 
 # We need CRT files for *-wasi targets, at least as new as the commit in
 # src/ci/docker/host-x86_64/dist-various-2/build-wasi-toolchain.sh
+# (updated per https://github.com/rust-lang/rust/pull/96907)
 %global wasi_libc_url https://github.com/WebAssembly/wasi-libc
-%global wasi_libc_commit ad5133410f66b93a2381db5b542aad5e0964db96
+%global wasi_libc_commit 9886d3d6200fcc3726329966860fc058707406cd
 %global wasi_libc_name wasi-libc-%{wasi_libc_commit}
 %global wasi_libc_source %{wasi_libc_url}/archive/%{wasi_libc_commit}/%{wasi_libc_name}.tar.gz
 %global wasi_libc_dir %{_builddir}/%{wasi_libc_name}
@@ -43,13 +46,15 @@
 # We can also choose to just use Rust's bundled LLVM, in case the system LLVM
 # is insufficient.  Rust currently requires LLVM 12.0+.
 %global min_llvm_version 12.0.0
-%global bundled_llvm_version 13.0.0
+%global bundled_llvm_version 14.0.4
 %bcond_with bundled_llvm
 
-# Requires stable libgit2 1.3
-%global min_libgit2_version 1.3.0
-%global bundled_libgit2_version 1.3.0
-%if 0%{?fedora} >= 36
+# Requires stable libgit2 1.4, and not the next minor soname change.
+# This needs to be consistent with the bindings in vendor/libgit2-sys.
+%global min_libgit2_version 1.4.0
+%global next_libgit2_version 1.5.0~
+%global bundled_libgit2_version 1.4.2
+%if 0%{?fedora} >= 99
 %bcond_with bundled_libgit2
 %else
 %bcond_without bundled_libgit2
@@ -78,8 +83,8 @@
 %endif
 
 Name:           rust
-Version:        1.58.1
-Release:        1%{?dist}.redsleeve
+Version:        1.62.1
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -98,14 +103,20 @@ Source1:        %{wasi_libc_source}
 # By default, rust tries to use "rust-lld" as a linker for WebAssembly.
 Patch1:         0001-Use-lld-provided-by-system-for-wasm.patch
 
+# Set a substitute-path in rust-gdb for standard library sources.
+Patch2:         rustc-1.61.0-rust-gdb-substitute-path.patch
+
 ### RHEL-specific patches below ###
 
+# Simple rpm macros for rust-toolset (as opposed to full rust-packaging)
+Source100:      macros.rust-toolset
+
 # Disable cargo->libgit2->libssh2 on RHEL, as it's not approved for FIPS (rhbz1732949)
-Patch100:       rustc-1.56.0-disable-libssh2.patch
+Patch100:       rustc-1.59.0-disable-libssh2.patch
 
 # libcurl on RHEL7 doesn't have http2, but since cargo requests it, curl-sys
 # will try to build it statically -- instead we turn off the feature.
-Patch101:       rustc-1.58.0-disable-http2.patch
+Patch101:       rustc-1.62.0-disable-http2.patch
 
 # kernel rh1410097 causes too-small stacks for PIE.
 # (affects RHEL6 kernels when building for RHEL7)
@@ -117,9 +128,6 @@ Patch102:       rustc-1.58.0-no-default-pie.patch
   local abi = "gnu"
   if arch == "armv7hl" then
     arch = "armv7"
-    abi = "gnueabihf"
-  elseif arch == "armv6hl" then
-    arch = "arm"
     abi = "gnueabihf"
   elseif arch == "ppc64" then
     arch = "powerpc64"
@@ -141,31 +149,35 @@ end}
   for arch in string.gmatch(rpm.expand("%{bootstrap_arches}"), "%S+") do
     table.insert(bootstrap_arches, arch)
   end
-  local base = rpm.expand("https://static.rust-lang.org/dist/%{bootstrap_date}"
-                          .."/rust-%{bootstrap_channel}")
+  local base = rpm.expand("https://static.rust-lang.org/dist/%{bootstrap_date}")
+  local channel = rpm.expand("%{bootstrap_channel}")
   local target_arch = rpm.expand("%{_target_cpu}")
   for i, arch in ipairs(bootstrap_arches) do
-    i = 100 + i
-    print(string.format("Source%d: %s-%s.tar.xz\n",
-                        i, base, rust_triple(arch)))
+    i = 1000 + i * 3
+    local suffix = channel.."-"..rust_triple(arch)
+    print(string.format("Source%d: %s/cargo-%s.tar.xz\n", i, base, suffix))
+    print(string.format("Source%d: %s/rustc-%s.tar.xz\n", i+1, base, suffix))
+    print(string.format("Source%d: %s/rust-std-%s.tar.xz\n", i+2, base, suffix))
     if arch == target_arch then
-      rpm.define("bootstrap_source "..i)
+      rpm.define("bootstrap_source_cargo "..i)
+      rpm.define("bootstrap_source_rustc "..i+1)
+      rpm.define("bootstrap_source_std "..i+2)
+      rpm.define("bootstrap_suffix "..suffix)
     end
   end
 end}
 %endif
 
 %ifarch %{bootstrap_arches}
-%global bootstrap_root rust-%{bootstrap_channel}-%{rust_triple}
-%global local_rust_root %{_builddir}/%{bootstrap_root}/usr
-Provides:       bundled(%{name}-bootstrap) = %{bootstrap_rust}
+%global local_rust_root %{_builddir}/rust-%{bootstrap_suffix}
+Provides:       bundled(%{name}-bootstrap) = %{bootstrap_version}
 %else
-BuildRequires:  cargo >= %{bootstrap_cargo}
+BuildRequires:  cargo >= %{bootstrap_version}
 %if 0%{?rhel} && 0%{?rhel} < 8
-BuildRequires:  %{name} >= %{bootstrap_rust}
+BuildRequires:  %{name} >= %{bootstrap_version}
 BuildConflicts: %{name} > %{version}
 %else
-BuildRequires:  (%{name} >= %{bootstrap_rust} with %{name} <= %{version})
+BuildRequires:  (%{name} >= %{bootstrap_version} with %{name} <= %{version})
 %endif
 %global local_rust_root %{_prefix}
 %endif
@@ -182,7 +194,7 @@ BuildRequires:  pkgconfig(openssl)
 BuildRequires:  pkgconfig(zlib)
 
 %if %{without bundled_libgit2}
-BuildRequires:  pkgconfig(libgit2) >= %{min_libgit2_version}
+BuildRequires:  (pkgconfig(libgit2) >= %{min_libgit2_version} with pkgconfig(libgit2) < %{next_libgit2_version})
 %endif
 
 %if %{without disabled_libssh2}
@@ -223,6 +235,9 @@ BuildRequires:  procps-ng
 
 # debuginfo-gdb tests need gdb
 BuildRequires:  gdb
+
+# For src/test/run-make/static-pie
+BuildRequires:  glibc-static
 
 # Virtual provides for folks who attempt "dnf install rustc"
 Provides:       rustc = %{version}-%{release}
@@ -284,16 +299,21 @@ BuildRequires:  %{devtoolset_name}-gcc-c++
 %if %defined mingw_targets
 BuildRequires:  mingw32-filesystem >= 95
 BuildRequires:  mingw64-filesystem >= 95
+BuildRequires:  mingw32-crt
+BuildRequires:  mingw64-crt
 BuildRequires:  mingw32-gcc
 BuildRequires:  mingw64-gcc
+BuildRequires:  mingw32-winpthreads-static
+BuildRequires:  mingw64-winpthreads-static
 %endif
 
 %if %defined wasm_targets
 BuildRequires:  clang
+BuildRequires:  lld
 # brp-strip-static-archive breaks the archive index for wasm
 %global __os_install_post \
 %__os_install_post \
-find '%{buildroot}%{rustlibdir}' -type f -path '*/wasm*/lib/*.rlib' -print -exec '%{llvm_root}/bin/llvm-ranlib' '{}' ';' \
+find '%{buildroot}%{rustlibdir}'/wasm*/lib -type f -regex '.*\\.\\(a\\|rlib\\)' -print -exec '%{llvm_root}/bin/llvm-ranlib' '{}' ';' \
 %{nil}
 %endif
 
@@ -518,12 +538,30 @@ feature for the Rust standard library. The RLS (Rust Language Server) uses this
 data to provide information about the Rust standard library.
 
 
+%if 0%{?rhel} && 0%{?rhel} >= 8
+
+%package toolset
+Summary:        Rust Toolset
+Requires:       rust%{?_isa} = %{version}-%{release}
+Requires:       cargo%{?_isa} = %{version}-%{release}
+
+%description toolset
+This is the metapackage for Rust Toolset, bringing in the Rust compiler,
+the Cargo package manager, and a few convenience macros for rpm builds.
+
+%endif
+
+
 %prep
 
 %ifarch %{bootstrap_arches}
-%setup -q -n %{bootstrap_root} -T -b %{bootstrap_source}
-./install.sh --components=cargo,rustc,rust-std-%{rust_triple} \
-  --prefix=%{local_rust_root} --disable-ldconfig
+rm -rf %{local_rust_root}
+%setup -q -n cargo-%{bootstrap_suffix} -T -b %{bootstrap_source_cargo}
+./install.sh --prefix=%{local_rust_root} --disable-ldconfig
+%setup -q -n rustc-%{bootstrap_suffix} -T -b %{bootstrap_source_rustc}
+./install.sh --prefix=%{local_rust_root} --disable-ldconfig
+%setup -q -n rust-std-%{bootstrap_suffix} -T -b %{bootstrap_source_std}
+./install.sh --prefix=%{local_rust_root} --disable-ldconfig
 test -f '%{local_rust_root}/bin/cargo'
 test -f '%{local_rust_root}/bin/rustc'
 %endif
@@ -535,6 +573,7 @@ test -f '%{local_rust_root}/bin/rustc'
 %setup -q -n %{rustc_package}
 
 %patch1 -p1
+%patch2 -p1
 
 %if %with disabled_libssh2
 %patch100 -p1
@@ -552,6 +591,9 @@ rm -rf vendor/libnghttp2-sys/
 # Use our explicit python3 first
 sed -i.try-python -e '/^try python3 /i try "%{__python3}" "$@"' ./configure
 
+# Set a substitute-path in rust-gdb for standard library sources.
+sed -i.rust-src -e "s#@BUILDDIR@#$PWD#" ./src/etc/rust-gdb
+
 %if %without bundled_llvm
 rm -rf src/llvm-project/
 mkdir -p src/llvm-project/libunwind/
@@ -559,7 +601,8 @@ mkdir -p src/llvm-project/libunwind/
 
 # Remove other unused vendored libraries
 rm -rf vendor/curl-sys/curl/
-rm -rf vendor/jemalloc-sys/jemalloc/
+rm -rf vendor/*jemalloc-sys*/jemalloc/
+rm -rf vendor/libmimalloc-sys/c_src/mimalloc/
 rm -rf vendor/libssh2-sys/libssh2/
 rm -rf vendor/libz-sys/src/zlib/
 rm -rf vendor/libz-sys/src/zlib-ng/
@@ -637,14 +680,6 @@ if [ "$max_cpus" -ge 1 -a "$max_cpus" -lt "$ncpus" ]; then
   ncpus="$max_cpus"
 fi
 
-%define target_config %{shrink:
-  --set target.%{rust_triple}.linker=%{__cc}
-  --set target.%{rust_triple}.cc=%{__cc}
-  --set target.%{rust_triple}.cxx=%{__cxx}
-  --set target.%{rust_triple}.ar=%{__ar}
-  --set target.%{rust_triple}.ranlib=%{__ranlib}
-}
-
 %if %defined mingw_targets
 %{lua: do
   local cfg = ""
@@ -653,20 +688,21 @@ fi
       triple = triple,
       mingw = string.sub(triple, 1, 4) == "i686" and "mingw32" or "mingw64",
     }
-    local s = string.gsub([[%{shrink:
+    local s = string.gsub([[
       --set target.{{triple}}.linker=%{{{mingw}}_cc}
       --set target.{{triple}}.cc=%{{{mingw}}_cc}
       --set target.{{triple}}.ar=%{{{mingw}}_ar}
       --set target.{{triple}}.ranlib=%{{{mingw}}_ranlib}
-    }]], "{{(%w+)}}", subs)
+    ]], "{{(%w+)}}", subs)
     cfg = cfg .. " " .. s
   end
+  cfg = string.gsub(cfg, "%s+", " ")
   rpm.define("mingw_target_config " .. cfg)
 end}
 %endif
 
 %if %defined wasm_targets
-%make_build --quiet -C %{wasi_libc_dir}
+%make_build --quiet -C %{wasi_libc_dir} CC=clang AR=llvm-ar NM=llvm-nm
 %{lua: do
   local wasi_root = rpm.expand("%{wasi_libc_dir}") .. "/sysroot"
   local cfg = ""
@@ -682,14 +718,20 @@ end}
 %configure --disable-option-checking \
   --libdir=%{common_libdir} \
   --build=%{rust_triple} --host=%{rust_triple} --target=%{rust_triple} \
-  %{target_config} \
+  --set target.%{rust_triple}.linker=%{__cc} \
+  --set target.%{rust_triple}.cc=%{__cc} \
+  --set target.%{rust_triple}.cxx=%{__cxx} \
+  --set target.%{rust_triple}.ar=%{__ar} \
+  --set target.%{rust_triple}.ranlib=%{__ranlib} \
   %{?mingw_target_config} \
   %{?wasm_target_config} \
   --python=%{__python3} \
   --local-rust-root=%{local_rust_root} \
+  --set build.rustfmt=/bin/true \
   %{!?with_bundled_llvm: --llvm-root=%{llvm_root} \
     %{!?llvm_has_filecheck: --disable-codegen-tests} \
     %{!?with_llvm_static: --enable-llvm-link-shared } } \
+  --disable-llvm-static-stdcpp \
   --disable-rpath \
   %{enable_debuginfo} \
   --set rust.codegen-units-std=1 \
@@ -786,6 +828,11 @@ rm -f %{buildroot}%{rustlibdir}/etc/lldb_*
 # We don't want Rust copies of LLVM tools (rust-lld, rust-llvm-dwp)
 rm -f %{buildroot}%{rustlibdir}/%{rust_triple}/bin/rust-ll*
 
+%if 0%{?rhel} && 0%{?rhel} >= 8
+# This allows users to build packages using Rust Toolset.
+%{__install} -D -m 644 %{S:100} %{buildroot}%{rpmmacrodir}/macros.rust-toolset
+%endif
+
 
 %check
 %{export_rust_env}
@@ -795,6 +842,13 @@ rm -f %{buildroot}%{rustlibdir}/%{rust_triple}/bin/rust-ll*
 env RUSTC=%{buildroot}%{_bindir}/rustc \
     LD_LIBRARY_PATH="%{buildroot}%{_libdir}:$LD_LIBRARY_PATH" \
     %{buildroot}%{_bindir}/cargo run --manifest-path build/hello-world/Cargo.toml
+
+# Try a build sanity-check for other targets
+for triple in %{?mingw_targets} %{?wasm_targets}; do
+  env RUSTC=%{buildroot}%{_bindir}/rustc \
+      LD_LIBRARY_PATH="%{buildroot}%{_libdir}:$LD_LIBRARY_PATH" \
+      %{buildroot}%{_bindir}/cargo build --manifest-path build/hello-world/Cargo.toml --target=$triple
+done
 
 # The results are not stable on koji, so mask errors and just log it.
 # Some of the larger test artifacts are manually cleaned to save space.
@@ -919,7 +973,6 @@ end}
 %{_docdir}/%{name}/html/*.js
 %{_docdir}/%{name}/html/*.png
 %{_docdir}/%{name}/html/*.svg
-%{_docdir}/%{name}/html/*.woff
 %{_docdir}/%{name}/html/*.woff2
 %license %{_docdir}/%{name}/html/*.txt
 %license %{_docdir}/%{name}/html/*.md
@@ -972,9 +1025,31 @@ end}
 %{rustlibdir}/%{rust_triple}/analysis/
 
 
+%if 0%{?rhel} && 0%{?rhel} >= 8
+%files toolset
+%{rpmmacrodir}/macros.rust-toolset
+%endif
+
+
 %changelog
-* Sat Jul 23 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.58.1-1.redsleeve
-- added armv6 to rust_arches
+* Tue Jul 19 2022 Josh Stone <jistone@redhat.com> - 1.62.1-1
+- Update to 1.62.1.
+
+* Wed Jul 13 2022 Josh Stone <jistone@redhat.com> - 1.62.0-2
+- Prevent unsound coercions from functions with opaque return types.
+
+* Thu Jun 30 2022 Josh Stone <jistone@redhat.com> - 1.62.0-1
+- Update to 1.62.0.
+
+* Fri Jun 03 2022 Josh Stone <jistone@redhat.com> - 1.61.0-1
+- Update to 1.61.0.
+- Add rust-toolset as a subpackage.
+
+* Wed Apr 20 2022 Josh Stone <jistone@redhat.com> - 1.60.0-1
+- Update to 1.60.0.
+
+* Tue Apr 19 2022 Josh Stone <jistone@redhat.com> - 1.59.0-1
+- Update to 1.59.0.
 
 * Thu Jan 20 2022 Josh Stone <jistone@redhat.com> - 1.58.1-1
 - Update to 1.58.1.
