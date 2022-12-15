@@ -1,0 +1,86 @@
+From c922a56d4461c9e4ca2af07ecccb3626b99a35ae Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Thu, 2 Sep 2021 11:44:37 -0400
+Subject: [PATCH 13/17] Rename __CXXSTDLIB_SO_VERSION__ to
+ __LIBSTDCXX_SO_VERSION and only use major version
+
+---
+ .../testsuite/22_locale/messages/13631.cc      |  4 ++--
+ libstdc++-v3/testsuite/lib/dts.exp             | 18 +++++-------------
+ libstdc++-v3/testsuite/lib/libstdc++.exp       |  4 ++--
+ 3 files changed, 9 insertions(+), 17 deletions(-)
+
+diff --git a/libstdc++-v3/testsuite/22_locale/messages/13631.cc b/libstdc++-v3/testsuite/22_locale/messages/13631.cc
+index 5b20df382..f4c5eb7a2 100644
+--- a/libstdc++-v3/testsuite/22_locale/messages/13631.cc
++++ b/libstdc++-v3/testsuite/22_locale/messages/13631.cc
+@@ -51,7 +51,7 @@ void test01()
+   msgs_facet.close(msgs);
+ 
+   // Fixed upstream in GCC 5
+-#if __CXXSTDLIB_SO_VERSION__ >= 501000
++#if __LIBSTDCXX_SO_VERSION >= 5
+   VERIFY( translation1 == translation2 );
+ #endif
+ }
+@@ -77,7 +77,7 @@ void test02()
+   // Without a real translation this test doesn't mean anything:
+ 
+   // Fixed upstream in GCC 5
+-#if __CXXSTDLIB_SO_VERSION__ >= 501000
++#if __LIBSTDCXX_SO_VERSION >= 5
+   VERIFY( !translation1.empty() );
+   VERIFY( translation1 != msgid );
+ #endif
+diff --git a/libstdc++-v3/testsuite/lib/dts.exp b/libstdc++-v3/testsuite/lib/dts.exp
+index dc5cf3e95..60f94bd6d 100644
+--- a/libstdc++-v3/testsuite/lib/dts.exp
++++ b/libstdc++-v3/testsuite/lib/dts.exp
+@@ -1,15 +1,10 @@
+-# For DTS testing, generate a number expressing the
+-# system version of libstdc++.so
+-#
+-# Generate a version number equivalent to
+-#  #define GCC_VERSION (__GNUC__ * 10000 \
+-#                       + __GNUC_MINOR__ * 100 \
+-#                       + __GNUC_PATCHLEVEL__)
++# For DTS testing, get the major version of the
++# system libstdc++.so
+ #
+ # For example, given an underlying version of gcc 4.8.5
+-# this function will return 408050.
++# this function will return 4
+ 
+-proc get_dts_base_version { } {
++proc get_dts_base_major_version { } {
+ 
+     # Invoke /usr/bin/gcc to get at the underlying GCC version
+     # in dotted form (e.g. "4.8.5").
+@@ -24,8 +19,5 @@ proc get_dts_base_version { } {
+     verbose "minor: '$minor'" 2
+     verbose "patchlevel: '$patchlevel'" 2
+ 
+-    set base_gcc_version [expr (($major * 10000) + ($minor * 100)  + $patchlevel)]
+-    verbose "base_gcc_version: '$base_gcc_version'" 2
+-
+-    return $base_gcc_version
++    return $major
+ }
+diff --git a/libstdc++-v3/testsuite/lib/libstdc++.exp b/libstdc++-v3/testsuite/lib/libstdc++.exp
+index 5e4b32f76..297485b19 100644
+--- a/libstdc++-v3/testsuite/lib/libstdc++.exp
++++ b/libstdc++-v3/testsuite/lib/libstdc++.exp
+@@ -326,8 +326,8 @@ proc libstdc++_init { testfile } {
+ 
+     # For DTS testing, expose the system version of libstdc++.so as
+     # a preprocessor define.
+-    set base_gcc_version [get_dts_base_version]
+-    set cxxflags "$cxxflags -D__CXXSTDLIB_SO_VERSION__=$base_gcc_version"
++    set base_gcc_version [get_dts_base_major_version]
++    set cxxflags "$cxxflags -D__LIBSTDCXX_SO_VERSION=$base_gcc_version"
+ 
+     # If a PCH file is available, use it.  We must delay performing
+     # this check until $cxx and such have been initialized because we
+-- 
+2.31.1
+

@@ -1,0 +1,588 @@
+From 786869fd62813e80da9b6545a295d53c36275c19 Mon Sep 17 00:00:00 2001
+From: Mark Eggleston <markeggleston@gcc.gnu.org>
+Date: Fri, 22 Jan 2021 13:12:14 +0000
+Subject: [PATCH 06/10] Allow string length and kind to be specified on a per
+ variable basis.
+
+This allows kind/length to be mixed with array specification in
+declarations.
+
+e.g.
+
+      INTEGER*4 x*2, y*8
+      CHARACTER names*20(10)
+      REAL v(100)*8, vv*4(50)
+
+The per-variable size overrides the kind or length specified for the type.
+
+Use -fdec-override-kind to enable. Also enabled by -fdec.
+
+Note: this feature is a merger of two previously separate features.
+
+Now accepts named constants as kind parameters:
+
+      INTEGER A
+      PARAMETER (A=2)
+      INTEGER B*(A)
+
+Contributed by Mark Eggleston <mark.eggleston@codethink.com>
+
+Now rejects invalid kind parameters and prints error messages:
+
+      INTEGER X*3
+
+caused an internal compiler error.
+
+Contributed by Mark Eggleston <mark.eggleston@codethink.com>
+---
+ gcc/fortran/decl.cc                           | 156 ++++++++++++++----
+ gcc/fortran/lang.opt                          |   4 +
+ gcc/fortran/options.cc                        |   1 +
+ .../dec_mixed_char_array_declaration_1.f      |  13 ++
+ .../dec_mixed_char_array_declaration_2.f      |  13 ++
+ .../dec_mixed_char_array_declaration_3.f      |  13 ++
+ .../gfortran.dg/dec_spec_in_variable_1.f      |  31 ++++
+ .../gfortran.dg/dec_spec_in_variable_2.f      |  31 ++++
+ .../gfortran.dg/dec_spec_in_variable_3.f      |  31 ++++
+ .../gfortran.dg/dec_spec_in_variable_4.f      |  14 ++
+ .../gfortran.dg/dec_spec_in_variable_5.f      |  19 +++
+ .../gfortran.dg/dec_spec_in_variable_6.f      |  19 +++
+ .../gfortran.dg/dec_spec_in_variable_7.f      |  15 ++
+ .../gfortran.dg/dec_spec_in_variable_8.f      |  14 ++
+ 14 files changed, 340 insertions(+), 34 deletions(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_1.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_2.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_3.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_spec_in_variable_1.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_spec_in_variable_2.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_spec_in_variable_3.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_spec_in_variable_4.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_spec_in_variable_5.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_spec_in_variable_6.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_spec_in_variable_7.f
+ create mode 100644 gcc/testsuite/gfortran.dg/dec_spec_in_variable_8.f
+
+diff --git a/gcc/fortran/decl.cc b/gcc/fortran/decl.cc
+index 5c8c1b7981b..f7dc9d8263d 100644
+--- a/gcc/fortran/decl.cc
++++ b/gcc/fortran/decl.cc
+@@ -1213,6 +1213,54 @@ syntax:
+   return MATCH_ERROR;
+ }
+ 
++/* This matches the nonstandard kind given after a variable name, like:
++   INTEGER x*2, y*4
++   The per-variable kind will override any kind given in the type
++   declaration.
++*/
++
++static match
++match_per_symbol_kind (int *length)
++{
++  match m;
++  gfc_expr *expr = NULL;
++
++  m = gfc_match_char ('*');
++  if (m != MATCH_YES)
++    return m;
++
++  m = gfc_match_small_literal_int (length, NULL);
++  if (m == MATCH_YES || m == MATCH_ERROR)
++    return m;
++
++  if (gfc_match_char ('(') == MATCH_NO)
++    return MATCH_ERROR;
++
++  m = gfc_match_expr (&expr);
++  if (m == MATCH_YES)
++    {
++      m = MATCH_ERROR; // Assume error
++      if (gfc_expr_check_typed (expr, gfc_current_ns, false))
++	{
++	  if ((expr->expr_type == EXPR_CONSTANT)
++	      && (expr->ts.type == BT_INTEGER))
++	    {
++	      *length = mpz_get_si(expr->value.integer);
++	      m = MATCH_YES;
++	    }
++	}
++
++	if (m == MATCH_YES)
++	  {
++	    if (gfc_match_char (')') == MATCH_NO)
++	       m = MATCH_ERROR;
++  }
++     }
++
++  if (expr != NULL)
++     gfc_free_expr (expr);
++  return m;
++}
+ 
+ /* Special subroutine for finding a symbol.  Check if the name is found
+    in the current name space.  If not, and we're compiling a function or
+@@ -2443,6 +2491,35 @@ check_function_name (char *name)
+ }
+ 
+ 
++static match
++match_character_length_clause (gfc_charlen **cl, bool *cl_deferred, int elem)
++{
++  gfc_expr* char_len;
++  char_len = NULL;
++
++  match m = match_char_length (&char_len, cl_deferred, false);
++  if (m == MATCH_YES)
++    {
++      *cl = gfc_new_charlen (gfc_current_ns, NULL);
++      (*cl)->length = char_len;
++    }
++  else if (m == MATCH_NO)
++    {
++      if (elem > 1
++	  && (current_ts.u.cl->length == NULL
++	      || current_ts.u.cl->length->expr_type != EXPR_CONSTANT))
++	{
++	  *cl = gfc_new_charlen (gfc_current_ns, NULL);
++	  (*cl)->length = gfc_copy_expr (current_ts.u.cl->length);
++	}
++      else
++      *cl = current_ts.u.cl;
++
++      *cl_deferred = current_ts.deferred;
++    }
++  return m;
++}
++
+ /* Match a variable name with an optional initializer.  When this
+    subroutine is called, a variable is expected to be parsed next.
+    Depending on what is happening at the moment, updates either the
+@@ -2453,7 +2530,7 @@ variable_decl (int elem)
+ {
+   char name[GFC_MAX_SYMBOL_LEN + 1];
+   static unsigned int fill_id = 0;
+-  gfc_expr *initializer, *char_len;
++  gfc_expr *initializer;
+   gfc_array_spec *as;
+   gfc_array_spec *cp_as; /* Extra copy for Cray Pointees.  */
+   gfc_charlen *cl;
+@@ -2462,11 +2539,15 @@ variable_decl (int elem)
+   match m;
+   bool t;
+   gfc_symbol *sym;
++  match cl_match;
++  match kind_match;
++  int overridden_kind;
+   char c;
+ 
+   initializer = NULL;
+   as = NULL;
+   cp_as = NULL;
++  kind_match = MATCH_NO;
+ 
+   /* When we get here, we've just matched a list of attributes and
+      maybe a type and a double colon.  The next thing we expect to see
+@@ -2519,6 +2600,28 @@ variable_decl (int elem)
+ 
+   var_locus = gfc_current_locus;
+ 
++
++  cl = NULL;
++  cl_deferred = false;
++  cl_match = MATCH_NO;
++
++  /* Check for a character length clause before an array clause */
++  if (flag_dec_override_kind)
++    {
++      if (current_ts.type == BT_CHARACTER)
++	{
++	  cl_match = match_character_length_clause (&cl, &cl_deferred, elem);
++	  if (cl_match == MATCH_ERROR)
++	    goto cleanup;
++	}
++      else
++	{
++	  kind_match = match_per_symbol_kind (&overridden_kind);
++	  if (kind_match == MATCH_ERROR)
++	    goto cleanup;
++	}
++    }
++
+   /* Now we could see the optional array spec. or character length.  */
+   m = gfc_match_array_spec (&as, true, true);
+   if (m == MATCH_ERROR)
+@@ -2667,40 +2770,12 @@ variable_decl (int elem)
+ 	}
+     }
+ 
+-  char_len = NULL;
+-  cl = NULL;
+-  cl_deferred = false;
+-
+-  if (current_ts.type == BT_CHARACTER)
++  /* Second chance for a character length clause */
++  if (cl_match == MATCH_NO && current_ts.type == BT_CHARACTER)
+     {
+-      switch (match_char_length (&char_len, &cl_deferred, false))
+-	{
+-	case MATCH_YES:
+-	  cl = gfc_new_charlen (gfc_current_ns, NULL);
+-
+-	  cl->length = char_len;
+-	  break;
+-
+-	/* Non-constant lengths need to be copied after the first
+-	   element.  Also copy assumed lengths.  */
+-	case MATCH_NO:
+-	  if (elem > 1
+-	      && (current_ts.u.cl->length == NULL
+-		  || current_ts.u.cl->length->expr_type != EXPR_CONSTANT))
+-	    {
+-	      cl = gfc_new_charlen (gfc_current_ns, NULL);
+-	      cl->length = gfc_copy_expr (current_ts.u.cl->length);
+-	    }
+-	  else
+-	    cl = current_ts.u.cl;
+-
+-	  cl_deferred = current_ts.deferred;
+-
+-	  break;
+-
+-	case MATCH_ERROR:
+-	  goto cleanup;
+-	}
++      m = match_character_length_clause (&cl, &cl_deferred, elem);
++      if (m == MATCH_ERROR)
++	goto cleanup;
+     }
+ 
+   /* The dummy arguments and result of the abreviated form of MODULE
+@@ -2802,6 +2877,19 @@ variable_decl (int elem)
+       goto cleanup;
+     }
+ 
++  if (kind_match == MATCH_YES)
++    {
++      gfc_find_symbol (name, gfc_current_ns, 1, &sym);
++      /* sym *must* be found at this point */
++      sym->ts.kind = overridden_kind;
++      if (gfc_validate_kind (sym->ts.type, sym->ts.kind, true) < 0)
++	{
++	  gfc_error ("Kind %d not supported for type %s at %C",
++		     sym->ts.kind, gfc_basic_typename (sym->ts.type));
++	  return MATCH_ERROR;
++	}
++    }
++
+   if (!check_function_name (name))
+     {
+       m = MATCH_ERROR;
+diff --git a/gcc/fortran/lang.opt b/gcc/fortran/lang.opt
+index 25cc948699b..4a269ebb22d 100644
+--- a/gcc/fortran/lang.opt
++++ b/gcc/fortran/lang.opt
+@@ -502,6 +502,10 @@ fdec-math
+ Fortran Var(flag_dec_math)
+ Enable legacy math intrinsics for compatibility.
+ 
++fdec-override-kind
++Fortran Var(flag_dec_override_kind)
++Enable support for per variable kind specification.
++
+ fdec-structure
+ Fortran Var(flag_dec_structure)
+ Enable support for DEC STRUCTURE/RECORD.
+diff --git a/gcc/fortran/options.cc b/gcc/fortran/options.cc
+index d6bd36c3a8a..edbab483b36 100644
+--- a/gcc/fortran/options.cc
++++ b/gcc/fortran/options.cc
+@@ -78,6 +78,7 @@ set_dec_flags (int value)
+   SET_BITFLAG (flag_dec_blank_format_item, value, value);
+   SET_BITFLAG (flag_dec_char_conversions, value, value);
+   SET_BITFLAG (flag_dec_duplicates, value, value);
++  SET_BITFLAG (flag_dec_override_kind, value, value);
+ }
+ 
+ /* Finalize DEC flags.  */
+diff --git a/gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_1.f b/gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_1.f
+new file mode 100644
+index 00000000000..706ea4112a4
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_1.f
+@@ -0,0 +1,13 @@
++! { dg-do run }
++! { dg-options "-fdec" }
++!
++! Test character declaration with mixed string length and array specification
++!
++! Contributed by Jim MacArthur <jim.macarthur@codethink.co.uk>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++       PROGRAM character_declaration
++          CHARACTER ASPEC_SLENGTH*2 (5) /'01','02','03','04','05'/
++          CHARACTER SLENGTH_ASPEC(5)*2 /'01','02','03','04','05'/
++          if (ASPEC_SLENGTH(3).NE.SLENGTH_ASPEC(3)) STOP 1
++        END
+diff --git a/gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_2.f b/gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_2.f
+new file mode 100644
+index 00000000000..26d2acf01de
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_2.f
+@@ -0,0 +1,13 @@
++! { dg-do run }
++! { dg-options "-fdec-override-kind" }
++!
++! Test character declaration with mixed string length and array specification
++!
++! Contributed by Jim MacArthur <jim.macarthur@codethink.co.uk>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        PROGRAM character_declaration
++          CHARACTER ASPEC_SLENGTH*2 (5) /'01','02','03','04','05'/
++          CHARACTER SLENGTH_ASPEC(5)*2 /'01','02','03','04','05'/
++          if (ASPEC_SLENGTH(3).NE.SLENGTH_ASPEC(3)) STOP 1
++        END
+diff --git a/gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_3.f b/gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_3.f
+new file mode 100644
+index 00000000000..76e4f0bdb93
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_mixed_char_array_declaration_3.f
+@@ -0,0 +1,13 @@
++! { dg-do compile }
++! { dg-options "-fdec-override-kind -fno-dec-override-kind" }
++!
++! Test character declaration with mixed string length and array specification
++!
++! Contributed by Jim MacArthur <jim.macarthur@codethink.co.uk>
++! Modified by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        PROGRAM character_declaration
++          CHARACTER ASPEC_SLENGTH*2 (5) /'01','02','03','04','05'/ ! { dg-error "Syntax error" }
++          CHARACTER SLENGTH_ASPEC(5)*2 /'01','02','03','04','05'/
++          if (ASPEC_SLENGTH(3).NE.SLENGTH_ASPEC(3)) STOP 1 ! { dg-error " Operands of comparison operator" }
++        END
+diff --git a/gcc/testsuite/gfortran.dg/dec_spec_in_variable_1.f b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_1.f
+new file mode 100644
+index 00000000000..edd0f5874b7
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_1.f
+@@ -0,0 +1,31 @@
++! { dg-do run }
++! { dg-options "-fdec" }
++!
++! Test kind specification in variable not in type
++!
++! Contributed by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        program spec_in_var
++          integer*8  ai*1, bi*4, ci
++          real*4 ar*4, br*8, cr
++
++          ai = 1
++          ar = 1.0
++          bi = 2
++          br = 2.0
++          ci = 3
++          cr = 3.0
++
++          if (ai .ne. 1) stop 1
++          if (abs(ar - 1.0) > 1.0D-6) stop 2
++          if (bi .ne. 2) stop 3
++          if (abs(br - 2.0) > 1.0D-6) stop 4
++          if (ci .ne. 3) stop 5
++          if (abs(cr - 3.0) > 1.0D-6) stop 6
++          if (kind(ai) .ne. 1) stop 7
++          if (kind(ar) .ne. 4) stop 8
++          if (kind(bi) .ne. 4) stop 9
++          if (kind(br) .ne. 8) stop 10
++          if (kind(ci) .ne. 8) stop 11
++          if (kind(cr) .ne. 4) stop 12
++        end
+diff --git a/gcc/testsuite/gfortran.dg/dec_spec_in_variable_2.f b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_2.f
+new file mode 100644
+index 00000000000..bfaba584dbb
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_2.f
+@@ -0,0 +1,31 @@
++! { dg-do run }
++! { dg-options "-fdec-override-kind" }
++!
++! Test kind specification in variable not in type
++!
++! Contributed by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        program spec_in_var
++          integer*8  ai*1, bi*4, ci
++          real*4 ar*4, br*8, cr
++
++          ai = 1
++          ar = 1.0
++          bi = 2
++          br = 2.0
++          ci = 3
++          cr = 3.0
++
++          if (ai .ne. 1) stop 1
++          if (abs(ar - 1.0) > 1.0D-6) stop 2
++          if (bi .ne. 2) stop 3
++          if (abs(br - 2.0) > 1.0D-6) stop 4
++          if (ci .ne. 3) stop 5
++          if (abs(cr - 3.0) > 1.0D-6) stop 6
++          if (kind(ai) .ne. 1) stop 7
++          if (kind(ar) .ne. 4) stop 8
++          if (kind(bi) .ne. 4) stop 9
++          if (kind(br) .ne. 8) stop 10
++          if (kind(ci) .ne. 8) stop 11
++          if (kind(cr) .ne. 4) stop 12
++        end
+diff --git a/gcc/testsuite/gfortran.dg/dec_spec_in_variable_3.f b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_3.f
+new file mode 100644
+index 00000000000..5ff434e7466
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_3.f
+@@ -0,0 +1,31 @@
++! { dg-do compile }
++! { dg-options "-fdec -fno-dec-override-kind" }
++!
++! Test kind specification in variable not in type
++!
++! Contributed by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        program spec_in_var
++          integer*8  ai*1, bi*4, ci ! { dg-error "Syntax error" }
++          real*4 ar*4, br*8, cr ! { dg-error "Syntax error" }
++
++          ai = 1
++          ar = 1.0
++          bi = 2
++          br = 2.0
++          ci = 3
++          cr = 3.0
++
++          if (ai .ne. 1) stop 1
++          if (abs(ar - 1.0) > 1.0D-6) stop 2
++          if (bi .ne. 2) stop 3
++          if (abs(br - 2.0) > 1.0D-6) stop 4
++          if (ci .ne. 3) stop 5
++          if (abs(cr - 3.0) > 1.0D-6) stop 6
++          if (kind(ai) .ne. 1) stop 7
++          if (kind(ar) .ne. 4) stop 8
++          if (kind(bi) .ne. 4) stop 9
++          if (kind(br) .ne. 8) stop 10
++          if (kind(ci) .ne. 8) stop 11
++          if (kind(cr) .ne. 4) stop 12
++        end
+diff --git a/gcc/testsuite/gfortran.dg/dec_spec_in_variable_4.f b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_4.f
+new file mode 100644
+index 00000000000..c01980e8b9d
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_4.f
+@@ -0,0 +1,14 @@
++! { dg-do compile }
++!
++! Test kind specification in variable not in type. The per variable
++! kind specification is not enabled so these should fail
++!
++! Contributed by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        program spec_in_var
++          integer a
++          parameter(a=2)
++          integer b*(a) ! { dg-error "Syntax error" }
++          real c*(8)    ! { dg-error "Syntax error" }
++          logical d*1_1 ! { dg-error "Syntax error" }
++        end
+diff --git a/gcc/testsuite/gfortran.dg/dec_spec_in_variable_5.f b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_5.f
+new file mode 100644
+index 00000000000..e2f39da3f4f
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_5.f
+@@ -0,0 +1,19 @@
++! { dg-do run }
++! { dg-options "-fdec-override-kind" }
++!
++! Test kind specification in variable not in type
++!
++! Contributed by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        program spec_in_var
++          integer a
++          parameter(a=2)
++          integer b*(a)
++          real c*(8)
++          logical d*(1_1)
++          character e*(a)
++          if (kind(b).ne.2) stop 1
++          if (kind(c).ne.8) stop 2
++          if (kind(d).ne.1) stop 3
++          if (len(e).ne.2) stop 4
++        end
+diff --git a/gcc/testsuite/gfortran.dg/dec_spec_in_variable_6.f b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_6.f
+new file mode 100644
+index 00000000000..569747874e3
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_6.f
+@@ -0,0 +1,19 @@
++! { dg-do run }
++! { dg-options "-fdec" }
++!
++! Test kind specification in variable not in type
++!
++! Contributed by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        program spec_in_var
++          integer a
++          parameter(a=2)
++          integer b*(a)
++          real c*(8)
++          logical d*(1_1)
++          character e*(a)
++          if (kind(b).ne.2) stop 1
++          if (kind(c).ne.8) stop 2
++          if (kind(d).ne.1) stop 3
++          if (len(e).ne.2) stop 4
++        end
+diff --git a/gcc/testsuite/gfortran.dg/dec_spec_in_variable_7.f b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_7.f
+new file mode 100644
+index 00000000000..b975bfd15c5
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_7.f
+@@ -0,0 +1,15 @@
++! { dg-do compile }
++! { dg-options "-fdec -fno-dec-override-kind" }
++!
++! Test kind specification in variable not in type as the per variable
++! kind specification is not enables these should fail
++!
++! Contributed by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        program spec_in_var
++          integer a
++          parameter(a=2)
++          integer b*(a) ! { dg-error "Syntax error" }
++          real c*(8)    ! { dg-error "Syntax error" }
++          logical d*1_1 ! { dg-error "Syntax error" }
++        end
+diff --git a/gcc/testsuite/gfortran.dg/dec_spec_in_variable_8.f b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_8.f
+new file mode 100644
+index 00000000000..85732e0bd85
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/dec_spec_in_variable_8.f
+@@ -0,0 +1,14 @@
++! { dg-do compile }
++! { dg-options "-fdec" }
++!
++! Check that invalid kind values are rejected.
++!
++! Contributed by Mark Eggleston <mark.eggleston@codethink.com>
++!
++        program spec_in_var
++          integer a
++          parameter(a=3)
++          integer b*(a) ! { dg-error "Kind 3 not supported" }
++          real c*(78)   ! { dg-error "Kind 78 not supported" }
++          logical d*(*) ! { dg-error "Invalid character" }
++        end
+-- 
+2.27.0
+

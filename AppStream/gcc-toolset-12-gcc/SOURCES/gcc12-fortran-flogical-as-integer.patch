@@ -1,0 +1,305 @@
+From 9b45f3063dfd2b893e7963a4828c1b0afecdc68a Mon Sep 17 00:00:00 2001
+From: Mark Eggleston <markeggleston@gcc.gnu.org>
+Date: Fri, 22 Jan 2021 12:41:46 +0000
+Subject: [PATCH 02/10] Convert LOGICAL to INTEGER for arithmetic ops, and vice
+ versa
+
+We allow converting LOGICAL types to INTEGER when doing arithmetic
+operations, and converting INTEGER types to LOGICAL for use in
+boolean operations.
+
+This feature is enabled with the -flogical-as-integer flag.
+
+Note: using this feature will disable bitwise logical operations enabled by
+-fdec.
+---
+ gcc/fortran/lang.opt                          |  4 ++
+ gcc/fortran/resolve.cc                        | 55 ++++++++++++++++++-
+ .../logical_to_integer_and_vice_versa_1.f     | 31 +++++++++++
+ .../logical_to_integer_and_vice_versa_2.f     | 31 +++++++++++
+ .../logical_to_integer_and_vice_versa_3.f     | 33 +++++++++++
+ .../logical_to_integer_and_vice_versa_4.f     | 33 +++++++++++
+ 6 files changed, 186 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_1.f
+ create mode 100644 gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_2.f
+ create mode 100644 gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_3.f
+ create mode 100644 gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_4.f
+
+diff --git a/gcc/fortran/lang.opt b/gcc/fortran/lang.opt
+index 52bd522051e..c4da248f07c 100644
+--- a/gcc/fortran/lang.opt
++++ b/gcc/fortran/lang.opt
+@@ -497,6 +497,10 @@ fdec-static
+ Fortran Var(flag_dec_static)
+ Enable DEC-style STATIC and AUTOMATIC attributes.
+ 
++flogical-as-integer
++Fortran Var(flag_logical_as_integer)
++Convert from integer to logical or logical to integer for arithmetic operations.
++
+ fdefault-double-8
+ Fortran Var(flag_default_double)
+ Set the default double precision kind to an 8 byte wide type.
+diff --git a/gcc/fortran/resolve.cc b/gcc/fortran/resolve.cc
+index c075d0fa0c4..4b90cb59902 100644
+--- a/gcc/fortran/resolve.cc
++++ b/gcc/fortran/resolve.cc
+@@ -3915,7 +3915,6 @@ lookup_uop_fuzzy (const char *op, gfc_symtree *uop)
+   return gfc_closest_fuzzy_match (op, candidates);
+ }
+ 
+-
+ /* Callback finding an impure function as an operand to an .and. or
+    .or.  expression.  Remember the last function warned about to
+    avoid double warnings when recursing.  */
+@@ -3975,6 +3974,22 @@ convert_hollerith_to_character (gfc_expr *e)
+     }
+ }
+ 
++/* If E is a logical, convert it to an integer and issue a warning
++   for the conversion.  */
++
++static void
++convert_integer_to_logical (gfc_expr *e)
++{
++  if (e->ts.type == BT_INTEGER)
++    {
++      /* Convert to LOGICAL */
++      gfc_typespec t;
++      t.type = BT_LOGICAL;
++      t.kind = 1;
++      gfc_convert_type_warn (e, &t, 2, 1);
++    }
++}
++
+ /* Convert to numeric and issue a warning for the conversion.  */
+ 
+ static void
+@@ -3987,6 +4002,22 @@ convert_to_numeric (gfc_expr *a, gfc_expr *b)
+   gfc_convert_type_warn (a, &t, 2, 1);
+ }
+ 
++/* If E is a logical, convert it to an integer and issue a warning
++   for the conversion.  */
++
++static void
++convert_logical_to_integer (gfc_expr *e)
++{
++  if (e->ts.type == BT_LOGICAL)
++    {
++      /* Convert to INTEGER */
++      gfc_typespec t;
++      t.type = BT_INTEGER;
++      t.kind = 1;
++      gfc_convert_type_warn (e, &t, 2, 1);
++    }
++}
++
+ /* Resolve an operator expression node.  This can involve replacing the
+    operation with a user defined function call.  */
+ 
+@@ -4072,6 +4103,12 @@ resolve_operator (gfc_expr *e)
+     case INTRINSIC_TIMES:
+     case INTRINSIC_DIVIDE:
+     case INTRINSIC_POWER:
++      if (flag_logical_as_integer)
++	{
++	  convert_logical_to_integer (op1);
++	  convert_logical_to_integer (op2);
++	}
++
+       if (gfc_numeric_ts (&op1->ts) && gfc_numeric_ts (&op2->ts))
+ 	{
+ 	  gfc_type_convert_binary (e, 1);
+@@ -4108,6 +4145,13 @@ resolve_operator (gfc_expr *e)
+     case INTRINSIC_OR:
+     case INTRINSIC_EQV:
+     case INTRINSIC_NEQV:
++
++      if (flag_logical_as_integer)
++	{
++	  convert_integer_to_logical (op1);
++	  convert_integer_to_logical (op2);
++	}
++
+       if (op1->ts.type == BT_LOGICAL && op2->ts.type == BT_LOGICAL)
+ 	{
+ 	  e->ts.type = BT_LOGICAL;
+@@ -4158,6 +4202,9 @@ resolve_operator (gfc_expr *e)
+ 	  goto simplify_op;
+ 	}
+ 
++      if (flag_logical_as_integer)
++	convert_integer_to_logical (op1);
++
+       if (op1->ts.type == BT_LOGICAL)
+ 	{
+ 	  e->ts.type = BT_LOGICAL;
+@@ -4198,6 +4245,12 @@ resolve_operator (gfc_expr *e)
+ 	  convert_hollerith_to_character (op2);
+ 	}
+ 
++      if (flag_logical_as_integer)
++	{
++	  convert_logical_to_integer (op1);
++	  convert_logical_to_integer (op2);
++	}
++
+       if (op1->ts.type == BT_CHARACTER && op2->ts.type == BT_CHARACTER
+ 	  && op1->ts.kind == op2->ts.kind)
+ 	{
+diff --git a/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_1.f b/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_1.f
+new file mode 100644
+index 00000000000..938a91d9e9a
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_1.f
+@@ -0,0 +1,31 @@
++! { dg-do run }
++! { dg-options "-std=legacy -flogical-as-integer" }
++!
++! Test conversion between logical and integer for logical operators
++!
++! Test case contributed by Jim MacArthur <jim.macarthur@codethink.co.uk>
++! Modified for -flogical-as-integer by Mark Eggleston
++! <mark.eggleston@codethink.com>
++!
++        PROGRAM logical_integer_conversion
++          LOGICAL lpos /.true./
++          INTEGER ineg/0/
++          INTEGER ires
++          LOGICAL lres
++
++          ! Test Logicals converted to Integers
++          if ((lpos.AND.ineg).EQ.1) STOP 3
++          if ((ineg.AND.lpos).NE.0) STOP 4
++          ires = (.true..AND.0)
++          if (ires.NE.0) STOP 5
++          ires = (1.AND..false.)
++          if (ires.EQ.1) STOP 6
++
++          ! Test Integers converted to Logicals
++          if (lpos.EQ.ineg) STOP 7
++          if (ineg.EQ.lpos) STOP 8
++          lres = (.true..EQ.0)
++          if (lres) STOP 9
++          lres = (1.EQ..false.)
++          if (lres) STOP 10
++        END
+diff --git a/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_2.f b/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_2.f
+new file mode 100644
+index 00000000000..9f146202ba5
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_2.f
+@@ -0,0 +1,31 @@
++! { dg-do compile }
++! { dg-options "-std=legacy -flogical-as-integer -fno-logical-as-integer" }
++!
++! Based on logical_to_integer_and_vice_versa_1.f but with option disabled
++! to test for error messages.
++!
++! Test case contributed by by Mark Eggleston <mark.eggleston@codethink.com>
++!
++!
++        PROGRAM logical_integer_conversion
++          LOGICAL lpos /.true./
++          INTEGER ineg/0/
++          INTEGER ires
++          LOGICAL lres
++
++          ! Test Logicals converted to Integers
++          if ((lpos.AND.ineg).EQ.1) STOP 3 ! { dg-error "Operands of logical operator" }
++          if ((ineg.AND.lpos).NE.0) STOP 4 ! { dg-error "Operands of logical operator" }
++          ires = (.true..AND.0) ! { dg-error "Operands of logical operator" }
++          if (ires.NE.0) STOP 5
++          ires = (1.AND..false.) ! { dg-error "Operands of logical operator" }
++          if (ires.EQ.1) STOP 6
++
++          ! Test Integers converted to Logicals
++          if (lpos.EQ.ineg) STOP 7 ! { dg-error "Operands of comparison operator" }
++          if (ineg.EQ.lpos) STOP 8 ! { dg-error "Operands of comparison operator" }
++          lres = (.true..EQ.0) ! { dg-error "Operands of comparison operator" }
++          if (lres) STOP 9
++          lres = (1.EQ..false.) ! { dg-error "Operands of comparison operator" }
++          if (lres) STOP 10
++        END
+diff --git a/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_3.f b/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_3.f
+new file mode 100644
+index 00000000000..446873eb2dc
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_3.f
+@@ -0,0 +1,33 @@
++! { dg-do compile }
++! { dg-options "-std=legacy -flogical-as-integer" }
++!
++! Test conversion between logical and integer for logical operators
++!
++        program test
++          logical f /.false./
++          logical t /.true./
++          real x
++
++          x = 7.7
++          x = x + t*3.0
++          if (abs(x - 10.7).gt.0.00001) stop 1
++          x = x + .false.*5.0
++          if (abs(x - 10.7).gt.0.00001) stop 2
++          x = x - .true.*5.0
++          if (abs(x - 5.7).gt.0.00001) stop 3
++          x = x + t
++          if (abs(x - 6.7).gt.0.00001) stop 4
++          x = x + f
++          if (abs(x - 6.7).gt.0.00001) stop 5
++          x = x - t
++          if (abs(x - 5.7).gt.0.00001) stop 6
++          x = x - f
++          if (abs(x - 5.7).gt.0.00001) stop 7
++          x = x**.true.
++          if (abs(x - 5.7).gt.0.00001) stop 8
++          x = x**.false.
++          if (abs(x - 1.0).gt.0.00001) stop 9
++          x = x/t
++          if (abs(x - 1.0).gt.0.00001) stop 10
++          if ((x/.false.).le.huge(x)) stop 11
++        end
+diff --git a/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_4.f b/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_4.f
+new file mode 100644
+index 00000000000..4301a4988d8
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/logical_to_integer_and_vice_versa_4.f
+@@ -0,0 +1,33 @@
++! { dg-do compile }
++! { dg-options "-std=legacy -flogical-as-integer -fno-logical-as-integer" }
++!
++! Test conversion between logical and integer for logical operators
++!
++        program test
++          logical f /.false./
++          logical t /.true./
++          real x
++
++          x = 7.7
++          x = x + t*3.0 ! { dg-error "Operands of binary numeric" }
++          if (abs(x - 10.7).gt.0.00001) stop 1
++          x = x + .false.*5.0 ! { dg-error "Operands of binary numeric" }
++          if (abs(x - 10.7).gt.0.00001) stop 2
++          x = x - .true.*5.0 ! { dg-error "Operands of binary numeric" }
++          if (abs(x - 5.7).gt.0.00001) stop 3
++          x = x + t ! { dg-error "Operands of binary numeric" }
++          if (abs(x - 6.7).gt.0.00001) stop 4
++          x = x + f ! { dg-error "Operands of binary numeric" }
++          if (abs(x - 6.7).gt.0.00001) stop 5
++          x = x - t ! { dg-error "Operands of binary numeric" }
++          if (abs(x - 5.7).gt.0.00001) stop 6
++          x = x - f ! { dg-error "Operands of binary numeric" }
++          if (abs(x - 5.7).gt.0.00001) stop 7
++          x = x**.true. ! { dg-error "Operands of binary numeric" }
++          if (abs(x - 5.7).gt.0.00001) stop 8
++          x = x**.false. ! { dg-error "Operands of binary numeric" }
++          if (abs(x - 1.0).gt.0.00001) stop 9
++          x = x/t ! { dg-error "Operands of binary numeric" }
++          if (abs(x - 1.0).gt.0.00001) stop 10
++          if ((x/.false.).le.huge(x)) stop 11 ! { dg-error "Operands of binary numeric" }
++        end
+-- 
+2.27.0
+

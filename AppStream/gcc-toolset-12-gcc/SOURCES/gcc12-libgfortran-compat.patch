@@ -1,0 +1,671 @@
+--- libgfortran/Makefile.am.jj	2022-04-28 15:56:10.129745930 +0200
++++ libgfortran/Makefile.am	2022-05-13 13:27:57.237167557 +0200
+@@ -45,6 +45,7 @@ LTLDFLAGS = $(shell $(SHELL) $(top_srcdi
+ 	    $(lt_host_flags)
+ 
+ toolexeclib_LTLIBRARIES = libgfortran.la
++noinst_LTLIBRARIES = libgfortran_nonshared80.la
+ toolexeclib_DATA = libgfortran.spec
+ libgfortran_la_LINK = $(LINK) $(libgfortran_la_LDFLAGS)
+ libgfortran_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
+@@ -1154,6 +1155,91 @@ libgfortran_la_SOURCES = $(prereq_SRC)
+ 
+ endif
+ 
++$(patsubst %.c,%.lo,$(nonshared_generated_C_SRC) $(nonshared)): \
++nonshared-%.lo: $(srcdir)/generated/%.c
++	$(LTCOMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.c,%.o,$(nonshared_generated_C_SRC) $(nonshared)): \
++nonshared-%.o: $(srcdir)/generated/%.c
++	$(COMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.c,%.lo,$(nonshared_intrinsics_C_SRC) $(nonshared)): \
++nonshared-%.lo: $(srcdir)/intrinsics/%.c
++	$(LTCOMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.c,%.o,$(nonshared_intrinsics_C_SRC) $(nonshared)): \
++nonshared-%.o: $(srcdir)/intrinsics/%.c
++	$(COMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.c,%.lo,$(nonshared_runtime_C_SRC) $(nonshared)): \
++nonshared-%.lo: $(srcdir)/runtime/%.c
++	$(LTCOMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.c,%.o,$(nonshared_runtime_C_SRC) $(nonshared)): \
++nonshared-%.o: $(srcdir)/runtime/%.c
++	$(COMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.f90,%.lo,$(nonshared_intrinsics_f90_SRC) $(nonshared)): \
++nonshared-%.lo: $(srcdir)/intrinsics/%.f90
++	$(LTPPFCCOMPILE) -c -o $@ $< -fallow-leading-underscore
++
++$(patsubst %.f90,%.o,$(nonshared_intrinsics_f90_SRC) $(nonshared)): \
++nonshared-%.o: $(srcdir)/intrinsics/%.f90
++	$(PPFCCOMPILE) -c -o $@ $< -fallow-leading-underscore
++
++nonshared_runtime_C_SRC = \
++nonshared-ISO_Fortran_binding.c
++
++nonshared_generated_C_SRC = \
++nonshared-findloc0_i1.c \
++nonshared-findloc0_i2.c \
++nonshared-findloc0_i4.c \
++nonshared-findloc0_i8.c \
++nonshared-findloc0_i16.c \
++nonshared-findloc0_r4.c \
++nonshared-findloc0_r8.c \
++nonshared-findloc0_r10.c \
++nonshared-findloc0_r16.c \
++nonshared-findloc0_c4.c \
++nonshared-findloc0_c8.c \
++nonshared-findloc0_c10.c \
++nonshared-findloc0_c16.c \
++nonshared-findloc0_s1.c \
++nonshared-findloc0_s4.c \
++nonshared-findloc1_i1.c \
++nonshared-findloc1_i2.c \
++nonshared-findloc1_i4.c \
++nonshared-findloc1_i8.c \
++nonshared-findloc1_i16.c \
++nonshared-findloc1_r4.c \
++nonshared-findloc1_r8.c \
++nonshared-findloc1_r10.c \
++nonshared-findloc1_r16.c \
++nonshared-findloc1_c4.c \
++nonshared-findloc1_c8.c \
++nonshared-findloc1_c10.c \
++nonshared-findloc1_c16.c \
++nonshared-findloc1_s1.c \
++nonshared-findloc1_s4.c \
++nonshared-findloc2_s1.c \
++nonshared-findloc2_s4.c
++
++nonshared_intrinsics_C_SRC = \
++nonshared-is_contiguous.c \
++nonshared-trigd.c
++
++nonshared_intrinsics_f90_SRC = \
++nonshared-random_init.f90
++
++libgfortran_nonshared80_la_SOURCES = \
++$(nonshared_runtime_C_SRC) \
++$(nonshared_generated_C_SRC) \
++$(nonshared_intrinsics_C_SRC) \
++$(nonshared_intrinsics_f90_SRC) \
++$(srcdir)/ieee/nonshared-ieee_arithmetic.c \
++$(srcdir)/io/nonshared-transfer.c \
++$(srcdir)/runtime/nonshared-error.c
++
+ I_M4_DEPS=m4/iparm.m4 m4/mtype.m4
+ I_M4_DEPS0=$(I_M4_DEPS) m4/iforeach.m4
+ I_M4_DEPS1=$(I_M4_DEPS) m4/ifunction.m4
+--- libgfortran/ieee/nonshared-ieee_arithmetic.c.jj	2022-05-13 13:22:46.612357695 +0200
++++ libgfortran/ieee/nonshared-ieee_arithmetic.c	2022-05-13 13:22:46.612357695 +0200
+@@ -0,0 +1,64 @@
++/* Helper functions in C for IEEE modules
++   Copyright (C) 2013-2022 Free Software Foundation, Inc.
++   Contributed by Francois-Xavier Coudert <fxcoudert@gcc.gnu.org>
++
++This file is part of the GNU Fortran runtime library (libgfortran).
++
++Libgfortran is free software; you can redistribute it and/or
++modify it under the terms of the GNU General Public
++License as published by the Free Software Foundation; either
++version 3 of the License, or (at your option) any later version.
++
++Libgfortran is distributed in the hope that it will be useful,
++but WITHOUT ANY WARRANTY; without even the implied warranty of
++MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++GNU General Public License for more details.
++
++Under Section 7 of GPL version 3, you are granted additional
++permissions described in the GCC Runtime Library Exception, version
++3.1, as published by the Free Software Foundation.
++
++You should have received a copy of the GNU General Public License and
++a copy of the GCC Runtime Library Exception along with this program;
++see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
++<http://www.gnu.org/licenses/>.  */
++
++#include "libgfortran.h"
++
++GFC_LOGICAL_4
++__ieee_arithmetic_MOD_ieee_support_subnormal_4 (gfc_array_r4 *arg)
++{
++  (void) arg;
++  return 1;
++}
++
++GFC_LOGICAL_4
++__ieee_arithmetic_MOD_ieee_support_subnormal_8 (gfc_array_r8 *arg)
++{
++  (void) arg;
++  return 1;
++}
++
++#ifdef HAVE_GFC_REAL_10
++GFC_LOGICAL_4
++__ieee_arithmetic_MOD_ieee_support_subnormal_10 (gfc_array_r10 *arg)
++{
++  (void) arg;
++  return 1;
++}
++#endif
++
++#ifdef HAVE_GFC_REAL_16
++GFC_LOGICAL_4
++__ieee_arithmetic_MOD_ieee_support_subnormal_16 (gfc_array_r16 *arg)
++{
++  (void) arg;
++  return 1;
++}
++#endif
++
++GFC_LOGICAL_4
++__ieee_arithmetic_MOD_ieee_support_subnormal_noarg (void)
++{
++  return 1;
++}
+--- libgfortran/Makefile.in.jj	2022-04-28 15:56:10.132745889 +0200
++++ libgfortran/Makefile.in	2022-05-13 13:28:10.925982986 +0200
+@@ -217,7 +217,8 @@ am__uninstall_files_from_dir = { \
+ am__installdirs = "$(DESTDIR)$(cafexeclibdir)" \
+ 	"$(DESTDIR)$(toolexeclibdir)" "$(DESTDIR)$(toolexeclibdir)" \
+ 	"$(DESTDIR)$(gfor_cdir)" "$(DESTDIR)$(fincludedir)"
+-LTLIBRARIES = $(cafexeclib_LTLIBRARIES) $(toolexeclib_LTLIBRARIES)
++LTLIBRARIES = $(cafexeclib_LTLIBRARIES) $(noinst_LTLIBRARIES) \
++	$(toolexeclib_LTLIBRARIES)
+ libcaf_single_la_LIBADD =
+ am_libcaf_single_la_OBJECTS = single.lo
+ libcaf_single_la_OBJECTS = $(am_libcaf_single_la_OBJECTS)
+@@ -487,6 +488,36 @@ am__objects_65 = $(am__objects_3) $(am__
+ @onestep_FALSE@am_libgfortran_la_OBJECTS = $(am__objects_65)
+ @onestep_TRUE@am_libgfortran_la_OBJECTS = libgfortran_c.lo
+ libgfortran_la_OBJECTS = $(am_libgfortran_la_OBJECTS)
++libgfortran_nonshared80_la_LIBADD =
++am__objects_66 = nonshared-ISO_Fortran_binding.lo
++am__objects_67 = nonshared-findloc0_i1.lo nonshared-findloc0_i2.lo \
++	nonshared-findloc0_i4.lo nonshared-findloc0_i8.lo \
++	nonshared-findloc0_i16.lo nonshared-findloc0_r4.lo \
++	nonshared-findloc0_r8.lo nonshared-findloc0_r10.lo \
++	nonshared-findloc0_r16.lo nonshared-findloc0_c4.lo \
++	nonshared-findloc0_c8.lo nonshared-findloc0_c10.lo \
++	nonshared-findloc0_c16.lo nonshared-findloc0_s1.lo \
++	nonshared-findloc0_s4.lo nonshared-findloc1_i1.lo \
++	nonshared-findloc1_i2.lo nonshared-findloc1_i4.lo \
++	nonshared-findloc1_i8.lo nonshared-findloc1_i16.lo \
++	nonshared-findloc1_r4.lo nonshared-findloc1_r8.lo \
++	nonshared-findloc1_r10.lo nonshared-findloc1_r16.lo \
++	nonshared-findloc1_c4.lo nonshared-findloc1_c8.lo \
++	nonshared-findloc1_c10.lo nonshared-findloc1_c16.lo \
++	nonshared-findloc1_s1.lo nonshared-findloc1_s4.lo \
++	nonshared-findloc2_s1.lo nonshared-findloc2_s4.lo
++am__objects_68 = nonshared-is_contiguous.lo nonshared-trigd.lo
++am__objects_69 = nonshared-random_init.lo
++am_libgfortran_nonshared80_la_OBJECTS = $(am__objects_66) \
++	$(am__objects_67) $(am__objects_68) $(am__objects_69) \
++	nonshared-ieee_arithmetic.lo nonshared-transfer.lo \
++	nonshared-error.lo
++libgfortran_nonshared80_la_OBJECTS =  \
++	$(am_libgfortran_nonshared80_la_OBJECTS)
++AM_V_lt = $(am__v_lt_@AM_V@)
++am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
++am__v_lt_0 = --silent
++am__v_lt_1 = 
+ AM_V_P = $(am__v_P_@AM_V@)
+ am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
+ am__v_P_0 = false
+@@ -503,10 +534,6 @@ DEFAULT_INCLUDES = -I.@am__isrc@
+ depcomp = $(SHELL) $(top_srcdir)/../depcomp
+ am__depfiles_maybe = depfiles
+ am__mv = mv -f
+-AM_V_lt = $(am__v_lt_@AM_V@)
+-am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
+-am__v_lt_0 = --silent
+-am__v_lt_1 = 
+ PPFCCOMPILE = $(FC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) \
+ 	$(AM_CPPFLAGS) $(CPPFLAGS) $(AM_FCFLAGS) $(FCFLAGS)
+ LTPPFCCOMPILE = $(LIBTOOL) $(AM_V_lt) --tag=FC $(AM_LIBTOOLFLAGS) \
+@@ -550,7 +577,8 @@ AM_V_FC = $(am__v_FC_@AM_V@)
+ am__v_FC_ = $(am__v_FC_@AM_DEFAULT_V@)
+ am__v_FC_0 = @echo "  FC      " $@;
+ am__v_FC_1 = 
+-SOURCES = $(libcaf_single_la_SOURCES) $(libgfortran_la_SOURCES)
++SOURCES = $(libcaf_single_la_SOURCES) $(libgfortran_la_SOURCES) \
++	$(libgfortran_nonshared80_la_SOURCES)
+ am__can_run_installinfo = \
+   case $$AM_UPDATE_INFO_DIR in \
+     n|no|NO) false;; \
+@@ -754,6 +782,7 @@ LTLDFLAGS = $(shell $(SHELL) $(top_srcdi
+ 	    $(lt_host_flags)
+ 
+ toolexeclib_LTLIBRARIES = libgfortran.la
++noinst_LTLIBRARIES = libgfortran_nonshared80.la
+ toolexeclib_DATA = libgfortran.spec
+ libgfortran_la_LINK = $(LINK) $(libgfortran_la_LDFLAGS)
+ libgfortran_la_LDFLAGS = -version-info `grep -v '^\#' $(srcdir)/libtool-version` \
+@@ -1670,6 +1699,59 @@ prereq_SRC = $(gfor_src) $(gfor_built_sr
+ #libgfortran_F.lo: 
+ #	$(LTPPFCCOMPILE) -c -o $@ $^ -combine
+ @onestep_TRUE@libgfortran_la_SOURCES = libgfortran_c.c $(filter-out %.c,$(prereq_SRC))
++nonshared_runtime_C_SRC = \
++nonshared-ISO_Fortran_binding.c
++
++nonshared_generated_C_SRC = \
++nonshared-findloc0_i1.c \
++nonshared-findloc0_i2.c \
++nonshared-findloc0_i4.c \
++nonshared-findloc0_i8.c \
++nonshared-findloc0_i16.c \
++nonshared-findloc0_r4.c \
++nonshared-findloc0_r8.c \
++nonshared-findloc0_r10.c \
++nonshared-findloc0_r16.c \
++nonshared-findloc0_c4.c \
++nonshared-findloc0_c8.c \
++nonshared-findloc0_c10.c \
++nonshared-findloc0_c16.c \
++nonshared-findloc0_s1.c \
++nonshared-findloc0_s4.c \
++nonshared-findloc1_i1.c \
++nonshared-findloc1_i2.c \
++nonshared-findloc1_i4.c \
++nonshared-findloc1_i8.c \
++nonshared-findloc1_i16.c \
++nonshared-findloc1_r4.c \
++nonshared-findloc1_r8.c \
++nonshared-findloc1_r10.c \
++nonshared-findloc1_r16.c \
++nonshared-findloc1_c4.c \
++nonshared-findloc1_c8.c \
++nonshared-findloc1_c10.c \
++nonshared-findloc1_c16.c \
++nonshared-findloc1_s1.c \
++nonshared-findloc1_s4.c \
++nonshared-findloc2_s1.c \
++nonshared-findloc2_s4.c
++
++nonshared_intrinsics_C_SRC = \
++nonshared-is_contiguous.c \
++nonshared-trigd.c
++
++nonshared_intrinsics_f90_SRC = \
++nonshared-random_init.f90
++
++libgfortran_nonshared80_la_SOURCES = \
++$(nonshared_runtime_C_SRC) \
++$(nonshared_generated_C_SRC) \
++$(nonshared_intrinsics_C_SRC) \
++$(nonshared_intrinsics_f90_SRC) \
++$(srcdir)/ieee/nonshared-ieee_arithmetic.c \
++$(srcdir)/io/nonshared-transfer.c \
++$(srcdir)/runtime/nonshared-error.c
++
+ I_M4_DEPS = m4/iparm.m4 m4/mtype.m4
+ I_M4_DEPS0 = $(I_M4_DEPS) m4/iforeach.m4
+ I_M4_DEPS1 = $(I_M4_DEPS) m4/ifunction.m4
+@@ -1780,6 +1862,17 @@ clean-cafexeclibLTLIBRARIES:
+ 	  rm -f $${locs}; \
+ 	}
+ 
++clean-noinstLTLIBRARIES:
++	-test -z "$(noinst_LTLIBRARIES)" || rm -f $(noinst_LTLIBRARIES)
++	@list='$(noinst_LTLIBRARIES)'; \
++	locs=`for p in $$list; do echo $$p; done | \
++	      sed 's|^[^/]*$$|.|; s|/[^/]*$$||; s|$$|/so_locations|' | \
++	      sort -u`; \
++	test -z "$$locs" || { \
++	  echo rm -f $${locs}; \
++	  rm -f $${locs}; \
++	}
++
+ install-toolexeclibLTLIBRARIES: $(toolexeclib_LTLIBRARIES)
+ 	@$(NORMAL_INSTALL)
+ 	@list='$(toolexeclib_LTLIBRARIES)'; test -n "$(toolexeclibdir)" || list=; \
+@@ -1821,6 +1914,9 @@ libcaf_single.la: $(libcaf_single_la_OBJ
+ libgfortran.la: $(libgfortran_la_OBJECTS) $(libgfortran_la_DEPENDENCIES) $(EXTRA_libgfortran_la_DEPENDENCIES) 
+ 	$(AM_V_GEN)$(libgfortran_la_LINK) -rpath $(toolexeclibdir) $(libgfortran_la_OBJECTS) $(libgfortran_la_LIBADD) $(LIBS)
+ 
++libgfortran_nonshared80.la: $(libgfortran_nonshared80_la_OBJECTS) $(libgfortran_nonshared80_la_DEPENDENCIES) $(EXTRA_libgfortran_nonshared80_la_DEPENDENCIES) 
++	$(AM_V_FCLD)$(FCLINK)  $(libgfortran_nonshared80_la_OBJECTS) $(libgfortran_nonshared80_la_LIBADD) $(LIBS)
++
+ mostlyclean-compile:
+ 	-rm -f *.$(OBJEXT)
+ 
+@@ -2272,6 +2368,44 @@ distclean-compile:
+ @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/minval_r8.Plo@am__quote@
+ @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/move_alloc.Plo@am__quote@
+ @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/mvbits.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-ISO_Fortran_binding.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-error.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_c10.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_c16.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_c4.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_c8.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_i1.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_i16.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_i2.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_i4.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_i8.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_r10.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_r16.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_r4.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_r8.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_s1.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc0_s4.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_c10.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_c16.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_c4.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_c8.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_i1.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_i16.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_i2.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_i4.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_i8.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_r10.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_r16.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_r4.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_r8.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_s1.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc1_s4.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc2_s1.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-findloc2_s4.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-ieee_arithmetic.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-is_contiguous.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-transfer.Plo@am__quote@
++@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nonshared-trigd.Plo@am__quote@
+ @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/norm2_r10.Plo@am__quote@
+ @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/norm2_r16.Plo@am__quote@
+ @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/norm2_r17.Plo@am__quote@
+@@ -7316,6 +7450,27 @@ ieee_helper.lo: ieee/ieee_helper.c
+ @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+ @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o ieee_helper.lo `test -f 'ieee/ieee_helper.c' || echo '$(srcdir)/'`ieee/ieee_helper.c
+ 
++nonshared-ieee_arithmetic.lo: $(srcdir)/ieee/nonshared-ieee_arithmetic.c
++@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT nonshared-ieee_arithmetic.lo -MD -MP -MF $(DEPDIR)/nonshared-ieee_arithmetic.Tpo -c -o nonshared-ieee_arithmetic.lo `test -f '$(srcdir)/ieee/nonshared-ieee_arithmetic.c' || echo '$(srcdir)/'`$(srcdir)/ieee/nonshared-ieee_arithmetic.c
++@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/nonshared-ieee_arithmetic.Tpo $(DEPDIR)/nonshared-ieee_arithmetic.Plo
++@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$(srcdir)/ieee/nonshared-ieee_arithmetic.c' object='nonshared-ieee_arithmetic.lo' libtool=yes @AMDEPBACKSLASH@
++@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
++@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o nonshared-ieee_arithmetic.lo `test -f '$(srcdir)/ieee/nonshared-ieee_arithmetic.c' || echo '$(srcdir)/'`$(srcdir)/ieee/nonshared-ieee_arithmetic.c
++
++nonshared-transfer.lo: $(srcdir)/io/nonshared-transfer.c
++@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT nonshared-transfer.lo -MD -MP -MF $(DEPDIR)/nonshared-transfer.Tpo -c -o nonshared-transfer.lo `test -f '$(srcdir)/io/nonshared-transfer.c' || echo '$(srcdir)/'`$(srcdir)/io/nonshared-transfer.c
++@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/nonshared-transfer.Tpo $(DEPDIR)/nonshared-transfer.Plo
++@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$(srcdir)/io/nonshared-transfer.c' object='nonshared-transfer.lo' libtool=yes @AMDEPBACKSLASH@
++@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
++@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o nonshared-transfer.lo `test -f '$(srcdir)/io/nonshared-transfer.c' || echo '$(srcdir)/'`$(srcdir)/io/nonshared-transfer.c
++
++nonshared-error.lo: $(srcdir)/runtime/nonshared-error.c
++@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -MT nonshared-error.lo -MD -MP -MF $(DEPDIR)/nonshared-error.Tpo -c -o nonshared-error.lo `test -f '$(srcdir)/runtime/nonshared-error.c' || echo '$(srcdir)/'`$(srcdir)/runtime/nonshared-error.c
++@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/nonshared-error.Tpo $(DEPDIR)/nonshared-error.Plo
++@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='$(srcdir)/runtime/nonshared-error.c' object='nonshared-error.lo' libtool=yes @AMDEPBACKSLASH@
++@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
++@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS) -c -o nonshared-error.lo `test -f '$(srcdir)/runtime/nonshared-error.c' || echo '$(srcdir)/'`$(srcdir)/runtime/nonshared-error.c
++
+ .f90.o:
+ 	$(AM_V_FC)$(FCCOMPILE) -c -o $@ $<
+ 
+@@ -7510,7 +7665,8 @@ maintainer-clean-generic:
+ clean: clean-am
+ 
+ clean-am: clean-cafexeclibLTLIBRARIES clean-generic clean-libtool \
+-	clean-local clean-toolexeclibLTLIBRARIES mostlyclean-am
++	clean-local clean-noinstLTLIBRARIES \
++	clean-toolexeclibLTLIBRARIES mostlyclean-am
+ 
+ distclean: distclean-am
+ 	-rm -f $(am__CONFIG_DISTCLEAN_FILES)
+@@ -7590,14 +7746,15 @@ uninstall-am: uninstall-cafexeclibLTLIBR
+ .PHONY: CTAGS GTAGS TAGS all all-am all-local am--refresh check \
+ 	check-am clean clean-cafexeclibLTLIBRARIES clean-cscope \
+ 	clean-generic clean-libtool clean-local \
+-	clean-toolexeclibLTLIBRARIES cscope cscopelist-am ctags \
+-	ctags-am distclean distclean-compile distclean-generic \
+-	distclean-hdr distclean-libtool distclean-local distclean-tags \
+-	dvi dvi-am html html-am info info-am install install-am \
+-	install-cafexeclibLTLIBRARIES install-data install-data-am \
+-	install-dvi install-dvi-am install-exec install-exec-am \
+-	install-exec-local install-gfor_cHEADERS install-html \
+-	install-html-am install-info install-info-am install-man \
++	clean-noinstLTLIBRARIES clean-toolexeclibLTLIBRARIES cscope \
++	cscopelist-am ctags ctags-am distclean distclean-compile \
++	distclean-generic distclean-hdr distclean-libtool \
++	distclean-local distclean-tags dvi dvi-am html html-am info \
++	info-am install install-am install-cafexeclibLTLIBRARIES \
++	install-data install-data-am install-dvi install-dvi-am \
++	install-exec install-exec-am install-exec-local \
++	install-gfor_cHEADERS install-html install-html-am \
++	install-info install-info-am install-man \
+ 	install-nodist_fincludeHEADERS install-pdf install-pdf-am \
+ 	install-ps install-ps-am install-strip install-toolexeclibDATA \
+ 	install-toolexeclibLTLIBRARIES installcheck installcheck-am \
+@@ -7673,6 +7830,38 @@ ieee_arithmetic.mod: ieee_arithmetic.lo
+ @onestep_TRUE@libgfortran_c.lo: $(filter %.c,$(prereq_SRC))
+ @onestep_TRUE@	$(LTCOMPILE) -c -o $@ $^ -combine
+ 
++$(patsubst %.c,%.lo,$(nonshared_generated_C_SRC) $(nonshared)): \
++nonshared-%.lo: $(srcdir)/generated/%.c
++	$(LTCOMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.c,%.o,$(nonshared_generated_C_SRC) $(nonshared)): \
++nonshared-%.o: $(srcdir)/generated/%.c
++	$(COMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.c,%.lo,$(nonshared_intrinsics_C_SRC) $(nonshared)): \
++nonshared-%.lo: $(srcdir)/intrinsics/%.c
++	$(LTCOMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.c,%.o,$(nonshared_intrinsics_C_SRC) $(nonshared)): \
++nonshared-%.o: $(srcdir)/intrinsics/%.c
++	$(COMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.c,%.lo,$(nonshared_runtime_C_SRC) $(nonshared)): \
++nonshared-%.lo: $(srcdir)/runtime/%.c
++	$(LTCOMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.c,%.o,$(nonshared_runtime_C_SRC) $(nonshared)): \
++nonshared-%.o: $(srcdir)/runtime/%.c
++	$(COMPILE) -c -o $@ $< -DLIBGFORTRAN_NONSHARED
++
++$(patsubst %.f90,%.lo,$(nonshared_intrinsics_f90_SRC) $(nonshared)): \
++nonshared-%.lo: $(srcdir)/intrinsics/%.f90
++	$(LTPPFCCOMPILE) -c -o $@ $< -fallow-leading-underscore
++
++$(patsubst %.f90,%.o,$(nonshared_intrinsics_f90_SRC) $(nonshared)): \
++nonshared-%.o: $(srcdir)/intrinsics/%.f90
++	$(PPFCCOMPILE) -c -o $@ $< -fallow-leading-underscore
++
+ kinds.h: $(srcdir)/mk-kinds-h.sh
+ 	$(SHELL) $(srcdir)/mk-kinds-h.sh '@LIBGOMP_CHECKED_INT_KINDS@' '@LIBGOMP_CHECKED_REAL_KINDS@' '$(FCCOMPILE)' > $@ || rm $@
+ 
+--- libgfortran/libgfortran.h.jj	2022-04-28 15:56:10.221744660 +0200
++++ libgfortran/libgfortran.h	2022-05-13 13:22:46.652357155 +0200
+@@ -216,7 +216,7 @@ extern int __mingw_snprintf (char *, siz
+ # define internal_proto(x)	sym_rename(x, IPREFIX(x))
+ #endif
+ 
+-#if defined(HAVE_ATTRIBUTE_VISIBILITY) && defined(HAVE_ATTRIBUTE_ALIAS)
++#if defined(HAVE_ATTRIBUTE_VISIBILITY) && defined(HAVE_ATTRIBUTE_ALIAS) && !defined(LIBGFORTRAN_NONSHARED)
+ # define export_proto(x)	sym_rename(x, PREFIX(x))
+ # define export_proto_np(x)	extern char swallow_semicolon
+ # define iexport_proto(x)	internal_proto(x)
+@@ -291,6 +291,10 @@ typedef GFC_UINTEGER_4 gfc_char4_t;
+    simply equal to the kind parameter itself.  */
+ #define GFC_SIZE_OF_CHAR_KIND(kind) (kind)
+ 
++#ifdef LIBGFORTRAN_NONSHARED
++#define big_endian (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
++#endif
++
+ #define GFOR_POINTER_TO_L1(p, kind) \
+   ((__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__ ? 1: 0) * (kind - 1) + (GFC_LOGICAL_1 *)(p))
+ 
+@@ -2020,4 +2024,63 @@ extern int __snprintfieee128 (char *, si
+ #define HAVE_GFC_UINTEGER_1 1
+ #define HAVE_GFC_UINTEGER_4 1
+ 
++#ifdef LIBGFORTRAN_NONSHARED
++#include <stdlib.h>
++#include <string.h>              
++#include <errno.h>
++
++#define internal_malloc_size nonshared_internal_malloc_size
++#define xmalloc nonshared_internal_xmalloc
++#define xmallocarray nonshared_internal_xmallocarray
++#define reshape_packed nonshared_reshape_packed
++static inline __attribute__((__always_inline__, __unused__))
++void *
++internal_malloc_size (size_t size)
++{
++  void *p;
++
++  if (size == 0)
++    return NULL;
++
++  p = (void *) malloc (size);
++  if (p == NULL)
++    os_error ("Memory allocation failed");
++  return p;
++}
++
++static inline __attribute__((__always_inline__, __unused__))
++void *
++xmalloc (size_t size)
++{
++  return internal_malloc_size (size ? size : 1);
++}
++
++static inline __attribute__((__always_inline__, __unused__))
++void *
++xmallocarray (size_t nmemb, size_t size)
++{
++  if (!nmemb || !size)
++    size = nmemb = 1;
++  else if (__builtin_expect ((nmemb | size)
++			     >= (((size_t) 1) << (__CHAR_BIT__
++						  * sizeof (size_t) / 2)), 0)
++	   && nmemb > __SIZE_MAX__ / size)
++    {
++      errno = ENOMEM;
++      os_error ("Integer overflow in xmallocarray");
++    }
++
++  return internal_malloc_size (nmemb * size);
++}
++
++static inline __attribute__((__always_inline__, __unused__))
++#include "intrinsics/reshape_packed.c"
++
++struct no_bounds_check { int bounds_check; };
++#define compile_options ((struct no_bounds_check) { .bounds_check = 0 })
++
++#define internal_error(x, y...) runtime_error (y)
++
++#endif
++
+ #endif  /* LIBGFOR_H  */
+--- libgfortran/runtime/nonshared-error.c.jj	2022-05-13 13:22:46.653357141 +0200
++++ libgfortran/runtime/nonshared-error.c	2022-05-13 13:22:46.653357141 +0200
+@@ -0,0 +1,56 @@
++/* Copyright (C) 2020-2022 Free Software Foundation, Inc.
++
++This file is part of the GNU Fortran runtime library (libgfortran).
++
++Libgfortran is free software; you can redistribute it and/or modify
++it under the terms of the GNU General Public License as published by
++the Free Software Foundation; either version 3, or (at your option)
++any later version.
++
++Libgfortran is distributed in the hope that it will be useful,
++but WITHOUT ANY WARRANTY; without even the implied warranty of
++MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++GNU General Public License for more details.
++
++Under Section 7 of GPL version 3, you are granted additional
++permissions described in the GCC Runtime Library Exception, version
++3.1, as published by the Free Software Foundation.
++
++You should have received a copy of the GNU General Public License and
++a copy of the GCC Runtime Library Exception along with this program;
++see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
++<http://www.gnu.org/licenses/>.  */
++
++
++#define LIBGFORTRAN_NONSHARED
++#include "libgfortran.h"
++#include "io.h"
++#include "async.h"
++
++#include <string.h>
++#include <stdio.h>
++
++/* Improved version of os_error with a printf style format string and
++   a locus.  */
++
++void
++os_error_at (const char *where, const char *message, ...)
++{
++  char buf[4096];
++  size_t len = strlen (where);
++  int written;
++  va_list ap;
++
++  if (len >= 2048)
++    os_error ("Unknown error");
++  memcpy (buf, where, len);
++  memcpy (buf + len, ": ", 2);
++  va_start (ap, message);
++  written = vsnprintf (buf + len + 2, 4095 - len - 2, message, ap);
++  va_end (ap);
++  if (written < 0)
++    written = 0;
++  buf[len + 2 + written] = '\0';
++  os_error (buf);
++}
++iexport(os_error_at);
+--- libgfortran/io/nonshared-transfer.c.jj	2022-05-13 13:22:46.653357141 +0200
++++ libgfortran/io/nonshared-transfer.c	2022-05-13 13:22:46.653357141 +0200
+@@ -0,0 +1,42 @@
++/* Copyright (C) 2002-2022 Free Software Foundation, Inc.
++   Contributed by Andy Vaught
++   Namelist transfer functions contributed by Paul Thomas
++   F2003 I/O support contributed by Jerry DeLisle
++
++This file is part of the GNU Fortran runtime library (libgfortran).
++
++Libgfortran is free software; you can redistribute it and/or modify
++it under the terms of the GNU General Public License as published by
++the Free Software Foundation; either version 3, or (at your option)
++any later version.
++
++Libgfortran is distributed in the hope that it will be useful,
++but WITHOUT ANY WARRANTY; without even the implied warranty of
++MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++GNU General Public License for more details.
++
++Under Section 7 of GPL version 3, you are granted additional
++permissions described in the GCC Runtime Library Exception, version
++3.1, as published by the Free Software Foundation.
++
++You should have received a copy of the GNU General Public License and
++a copy of the GCC Runtime Library Exception along with this program;
++see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
++<http://www.gnu.org/licenses/>.  */
++
++
++/* transfer.c -- Top level handling of data transfer statements.  */
++
++#include "io.h"
++#include "fbuf.h"
++#include "format.h"
++#include "unix.h"
++#include "async.h"
++#include <string.h>
++#include <errno.h>
++
++void
++st_wait_async (st_parameter_wait *wtp)
++{
++  (void) wtp;
++}

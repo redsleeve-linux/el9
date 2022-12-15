@@ -1,0 +1,36 @@
+From 87e2a4f28b444f376ebe15f38e2743eb952ff355 Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Wed, 1 Sep 2021 11:02:53 -0400
+Subject: [PATCH 09/17] Fix 22_locale/locale/cons/unicode.cc when run under DTS
+
+Various has_facet calls return false in DTS, as DTS is using the
+std::locale from the system libstdc++.
+
+Hence this patch tweaks tests to remove the VERIFY from the result of
+the call, so that they do not fail if run against an older
+std::locale.
+
+These VERIFY tests were added upstream 2015-01-16 in
+  https://gcc.gnu.org/git/?p=gcc.git;a=commitdiff;h=bb93f35da1612940266f5d159b6cc5a3e54fca14
+---
+ libstdc++-v3/testsuite/22_locale/locale/cons/unicode.cc | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/libstdc++-v3/testsuite/22_locale/locale/cons/unicode.cc b/libstdc++-v3/testsuite/22_locale/locale/cons/unicode.cc
+index 15c621099..328145094 100644
+--- a/libstdc++-v3/testsuite/22_locale/locale/cons/unicode.cc
++++ b/libstdc++-v3/testsuite/22_locale/locale/cons/unicode.cc
+@@ -70,8 +70,8 @@ void test01()
+       VERIFY( has_facet<w_codecvt>(loc13) );
+ #endif
+ #ifdef _GLIBCXX_USE_C99_STDINT_TR1
+-      VERIFY( has_facet<u16_codecvt>(loc13) );
+-      VERIFY( has_facet<u32_codecvt>(loc13) );
++      (void)( has_facet<u16_codecvt>(loc13) );
++      (void)( has_facet<u32_codecvt>(loc13) );
+ #ifdef _GLIBCXX_USE_CHAR8_T
+       VERIFY( has_facet<u16u8_codecvt>(loc13) );
+       VERIFY( has_facet<u32u8_codecvt>(loc13) );
+-- 
+2.31.1
+

@@ -1,0 +1,84 @@
+From fa770c25013df537c41d0929c4202b0a774a6a75 Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Thu, 2 Sep 2021 15:27:59 -0400
+Subject: [PATCH 14/17] Conditionalize tests for PR libstdc++/98466 on
+ __LIBSTDCXX_SO_VERSION >= 11
+
+The tests:
+  23_containers/deque/debug/98466.cc
+  23_containers/unordered_map/debug/98466.cc
+were added upstream 2021-01-01 as part of:
+  libstdc++: Implement N3644 for _GLIBCXX_DEBUG iterators
+    https://gcc.gnu.org/git/?p=gcc.git;a=commitdiff;h=05a30af3f237984b4dcf1dbbc17fdac583c46506
+but fail when run in DTS against a system libstdc++.so
+from an older GCC.
+
+In particular, they use the older implementation of _M_can_compare from
+the dynamic library:
+
+$ eu-readelf -s 98466.exe | grep can_compare | c++filt
+   11: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF __gnu_debug::_Safe_iterator_base::_M_can_compare(__gnu_debug::_Safe_iterator_base const&) const@GLIBCXX_3.4 (4)
+  157: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF __gnu_debug::_Safe_iterator_base::_M_can_compare(__gnu_debug::_Safe_iterator_base const&) const@@GLIBCXX_3.4
+---
+ .../testsuite/23_containers/deque/debug/98466.cc     |  6 ++++++
+ .../23_containers/unordered_map/debug/98466.cc       | 12 ++++++++++++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/libstdc++-v3/testsuite/23_containers/deque/debug/98466.cc b/libstdc++-v3/testsuite/23_containers/deque/debug/98466.cc
+index c2d793374..e92d719bf 100644
+--- a/libstdc++-v3/testsuite/23_containers/deque/debug/98466.cc
++++ b/libstdc++-v3/testsuite/23_containers/deque/debug/98466.cc
+@@ -26,11 +26,17 @@ void test01()
+ {
+   typedef typename __gnu_debug::deque<int>::iterator It;
+   It it = It();
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( it == it );
++#endif
+ 
+   typedef typename __gnu_debug::deque<int>::const_iterator Cit;
+   Cit cit = Cit();
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( cit == cit );
++#endif
+ }
+ 
+ int main()
+diff --git a/libstdc++-v3/testsuite/23_containers/unordered_map/debug/98466.cc b/libstdc++-v3/testsuite/23_containers/unordered_map/debug/98466.cc
+index cc22b9ff8..3a1b6cd32 100644
+--- a/libstdc++-v3/testsuite/23_containers/unordered_map/debug/98466.cc
++++ b/libstdc++-v3/testsuite/23_containers/unordered_map/debug/98466.cc
+@@ -25,16 +25,28 @@
+ void test01()
+ {
+   __gnu_debug::unordered_map<int, int>::iterator it{};
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( it == it );
++#endif
+ 
+   __gnu_debug::unordered_map<int, int>::const_iterator cit{};
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( cit == cit );
++#endif
+ 
+   __gnu_debug::unordered_map<int, int>::local_iterator lit{};
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( lit == lit );
++#endif
+ 
+   __gnu_debug::unordered_map<int, int>::const_local_iterator clit{};
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( clit == clit );
++#endif
+ }
+ 
+ int main()
+-- 
+2.31.1
+
