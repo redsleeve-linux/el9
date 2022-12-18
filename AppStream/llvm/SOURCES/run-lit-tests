@@ -1,0 +1,59 @@
+#!/bin/bash
+
+usage() {
+    echo "usage: `basename $0` [OPTIONS]"
+    echo "  --threads NUM         The number of threads to use for running tests."
+    echo "  --multilib-arch ARCH  Use this option to test 32-bit libs/binaries on"
+    echo "                        64-bit hosts."
+}
+
+threads_arg=''
+
+while [ $# -gt 0 ]; do
+    case $1 in
+        --threads)
+            shift
+            threads_arg="--threads $1"
+            ;;
+	--multilib-arch)
+            shift
+	    ARCH=$1
+	    ;;
+        * )
+            echo "unknown option: $1"
+            echo ""
+            usage
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+set -xe
+
+if [ -z "$ARCH" ]; then
+    ARCH=`rpm --eval '%_arch'`
+fi
+
+case $ARCH in
+    arm)
+	;&
+    i686)
+        LIB_DIR="/usr/lib/"
+        ;;
+    *)
+        LIB_DIR="/usr/lib64/"
+        ;;
+esac
+
+cd $(mktemp -d)
+ln -s /usr/include include
+ln -s /usr/share/llvm/src/docs docs
+tar -xzf /usr/share/llvm/src/test.tar.gz
+ln -s /usr/share/llvm/src/$ARCH.site.cfg.py test/lit.site.cfg.py
+ln -s /usr/share/llvm/src/$ARCH.Unit.site.cfg.py test/Unit/lit.site.cfg.py
+lit -v -s $threads_arg test \
+	-Dllvm_obj_root=`pwd` \
+	-Dllvm_test_root=`pwd`/test \
+	-Dllvm_unittest_bindir=$LIB_DIR/llvm \
+	-Dllvm_shlib_dir=$LIB_DIR
