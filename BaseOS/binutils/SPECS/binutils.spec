@@ -39,7 +39,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?name_cross}%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 24%{?dist}
+Release: 24%{?dist}.redsleeve
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -428,6 +428,7 @@ Patch56: binutils-s390x-static-PIE.patch
 # Lifetime: Fixed in 2.36
 Patch57: binutils-undefined-ref-to-sym.patch
 
+Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 Provides: bundled(libiberty)
@@ -1021,6 +1022,9 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
+* Mon Nov 28 2022 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-24.redsleeve
+- minor adjustments for armv6
+
 * Mon Jun 13 2022 Nick Clifton  <nickc@redhat.com> - 2.35.2-24
 - Fix bogus linker warnings about references to undefined symbols.  (#2095926)
 

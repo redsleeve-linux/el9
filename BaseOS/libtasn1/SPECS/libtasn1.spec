@@ -1,7 +1,7 @@
 Summary:	The ASN.1 library used in GNUTLS
 Name:		libtasn1
 Version:	4.16.0
-Release:	7%{?dist}.redsleeve
+Release:	8%{?dist}.redsleeve
 
 # The libtasn1 library is LGPLv2+, utilities are GPLv3+
 License:	GPLv3+ and LGPLv2+
@@ -11,6 +11,7 @@ Source1:	http://ftp.gnu.org/gnu/libtasn1/%name-%version.tar.gz.sig
 Source2:	gpgkey-1F42418905D8206AA754CCDC29EE58B996865171.gpg
 Patch1:		libtasn1-3.4-rpath.patch
 Patch200:	libtasn1-4.16-coverity.patch
+Patch300:	libtasn1-4.19-CVE-2021-46848.patch
 
 BuildRequires:	gnupg2
 BuildRequires:	gcc
@@ -57,6 +58,7 @@ gpgv2 --keyring %{SOURCE2} %{SOURCE1} %{SOURCE0}
 
 %patch1 -p1 -b .rpath
 %patch200 -p1 -b .coverity
+%patch300 -p1 -b .CVE-2021-46848
 
 %build
 autoreconf -v -f --install
@@ -95,8 +97,11 @@ make check
 
 
 %changelog
-* Thu Jul 21 2022 Jacco Ligthart <jacco@redsleeve.org> - .4.16.0-7redsleeve
+* Sat Feb 04 2023 Jacco Ligthart <jacco@redsleeve.org> - .4.16.0-8.redsleeve
 - no valgrind on arm
+
+* Wed Nov 30 2022 Simo Sorce <simo@redhat.com> - 4.16.0-9
+- Resolves: rhbz#2140602
 
 * Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com> - 4.16.0-7
 - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags

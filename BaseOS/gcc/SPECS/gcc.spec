@@ -116,7 +116,7 @@
 Summary: Various compilers (C, C++, Objective-C, ...)
 Name: gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.1%{?dist}
+Release: %{gcc_release}.1%{?dist}.redsleeve
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -1111,6 +1111,9 @@ CONFIGURE_OPTS="\
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
+%endif
+%ifarch armv6hl
+	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch mips mipsel
 	--with-arch=mips32r2 --with-fp-32=xx \
@@ -3274,6 +3277,9 @@ end
 %{ANNOBIN_GCC_PLUGIN_DIR}/gcc-annobin.so.0.0.0
 
 %changelog
+* Mon Nov 28 2022 Jacco Ligthart <jacco@redsleeve.org> 11.3.1-2.1.redsleeve
+- added config options for armv6hl
+
 * Tue Jul 12 2022 Marek Polacek <polacek@redhat.com> 11.3.1-2.1
 - fix handling of invalid ranges in std::regex (#2106262)
 
