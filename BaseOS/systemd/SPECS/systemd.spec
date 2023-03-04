@@ -21,7 +21,7 @@
 Name:           systemd
 Url:            https://www.freedesktop.org/wiki/Software/systemd
 Version:        250
-Release:        12%{?dist}.1.redsleeve
+Release:        12%{?dist}.3
 # For a breakdown of the licensing, see README
 License:        LGPLv2+ and MIT and GPLv2+
 Summary:        System and Service Manager
@@ -430,6 +430,17 @@ Patch0349: 0349-test-do-not-restart-getty-tty2-automatically.patch
 Patch0350: 0350-tests-add-test-for-StopIdleSessionSec-option.patch
 Patch0351: 0351-logind-schedule-idle-check-full-interval-from-now-if.patch
 Patch0352: 0352-time-util-fix-buffer-over-run.patch
+Patch0353: 0353-coredump-adjust-whitespace.patch
+Patch0354: 0354-basic-add-STRERROR-wrapper-for-strerror_r.patch
+Patch0355: 0355-coredump-do-not-allow-user-to-access-coredumps-with-.patch
+Patch0356: 0356-Packit-build-SRPMs-in-Copr.patch
+Patch0357: 0357-test-support-non-summer-time.patch
+Patch0358: 0358-test-bump-the-base-VM-memory-to-768M.patch
+Patch0359: 0359-test-don-t-overwrite-existing-QEMU_OPTIONS.patch
+Patch0360: 0360-shared-json-allow-json_variant_dump-to-return-an-err.patch
+Patch0361: 0361-shared-json-use-different-return-code-for-empty-inpu.patch
+Patch0362: 0362-coredump-avoid-deadlock-when-passing-processed-backt.patch
+Patch0363: 0363-test-disable-flaky-subtests-that-require-udevadm-wai.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -481,7 +492,7 @@ BuildRequires:  libseccomp-devel
 BuildRequires:  meson >= 0.43
 BuildRequires:  gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires:  valgrind-devel
+BuildRequires:  valgrind-devel
 BuildRequires:  pkgconfig(bash-completion)
 BuildRequires:  pkgconfig(tss2-esys)
 BuildRequires:  pkgconfig(tss2-rc)
@@ -1211,8 +1222,20 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 %files standalone-sysusers -f .file-list-standalone-sysusers
 
 %changelog
-* Sat Feb 04 2023 Jacco Ligthart <jacco@redsleeve.org> - 250-12.1.redsleeve
-- removed valgrind
+* Mon Feb 13 2023 systemd maintenance team <systemd-maint@redhat.com> - 250-12.3
+- shared/json: allow json_variant_dump() to return an error (#2149074)
+- shared/json: use different return code for empty input (#2149074)
+- coredump: avoid deadlock when passing processed backtrace data (#2149074)
+- test: disable flaky subtests that require udevadm wait/lock (#2149074)
+
+* Mon Jan 16 2023 systemd maintenance team <systemd-maint@redhat.com> - 250-12.2
+- coredump: adjust whitespace (#2155516)
+- basic: add STRERROR() wrapper for strerror_r() (#2155516)
+- coredump: do not allow user to access coredumps with changed uid/gid/capabilities (#2155516)
+- Packit: build SRPMs in Copr (#2155516)
+- test: support non-summer time (#2155516)
+- test: bump the base VM memory to 768M (#2155516)
+- test: don't overwrite existing $QEMU_OPTIONS (#2155516)
 
 * Mon Nov 07 2022 systemd maintenance team <systemd-maint@redhat.com> - 250-12.1
 - time-util: fix buffer-over-run (#2139388)
