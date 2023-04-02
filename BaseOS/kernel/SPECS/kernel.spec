@@ -96,7 +96,7 @@ Summary: The Linux kernel
 %global signmodules 1
 
 # Compress modules only for architectures that build modules
-%ifarch noarch
+%ifarch noarch %{arm}
 %global zipmodules 0
 %else
 %global zipmodules 1
@@ -445,7 +445,7 @@ Summary: The Linux kernel
 %define kernel_mflags KALLSYMS_EXTRA_PASS=1
 # we only build headers/perf/tools on the base arm arches
 # just like we used to only build them on i386 for x86
-%ifnarch armv7hl
+%ifnarch armv7hl armv6hl
 %define with_headers 0
 %define with_cross_headers 0
 %endif
@@ -459,6 +459,11 @@ Summary: The Linux kernel
 %define hdrarch arm64
 %define make_target Image.gz
 %define kernel_image arch/arm64/boot/Image.gz
+%endif
+
+%ifarch %{arm}
+%define asmarch arm
+%define hdrarch arm
 %endif
 
 # Should make listnewconfig fail if there's config options
@@ -538,7 +543,7 @@ Name: kernel
 License: GPLv2 and Redistributable, no modification permitted
 URL: https://www.kernel.org/
 Version: %{rpmversion}
-Release: %{pkg_release}
+Release: %{pkg_release}.redsleeve
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
 # SET %%nobuildarches (ABOVE) INSTEAD
 %if 0%{?fedora}
@@ -560,7 +565,7 @@ BuildRequires: kmod, patch, bash, coreutils, tar, git-core, which
 BuildRequires: bzip2, xz, findutils, gzip, m4, perl-interpreter, perl-Carp, perl-devel, perl-generators, make, diffutils, gawk
 BuildRequires: gcc, binutils, redhat-rpm-config, hmaccalc, bison, flex, gcc-c++
 BuildRequires: net-tools, hostname, bc, elfutils-devel
-BuildRequires: dwarves
+#BuildRequires: dwarves
 BuildRequires: python3-devel
 BuildRequires: gcc-plugin-devel
 # glibc-static is required for a consistent build environment (specifically
@@ -2170,7 +2175,7 @@ BuildKernel %make_target %kernel_image %{use_vdso} lpae
 BuildKernel %make_target %kernel_image %{_use_vdso}
 %endif
 
-%ifnarch noarch i686
+%ifnarch noarch i686 %{arm}
 %if !%{with_debug} && !%{with_zfcpdump} && !%{with_pae} && !%{with_up}
 # If only building the user space tools, then initialize the build environment
 # and some variables so that the various userspace tools can be built.
@@ -3017,6 +3022,9 @@ fi
 #
 #
 %changelog
+* Sat Mar 04 2023 Jacco Ligthart <jacco@redsleeve.org> 5.14.0-162.18.1.el9.redsleeve]
+- added flags for armv6
+
 * Tue Feb 28 2023 CentOS Sources <bugs@centos.org> - 5.14.0-162.18.1.el9.centos
 - Apply debranding changes
 

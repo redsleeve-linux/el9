@@ -21,7 +21,7 @@
 Name:           systemd
 Url:            https://www.freedesktop.org/wiki/Software/systemd
 Version:        250
-Release:        12%{?dist}.3
+Release:        12%{?dist}.3.redsleeve
 # For a breakdown of the licensing, see README
 License:        LGPLv2+ and MIT and GPLv2+
 Summary:        System and Service Manager
@@ -492,7 +492,7 @@ BuildRequires:  libseccomp-devel
 BuildRequires:  meson >= 0.43
 BuildRequires:  gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-BuildRequires:  valgrind-devel
+#BuildRequires:  valgrind-devel
 BuildRequires:  pkgconfig(bash-completion)
 BuildRequires:  pkgconfig(tss2-esys)
 BuildRequires:  pkgconfig(tss2-rc)
@@ -1222,6 +1222,9 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 %files standalone-sysusers -f .file-list-standalone-sysusers
 
 %changelog
+* Sat Mar 04 2023 Jacco Ligthart <jacco@redsleeve.org> - 250-12.1.redsleeve
+- removed valgrind
+
 * Mon Feb 13 2023 systemd maintenance team <systemd-maint@redhat.com> - 250-12.3
 - shared/json: allow json_variant_dump() to return an error (#2149074)
 - shared/json: use different return code for empty input (#2149074)
