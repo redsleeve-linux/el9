@@ -3,7 +3,7 @@
 Name:    pesign
 Summary: Signing utility for UEFI binaries
 Version: 115
-Release: 4%{?dist}
+Release: 6%{?dist}.redsleeve
 License: GPL-2.0-only
 URL:     https://github.com/rhboot/pesign
 
@@ -62,6 +62,7 @@ git commit -a -q -m "%{version} baseline."
 git am %{patches} </dev/null
 git config --unset user.email
 git config --unset user.name
+sed -i 's/grecord-gcc-switches/& -flto/' Make.defaults
 
 %build
 # Workaround for mandoc not being packaged
@@ -162,6 +163,17 @@ certutil -d %{_sysconfdir}/pki/pesign/ -X -L > /dev/null
 %{python3_sitelib}/mockbuild/plugins/pesign.*
 
 %changelog
+* Tue Mar 07 2023 Jacco Ligthart <jacco@redsleeve.org> - 115-6.redsleeve
+- added lto to the gcc flags
+
+* Wed Jan 18 2023 Robbie Harwood <rharwood@redhat.com> - 115-6
+- Fix chmod invocation
+- Resolves: CVE-2022-3560
+
+* Wed Jan 18 2023 Robbie Harwood <rharwood@redhat.com> - 115-5
+- Deprecate pesign-authorize and drop ACL use
+- Resolves: CVE-2022-3560
+
 * Mon Apr 04 2022 Robbie Harwood <rharwood@redhat.com>
 - Detect presence of rpm-sign when checking for rhel-ness
 - Resolves: #2044886

@@ -1,0 +1,283 @@
+From 919cfcc929d889df531e690d2b3ff0d122e935d8 Mon Sep 17 00:00:00 2001
+From: Jacco Ligthart <jacco@redsleeve.org>
+Date: Mon, 22 Aug 2022 13:31:49 +0000
+Subject: [PATCH] removed valgrind for arm
+
+---
+ SOURCES/1000-32bit-fixes.patch                | 148 ++++++++++++++++++
+ ...001-only-yield-under-armv7-and-above.patch |  17 ++
+ ...on-failure-in-32-bit-mode-with-fuse3.patch |  39 +++++
+ SPECS/ceph.spec                               |  10 +-
+ 4 files changed, 213 insertions(+), 1 deletion(-)
+ create mode 100644 SOURCES/1000-32bit-fixes.patch
+ create mode 100644 SOURCES/1001-only-yield-under-armv7-and-above.patch
+ create mode 100644 SOURCES/1002-avoid-compilation-failure-in-32-bit-mode-with-fuse3.patch
+
+diff --git a/SOURCES/1000-32bit-fixes.patch b/SOURCES/1000-32bit-fixes.patch
+new file mode 100644
+index 0000000..cec515e
+--- /dev/null
++++ b/SOURCES/1000-32bit-fixes.patch
+@@ -0,0 +1,148 @@
++Description: Misc fixes for 32 bit architecture builds.
++Author: James Page <james.page@ubuntu.com>
++Forwarded: no
++
++--- a/src/tools/rbd_mirror/image_replayer/snapshot/Replayer.cc
+++++ b/src/tools/rbd_mirror/image_replayer/snapshot/Replayer.cc
++@@ -253,7 +253,8 @@ bool Replayer<I>::get_replay_status(std:
++ 
++   json_spirit::mObject root_obj;
++   root_obj["replay_state"] = replay_state;
++-  root_obj["remote_snapshot_timestamp"] = remote_snap_info->timestamp.sec();
+++  root_obj["remote_snapshot_timestamp"] = static_cast<uint64_t>(
+++    remote_snap_info->timestamp.sec());
++ 
++   auto matching_remote_snap_id = util::compute_remote_snap_id(
++     m_state_builder->local_image_ctx->image_lock,
++@@ -267,8 +268,8 @@ bool Replayer<I>::get_replay_status(std:
++     // use the timestamp from the matching remote image since
++     // the local snapshot would just be the time the snapshot was
++     // synced and not the consistency point in time.
++-    root_obj["local_snapshot_timestamp"] =
++-      matching_remote_snap_it->second.timestamp.sec();
+++    root_obj["local_snapshot_timestamp"] = static_cast<uint64_t>(
+++      matching_remote_snap_it->second.timestamp.sec());
++   }
++ 
++   matching_remote_snap_it = m_state_builder->remote_image_ctx->snap_info.find(
++@@ -276,7 +277,8 @@ bool Replayer<I>::get_replay_status(std:
++   if (m_remote_snap_id_end != CEPH_NOSNAP &&
++       matching_remote_snap_it !=
++         m_state_builder->remote_image_ctx->snap_info.end()) {
++-    root_obj["syncing_snapshot_timestamp"] = remote_snap_info->timestamp.sec();
+++    root_obj["syncing_snapshot_timestamp"] = static_cast<uint64_t>(
+++        remote_snap_info->timestamp.sec());
++     root_obj["syncing_percent"] = static_cast<uint64_t>(
++         100 * m_local_mirror_snap_ns.last_copied_object_number /
++         static_cast<float>(std::max<uint64_t>(1U, m_local_object_count)));
++--- a/src/common/buffer.cc
+++++ b/src/common/buffer.cc
++@@ -2272,7 +2272,7 @@ MEMPOOL_DEFINE_OBJECT_FACTORY(buffer::ra
++ 
++ void ceph::buffer::list::page_aligned_appender::_refill(size_t len) {
++   const size_t alloc = \
++-    std::max((size_t)min_alloc, (len + CEPH_PAGE_SIZE - 1) & CEPH_PAGE_MASK);
+++    std::max((size_t)min_alloc, (size_t)((len + CEPH_PAGE_SIZE - 1) & CEPH_PAGE_MASK));
++   auto new_back = \
++     ptr_node::create(buffer::create_page_aligned(alloc));
++   new_back->set_length(0);   // unused, so far.
++--- a/src/s3select/include/s3select_functions.h
+++++ b/src/s3select/include/s3select_functions.h
++@@ -585,7 +585,7 @@ struct _fn_diff_timestamp : public base_
++     {
++       boost::gregorian::date_period dp =
++         boost::gregorian::date_period( val_dt1.timestamp()->date(), val_dt2.timestamp()->date());
++-      result->set_value( dp.length().days() );
+++      result->set_value( (int64_t)dp.length().days() );
++     }
++     else if (strcmp(val_date_part.str(), "hours") == 0)
++     {
++--- a/src/os/bluestore/BlueFS.cc
+++++ b/src/os/bluestore/BlueFS.cc
++@@ -3787,11 +3787,11 @@ int BlueFS::do_replay_recovery_read(File
++ 
++ size_t BlueFS::probe_alloc_avail(int dev, uint64_t alloc_size)
++ {
++-  size_t total = 0;
++-  auto iterated_allocation = [&](size_t off, size_t len) {
+++  uint64_t total = 0;
+++  auto iterated_allocation = [&](uint64_t off, uint64_t len) {
++     //only count in size that is alloc_size aligned
++-    size_t dist_to_alignment;
++-    size_t offset_in_block = off & (alloc_size - 1);
+++    uint64_t dist_to_alignment;
+++    uint64_t offset_in_block = off & (alloc_size - 1);
++     if (offset_in_block == 0)
++       dist_to_alignment = 0;
++     else
++--- a/src/tools/neorados.cc
+++++ b/src/tools/neorados.cc
++@@ -146,7 +146,7 @@ void create(R::RADOS& r, const std::vect
++ 			     obj, pname));
++ }
++ 
++-inline constexpr std::size_t io_size = 4 << 20;
+++inline constexpr std::uint64_t io_size = 4 << 20;
++ 
++ void write(R::RADOS& r, const std::vector<std::string>& p, s::yield_context y)
++ {
++@@ -156,7 +156,7 @@ void write(R::RADOS& r, const std::vecto
++ 
++   bs::error_code ec;
++   std::unique_ptr<char[]> buf = std::make_unique<char[]>(io_size);
++-  std::size_t off = 0;
+++  std::uint64_t off = 0;
++   boost::io::ios_exception_saver ies(std::cin);
++ 
++   std::cin.exceptions(std::istream::badbit);
++@@ -203,7 +203,7 @@ void read(R::RADOS& r, const std::vector
++ 		    obj, pname));
++   }
++ 
++-  std::size_t off = 0;
+++  std::uint64_t off = 0;
++   ceph::buffer::list bl;
++   while (auto toread = std::max(len - off, io_size)) {
++     R::ReadOp op;
++--- a/src/tools/cephfs_mirror/FSMirror.cc
+++++ b/src/tools/cephfs_mirror/FSMirror.cc
++@@ -345,7 +345,7 @@ void FSMirror::handle_acquire_directory(
++     std::scoped_lock locker(m_lock);
++     m_directories.emplace(dir_path);
++     m_service_daemon->add_or_update_fs_attribute(m_filesystem.fscid, SERVICE_DAEMON_DIR_COUNT_KEY,
++-                                                 m_directories.size());
+++                                                 static_cast<uint64_t>(m_directories.size()));
++ 
++     for (auto &[peer, peer_replayer] : m_peer_replayers) {
++       dout(10) << ": peer=" << peer << dendl;
++@@ -363,7 +363,7 @@ void FSMirror::handle_release_directory(
++     if (it != m_directories.end()) {
++       m_directories.erase(it);
++       m_service_daemon->add_or_update_fs_attribute(m_filesystem.fscid, SERVICE_DAEMON_DIR_COUNT_KEY,
++-                                                   m_directories.size());
+++                                                   static_cast<uint64_t>(m_directories.size()));
++       for (auto &[peer, peer_replayer] : m_peer_replayers) {
++         dout(10) << ": peer=" << peer << dendl;
++         peer_replayer->remove_directory(dir_path);
++--- a/src/librbd/object_map/DiffRequest.cc
+++++ b/src/librbd/object_map/DiffRequest.cc
++@@ -175,7 +175,7 @@ void DiffRequest<I>::handle_load_object_
++     m_object_map.resize(num_objs);
++   }
++ 
++-  size_t prev_object_diff_state_size = m_object_diff_state->size();
+++  uint64_t prev_object_diff_state_size = m_object_diff_state->size();
++   if (prev_object_diff_state_size < num_objs) {
++     // the diff state should be the largest of all snapshots in the set
++     m_object_diff_state->resize(num_objs);
++--- a/src/SimpleRADOSStriper.cc
+++++ b/src/SimpleRADOSStriper.cc
++@@ -140,7 +140,7 @@ int SimpleRADOSStriper::remove()
++   return 0;
++ }
++ 
++-int SimpleRADOSStriper::truncate(uint64_t size)
+++int SimpleRADOSStriper::truncate(size_t size)
++ {
++   d(5) << size << dendl;
++ 
+diff --git a/SOURCES/1001-only-yield-under-armv7-and-above.patch b/SOURCES/1001-only-yield-under-armv7-and-above.patch
+new file mode 100644
+index 0000000..f5a9206
+--- /dev/null
++++ b/SOURCES/1001-only-yield-under-armv7-and-above.patch
+@@ -0,0 +1,17 @@
++Description: Only yield under ARMv7 and above (#1176)
++Author: Rosen Penev <rosenp@gmail.com>
++Date: Tue, 12 Nov 2019 13:56:53 -0800
++Origin: upstream, https://github.com/facebook/folly/commit/62d8e6e0b91ebd6f878f3066cd9b6e5f3c18a97b.patch
++Last-Update: 2021-11-24
++
++--- ceph-16.2.6+ds.orig/src/rocksdb/third-party/folly/folly/portability/Asm.h
+++++ ceph-16.2.6+ds/src/rocksdb/third-party/folly/folly/portability/Asm.h
++@@ -19,7 +19,7 @@ inline void asm_volatile_pause() {
++   ::_mm_pause();
++ #elif defined(__i386__) || FOLLY_X64
++   asm volatile("pause");
++-#elif FOLLY_AARCH64 || defined(__arm__)
+++#elif FOLLY_AARCH64 || (defined(__arm__) && !(__ARM_ARCH < 7))
++   asm volatile("yield");
++ #elif FOLLY_PPC64
++   asm volatile("or 27,27,27");
+diff --git a/SOURCES/1002-avoid-compilation-failure-in-32-bit-mode-with-fuse3.patch b/SOURCES/1002-avoid-compilation-failure-in-32-bit-mode-with-fuse3.patch
+new file mode 100644
+index 0000000..590c419
+--- /dev/null
++++ b/SOURCES/1002-avoid-compilation-failure-in-32-bit-mode-with-fuse3.patch
+@@ -0,0 +1,39 @@
++commit 3640e14e0010975928c9b6d3440b1aaea2e129c8
++Author: Vladimir Bashkirtsev <vladimir@bashkirtsev.com>
++Date:   Sat Jan 16 13:02:37 2021 +1030
++
++    cient/fuse_ll.c: align fuse_ll_forget() with fuse3 API
++    
++    In fuse2 forget() is defined as:
++    
++    void (*forget) (fuse_req_t req, fuse_ino_t ino, unsigned long nlookup);
++    
++    In fuse3 forget() is defined as:
++    
++    void (*forget) (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup);
++    
++    Apparently FUSE fixed the issue of nlookup becoming 32 bit value on 32 bit systems as nlookup should be 64 bit value at all times.
++    
++    We should use new function signature to avoid compilation failure in 32 bit mode with fuse3.
++    
++    Signed-off-by: Vladimir Bashkirtsev <vladimir@bashkirtsev.com>
++
++diff --git a/src/client/fuse_ll.cc b/src/client/fuse_ll.cc
++index e43f153..2eccbcf 100644
++--- a/src/client/fuse_ll.cc
+++++ b/src/client/fuse_ll.cc
++@@ -192,8 +192,14 @@ static void fuse_ll_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
++   cfuse->iput(i1);
++ }
++ 
+++// fuse3 has changed forget function signature
+++#if FUSE_VERSION >= FUSE_MAKE_VERSION(3, 0)
+++static void fuse_ll_forget(fuse_req_t req, fuse_ino_t ino,
+++			   uint64_t nlookup)
+++#else
++ static void fuse_ll_forget(fuse_req_t req, fuse_ino_t ino,
++ 			   long unsigned nlookup)
+++#endif
++ {
++   CephFuse::Handle *cfuse = fuse_ll_req_prepare(req);
++   cfuse->client->ll_forget(cfuse->iget(ino), nlookup+1);
+diff --git a/SPECS/ceph.spec b/SPECS/ceph.spec
+index e0b41bc..c5b19c7 100644
+--- a/SPECS/ceph.spec
++++ b/SPECS/ceph.spec
+@@ -64,7 +64,7 @@
+ #################################################################################
+ Name:		ceph
+ Version:	16.2.4
+-Release:	5%{?dist}
++Release:	5%{?dist}.redsleeve
+ %if 0%{?fedora} || 0%{?rhel}
+ Epoch:		2
+ %endif
+@@ -95,6 +95,9 @@ Patch0013:	0013-osdc-Objecter-move-LingerOp-s-ctor-to-.cc.patch
+ Patch0014:	0014-cmake-add-an-option-WITH_FMT_HEADER_ONLY.patch
+ Patch0015:	0015-ceph.spec.in-build-with-header-only-fmt-on-RHEL.patch
+ Patch0016:      0016-cmake-link-bundled-fmt-statically.patch
++Patch1000:	1000-32bit-fixes.patch
++Patch1001:	1001-only-yield-under-armv7-and-above.patch
++Patch1002:	1002-avoid-compilation-failure-in-32-bit-mode-with-fuse3.patch
+ # ceph 14.0.1 does not support 32-bit architectures, bugs #1727788, #1727787
+ ExcludeArch:	i686 armv7hl
+ %if 0%{?suse_version}
+@@ -154,7 +157,9 @@ BuildRequires:	sqlite-devel
+ BuildRequires:	sudo
+ BuildRequires:	pkgconfig(udev)
+ BuildRequires:	util-linux
++%ifnarch %{arm}
+ BuildRequires:	valgrind-devel
++%endif
+ BuildRequires:	which
+ BuildRequires:	xfsprogs
+ BuildRequires:	xfsprogs-devel
+@@ -1142,6 +1147,9 @@ fi
+ %{_includedir}/rados/objclass.h
+ 
+ %changelog
++* Mon Aug 22 2022 Jacco Ligthart <jacco@redsleeve.org> - 2:16.2.4-5.redsleeve
++- removed valgrind for arm
++
+ * Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com> - 2:16.2.4-5
+ - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags
+   Related: rhbz#1991688
+-- 
+2.31.1
+

@@ -1,0 +1,209 @@
+From b65f7e5ac3ea2de048b2a31da2db9a10c0f83671 Mon Sep 17 00:00:00 2001
+From: Jacco Ligthart <jacco@redsleeve.org>
+Date: Wed, 8 Feb 2023 23:11:39 +0000
+Subject: [PATCH] patched for armv6
+
+---
+ SOURCES/gcc6-decimal-rtti-arm.patch | 126 ++++++++++++++++++++++++++++
+ SPECS/gcc.spec                      |  17 +++-
+ 2 files changed, 142 insertions(+), 1 deletion(-)
+ create mode 100644 SOURCES/gcc6-decimal-rtti-arm.patch
+
+diff --git a/SOURCES/gcc6-decimal-rtti-arm.patch b/SOURCES/gcc6-decimal-rtti-arm.patch
+new file mode 100644
+index 0000000..a938730
+--- /dev/null
++++ b/SOURCES/gcc6-decimal-rtti-arm.patch
+@@ -0,0 +1,126 @@
++diff -ru gcc-6.3.1-20170216-orig/libstdc++-v3/src/nonshared11/locale-inst-asm.S gcc-6.3.1-20170216/libstdc++-v3/src/nonshared11/locale-inst-asm.S
++--- gcc-6.3.1-20170216-orig/libstdc++-v3/src/nonshared11/locale-inst-asm.S	2017-07-03 12:35:38.145446630 +0200
+++++ gcc-6.3.1-20170216/libstdc++-v3/src/nonshared11/locale-inst-asm.S	2017-07-03 14:18:18.262272416 +0200
++@@ -22,6 +22,11 @@
++ 
++ #ifdef __i386__
++ #define ALIGN1	.align 4
+++#elif defined __arm__
+++#define ALIGN1	.align 4
+++#define OBJECT %object
+++#define SECTION1(x).section .gnu.linkonce.d.rel.ro.x,"aw",%progbits
+++#define SECTION3(x).section .gnu.linkonce.r.x,"a",%progbits
++ #elif defined __x86_64__
++ #define ALIGN1	.align 32
++ #define ALIGN2	.align 16
++@@ -288,4 +293,4 @@
++ 	POINTER	SYM(_ZTISt16__numpunct_cacheIwE)
++ 	VPTR(_ZNSt16__numpunct_cacheIwED1Ev)
++ 	VPTR(_ZNSt16__numpunct_cacheIwED0Ev)
++-	.section	.note.GNU-stack,"",@progbits
+++	.section	.note.GNU-stack,"",%progbits
++diff -ru gcc-6.3.1-20170216-orig/libstdc++-v3/src/nonshared98/decimal-rtti.S gcc-6.3.1-20170216/libstdc++-v3/src/nonshared98/decimal-rtti.S
++--- gcc-6.3.1-20170216-orig/libstdc++-v3/src/nonshared98/decimal-rtti.S	2017-07-03 14:43:40.511082860 +0200
+++++ gcc-6.3.1-20170216/libstdc++-v3/src/nonshared98/decimal-rtti.S	2017-07-03 14:14:14.138216542 +0200
++@@ -21,9 +21,14 @@
++    <http://www.gnu.org/licenses/>.  */
++ 
++ #if defined __x86_64__ || defined __powerpc64__ || defined __s390x__ || defined __ia64__ || defined __aarch64__ \
++-    || defined __i386__ || defined __powerpc__ || defined __s390__
+++    || defined __i386__ || defined __powerpc__ || defined __s390__ || defined __arm__
++ #ifdef __i386__
++ #define ALIGN1	.align 4
+++#elif defined __arm__
+++#define ALIGN1	.align 4
+++#define OBJECT %object
+++#define SECTION1(x).section .gnu.linkonce.d.rel.ro.x,"aw",%progbits
+++#define SECTION3(x).section .gnu.linkonce.r.x,"a",%progbits
++ #elif defined __x86_64__
++ #define ALIGN1	.align 32
++ #define ALIGN2	.align 16
++@@ -271,4 +276,4 @@
++ _ZTSDf:
++ 	STRING	"Df"
++ #endif
++-	.section	.note.GNU-stack,"",@progbits
+++	.section	.note.GNU-stack,"",%progbits
++diff -ru gcc-6.3.1-20170216-orig/libstdc++-v3/src/nonshared98/float128.S gcc-6.3.1-20170216/libstdc++-v3/src/nonshared98/float128.S
++--- gcc-6.3.1-20170216-orig/libstdc++-v3/src/nonshared98/float128.S	2017-07-03 14:43:46.011059614 +0200
+++++ gcc-6.3.1-20170216/libstdc++-v3/src/nonshared98/float128.S	2017-07-03 14:16:20.767726815 +0200
++@@ -20,9 +20,14 @@
++    see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
++    <http://www.gnu.org/licenses/>.  */
++ 
++-#if defined __x86_64__ || defined __i386__ || defined __ia64__
+++#if defined __x86_64__ || defined __i386__ || defined __ia64__ || defined __arm__
++ #ifdef __i386__
++ #define ALIGN1	.align 4
+++#elif defined __arm__
+++#define ALIGN1	.align 4
+++#define OBJECT %object
+++#define SECTION1(x).section .gnu.linkonce.d.rel.ro.x,"aw",%progbits
+++#define SECTION3(x).section .gnu.linkonce.r.x,"a",%progbits
++ #elif defined __x86_64__
++ #define ALIGN1	.align 32
++ #define ALIGN2	.align 16
++@@ -159,4 +164,4 @@
++ _ZTSg:
++ 	STRING	"g"
++ #endif
++-	.section	.note.GNU-stack,"",@progbits
+++	.section	.note.GNU-stack,"",%progbits
++diff -ru gcc-6.3.1-20170216-orig/libstdc++-v3/src/nonshared98/int128.S gcc-6.3.1-20170216/libstdc++-v3/src/nonshared98/int128.S
++--- gcc-6.3.1-20170216-orig/libstdc++-v3/src/nonshared98/int128.S	2017-07-03 14:43:51.191037720 +0200
+++++ gcc-6.3.1-20170216/libstdc++-v3/src/nonshared98/int128.S	2017-07-03 13:49:53.148806566 +0200
++@@ -213,4 +213,4 @@
++ _ZTSo:
++ 	STRING	"o"
++ #endif
++-	.section	.note.GNU-stack,"",@progbits
+++	.section	.note.GNU-stack,"",%progbits
++diff -ru gcc-6.3.1-20170216-orig/libstdc++-v3/src/nonshared98/nullptr-rtti.S gcc-6.3.1-20170216/libstdc++-v3/src/nonshared98/nullptr-rtti.S
++--- gcc-6.3.1-20170216-orig/libstdc++-v3/src/nonshared98/nullptr-rtti.S	2017-07-03 14:43:56.011017348 +0200
+++++ gcc-6.3.1-20170216/libstdc++-v3/src/nonshared98/nullptr-rtti.S	2017-07-03 13:51:34.473432976 +0200
++@@ -21,9 +21,14 @@
++    <http://www.gnu.org/licenses/>.  */
++ 
++ #if defined __x86_64__ || defined __powerpc64__ || defined __s390x__ || defined __ia64__ || defined __aarch64__ \
++-    || defined __i386__ || defined __powerpc__ || defined __s390__
+++    || defined __i386__ || defined __powerpc__ || defined __s390__ || defined __arm__
++ #ifdef __i386__
++ #define ALIGN1	.align 4
+++#elif defined __arm__
+++#define ALIGN1	.align 4
+++#define OBJECT	%object
+++#define SECTION1(x).section .gnu.linkonce.d.rel.ro.x,"aw",%progbits
+++#define SECTION3(x).section .gnu.linkonce.r.x,"a",%progbits
++ #elif defined __x86_64__
++ #define ALIGN1	.align 32
++ #define ALIGN2	.align 16
++@@ -163,4 +168,4 @@
++ _ZTSDn:
++ 	STRING	"Dn"
++ #endif
++-	.section	.note.GNU-stack,"",@progbits
+++	.section	.note.GNU-stack,"",%progbits
++diff -ru gcc-11.2.1-20220127-orig/libstdc++-v3/src/nonshared98/char8_t-rtti.S gcc-11.2.1-20220127/libstdc++-v3/src/nonshared98/char8_t-rtti.S
++--- gcc-11.2.1-20220127-orig/libstdc++-v3/src/nonshared98/char8_t-rtti.S	2022-05-29 09:02:04.984962745 +0000
+++++ gcc-11.2.1-20220127/libstdc++-v3/src/nonshared98/char8_t-rtti.S	2022-05-29 09:09:42.178607766 +0000
++@@ -24,6 +24,11 @@
++     || defined __i386__ || defined __powerpc__ || defined __s390__
++ #ifdef __i386__
++ #define ALIGN1	.align 4
+++#elif defined __arm__
+++#define ALIGN1 .align 4
+++#define OBJECT %object
+++#define SECTION1(x).section .gnu.linkonce.d.rel.ro.x,"aw",%progbits
+++#define SECTION3(x).section .gnu.linkonce.r.x,"a",%progbits
++ #elif defined __x86_64__
++ #define ALIGN1	.align 32
++ #define ALIGN2	.align 16
++@@ -163,4 +168,4 @@
++ _ZTSDu:
++ 	STRING	"Du"
++ #endif
++-	.section	.note.GNU-stack,"",@progbits
+++	.section	.note.GNU-stack,"",%progbits
+diff --git a/SPECS/gcc.spec b/SPECS/gcc.spec
+index 6de8aa5..36f48a1 100644
+--- a/SPECS/gcc.spec
++++ b/SPECS/gcc.spec
+@@ -147,7 +147,7 @@
+ Summary: GCC version 12
+ Name: %{?scl_prefix}gcc
+ Version: %{gcc_version}
+-Release: %{gcc_release}.5%{?dist}
++Release: %{gcc_release}.5%{?dist}.redsleeve
+ # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
+ # GCC Runtime Exception.
+ License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
+@@ -389,6 +389,8 @@ Patch3017: 0020-more-fixes.patch
+ Patch3018: 0021-libstdc++-disable-tests.patch
+ Patch3019: 0022-libstdc++-revert-behavior.patch
+ 
++Patch10000: gcc6-decimal-rtti-arm.patch
++
+ %if 0%{?rhel} == 9
+ %global nonsharedver 110
+ %endif
+@@ -407,6 +409,9 @@ Patch3019: 0022-libstdc++-revert-behavior.patch
+ %else
+ %global _gnu -gnueabi
+ %endif
++%ifarch %{arm}
++%global _gnu -gnueabi
++%endif
+ %ifarch sparcv9
+ %global gcc_target_platform sparc64-%{_vendor}-%{_target_os}
+ %endif
+@@ -795,6 +800,10 @@ cd ..
+ %patch3019 -p1 -b .dts-test-19~
+ %endif
+ 
++%ifarch %{arm}
++%patch10000 -p1
++%endif
++
+ find gcc/testsuite -name \*.pr96939~ | xargs rm -f
+ 
+ echo 'Red Hat %{version}-%{gcc_release}' > gcc/DEV-PHASE
+@@ -1140,6 +1149,9 @@ CONFIGURE_OPTS="\
+ %endif
+ 	--enable-decimal-float \
+ %endif
++%ifarch armv6hl
++	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
++%endif
+ %ifarch armv7hl
+ 	--with-tune=generic-armv7-a --with-arch=armv7-a \
+ 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
+@@ -2960,6 +2972,9 @@ fi
+ %endif
+ 
+ %changelog
++* Wed Feb 09 2023 Jacco Ligthart <jacco@redsleeve.org> 12.1.1-3.5.redsleeve
++- patched for armv6
++
+ * Tue Dec 13 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.5
+ - bump NVR (#2150126)
+ 
+-- 
+2.31.1
+

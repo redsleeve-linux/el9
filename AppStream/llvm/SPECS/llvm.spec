@@ -1,3 +1,7 @@
+# Workaround for
+# Cannot handle 8-byte build ID
+%define debug_package %{nil}
+
 # We are building with clang for faster/lower memory LTO builds.
 # See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
 %global toolchain clang
@@ -68,14 +72,15 @@
 %ifarch %{arm}
 # koji overrides the _gnu variable to be gnu, which is not correct for clang, so
 # we need to hard-code the correct triple here.
-%global llvm_triple armv7l-redhat-linux-gnueabihf
+#global llvm_triple armv7l-redhat-linux-gnueabihf
+%global llvm_triple armv6hl-redhat-linux-gnueabi
 %else
 %global llvm_triple %{_host}
 %endif
 
 Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}
-Release:	1%{?dist}
+Release:	1%{?dist}.redsleeve
 Summary:	The Low Level Virtual Machine
 
 License:	NCSA
@@ -601,6 +606,9 @@ fi
 %endif
 
 %changelog
+* Thu Dec 22 2022 Jacco Ligthart <jacco@redsleeve.org> - 14.0.6-1.redsleeve
+- changed llvm_triple for armv6
+
 * Mon Jul 18 2022 Timm Bäder <tbaeder@redhat.com> - 14.0.6-1
 - Update to 14.0.6
 

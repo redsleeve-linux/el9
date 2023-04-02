@@ -29,7 +29,7 @@
 # Define GOROOT macros
 %global goroot          %{_prefix}/lib/%{name}
 %global gopath          %{_datadir}/gocode
-%global golang_arches   x86_64 aarch64 ppc64le s390x
+%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
 %global golibdir        %{_libdir}/%{name}
 
 # Golang build options.
@@ -96,12 +96,12 @@
 %endif
 
 %global go_api 1.18
-%global go_version 1.18.4
+%global go_version 1.18.9
 %global pkg_release 1
 
 Name:           golang
 Version:        %{go_version}
-Release:        3%{?dist}
+Release:        1%{?dist}.redsleeve
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD and Public Domain
@@ -147,6 +147,10 @@ Patch221:       fix_TestScript_list_std.patch
 Patch223: remove_ed25519vectors_test.patch
 
 Patch224: openssl_deprecated_algorithm_tests.patch
+
+Patch225: enable-big-endian-fips.patch
+
+Patch226: ppc64le-internal-linker-fix.patch
 
 # Having documentation separate was broken
 Obsoletes:      %{name}-docs < 1.1-4
@@ -241,6 +245,8 @@ Requires:       %{name} = %{version}-%{release}
 %patch221 -p1
 %patch223 -p1
 %patch224 -p1
+%patch225 -p1
+%patch226 -p1
 
 cp %{SOURCE1} ./src/runtime/
 
@@ -514,6 +520,16 @@ cd ..
 %endif
 
 %changelog
+* Wed Feb 09 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.18.9-1.redsleeve
+- added arm to golang_arches
+
+* Tue Dec 20 2022 David Benoit <dbenoit@redhat.com> - 1.18.9-1
+- Rebase to Go 1.18.9
+- Enable big endian support for fips mode 
+- Fix ppc64le linker issue
+- Resolves: rhbz#2144547
+- Resolves: rhbz#2149311
+
 * Tue Aug 16 2022 David Benoit <dbenoit@redhat.com> - 1.18.4-3
 - Temporarily disable crypto tests on ppc64le
 - Related: rhbz#2109180

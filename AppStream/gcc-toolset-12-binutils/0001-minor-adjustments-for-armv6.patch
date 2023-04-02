@@ -1,0 +1,77 @@
+From 61f3915454eba4684e7efbc7736550a0d17ea586 Mon Sep 17 00:00:00 2001
+From: Jacco Ligthart <jacco@redsleeve.org>
+Date: Tue, 27 Dec 2022 07:57:34 +0000
+Subject: [PATCH] minor adjustments for armv6
+
+---
+ SOURCES/binutils-armv6.patch | 25 +++++++++++++++++++++++++
+ SPECS/binutils.spec          |  7 ++++++-
+ 2 files changed, 31 insertions(+), 1 deletion(-)
+ create mode 100644 SOURCES/binutils-armv6.patch
+
+diff --git a/SOURCES/binutils-armv6.patch b/SOURCES/binutils-armv6.patch
+new file mode 100644
+index 0000000..9ba7ffd
+--- /dev/null
++++ b/SOURCES/binutils-armv6.patch
+@@ -0,0 +1,25 @@
++diff -ru binutils-2.30/ld/configure.tgt binutils-2.30-rock/ld/configure.tgt
++--- binutils-2.30/ld/configure.tgt	2021-04-25 04:02:21.308705685 +0200
+++++ binutils-2.30-rock/ld/configure.tgt	2021-04-25 03:46:48.039031480 +0200
++@@ -174,8 +174,8 @@
++ 			targ_extra_libpath=$targ_extra_emuls
++ 			;;
++ arm*-*-linux-*)		targ_emul=armelf_linux
++-			targ_extra_emuls="armelf armelfb armelfb_linux"
++-			targ_extra_libpath="armelfb_linux"
+++			targ_extra_emuls="armelf armelf_linux_eabi armelfb armelfb_linux"
+++			targ_extra_libpath="armelf_linux_eabi armelfb_linux"
++ 			;;
++ arm*b-*-nacl*)		targ_emul=armelfb_nacl
++ 			targ_extra_emuls="armelf_nacl"
++diff -ru binutils-2.30/bfd/doc/Makefile.in binutils-2.30-rock/bfd/doc/Makefile.in
++--- binutils-2.30/bfd/doc/Makefile.in	2021-04-25 04:01:40.936807315 +0200
+++++ binutils-2.30-rock/bfd/doc/Makefile.in	2021-04-25 03:56:15.013627770 +0200
++@@ -171,6 +171,7 @@
++ CC = @CC@
++ CCDEPMODE = @CCDEPMODE@
++ CC_FOR_BUILD = @CC_FOR_BUILD@
+++CFLAGS_FOR_BUILD = -march=armv6 -mfpu=vfp -mfloat-abi=hard
++ CFLAGS = @CFLAGS@
++ COREFILE = @COREFILE@
++ COREFLAG = @COREFLAG@
+diff --git a/SPECS/binutils.spec b/SPECS/binutils.spec
+index 2960e21..4a0aa03 100644
+--- a/SPECS/binutils.spec
++++ b/SPECS/binutils.spec
+@@ -42,7 +42,7 @@
+ Summary: A GNU collection of binary utilities
+ Name: %{?scl_prefix}%{?cross}binutils%{?_with_debug:-debug}
+ Version: 2.38
+-Release: 16%{?dist}
++Release: 16%{?dist}.redsleeve
+ License: GPLv3+
+ URL: https://sourceware.org/binutils
+ 
+@@ -308,6 +308,8 @@ Patch23: binutils-indirect-symbols.patch
+ # Lifetime: Fixed in 2.39
+ Patch24: binutils-bfd-DWARF-improvements.patch
+ 
++Patch1000: binutils-armv6.patch
++
+ #----------------------------------------------------------------------------
+ 
+ Provides: bundled(libiberty)
+@@ -954,6 +956,9 @@ exit 0
+ 
+ #----------------------------------------------------------------------------
+ %changelog
++* Mon Dec 26 2022 Jacco Ligthart <jacco@redsleeve.org> 2.38-16.redsleeve
++- minor adjustments for armv6
++
+ * Fri Jul 01 2022 Nick Clifton  <nickc@redhat.comn> - 2.38-16
+ - Fix the Provides fields of the binutils-gold and binutils-devel subpackages.  (#2103056)
+ 
+-- 
+2.31.1
+

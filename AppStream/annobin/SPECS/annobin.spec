@@ -2,7 +2,7 @@
 Name:    annobin
 Summary: Annotate and examine compiled binary files
 Version: 10.73
-Release: 3%{?dist}
+Release: 3%{?dist}.redsleeve
 License: GPLv3+
 # Maintainer: nickc@redhat.com
 # Web Page: https://sourceware.org/annobin/
@@ -248,6 +248,11 @@ CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" CXXFLAGS="$CFLAGS" %configure ${CONFIG_ARGS}
 export CLANG_TARGET_OPTIONS="-fcf-protection"
 %endif
 
+%ifarch armv6hl
+# FIXME: There should be a better way to do this.
+export CLANG_TARGET_OPTIONS="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
+%endif
+
 %make_build
 
 %if %{with plugin_rebuild}
@@ -362,6 +367,9 @@ fi
 #---------------------------------------------------------------------------------
 
 %changelog
+* Fri Dec 30 2022 Jacco Ligthart <jacco@redsleeve.org> - 10.73-3.redsleeve
+- added compiler flags for armv6
+
 * Wed Jul 20 2022 Florian Weimer <fweimer@redhat.com> - 10.73-3
 - Rebuild to switch back to system annobin (#2106262)
 

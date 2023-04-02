@@ -1,0 +1,63 @@
+From f762896881c4e535e14fe710652174d19f32b5c4 Mon Sep 17 00:00:00 2001
+From: Jacco Ligthart <jacco@redsleeve.org>
+Date: Thu, 22 Dec 2022 23:08:15 +0000
+Subject: [PATCH] link COFF with atomic
+
+---
+ SOURCES/1000_patch_atomic_arm.patch | 11 +++++++++++
+ SPECS/lld.spec                      |  7 ++++++-
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+ create mode 100644 SOURCES/1000_patch_atomic_arm.patch
+
+diff --git a/SOURCES/1000_patch_atomic_arm.patch b/SOURCES/1000_patch_atomic_arm.patch
+new file mode 100644
+index 0000000..5ef68c8
+--- /dev/null
++++ b/SOURCES/1000_patch_atomic_arm.patch
+@@ -0,0 +1,11 @@
++diff -ru a/COFF/CMakeLists.txt b/COFF/CMakeLists.txt
++--- a/lld/COFF/CMakeLists.txt	2022-12-19 20:04:10.737201766 +0000
+++++ b/lld/COFF/CMakeLists.txt	2022-12-19 20:04:00.043228253 +0000
++@@ -1,6 +1,7 @@
++ set(LLVM_TARGET_DEFINITIONS Options.td)
++ tablegen(LLVM Options.inc -gen-opt-parser-defs)
++ add_public_tablegen_target(COFFOptionsTableGen)
+++link_libraries(atomic)
++ 
++ add_lld_library(lldCOFF
++   CallGraphSort.cpp
+diff --git a/SPECS/lld.spec b/SPECS/lld.spec
+index 62830c1..213fbed 100644
+--- a/SPECS/lld.spec
++++ b/SPECS/lld.spec
+@@ -12,7 +12,7 @@
+ 
+ Name:		lld
+ Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}
+-Release:	1%{?dist}
++Release:	1%{?dist}.redsleeve
+ Summary:	The LLVM Linker
+ 
+ License:	NCSA
+@@ -30,6 +30,8 @@ Patch0:		0001-PATCH-lld-CMake-Check-for-gtest-headers-even-if-lit..patch
+ # Bundle libunwind header need during build for MachO support
+ Patch1:		0002-PATCH-lld-Import-compact_unwind_encoding.h-from-libu.patch
+ 
++Patch1000:	1000_patch_atomic_arm.patch
++
+ BuildRequires:	gcc
+ BuildRequires:	gcc-c++
+ BuildRequires:	cmake
+@@ -205,6 +207,9 @@ fi
+ %{_datadir}/lld/lit.lld-test.cfg.py
+ 
+ %changelog
++* Thu Dec 22 2022 Jacco Ligthart < jacco@redsleeve.org> - 14.0.6-1.redsleeve
++- link COFF with atomic
++
+ * Wed Jul 20 2022 Timm Bäder <tbaeder@redhat.com> - 14.0.6-1
+ - 14.0.6 Release
+ 
+-- 
+2.31.1
+

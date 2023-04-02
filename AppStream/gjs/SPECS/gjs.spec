@@ -20,7 +20,7 @@
 
 Name:           gjs
 Version:        1.68.6
-Release:        1%{?dist}
+Release:        1%{?dist}.redsleeve
 Summary:        Javascript Bindings for GNOME
 
 # The following files contain code from Mozilla which
@@ -159,7 +159,7 @@ pushd firefox-%{mozjs_version}
 %patch14 -p1
 %patch15 -p1
 
-%ifarch armv7hl
+%ifarch %{arm}
 # Include definitions for user vfp on armv7 as it causes the compilation to fail without them
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1526653
 %patch17 -p1
@@ -295,6 +295,9 @@ popd
 %{_datadir}/installed-tests/
 
 %changelog
+* Mon Dec 05 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.68.6-1.redsleeve
+- patch for all arms in stead of only armv7
+
 * Tue Apr 05 2022 Florian Müllner <fmuellner@redhat.com> - 1.68.6-1
 - Update to 1.68.6
 Resolves: #2066167

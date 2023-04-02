@@ -1,0 +1,39 @@
+commit 3640e14e0010975928c9b6d3440b1aaea2e129c8
+Author: Vladimir Bashkirtsev <vladimir@bashkirtsev.com>
+Date:   Sat Jan 16 13:02:37 2021 +1030
+
+    cient/fuse_ll.c: align fuse_ll_forget() with fuse3 API
+    
+    In fuse2 forget() is defined as:
+    
+    void (*forget) (fuse_req_t req, fuse_ino_t ino, unsigned long nlookup);
+    
+    In fuse3 forget() is defined as:
+    
+    void (*forget) (fuse_req_t req, fuse_ino_t ino, uint64_t nlookup);
+    
+    Apparently FUSE fixed the issue of nlookup becoming 32 bit value on 32 bit systems as nlookup should be 64 bit value at all times.
+    
+    We should use new function signature to avoid compilation failure in 32 bit mode with fuse3.
+    
+    Signed-off-by: Vladimir Bashkirtsev <vladimir@bashkirtsev.com>
+
+diff --git a/src/client/fuse_ll.cc b/src/client/fuse_ll.cc
+index e43f153..2eccbcf 100644
+--- a/src/client/fuse_ll.cc
++++ b/src/client/fuse_ll.cc
+@@ -192,8 +192,14 @@ static void fuse_ll_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
+   cfuse->iput(i1);
+ }
+ 
++// fuse3 has changed forget function signature
++#if FUSE_VERSION >= FUSE_MAKE_VERSION(3, 0)
++static void fuse_ll_forget(fuse_req_t req, fuse_ino_t ino,
++			   uint64_t nlookup)
++#else
+ static void fuse_ll_forget(fuse_req_t req, fuse_ino_t ino,
+ 			   long unsigned nlookup)
++#endif
+ {
+   CephFuse::Handle *cfuse = fuse_ll_req_prepare(req);
+   cfuse->client->ll_forget(cfuse->iget(ino), nlookup+1);

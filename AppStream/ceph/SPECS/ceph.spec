@@ -64,7 +64,7 @@
 #################################################################################
 Name:		ceph
 Version:	16.2.4
-Release:	5%{?dist}
+Release:	5%{?dist}.redsleeve
 %if 0%{?fedora} || 0%{?rhel}
 Epoch:		2
 %endif
@@ -95,6 +95,9 @@ Patch0013:	0013-osdc-Objecter-move-LingerOp-s-ctor-to-.cc.patch
 Patch0014:	0014-cmake-add-an-option-WITH_FMT_HEADER_ONLY.patch
 Patch0015:	0015-ceph.spec.in-build-with-header-only-fmt-on-RHEL.patch
 Patch0016:      0016-cmake-link-bundled-fmt-statically.patch
+Patch1000:	1000-32bit-fixes.patch
+Patch1001:	1001-only-yield-under-armv7-and-above.patch
+Patch1002:	1002-avoid-compilation-failure-in-32-bit-mode-with-fuse3.patch
 # ceph 14.0.1 does not support 32-bit architectures, bugs #1727788, #1727787
 ExcludeArch:	i686 armv7hl
 %if 0%{?suse_version}
@@ -154,7 +157,9 @@ BuildRequires:	sqlite-devel
 BuildRequires:	sudo
 BuildRequires:	pkgconfig(udev)
 BuildRequires:	util-linux
+%ifnarch %{arm}
 BuildRequires:	valgrind-devel
+%endif
 BuildRequires:	which
 BuildRequires:	xfsprogs
 BuildRequires:	xfsprogs-devel
@@ -1142,6 +1147,9 @@ fi
 %{_includedir}/rados/objclass.h
 
 %changelog
+* Mon Aug 22 2022 Jacco Ligthart <jacco@redsleeve.org> - 2:16.2.4-5.redsleeve
+- removed valgrind for arm
+
 * Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com> - 2:16.2.4-5
 - Rebuilt for IMA sigs, glibc 2.34, aarch64 flags
   Related: rhbz#1991688

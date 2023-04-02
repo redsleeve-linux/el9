@@ -1,6 +1,6 @@
 # Only x86_64 and i686 are Tier 1 platforms at this time.
 # https://doc.rust-lang.org/nightly/rustc/platform-support.html
-%global rust_arches x86_64 i686 aarch64 ppc64le s390x
+%global rust_arches x86_64 i686 aarch64 ppc64le s390x armv6hl
 
 # The channel can be stable, beta, or nightly
 %{!?channel: %global channel stable}
@@ -17,7 +17,7 @@
 # a waste of lookaside cache space when they're most often unused.
 # Run "spectool -g rust.spec" after changing this and then "fedpkg upload" to
 # add them to sources. Remember to remove them again after the bootstrap build!
-#global bootstrap_arches %%{rust_arches}
+%global bootstrap_arches armv6hl
 
 # Define a space-separated list of targets to ship rust-std-static-$triple for
 # cross-compilation. The packages are noarch, but they're not fully
@@ -84,7 +84,7 @@
 
 Name:           rust
 Version:        1.62.1
-Release:        1%{?dist}
+Release:        1%{?dist}.redsleeve
 Summary:        The Rust Programming Language
 License:        (ASL 2.0 or MIT) and (BSD and MIT)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -128,6 +128,9 @@ Patch102:       rustc-1.58.0-no-default-pie.patch
   local abi = "gnu"
   if arch == "armv7hl" then
     arch = "armv7"
+    abi = "gnueabihf"
+  elseif arch == "armv6hl" then
+    arch = "arm"
     abi = "gnueabihf"
   elseif arch == "ppc64" then
     arch = "powerpc64"
@@ -1032,6 +1035,9 @@ end}
 
 
 %changelog
+* Mon Dec 05 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.62.1-1.redsleeve
+- added armv6 to rust_arches
+
 * Tue Jul 19 2022 Josh Stone <jistone@redhat.com> - 1.62.1-1
 - Update to 1.62.1.
 

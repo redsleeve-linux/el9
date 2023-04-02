@@ -147,7 +147,7 @@
 Summary: GCC version 12
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.2%{?dist}
+Release: %{gcc_release}.5%{?dist}.redsleeve
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -352,6 +352,8 @@ Patch12: gcc12-pr105551.patch
 Patch13: gcc12-libtsan-s390x.patch
 # This has been backported to GCC 12, so eventually we can drop it.
 Patch14: gcc12-pr105991.patch
+# For DTS 12.0.z.
+Patch15: gcc12-detect-sapphirerapids.patch
 
 Patch100: gcc12-fortran-fdec-duplicates.patch
 Patch101: gcc12-fortran-flogical-as-integer.patch
@@ -387,6 +389,8 @@ Patch3017: 0020-more-fixes.patch
 Patch3018: 0021-libstdc++-disable-tests.patch
 Patch3019: 0022-libstdc++-revert-behavior.patch
 
+Patch10000: gcc6-decimal-rtti-arm.patch
+
 %if 0%{?rhel} == 9
 %global nonsharedver 110
 %endif
@@ -403,6 +407,9 @@ Patch3019: 0022-libstdc++-revert-behavior.patch
 %if 0%{?scl:1}
 %global _gnu %{nil}
 %else
+%global _gnu -gnueabi
+%endif
+%ifarch %{arm}
 %global _gnu -gnueabi
 %endif
 %ifarch sparcv9
@@ -730,6 +737,7 @@ so that there cannot be any synchronization problems.
 %patch12 -p0 -b .pr105551~
 %patch13 -p0 -b .libtsan-s390x~
 %patch14 -p1 -b .pr105991~
+%patch15 -p1 -b .detect-spr~
 
 %if 0%{?rhel} >= 6
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -790,6 +798,10 @@ cd ..
 %patch3018 -p1 -b .dts-test-18~
 %if 0%{?rhel} <= 7
 %patch3019 -p1 -b .dts-test-19~
+%endif
+
+%ifarch %{arm}
+%patch10000 -p1
 %endif
 
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
@@ -1136,6 +1148,9 @@ CONFIGURE_OPTS="\
 %endif
 %endif
 	--enable-decimal-float \
+%endif
+%ifarch armv6hl
+	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
@@ -2957,6 +2972,15 @@ fi
 %endif
 
 %changelog
+* Wed Feb 09 2023 Jacco Ligthart <jacco@redsleeve.org> 12.1.1-3.5.redsleeve
+- patched for armv6
+
+* Tue Dec 13 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.5
+- bump NVR (#2150126)
+
+* Mon Dec  5 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.4
+- fix Sapphire Rapids detection in host_detect_local_cpu (#2150126)
+
 * Fri Jul  8 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.2
 - recognize PLUS and XOR forms of rldimi (PR target/105991, #2095789)
 

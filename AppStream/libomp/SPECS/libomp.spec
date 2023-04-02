@@ -11,7 +11,7 @@
 
 Name: libomp
 Version: %{libomp_version}%{?rc_ver:~rc%{rc_ver}}
-Release: 1%{?dist}
+Release: 1%{?dist}.redsleeve
 Summary: OpenMP runtime for clang
 
 License: NCSA
@@ -127,8 +127,8 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %files
 %license LICENSE.TXT
 %{_libdir}/libomp.so
-%{_libdir}/libompd.so
 %ifnarch %{arm}
+%{_libdir}/libompd.so
 %{_libdir}/libarcher.so
 %endif
 %ifnarch %{ix86} %{arm}
@@ -154,6 +154,9 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %{_libexecdir}/tests/libomp/
 
 %changelog
+* Thu Dec 22 2022 Jacco Ligthart <jaccor@redsleeve.org> - 14.0.6-1.redsleeve
+- disabled libompd.so for arm
+
 * Wed Jul 20 2022 Timm Bäder <tbaeder@redhat.com> - 14.0.6-1
 - 14.0.6 Release
 
