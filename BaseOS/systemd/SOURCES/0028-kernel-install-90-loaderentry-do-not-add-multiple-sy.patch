@@ -1,0 +1,31 @@
+From d3b559f5e561750e6c50449b2ca84b40abeb492d Mon Sep 17 00:00:00 2001
+From: Antonio Alvarez Feijoo <antonio.feijoo@suse.com>
+Date: Fri, 4 Nov 2022 09:57:24 +0100
+Subject: [PATCH] kernel-install/90-loaderentry: do not add multiple
+ systemd.machine_id options
+
+Do not unconditionally add a new systemd.machine_id command line option, first
+check if it already exists with the expected value.
+
+Fixes #25203
+
+(cherry picked from commit 981502c5cc9ce32c3f77ff74aad87cd6f0da3b16)
+
+Related #2138081
+---
+ src/kernel-install/90-loaderentry.install | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/kernel-install/90-loaderentry.install b/src/kernel-install/90-loaderentry.install
+index 743af33aa9..ea75e1b0d8 100755
+--- a/src/kernel-install/90-loaderentry.install
++++ b/src/kernel-install/90-loaderentry.install
+@@ -85,7 +85,7 @@ BOOT_OPTIONS="${BOOT_OPTIONS% }"
+ # command line with the machine ID we use, so that the machine ID remains
+ # stable, even during factory reset, in the initrd (where the system's machine
+ # ID is not directly accessible yet), and if the root file system is volatile.
+-if [ "$ENTRY_TOKEN" = "$MACHINE_ID" ]; then
++if [ "$ENTRY_TOKEN" = "$MACHINE_ID" ] && ! echo "$BOOT_OPTIONS" | grep -q "systemd.machine_id=$MACHINE_ID"; then
+     BOOT_OPTIONS="$BOOT_OPTIONS systemd.machine_id=$MACHINE_ID"
+ fi
+ 

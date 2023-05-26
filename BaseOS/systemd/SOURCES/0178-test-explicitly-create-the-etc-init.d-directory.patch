@@ -1,0 +1,34 @@
+From 0bdf4aaa0d8cdc6b2721d09fe630bf6185903a0d Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Thu, 12 Jan 2023 19:19:28 +0100
+Subject: [PATCH] test: explicitly create the /etc/init.d directory
+
+On RHEL/CentOS/Fedora this directory is provided by the chkconfig or
+initscripts package, which might not be installed:
+
+testsuite-26.sh[1225]: + [[ -x /usr/lib/systemd/system-generators/systemd-sysv-generator ]]
+testsuite-26.sh[1225]: + cat
+testsuite-26.sh[2330]: /usr/lib/systemd/tests/testdata/units/testsuite-26.sh: line 299: /etc/init.d/issue-24990: No such file or directory
+
+Follow-up to 5f882cc3ab32636d9242effb2cefad20d92d2ec2.
+
+(cherry picked from commit 7fcf0fab078ed92a4f6c3c3658c0a9dfd67c9601)
+
+Related: #2160477
+---
+ test/units/testsuite-26.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/units/testsuite-26.sh b/test/units/testsuite-26.sh
+index a8e7a5abaa..37ae6069bc 100755
+--- a/test/units/testsuite-26.sh
++++ b/test/units/testsuite-26.sh
+@@ -294,7 +294,7 @@ systemctl unset-environment IMPORT_THIS IMPORT_THIS_TOO
+ 
+ # test for sysv-generator (issue #24990)
+ if [[ -x /usr/lib/systemd/system-generators/systemd-sysv-generator ]]; then
+-
++    mkdir -p /etc/init.d
+     # invalid dependency
+     cat >/etc/init.d/issue-24990 <<\EOF
+ #!/bin/bash

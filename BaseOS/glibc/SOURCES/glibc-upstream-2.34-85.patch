@@ -1,0 +1,109 @@
+commit f7a79879c0b2bef0dadd6caaaeeb0d26423e04e5
+Author: Siddhesh Poyarekar <siddhesh@sourceware.org>
+Date:   Thu Jan 13 11:28:36 2022 +0530
+
+    realpath: Set errno to ENAMETOOLONG for result larger than PATH_MAX [BZ #28770]
+    
+    realpath returns an allocated string when the result exceeds PATH_MAX,
+    which is unexpected when its second argument is not NULL.  This results
+    in the second argument (resolved) being uninitialized and also results
+    in a memory leak since the caller expects resolved to be the same as the
+    returned value.
+    
+    Return NULL and set errno to ENAMETOOLONG if the result exceeds
+    PATH_MAX.  This fixes [BZ #28770], which is CVE-2021-3998.
+    
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+    Signed-off-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+    (cherry picked from commit ee8d5e33adb284601c00c94687bc907e10aec9bb)
+
+diff --git a/stdlib/Makefile b/stdlib/Makefile
+index 9bb5c221e8be3288..a4ac30d1f6359561 100644
+--- a/stdlib/Makefile
++++ b/stdlib/Makefile
+@@ -109,6 +109,7 @@ tests := \
+   tst-random \
+   tst-random2 \
+   tst-realpath \
++  tst-realpath-toolong \
+   tst-secure-getenv \
+   tst-setcontext \
+   tst-setcontext2 \
+diff --git a/stdlib/canonicalize.c b/stdlib/canonicalize.c
+index 698f9ede25570ef2..7a23a51b3a395eb3 100644
+--- a/stdlib/canonicalize.c
++++ b/stdlib/canonicalize.c
+@@ -400,8 +400,16 @@ realpath_stk (const char *name, char *resolved,
+ 
+ error:
+   *dest++ = '\0';
+-  if (resolved != NULL && dest - rname <= get_path_max ())
+-    rname = strcpy (resolved, rname);
++  if (resolved != NULL)
++    {
++      if (dest - rname <= get_path_max ())
++	rname = strcpy (resolved, rname);
++      else
++	{
++	  failed = true;
++	  __set_errno (ENAMETOOLONG);
++	}
++    }
+ 
+ error_nomem:
+   scratch_buffer_free (&extra_buffer);
+diff --git a/stdlib/tst-realpath-toolong.c b/stdlib/tst-realpath-toolong.c
+new file mode 100644
+index 0000000000000000..8bed772460b37571
+--- /dev/null
++++ b/stdlib/tst-realpath-toolong.c
+@@ -0,0 +1,49 @@
++/* Verify that realpath returns NULL with ENAMETOOLONG if the result exceeds
++   NAME_MAX.
++   Copyright The GNU Toolchain Authors.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <limits.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <support/check.h>
++#include <support/temp_file.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++
++#define BASENAME "tst-realpath-toolong."
++
++int
++do_test (void)
++{
++  char *base = support_create_and_chdir_toolong_temp_directory (BASENAME);
++
++  char buf[PATH_MAX + 1];
++  const char *res = realpath (".", buf);
++
++  /* canonicalize.c states that if the real path is >= PATH_MAX, then
++     realpath returns NULL and sets ENAMETOOLONG.  */
++  TEST_VERIFY (res == NULL);
++  TEST_VERIFY (errno == ENAMETOOLONG);
++
++  free (base);
++  return 0;
++}
++
++#include <support/test-driver.c>

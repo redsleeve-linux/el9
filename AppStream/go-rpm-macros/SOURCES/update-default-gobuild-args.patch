@@ -1,5 +1,14 @@
+From c05378a9d5d7ceb0fef2a915df9b88750685a3a9 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Alejandro=20S=C3=A1ez?= <asm@redhat.com>
+Date: Thu, 24 Nov 2022 15:05:06 +0100
+Subject: [PATCH] Update default gobuild args
+
+---
+ rpm/macros.d/macros.go-compilers-golang | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
 diff --git a/rpm/macros.d/macros.go-compilers-golang b/rpm/macros.d/macros.go-compilers-golang
-index b0ab4c4..942549f 100644
+index 74428a3..8cee8e2 100644
 --- a/rpm/macros.d/macros.go-compilers-golang
 +++ b/rpm/macros.d/macros.go-compilers-golang
 @@ -20,6 +20,8 @@
@@ -11,40 +20,45 @@ index b0ab4c4..942549f 100644
  # This *must* be all on one line, as it will be used in shell
  # assignments. eg
  #
-@@ -29,22 +31,33 @@
+@@ -29,13 +31,16 @@
  #
  #    %make GOBUILDFLAGS="%gobuildflags"
  #
--%gobuildflags() %{expand:%{gocompilerflags} -tags=\\"rpm_crashtraceback \\" -ldflags \\"${LDFLAGS:-}%{?currentgoldflags} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -extldflags '%__global_ldflags %{?__golang_extldflags}'\\" -a -v -x}
-+%gobuildflags() %{expand:%{gocompilerflags} -tags=\\"rpm_crashtraceback ${BUILDTAGS:-} libtrust_openssl\\" -ldflags \\"-linkmode=external -compressdwarf=false ${LDFLAGS:-}%{?currentgoldflags} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -extldflags '%__global_ldflags %{?__golang_extldflags}'\\" -a -v -x}
-+%_gobuildflags_internal() %{expand:%{gocompilerflags} -tags="rpm_crashtraceback ${BUILDTAGS:-} libtrust_openssl" -ldflags "-linkmode=external -compressdwarf=false ${LDFLAGS:-}%{?currentgoldflags} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -extldflags '%__global_ldflags %{?__golang_extldflags}'" -a -v -x}
+-%gobuildflags() %{expand:%{gocompilerflags} -tags="rpm_crashtraceback ${BUILDTAGS:-}" -ldflags "${LDFLAGS:-} %{?currentgoldflags} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -compressdwarf=false -linkmode=external -extldflags '%{build_ldflags} %{?__golang_extldflags}'" -a -v -x}
++%gobuildflags() %{expand:%{gocompilerflags} -tags=\\"rpm_crashtraceback ${BUILDTAGS:-} libtrust_openssl\\" -ldflags \\"-linkmode=external -compressdwarf=false ${LDFLAGS:-} %{?currentgoldflags} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -extldflags '%__global_ldflags %{?__golang_extldflags}'\\" -a -v -x}
++%_gobuildflags_internal() %{expand:%{gocompilerflags} -tags="rpm_crashtraceback ${BUILDTAGS:-} libtrust_openssl" -ldflags "-linkmode=external -compressdwarf=false ${LDFLAGS:-} %{?currentgoldflags} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -extldflags '%__global_ldflags %{?__golang_extldflags}'" -a -v -x}
  
  # Turn off Go modules
  %gomodulesmode GO111MODULE=off
  
  # Define commands for building
  # BUILD_ID can be generated for golang build no matter of debuginfo
-+
 +%_gobuild_cmd CGO_CPPFLAGS="-D_FORTIFY_SOURCE=2 -fstack-protector-all" go build %{_gobuildflags_internal}
 +%gobuild_compat_el8(o:) %{expand:%{_gobuild_cmd} %{?**};}
  %gobuild(o:) %{expand:
+   # https://pagure.io/go-rpm-macros/pull-request/38
+   # Most of the default LDFLAGS for Fedora are not supported so we don't want
+@@ -44,14 +49,16 @@
    # https://bugzilla.redhat.com/show_bug.cgi?id=995136#c12
    %global _dwz_low_mem_die_limit 0
    %{?gobuilddir:GOPATH="%{gobuilddir}:${GOPATH:+${GOPATH}:}%{?gopath}"} %{?gomodulesmode} \\
--  go build %{?gocompilerflags} -tags="rpm_crashtraceback ${BUILDTAGS:-}" -ldflags "${LDFLAGS:-}%{?currentgoldflags} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -extldflags '%__global_ldflags %{?__golang_extldflags}'" -a -v -x %{?**};
+-  go build %{gobuildflags} %{?**};
 +  %{_gobuild_cmd} %{?**};
  }
  ${workroot}${GOPATH:+:${GOPATH}}
  
  # Define commands for testing
  %gotestflags      %{gocompilerflags}
- %gotestextldflags %__global_ldflags %{?__golang_extldflags}
--%gotest() %{?gomodulesmode} go test %{gotestflags} -ldflags "${LDFLAGS:-}%{?currentgoldflags} -extldflags '%{gotestextldflags}'" %{?**};
-+
-+%_gotest_cmd %{?gomodulesmode} go test %{gotestflags} -ldflags "${LDFLAGS:-}%{?currentgoldflags} -extldflags '%{gotestextldflags}'"
+ %gotestextldflags %{build_ldflags} %{?__golang_extldflags}
+-%gotest() %{expand:
+-  %undefine _auto_set_build_flags
+-  %{?gomodulesmode} go test %{gotestflags} -ldflags "${LDFLAGS:-} %{?currentgoldflags} -extldflags '%{gotestextldflags}'" %{?**};
++%_gotest_cmd %{?gomodulesmode} go test %{gotestflags} -ldflags "${LDFLAGS:-} %{?currentgoldflags} -extldflags '%{gotestextldflags}'"
 +%gotest_compat_el8(o:) %{expand:%{_gotest_cmd} %{?**};}
 +%gotest(o:) %{expand:
 +  %{?gobuilddir:GOPATH="%{gobuilddir}:${GOPATH:+${GOPATH}:}%{?gopath}"} %{?gomodulesmode} \\
 +  %{_gotest_cmd} %{?**};
-+}
-+
+ }
+-- 
+2.38.1
+

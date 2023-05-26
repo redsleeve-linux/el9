@@ -1,0 +1,34 @@
+From c2317e2a2be2dd39266b82712ec9569a86f7fde3 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 13 Nov 2022 21:10:56 +0900
+Subject: [PATCH] systemctl: do not show unit properties with --all
+
+Fixes a bug introduced by a6e334649d4bdff0c6f664e98666b2223aa21a8b.
+
+Fixes #25343.
+
+(cherry picked from commit 0b51a1c8c4c77f98a8c234cd2c7a7849329be027)
+
+Related: #2138081
+---
+ src/systemctl/systemctl-show.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/systemctl/systemctl-show.c b/src/systemctl/systemctl-show.c
+index 8d3db98c0a..24c7d564b8 100644
+--- a/src/systemctl/systemctl-show.c
++++ b/src/systemctl/systemctl-show.c
+@@ -2207,9 +2207,10 @@ int verb_show(int argc, char *argv[], void *userdata) {
+ 
+                 if (!arg_states && !arg_types) {
+                         if (show_mode == SYSTEMCTL_SHOW_PROPERTIES)
+-                                r = show_one(bus, "/org/freedesktop/systemd1", NULL, show_mode, &new_line, &ellipsized);
+-                        else
+-                                r = show_system_status(bus);
++                                /* systemctl show --all → show properties of the manager */
++                                return show_one(bus, "/org/freedesktop/systemd1", NULL, show_mode, &new_line, &ellipsized);
++
++                        r = show_system_status(bus);
+                         if (r < 0)
+                                 return r;
+ 

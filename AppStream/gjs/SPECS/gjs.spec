@@ -20,7 +20,7 @@
 
 Name:           gjs
 Version:        1.68.6
-Release:        1%{?dist}.redsleeve
+Release:        3%{?dist}
 Summary:        Javascript Bindings for GNOME
 
 # The following files contain code from Mozilla which
@@ -68,7 +68,10 @@ Patch30:        FixSharedArray.diff
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1663863
 Patch31:        0002-D89554-autoconf1.diff
 Patch32:        0003-D94538-autoconf2.diff
+
 %endif
+
+Patch40:        0001-gobject-Guard-against-null-JS-wrapper-in-set-get-pro.patch
 
 BuildRequires:  cairo-gobject-devel
 BuildRequires:  dbus-daemon
@@ -159,7 +162,7 @@ pushd firefox-%{mozjs_version}
 %patch14 -p1
 %patch15 -p1
 
-%ifarch %{arm}
+%ifarch armv7hl
 # Include definitions for user vfp on armv7 as it causes the compilation to fail without them
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1526653
 %patch17 -p1
@@ -183,6 +186,8 @@ pushd firefox-%{mozjs_version}
 rm -rf modules/zlib
 popd
 %endif
+
+%patch40 -p1
 
 %build
 %if 0%{?bundled_mozjs}
@@ -295,8 +300,9 @@ popd
 %{_datadir}/installed-tests/
 
 %changelog
-* Mon Dec 05 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.68.6-1.redsleeve
-- patch for all arms in stead of only armv7
+* Wed Feb 15 2023 Florian Müllner <fmuellner@redhat.com> - 1.68.6-2
+- Guard against invalid gobject property access
+Resolves: #2170044
 
 * Tue Apr 05 2022 Florian Müllner <fmuellner@redhat.com> - 1.68.6-1
 - Update to 1.68.6

@@ -1,0 +1,38 @@
+From b6f459c221004de9753569e2ec5ee5f887fc8b51 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 15 Dec 2022 15:28:56 +0900
+Subject: [PATCH] test: suppress echo in monitor_check_rr()
+
+(cherry picked from commit ef09861a0b0aa7c6a948f4e008e2fea312bc68d6)
+
+Related: #2138081
+---
+ test/units/testsuite-75.sh | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/test/units/testsuite-75.sh b/test/units/testsuite-75.sh
+index d2062c7b05..d0c7133412 100755
+--- a/test/units/testsuite-75.sh
++++ b/test/units/testsuite-75.sh
+@@ -16,17 +16,17 @@ run() {
+     "$@" |& tee "$RUN_OUT"
+ }
+ 
+-monitor_check_rr() {
++monitor_check_rr() (
++    set +x
++    set +o pipefail
+     local match="${1:?}"
+ 
+     # Wait until the first mention of the specified log message is
+     # displayed. We turn off pipefail for this, since we don't care about the
+     # lhs of this pipe expression, we only care about the rhs' result to be
+     # clean
+-    set +o pipefail
+     journalctl -u resmontest.service -f --full | grep -m1 "$match"
+-    set -o pipefail
+-}
++)
+ 
+ # Test for resolvectl, resolvconf
+ systemctl unmask systemd-resolved.service

@@ -1,0 +1,52 @@
+From f0839034c9910529f368e60262b5653afad58f63 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Mon, 7 Nov 2022 16:39:12 +0100
+Subject: [PATCH] semaphore: remove the Semaphore repositories recursively
+
+The list of disabled repositories was recently converted from a single
+file into a directory with separate repository files, so let's adjust
+the setup script accordingly.
+
+```
+$ ls -lR /etc/apt/sources.list.d/
+/etc/apt/sources.list.d/:
+total 36
+-rw-r--r-- 1 root root   76 Nov  3 10:28 azure-cli.list
+-rw-r--r-- 1 root root   72 Nov  3 10:22 bazel.list
+drwxr-xr-x 2 root root 4096 Nov  3 10:31 disabled
+-rw-r--r-- 1 root root  113 Nov  3 10:13 docker-source.list
+-rw-r--r-- 1 root root  367 Nov  3 10:28 github_git-lfs.list
+-rw-r--r-- 1 root root  111 Nov  3 10:25 google-chrome-source.list
+-rw-r--r-- 1 root root   64 Nov  3 10:14 google-cloud-sdk.list
+-rw-r--r-- 1 root root   54 Nov  3 10:23 helm-stable-debian.list
+-rw-r--r-- 1 root root   89 Nov  3 10:29 yarn-source.list
+
+/etc/apt/sources.list.d/disabled:
+total 20
+-rw-r--r-- 1 root root 100 Nov  3 10:23 devel_kubic_libcontainers_stable.list
+-rw-r--r-- 1 root root 103 Nov  3 10:27 git.list
+-rw-r--r-- 1 root root 105 Nov  3 10:22 gradle.list
+-rw-r--r-- 1 root root 118 Nov  3 10:13 pypy.list
+-rw-r--r-- 1 root root 104 Nov  3 10:13 python.list
+```
+
+(cherry picked from commit 610eb3f8260ecbb161db5186a5e27417f3110a68)
+
+Related #2138081
+---
+ .semaphore/semaphore-runner.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.semaphore/semaphore-runner.sh b/.semaphore/semaphore-runner.sh
+index 98fd7b4411..b0d32bd136 100755
+--- a/.semaphore/semaphore-runner.sh
++++ b/.semaphore/semaphore-runner.sh
+@@ -55,7 +55,7 @@ for phase in "${PHASES[@]}"; do
+     case "$phase" in
+         SETUP)
+             # remove semaphore repos, some of them don't work and cause error messages
+-            sudo rm -f /etc/apt/sources.list.d/*
++            sudo rm -rf /etc/apt/sources.list.d/*
+ 
+             # enable backports for latest LXC
+             echo "deb http://archive.ubuntu.com/ubuntu $UBUNTU_RELEASE-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/backports.list

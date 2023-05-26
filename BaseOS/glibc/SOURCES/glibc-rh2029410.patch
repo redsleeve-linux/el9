@@ -1,0 +1,143 @@
+commit ea5814467a02c9d2d7608b6445c5d60e2a81d3ee
+Author: H.J. Lu <hjl.tools@gmail.com>
+Date:   Fri Dec 10 13:00:09 2021 -0800
+
+    x86-64: Remove LD_PREFER_MAP_32BIT_EXEC support [BZ #28656]
+    
+    Remove the LD_PREFER_MAP_32BIT_EXEC environment variable support since
+    the first PT_LOAD segment is no longer executable due to defaulting to
+    -z separate-code.
+    
+    This fixes [BZ #28656].
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/dl-librecon.h b/sysdeps/unix/sysv/linux/x86_64/64/dl-librecon.h
+deleted file mode 100644
+index 5b9696e2de8e5482..0000000000000000
+--- a/sysdeps/unix/sysv/linux/x86_64/64/dl-librecon.h
++++ /dev/null
+@@ -1,45 +0,0 @@
+-/* Optional code to distinguish library flavours.  x86-64 version.
+-   Copyright (C) 2015-2021 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-#ifndef _DL_LIBRECON_H
+-
+-#include <sysdeps/unix/sysv/linux/dl-librecon.h>
+-
+-/* Recognizing extra environment variables.  For 64-bit applications,
+-   branch prediction performance may be negatively impacted when the
+-   target of a branch is more than 4GB away from the branch.  Add the
+-   Prefer_MAP_32BIT_EXEC bit so that mmap will try to map executable
+-   pages with MAP_32BIT first.  NB: MAP_32BIT will map to lower 2GB,
+-   not lower 4GB, address.  Prefer_MAP_32BIT_EXEC reduces bits available
+-   for address space layout randomization (ASLR).  Prefer_MAP_32BIT_EXEC
+-   is always disabled for SUID programs and can be enabled by setting
+-   environment variable, LD_PREFER_MAP_32BIT_EXEC.  */
+-#define EXTRA_LD_ENVVARS \
+-  case 21:								  \
+-    if (!__libc_enable_secure						  \
+-	&& memcmp (envline, "PREFER_MAP_32BIT_EXEC", 21) == 0)		  \
+-      GLRO(dl_x86_cpu_features).preferred[index_arch_Prefer_MAP_32BIT_EXEC] \
+-	|= bit_arch_Prefer_MAP_32BIT_EXEC;				  \
+-    break;
+-
+-/* Extra unsecure variables.  The names are all stuffed in a single
+-   string which means they have to be terminated with a '\0' explicitly.  */
+-#define EXTRA_UNSECURE_ENVVARS \
+-  "LD_PREFER_MAP_32BIT_EXEC\0"
+-
+-#endif /* dl-librecon.h */
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/mmap_internal.h b/sysdeps/unix/sysv/linux/x86_64/64/mmap_internal.h
+deleted file mode 100644
+index 18177d2cb3ae645f..0000000000000000
+--- a/sysdeps/unix/sysv/linux/x86_64/64/mmap_internal.h
++++ /dev/null
+@@ -1,42 +0,0 @@
+-/* Linux mmap system call.  x86-64 version.
+-   Copyright (C) 2015-2021 Free Software Foundation, Inc.
+-
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public License as
+-   published by the Free Software Foundation; either version 2.1 of the
+-   License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-#ifndef MMAP_X86_64_INTERNAL_H
+-#define MMAP_X86_64_INTERNAL_H
+-
+-#include <ldsodefs.h>
+-
+-/* If the Prefer_MAP_32BIT_EXEC bit is set, try to map executable pages
+-   with MAP_32BIT first.  */
+-#define MMAP_PREPARE(addr, len, prot, flags, fd, offset)		\
+-  if ((addr) == NULL							\
+-      && ((prot) & PROT_EXEC) != 0					\
+-      && HAS_ARCH_FEATURE (Prefer_MAP_32BIT_EXEC))			\
+-    {									\
+-      void *ret = (void*) INLINE_SYSCALL_CALL (mmap, (addr), (len),	\
+-					      (prot),			\
+-					      (flags) | MAP_32BIT,	\
+-					      (fd), (offset));		\
+-      if (ret != MAP_FAILED)						\
+-	return ret;							\
+-    }
+-
+-#include_next <mmap_internal.h>
+-
+-#endif
+diff --git a/sysdeps/x86/cpu-tunables.c b/sysdeps/x86/cpu-tunables.c
+index 00fe5045eb56eb07..58f2fad4323d5d91 100644
+--- a/sysdeps/x86/cpu-tunables.c
++++ b/sysdeps/x86/cpu-tunables.c
+@@ -260,13 +260,6 @@ TUNABLE_CALLBACK (set_hwcaps) (tunable_val_t *valp)
+ 		 20);
+ 	    }
+ 	  break;
+-	case 21:
+-	    {
+-	      CHECK_GLIBC_IFUNC_PREFERRED_BOTH (n, cpu_features,
+-						Prefer_MAP_32BIT_EXEC,
+-						disable, 21);
+-	    }
+-	  break;
+ 	case 23:
+ 	    {
+ 	      CHECK_GLIBC_IFUNC_PREFERRED_NEED_BOTH
+diff --git a/sysdeps/x86/include/cpu-features-preferred_feature_index_1.def b/sysdeps/x86/include/cpu-features-preferred_feature_index_1.def
+index d7c93f00c5928a30..3bdc76cf71007948 100644
+--- a/sysdeps/x86/include/cpu-features-preferred_feature_index_1.def
++++ b/sysdeps/x86/include/cpu-features-preferred_feature_index_1.def
+@@ -26,7 +26,6 @@ BIT (I586)
+ BIT (I686)
+ BIT (Slow_SSE4_2)
+ BIT (AVX_Fast_Unaligned_Load)
+-BIT (Prefer_MAP_32BIT_EXEC)
+ BIT (Prefer_No_VZEROUPPER)
+ BIT (Prefer_ERMS)
+ BIT (Prefer_No_AVX512)

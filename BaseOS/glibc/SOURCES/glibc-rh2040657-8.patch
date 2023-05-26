@@ -1,0 +1,146 @@
+commit 9ba202c78f0aa39f49929eee63c367847da72ee4
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Jan 14 20:16:05 2022 +0100
+
+    Add --with-rtld-early-cflags configure option
+    
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+Conflicts:
+	INSTALL
+	configure
+	manual/install.texi
+	  (Missing --with-timeout-factor downstream.)
+
+diff --git a/INSTALL b/INSTALL
+index d6d93ec9be4262d7..d8d4e9f155f56616 100644
+--- a/INSTALL
++++ b/INSTALL
+@@ -106,6 +106,14 @@ if 'CFLAGS' is specified it must enable optimization.  For example:
+      particular case and potentially change debugging information and
+      metadata only).
+ 
++'--with-rtld-early-cflags=CFLAGS'
++     Use additional compiler flags CFLAGS to build the early startup
++     code of the dynamic linker.  These flags can be used to enable
++     early dynamic linker diagnostics to run on CPUs which are not
++     compatible with the rest of the GNU C Library, for example, due to
++     compiler flags which target a later instruction set architecture
++     (ISA).
++
+ '--disable-shared'
+      Don't build shared libraries even if it is possible.  Not all
+      systems support shared libraries; you need ELF support and
+diff --git a/config.make.in b/config.make.in
+index e8630a8d0ccf874d..6d43e691f7823262 100644
+--- a/config.make.in
++++ b/config.make.in
+@@ -110,6 +110,7 @@ CFLAGS = @CFLAGS@
+ CPPFLAGS-config = @CPPFLAGS@
+ CPPUNDEFS = @CPPUNDEFS@
+ extra-nonshared-cflags = @extra_nonshared_cflags@
++rtld-early-cflags = @rtld_early_cflags@
+ ASFLAGS-config = @ASFLAGS_config@
+ AR = @AR@
+ NM = @NM@
+diff --git a/configure b/configure
+index e9d2b1f398c4dba0..03f4e59e754b5463 100755
+--- a/configure
++++ b/configure
+@@ -681,6 +681,7 @@ force_install
+ bindnow
+ hardcoded_path_in_tests
+ enable_timezone_tools
++rtld_early_cflags
+ extra_nonshared_cflags
+ use_default_link
+ sysheaders
+@@ -761,6 +762,7 @@ with_selinux
+ with_headers
+ with_default_link
+ with_nonshared_cflags
++with_rtld_early_cflags
+ enable_sanity_checks
+ enable_shared
+ enable_profile
+@@ -1479,6 +1481,8 @@ Optional Packages:
+   --with-default-link     do not use explicit linker scripts
+   --with-nonshared-cflags=CFLAGS
+                           build nonshared libraries with additional CFLAGS
++  --with-rtld-early-cflags=CFLAGS
++                          build early initialization with additional CFLAGS
+   --with-cpu=CPU          select code for CPU variant
+ 
+ Some influential environment variables:
+@@ -3383,6 +3387,16 @@ fi
+ 
+ 
+ 
++# Check whether --with-rtld-early-cflags was given.
++if test "${with_rtld_early_cflags+set}" = set; then :
++  withval=$with_rtld_early_cflags; rtld_early_cflags=$withval
++else
++  rtld_early_cflags=
++fi
++
++
++
++
+ # Check whether --enable-sanity-checks was given.
+ if test "${enable_sanity_checks+set}" = set; then :
+   enableval=$enable_sanity_checks; enable_sanity=$enableval
+diff --git a/configure.ac b/configure.ac
+index 79f6822d29ce21cf..eb9431875fae1b0e 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -162,6 +162,12 @@ AC_ARG_WITH([nonshared-cflags],
+ 	    [extra_nonshared_cflags=$withval],
+ 	    [extra_nonshared_cflags=])
+ AC_SUBST(extra_nonshared_cflags)
++AC_ARG_WITH([rtld-early-cflags],
++	    AS_HELP_STRING([--with-rtld-early-cflags=CFLAGS],
++			   [build early initialization with additional CFLAGS]),
++	    [rtld_early_cflags=$withval],
++	    [rtld_early_cflags=])
++AC_SUBST(rtld_early_cflags)
+ 
+ AC_ARG_ENABLE([sanity-checks],
+ 	      AS_HELP_STRING([--disable-sanity-checks],
+diff --git a/elf/Makefile b/elf/Makefile
+index 52aafc89cec835ab..778e393395fc5248 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -152,6 +152,14 @@ CFLAGS-.o += $(call elide-stack-protector,.o,$(elide-routines.os))
+ CFLAGS-.op += $(call elide-stack-protector,.op,$(elide-routines.os))
+ CFLAGS-.os += $(call elide-stack-protector,.os,$(all-rtld-routines))
+ 
++# Add the requested compiler flags to the early startup code.
++CFLAGS-dl-printf.os += $(rtld-early-cflags)
++CFLAGS-dl-sysdep.os += $(rtld-early-cflags)
++CFLAGS-dl-tunables.os += $(rtld-early-cflags)
++CFLAGS-dl-write.os += $(rtld-early-cflags)
++CFLAGS-dl-writev.os += $(rtld-early-cflags)
++CFLAGS-rtld.os += $(rtld-early-cflags)
++
+ ifeq ($(unwind-find-fde),yes)
+ routines += unwind-dw2-fde-glibc
+ shared-only-routines += unwind-dw2-fde-glibc
+diff --git a/manual/install.texi b/manual/install.texi
+index 1320ac69b3c645f2..816b77a0a25a88a7 100644
+--- a/manual/install.texi
++++ b/manual/install.texi
+@@ -131,6 +131,13 @@ that the objects in @file{libc_nonshared.a} are compiled with this flag
+ (although this will not affect the generated code in this particular
+ case and potentially change debugging information and metadata only).
+ 
++@item --with-rtld-early-cflags=@var{cflags}
++Use additional compiler flags @var{cflags} to build the early startup
++code of the dynamic linker.  These flags can be used to enable early
++dynamic linker diagnostics to run on CPUs which are not compatible with
++the rest of @theglibc{}, for example, due to compiler flags which target
++a later instruction set architecture (ISA).
++
+ @c disable static doesn't work currently
+ @c @item --disable-static
+ @c Don't build static libraries.  Static libraries aren't that useful these

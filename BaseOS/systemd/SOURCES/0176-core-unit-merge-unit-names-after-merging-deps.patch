@@ -1,0 +1,45 @@
+From 48455fa876129bf33df06d2e758fb0fbda510d5b Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 16 Nov 2022 03:18:30 +0900
+Subject: [PATCH] core/unit: merge unit names after merging deps
+
+Before:
+systemd[1]: issue-24990.service: Dependency Before=n/a dropped, merged into issue-24990.service
+After:
+systemd[1]: issue-24990.service: Dependency Before=test1.service dropped, merged into issue-24990.service
+
+(cherry picked from commit 1d0c81a05b1605a5fc3db44d5a157a1d6876eda9)
+
+Related: #2160477
+---
+ src/core/unit.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 6b49edc2de..d1929bbf69 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -1164,11 +1164,6 @@ int unit_merge(Unit *u, Unit *other) {
+         if (r < 0)
+                 return r;
+ 
+-        /* Merge names */
+-        r = unit_merge_names(u, other);
+-        if (r < 0)
+-                return r;
+-
+         /* Redirect all references */
+         while (other->refs_by_target)
+                 unit_ref_set(other->refs_by_target, other->refs_by_target->source, u);
+@@ -1176,6 +1171,11 @@ int unit_merge(Unit *u, Unit *other) {
+         /* Merge dependencies */
+         unit_merge_dependencies(u, other);
+ 
++        /* Merge names. It is better to do that after merging deps, otherwise the log message contains n/a. */
++        r = unit_merge_names(u, other);
++        if (r < 0)
++                return r;
++
+         other->load_state = UNIT_MERGED;
+         other->merged_into = u;
+ 

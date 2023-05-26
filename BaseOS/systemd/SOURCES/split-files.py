@@ -17,18 +17,19 @@ def files(root):
 
 o_libs = open('.file-list-libs', 'w')
 o_udev = open('.file-list-udev', 'w')
+o_boot = open('.file-list-boot', 'w')
 o_pam = open('.file-list-pam', 'w')
 o_rpm_macros = open('.file-list-rpm-macros', 'w')
 o_devel = open('.file-list-devel', 'w')
 o_container = open('.file-list-container', 'w')
 o_networkd = open('.file-list-networkd', 'w')
-o_resolved = open('.file-list-resolved', 'w')
 o_oomd = open('.file-list-oomd', 'w')
 o_remote = open('.file-list-remote', 'w')
+o_resolve = open('.file-list-resolve', 'w')
 o_tests = open('.file-list-tests', 'w')
 o_standalone_tmpfiles = open('.file-list-standalone-tmpfiles', 'w')
 o_standalone_sysusers = open('.file-list-standalone-sysusers', 'w')
-o_rest = open('.file-list-rest', 'w')
+o_main = open('.file-list-main', 'w')
 for file in files(buildroot):
     n = file.path[1:]
     if re.match(r'''/usr/(share|include)$|
@@ -58,7 +59,11 @@ for file in files(buildroot):
         o = o_rpm_macros
     elif '/usr/lib/systemd/tests' in n:
         o = o_tests
-    elif re.search(r'/lib.*\.pc|/man3/|/usr/include|(?<!/libsystemd-shared-...).so$', n):
+    elif re.search(r'/libsystemd-(shared|core)-.*\.so$', n):
+        o = o_main
+    elif re.search(r'/libcryptsetup-token-systemd-.*\.so$', n):
+        o = o_udev
+    elif re.search(r'/lib.*\.pc|/man3/|/usr/include|\.so$', n):
         o = o_devel
     elif re.search(r'''journal-(remote|gateway|upload)|
                        systemd-remote\.conf|
@@ -66,6 +71,7 @@ for file in files(buildroot):
                        /var/log/journal/remote
     ''', n, re.X):
         o = o_remote
+
     elif re.search(r'''mymachines|
                        machinectl|
                        systemd-nspawn|
@@ -77,26 +83,25 @@ for file in files(buildroot):
                        org.freedesktop.(import|machine)1
     ''', n, re.X):
         o = o_container
+
     elif re.search(r'''/usr/lib/systemd/network/80-|
                        networkd|
                        networkctl|
-                       org.freedesktop.network1
+                       org.freedesktop.network1|
+                       sysusers\.d/systemd-network.conf|
+                       tmpfiles\.d/systemd-network.conf|
+                       systemd\.network|
+                       systemd\.netdev
     ''', n, re.X):
         o = o_networkd
-    elif re.search(r'''resolved|
-                       resolvectl|
-                       resolvconf|
-                       org.freedesktop.resolve1|
-                       systemd-resolve|
-                       nss-resolve
-    ''', n, re.X):
-        o = o_resolved
+
     elif '.so.' in n:
         o = o_libs
+
     elif re.search(r'''udev(?!\.pc)|
                        hwdb|
                        bootctl|
-                       sd-boot|systemd-boot\.|loader.conf|
+                       boot-update|
                        bless-boot|
                        boot-system-token|
                        kernel-install|
@@ -106,6 +111,7 @@ for file in files(buildroot):
                        random-seed|
                        modules-load|
                        timesync|
+                       crypttab|
                        cryptenroll|
                        cryptsetup|
                        kmod|
@@ -119,15 +125,42 @@ for file in files(buildroot):
                        repart|
                        gpt-auto|
                        volatile-root|
-                       verity-setup|
+                       veritysetup|
+                       integritysetup|
+                       integritytab|
                        remount-fs|
+                       /initrd|
+                       systemd-pcrphase|
+                       systemd-measure|
                        /boot$|
-                       /boot/efi|
                        /kernel/|
                        /kernel$|
-                       /modprobe.d
-    ''', n, re.X):
+                       /modprobe.d|
+                       binfmt|
+                       sysctl|
+                       coredump|
+                       homed|home1|
+                       portabled|portable1
+    ''', n, re.X):     # coredumpctl, homectl, portablectl are included in the main package because
+                       # they can be used to interact with remote daemons. Also, the user could be
+                       # confused if those user-facing binaries are not available.
         o = o_udev
+
+    elif re.search(r'''/boot/efi|
+                       /usr/lib/systemd/boot|
+                       sd-boot|systemd-boot\.|loader.conf
+    ''', n, re.X):
+        o = o_boot
+
+    elif re.search(r'''resolved|resolve1|
+                       resolvectl|
+                       systemd-resolve|
+                       resolvconf|
+                       systemd\.(positive|negative)|
+                       nss-resolve
+    ''', n, re.X):     # resolvectl and nss-resolve are in the main package.
+        o = o_resolve
+
     elif re.search(r'''10-oomd-.*defaults\.conf|
                        oomd\.conf|
                        oomctl|
@@ -135,6 +168,7 @@ for file in files(buildroot):
                        systemd-oomd
     ''', n, re.X):
         o = o_oomd
+
     elif n.endswith('.standalone'):
         if 'tmpfiles' in n:
             o = o_standalone_tmpfiles
@@ -142,8 +176,9 @@ for file in files(buildroot):
             o = o_standalone_sysusers
         else:
             assert False, 'Found .standalone not belonging to known packages'
+
     else:
-        o = o_rest
+        o = o_main
 
     if n in known_files:
         prefix = ' '.join(known_files[n].split()[:-1])

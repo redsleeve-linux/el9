@@ -1,0 +1,56 @@
+commit 9db6a597ef950737d3cd7af0d4211291197b82dd
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Tue May 31 12:17:20 2022 -0300
+
+    posix: Use 64 bit stat for posix_fallocate fallback (BZ# 29207)
+    
+    This is a missing spot initially from 52a5fe70a2c77935.
+    
+    Checked on i686-linux-gnu.
+    
+    (cherry picked from commit 574ba60fc8a7fb35e6216e2fdecc521acab7ffd2)
+
+diff --git a/sysdeps/posix/posix_fallocate.c b/sysdeps/posix/posix_fallocate.c
+index 0bb379c94d7cf779..4381033d6e16c2e3 100644
+--- a/sysdeps/posix/posix_fallocate.c
++++ b/sysdeps/posix/posix_fallocate.c
+@@ -30,7 +30,7 @@
+ int
+ posix_fallocate (int fd, __off_t offset, __off_t len)
+ {
+-  struct stat64 st;
++  struct __stat64_t64 st;
+ 
+   if (offset < 0 || len < 0)
+     return EINVAL;
+@@ -48,7 +48,7 @@ posix_fallocate (int fd, __off_t offset, __off_t len)
+   }
+ 
+   /* We have to make sure that this is really a regular file.  */
+-  if (__fstat64 (fd, &st) != 0)
++  if (__fstat64_time64 (fd, &st) != 0)
+     return EBADF;
+   if (S_ISFIFO (st.st_mode))
+     return ESPIPE;
+diff --git a/sysdeps/posix/posix_fallocate64.c b/sysdeps/posix/posix_fallocate64.c
+index c1e233b49c8d7f37..d45b0c17489fbbbb 100644
+--- a/sysdeps/posix/posix_fallocate64.c
++++ b/sysdeps/posix/posix_fallocate64.c
+@@ -30,7 +30,7 @@
+ int
+ __posix_fallocate64_l64 (int fd, __off64_t offset, __off64_t len)
+ {
+-  struct stat64 st;
++  struct __stat64_t64 st;
+ 
+   if (offset < 0 || len < 0)
+     return EINVAL;
+@@ -48,7 +48,7 @@ __posix_fallocate64_l64 (int fd, __off64_t offset, __off64_t len)
+   }
+ 
+   /* We have to make sure that this is really a regular file.  */
+-  if (__fstat64 (fd, &st) != 0)
++  if (__fstat64_time64 (fd, &st) != 0)
+     return EBADF;
+   if (S_ISFIFO (st.st_mode))
+     return ESPIPE;

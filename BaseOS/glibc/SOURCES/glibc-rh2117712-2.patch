@@ -1,0 +1,45 @@
+commit 68e036f27f31c3378201702e182246504fb00f87
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Aug 3 11:41:53 2022 +0200
+
+    nptl: Remove uses of assert_perror
+    
+    __pthread_sigmask cannot actually fail with valid pointer arguments
+    (it would need a really broken seccomp filter), and we do not check
+    for errors elsewhere.
+    
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff --git a/sysdeps/nptl/gai_misc.h b/sysdeps/nptl/gai_misc.h
+index 261e24dae62d7871..700fd5c46b4b7c82 100644
+--- a/sysdeps/nptl/gai_misc.h
++++ b/sysdeps/nptl/gai_misc.h
+@@ -81,9 +81,7 @@ __gai_start_notify_thread (void)
+ {
+   sigset_t ss;
+   sigemptyset (&ss);
+-  int sigerr __attribute__ ((unused));
+-  sigerr = __pthread_sigmask (SIG_SETMASK, &ss, NULL);
+-  assert_perror (sigerr);
++  (void) __pthread_sigmask (SIG_SETMASK, &ss, NULL);
+ }
+ 
+ extern inline int
+@@ -106,15 +104,12 @@ __gai_create_helper_thread (pthread_t *threadp, void *(*tf) (void *),
+   sigset_t ss;
+   sigset_t oss;
+   sigfillset (&ss);
+-  int sigerr __attribute__ ((unused));
+-  sigerr = __pthread_sigmask (SIG_SETMASK, &ss, &oss);
+-  assert_perror (sigerr);
++  (void) __pthread_sigmask (SIG_SETMASK, &ss, &oss);
+ 
+   int ret = __pthread_create (threadp, &attr, tf, arg);
+ 
+   /* Restore the signal mask.  */
+-  sigerr = __pthread_sigmask (SIG_SETMASK, &oss, NULL);
+-  assert_perror (sigerr);
++  (void) __pthread_sigmask (SIG_SETMASK, &oss, NULL);
+ 
+   (void) __pthread_attr_destroy (&attr);
+   return ret;

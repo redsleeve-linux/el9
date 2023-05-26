@@ -1,6 +1,8 @@
-%global libomp_version 14.0.6
-#global rc_ver 1
-%global libomp_srcdir openmp-%{libomp_version}%{?rc_ver:rc%{rc_ver}}.src
+%global toolchain gcc
+
+%global maj_ver 15
+%global libomp_version %{maj_ver}.0.7
+%global libomp_srcdir openmp-%{libomp_version}.src
 
 
 %ifarch ppc64le
@@ -10,22 +12,21 @@
 %endif
 
 Name: libomp
-Version: %{libomp_version}%{?rc_ver:~rc%{rc_ver}}
-Release: 1%{?dist}.redsleeve
+Version: %{libomp_version}
+Release: 1%{?dist}
 Summary: OpenMP runtime for clang
 
 License: NCSA
 URL: http://openmp.llvm.org
-Source0: https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}%{?rc_ver:-rc%{rc_ver}}/%{libomp_srcdir}.tar.xz
-Source1: https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}%{?rc_ver:-rc%{rc_ver}}/%{libomp_srcdir}.tar.xz.sig
-Source2: tstellar-gpg-key.asc
+Source0: https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}/%{libomp_srcdir}.tar.xz
+Source1: https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}/%{libomp_srcdir}.tar.xz.sig
+Source2: release-keys.asc
 Source3: run-lit-tests
 Source4: lit.fedora.cfg.py
 
-Patch0: 0001-PATCH-openmp-CMake-Make-LIBOMP_HEADERS_INSTALL_PATH-.patch
-
-BuildRequires: gcc
-BuildRequires: gcc-c++
+BuildRequires: clang
+# For clang-offload-packager
+BuildRequires: clang-tools-extra
 BuildRequires: cmake
 BuildRequires: ninja-build
 BuildRequires: elfutils-libelf-devel
@@ -50,6 +51,7 @@ OpenMP runtime for clang.
 
 %package devel
 Summary: OpenMP header files
+Requires: %{name}%{?isa} = %{version}-%{release}
 Requires: clang-resource-filesystem%{?isa} = %{version}
 
 %description devel
@@ -61,8 +63,6 @@ Requires: %{name}%{?isa} = %{version}-%{release}
 Requires: %{name}-devel%{?isa} = %{version}-%{release}
 Requires: clang
 Requires: llvm
-Requires: gcc
-Requires: gcc-c++
 Requires: python3-lit
 
 %description test
@@ -73,14 +73,17 @@ OpenMP regression tests
 %autosetup -n %{libomp_srcdir} -p2
 
 %build
-# LTO causes build failures in this package.  Disable LTO for now
-# https://bugzilla.redhat.com/show_bug.cgi?id=1988155
-%define _lto_cflags %{nil}
 
-%cmake  -GNinja \
+%if "%toolchain" == "gcc"
+# Building openmp with LTO fails with GCC but works with Clang
+%define _lto_cflags %{nil}
+%endif
+
+%cmake	-GNinja \
 	-DLIBOMP_INSTALL_ALIASES=OFF \
+	-DCMAKE_MODULE_PATH=%{_libdir}/cmake/llvm \
 	-DLLVM_DIR=%{_libdir}/cmake/llvm \
-	-DLIBOMP_HEADERS_INSTALL_PATH:PATH=%{_libdir}/clang/%{libomp_version}/include \
+	-DCMAKE_INSTALL_INCLUDEDIR=%{_libdir}/clang/%{libomp_version}/include \
 %if 0%{?__isa_bits} == 64
 	-DOPENMP_LIBDIR_SUFFIX=64 \
 %else
@@ -127,16 +130,16 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %files
 %license LICENSE.TXT
 %{_libdir}/libomp.so
-%ifnarch %{arm}
 %{_libdir}/libompd.so
+%ifnarch %{arm}
 %{_libdir}/libarcher.so
 %endif
 %ifnarch %{ix86} %{arm}
-%{_libdir}/libomptarget.rtl.amdgpu.so
-%{_libdir}/libomptarget.rtl.cuda.so
-%{_libdir}/libomptarget.rtl.%{libomp_arch}.so
+%{_libdir}/libomptarget.rtl.amdgpu.so.%{maj_ver}
+%{_libdir}/libomptarget.rtl.cuda.so.%{maj_ver}
+%{_libdir}/libomptarget.rtl.%{libomp_arch}.so.%{maj_ver}
 %endif
-%{_libdir}/libomptarget.so
+%{_libdir}/libomptarget.so.%{maj_ver}
 
 %files devel
 %{_libdir}/clang/%{libomp_version}/include/omp.h
@@ -144,18 +147,34 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %ifnarch %{arm}
 %{_libdir}/clang/%{libomp_version}/include/omp-tools.h
 %{_libdir}/clang/%{libomp_version}/include/ompt.h
-# FIXME: This is probably wrong.  Seems like LIBOMP_HEADERS_INSTALL may
-# not be respected.
-%{_includedir}/ompt-multiplex.h
+%{_libdir}/clang/%{libomp_version}/include/ompt-multiplex.h
 %endif
+%ifnarch %{ix86} %{arm}
+%{_libdir}/libomptarget.rtl.amdgpu.so
+%{_libdir}/libomptarget.rtl.cuda.so
+%{_libdir}/libomptarget.rtl.%{libomp_arch}.so
+%{_libdir}/libomptarget.devicertl.a
+%{_libdir}/libomptarget-amdgpu-*.bc
+%{_libdir}/libomptarget-nvptx-*.bc
+%endif
+%{_libdir}/libomptarget.so
 
 %files test
 %{_datadir}/libomp
 %{_libexecdir}/tests/libomp/
 
 %changelog
-* Thu Dec 22 2022 Jacco Ligthart <jaccor@redsleeve.org> - 14.0.6-1.redsleeve
-- disabled libompd.so for arm
+* Mon Jan 16 2023 Konrad Kleine <kkleine@redhat.com> - 15.0.7-1
+- Update to LLVM 15.0.7
+
+* Fri Dec 09 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.6-1
+- 15.0.6 Release
+
+* Fri Oct 28 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.1-2
+- Build libomp runtime library with gcc
+
+* Thu Sep 29 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.1-1
+- 15.0.1 Release
 
 * Wed Jul 20 2022 Timm Bäder <tbaeder@redhat.com> - 14.0.6-1
 - 14.0.6 Release
@@ -267,12 +286,12 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 - Use gnupg verify
 
 * Tue Jun 16 2020 sguelton@redhat.com - 10.0.0-3
-- Add Requires: libomp = %{version}-%{release} to libomp-test to avoid
+- Add Requires: libomp = %%{version}-%%{release} to libomp-test to avoid
   the need to test interoperability between the various combinations of old
   and new subpackages.
 
 * Mon Jun 01 2020 sguelton@redhat.com - 10.0.0-2
-- Add Requires: libomp-devel = %{version}-%{release} to libomp-test to avoid
+- Add Requires: libomp-devel = %%{version}-%%{release} to libomp-test to avoid
   the need to test interoperability between the various combinations of old
   and new subpackages.
 

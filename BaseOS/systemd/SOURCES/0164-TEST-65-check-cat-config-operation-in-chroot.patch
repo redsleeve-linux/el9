@@ -1,0 +1,48 @@
+From 3be1c0fa543f024319a03e89decedc6106cb4e02 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 5 Dec 2022 13:52:28 +0100
+Subject: [PATCH] TEST-65: check cat-config operation in chroot
+
+This verifies the fix in 2075b6dd394e09a0f203b9cc7e3253908397f933.
+
+(cherry picked from commit a7eed3eca3d7bc022d870258deb2f738b9527c6d)
+
+Related: #2138081
+---
+ test/test-functions        |  1 +
+ test/units/testsuite-65.sh | 10 ++++++++++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/test/test-functions b/test/test-functions
+index 194cd682bb..94e11a686a 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -158,6 +158,7 @@ BASICTOOLS=(
+     cat
+     chmod
+     chown
++    chroot
+     cmp
+     cryptsetup
+     cut
+diff --git a/test/units/testsuite-65.sh b/test/units/testsuite-65.sh
+index 1f34308b44..ebe1f57b52 100755
+--- a/test/units/testsuite-65.sh
++++ b/test/units/testsuite-65.sh
+@@ -139,6 +139,16 @@ systemd-analyze cat-config systemd/system.conf systemd/journald.conf >/dev/null
+ systemd-analyze cat-config systemd/system.conf foo/bar systemd/journald.conf >/dev/null
+ systemd-analyze cat-config foo/bar
+ 
++if [[ ! -v ASAN_OPTIONS ]]; then
++    # check that systemd-analyze cat-config paths work in a chroot
++    mkdir -p /tmp/root
++    mount --bind / /tmp/root
++    systemd-analyze cat-config systemd/system-preset >/tmp/out1
++    chroot /tmp/root systemd-analyze cat-config systemd/system-preset >/tmp/out2
++    diff /tmp/out{1,2}
++fi
++
++# verify
+ mkdir -p /tmp/img/usr/lib/systemd/system/
+ mkdir -p /tmp/img/opt/
+ 

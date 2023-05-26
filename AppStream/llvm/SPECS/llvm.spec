@@ -1,11 +1,6 @@
-# Workaround for
-# Cannot handle 8-byte build ID
-%define debug_package %{nil}
-
 # We are building with clang for faster/lower memory LTO builds.
 # See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
 %global toolchain clang
-
 
 # Components enabled if supported by target architecture:
 %define gold_arches %{ix86} x86_64 %{arm} aarch64 %{power64} s390x
@@ -20,20 +15,18 @@
 %bcond_without check
 
 %if %{with bundle_compat_lib}
-%global compat_maj_ver 13
-%global compat_ver %{compat_maj_ver}.0.1
+%global compat_maj_ver 14
+%global compat_ver %{compat_maj_ver}.0.6
 %endif
 
 %global llvm_libdir %{_libdir}/%{name}
 %global build_llvm_libdir %{buildroot}%{llvm_libdir}
-#global rc_ver 4
-%global maj_ver 14
+#global rc_ver 3
+%global maj_ver 15
 %global min_ver 0
-%global patch_ver 6
-%if !%{maj_ver} && 0%{?rc_ver}
-%global abi_revision 2
-%endif
+%global patch_ver 7
 %global llvm_srcdir llvm-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
+%global cmake_srcdir cmake-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
 
 %if %{with compat_build}
 %global pkg_name llvm%{maj_ver}
@@ -72,36 +65,44 @@
 %ifarch %{arm}
 # koji overrides the _gnu variable to be gnu, which is not correct for clang, so
 # we need to hard-code the correct triple here.
-#global llvm_triple armv7l-redhat-linux-gnueabihf
-%global llvm_triple armv6hl-redhat-linux-gnueabi
+%global llvm_triple armv7l-redhat-linux-gnueabihf
 %else
 %global llvm_triple %{_host}
 %endif
 
+# https://fedoraproject.org/wiki/Changes/PythonSafePath#Opting_out
+# Don't add -P to Python shebangs
+# The executable Python scripts in /usr/share/opt-viewer/ import each other
+%undefine _py3_shebang_P
+
 Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}
-Release:	1%{?dist}.redsleeve
+Release:	1%{?dist}
 Summary:	The Low Level Virtual Machine
 
 License:	NCSA
 URL:		http://llvm.org
 Source0:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{llvm_srcdir}.tar.xz
 Source1:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{llvm_srcdir}.tar.xz.sig
-Source2:	tstellar-gpg-key.asc
+Source2:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz
+Source3:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz.sig
+Source4:	release-keys.asc
 
 %if %{without compat_build}
-Source3:	run-lit-tests
-Source4:	lit.fedora.cfg.py
+Source5:	run-lit-tests
+Source6:	lit.fedora.cfg.py
 %endif
 %if %{with bundle_compat_lib}
-Source5:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{compat_ver}/llvm-%{compat_ver}.src.tar.xz
+Source7:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{compat_ver}/llvm-%{compat_ver}.src.tar.xz
+Source8:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{compat_ver}/llvm-%{compat_ver}.src.tar.xz.sig
+Source9:	tstellar-gpg-key.asc
 %endif
 
-%if 0%{?abi_revision}
-Patch0:		0001-cmake-Allow-shared-libraries-to-customize-the-soname.patch
-%endif
-Patch1:		0001-XFAIL-missing-abstract-variable.ll-test-on-ppc64le.patch
-Patch2:		0001-Disable-CrashRecoveryTest.DumpStackCleanup-test-on-a.patch
+Patch2:		0003-XFAIL-missing-abstract-variable.ll-test-on-ppc64le.patch
+
+# Needed to export clang-tblgen during the clang build, needed by the flang docs build.
+# TODO: Can be dropped for LLVM 16, see https://reviews.llvm.org/D131282.
+Patch3:		0001-Install-clang-tblgen.patch
 
 # RHEL-specific patches
 Patch101:	0001-Deactivate-markdown-doc.patch
@@ -217,13 +218,35 @@ Summary: LLVM's modified googletest sources
 %description googletest
 LLVM's modified googletest sources.
 
+%package toolset
+Summary: 	Package that installs llvm-toolset
+Requires:	clang = %{version}
+Requires:	llvm = %{version}
+
+%ifnarch s390x
+Requires:	lld = %{version}
+%endif
+
+%description toolset
+This is the main package for llvm-toolset.
+
 %endif
 
 %prep
-%{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
+%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
+%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE3}' --data='%{SOURCE2}'
+%if %{with bundle_compat_lib}
+%{gpgverify} --keyring='%{SOURCE9}' --signature='%{SOURCE8}' --data='%{SOURCE7}'
+%endif
+
+%setup -T -q -b 2 -n %{cmake_srcdir}
+# TODO: It would be more elegant to set -DLLVM_COMMON_CMAKE_UTILS=%{_builddir}/%{cmake_srcdir},
+# but this is not a CACHED variable, so we can't actually set it externally :(
+cd ..
+mv %{cmake_srcdir} cmake
 
 %if %{with bundle_compat_lib}
-%setup -T -q -b 5 -n llvm-%{compat_ver}.src
+%setup -T -q -b 7 -n llvm-%{compat_ver}.src
 %endif
 
 %autosetup -n %{llvm_srcdir} -p2
@@ -246,6 +269,9 @@ LLVM's modified googletest sources.
 # Decrease debuginfo verbosity to reduce memory consumption during final library linking
 %global optflags %(echo %{optflags} | sed 's/-g /-g1 /')
 %endif
+
+# Copy CFLAGS into ASMFLAGS, so -fcf-protection is used when compiling assembly files.
+export ASMFLAGS=$CFLAGS
 
 # force off shared libs as cmake macros turns it on.
 %cmake	-G Ninja \
@@ -309,7 +335,6 @@ LLVM's modified googletest sources.
 	-DLLVM_LINK_LLVM_DYLIB:BOOL=ON \
 	-DLLVM_BUILD_EXTERNAL_COMPILER_RT:BOOL=ON \
 	-DLLVM_INSTALL_TOOLCHAIN_ONLY:BOOL=OFF \
-	%{?abi_revision:-DLLVM_ABI_REVISION=%{abi_revision}} \
 	\
 	-DLLVM_DEFAULT_TARGET_TRIPLE=%{llvm_triple} \
 	-DSPHINX_WARNINGS_AS_ERRORS=OFF \
@@ -333,7 +358,8 @@ LLVM's modified googletest sources.
 	-DBUILD_SHARED_LIBS:BOOL=OFF \
 	-DLLVM_BUILD_LLVM_DYLIB=ON \
 	-DLLVM_ENABLE_RTTI:BOOL=ON \
-	-DLLVM_TARGETS_TO_BUILD=%{targets_to_build}
+	-DLLVM_TARGETS_TO_BUILD=%{targets_to_build} \
+	-DLLVM_INCLUDE_BENCHMARKS=OFF
 
 %ninja_build -C ../llvm-compat-libs LLVM
 
@@ -379,9 +405,6 @@ rm -rf test/tools/UpdateTestChecks
 install %{build_libdir}/libLLVMTestingSupport.a %{buildroot}%{_libdir}
 
 %global install_srcdir %{buildroot}%{_datadir}/llvm/src
-%global lit_cfg test/%{_arch}.site.cfg.py
-%global lit_unit_cfg test/Unit/%{_arch}.site.cfg.py
-%global lit_fedora_cfg %{_datadir}/llvm/lit.fedora.cfg.py
 
 # Install gtest sources so clang can use them for gtest
 install -d %{install_srcdir}
@@ -403,7 +426,7 @@ ln -s -t %{buildroot}%{_libdir}/bfd-plugins/ ../LLVMgold.so
 # Add version suffix to binaries
 for f in %{buildroot}/%{install_bindir}/*; do
   filename=`basename $f`
-  ln -s ../../../%{install_bindir}/$filename %{buildroot}/%{_bindir}/$filename%{exec_suffix}
+  ln -s ../../%{install_bindir}/$filename %{buildroot}/%{_bindir}/$filename%{exec_suffix}
 done
 
 # Move header files
@@ -531,7 +554,6 @@ fi
 %{_libdir}/bfd-plugins/LLVMgold.so
 %endif
 %{_libdir}/libLLVM-%{maj_ver}.%{min_ver}*.so
-%{_libdir}/libLLVM-%{maj_ver}.so%{?abi_revision:.%{abi_revision}}
 %{_libdir}/libLTO.so*
 %else
 %config(noreplace) %{_sysconfdir}/ld.so.conf.d/%{name}-%{_arch}.conf
@@ -603,11 +625,35 @@ fi
 %{_datadir}/llvm/src/utils
 %{_libdir}/libLLVMTestingSupport.a
 
+%files toolset
+%license LICENSE.TXT
+
 %endif
 
 %changelog
-* Thu Dec 22 2022 Jacco Ligthart <jacco@redsleeve.org> - 14.0.6-1.redsleeve
-- changed llvm_triple for armv6
+* Fri Jan 13 2023 Konrad Kleine <kkleine@redhat.com> - 15.0.7-1
+- Update to LLVM 15.0.7
+- Remove workaround for rbhz#2048440
+
+* Mon Dec 05 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.6-2
+- Disabling LTO for now
+
+* Mon Dec 05 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.6-1
+- Update to 15.0.6
+
+* Mon Sep 26 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.1-1
+- Update to 15.0.1
+
+* Mon Sep 26 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.0-3
+- Fixup: Produce toolset subpackage RPM
+  Related: rhbz#2118979
+
+* Wed Sep 21 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.0-2
+- Add toolset subpackage
+  Related: rhbz#2118979
+
+* Fri Sep 16 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.0-1
+- Update to 15.0.0
 
 * Mon Jul 18 2022 Timm Bäder <tbaeder@redhat.com> - 14.0.6-1
 - Update to 14.0.6

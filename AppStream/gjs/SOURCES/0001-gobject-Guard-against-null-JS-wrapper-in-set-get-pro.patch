@@ -1,0 +1,91 @@
+From cf128c8d52a3b86177d5231f32c2e156837fa8e7 Mon Sep 17 00:00:00 2001
+From: Philip Chimento <philip.chimento@gmail.com>
+Date: Mon, 14 Nov 2022 22:01:59 -0800
+Subject: [PATCH] gobject: Guard against null JS wrapper in set/get property
+
+The wrapper object may be disassociated from the GObject if dispose has
+been run. In that case, the pointers in the get/set property vfuncs may
+be null. Handle that case with a warning and don't get or set the
+property.
+
+Closes: #510
+---
+ gi/gobject.cpp                          | 12 ++++++++++
+ installed-tests/js/testIntrospection.js | 31 +++++++++++++++++++++++++
+ 2 files changed, 43 insertions(+)
+
+diff --git a/gi/gobject.cpp b/gi/gobject.cpp
+index b86872c2..881c06f8 100644
+--- a/gi/gobject.cpp
++++ b/gi/gobject.cpp
+@@ -171,6 +171,12 @@ static void gjs_object_set_gproperty(GObject* object,
+                                      unsigned property_id [[maybe_unused]],
+                                      const GValue* value, GParamSpec* pspec) {
+     auto* priv = ObjectInstance::for_gobject(object);
++    if (!priv) {
++        g_warning("Wrapper for GObject %p was disposed, cannot set property %s",
++                  object, g_param_spec_get_name(pspec));
++        return;
++    }
++
+     JSContext *cx = current_context();
+ 
+     JS::RootedObject js_obj(cx, priv->wrapper());
+@@ -184,6 +190,12 @@ static void gjs_object_get_gproperty(GObject* object,
+                                      unsigned property_id [[maybe_unused]],
+                                      GValue* value, GParamSpec* pspec) {
+     auto* priv = ObjectInstance::for_gobject(object);
++    if (!priv) {
++        g_warning("Wrapper for GObject %p was disposed, cannot get property %s",
++                  object, g_param_spec_get_name(pspec));
++        return;
++    }
++
+     JSContext *cx = current_context();
+ 
+     JS::RootedObject js_obj(cx, priv->wrapper());
+diff --git a/installed-tests/js/testIntrospection.js b/installed-tests/js/testIntrospection.js
+index 5e2ee7df..a0ffeefe 100644
+--- a/installed-tests/js/testIntrospection.js
++++ b/installed-tests/js/testIntrospection.js
+@@ -140,6 +140,37 @@ describe('Garbage collection of introspected objects', function () {
+         System.gc();
+         GLib.idle_add(GLib.PRIORITY_LOW, () => done());
+     });
++
++    // This tests a race condition that would crash; it should warn instead
++    it('handles setting a property from C on an object whose JS wrapper has been collected', function (done) {
++        const SomeObject = GObject.registerClass({
++            Properties: {
++                'screenfull': GObject.ParamSpec.boolean('screenfull', '', '',
++                    GObject.ParamFlags.READWRITE,
++                    false),
++            },
++        }, class SomeObject extends GObject.Object {});
++
++        GLib.test_expect_message('Gjs', GLib.LogLevelFlags.LEVEL_WARNING,
++            '*property screenfull*');
++
++        const settings = new Gio.Settings({schema: 'org.gnome.GjsTest'});
++        let obj = new SomeObject();
++        settings.bind('fullscreen', obj, 'screenfull', Gio.SettingsBindFlags.DEFAULT);
++        const handler = settings.connect('changed::fullscreen', () => {
++            obj.run_dispose();
++            obj = null;
++            settings.disconnect(handler);
++            GLib.idle_add(GLib.PRIORITY_LOW, () => {
++                GLib.test_assert_expected_messages_internal('Gjs',
++                    'testIntrospection.js', 0,
++                    'Warn about setting property on disposed JS object');
++                done();
++            });
++        });
++        settings.set_boolean('fullscreen', !settings.get_boolean('fullscreen'));
++        settings.reset('fullscreen');
++    });
+ });
+ 
+ describe('Gdk.Atom', function () {
+-- 
+2.39.1
+

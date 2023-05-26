@@ -1,0 +1,49 @@
+From 922c24e6b2074d63dd5554f2f0015a680958293e Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Mon, 23 Jan 2023 18:40:38 +0100
+Subject: [PATCH] test: bump the client-side timeout in sd-bus as well
+
+Since c78d18215b D-Bus services now have 60s to start, but the client
+side (sd-bus) still waits only for 25s before giving up:
+
+```
+[  226.196380] testsuite-71.sh[556]: + assert_in 'Static hostname: H' ''
+[  226.332965] testsuite-71.sh[576]: + set +ex
+[  226.332965] testsuite-71.sh[576]: FAIL: 'Static hostname: H' not found in:
+[  228.910782] sh[577]: + systemctl poweroff --no-block
+[  232.255584] hostnamectl[565]: Failed to query system properties: Connection timed out
+[  236.827514] systemd[1]: end.service: Consumed 2.131s CPU time.
+[  237.476969] dbus-daemon[566]: [system] Successfully activated service 'org.freedesktop.hostname1'
+[  237.516308] systemd[1]: system-modprobe.slice: Consumed 1.533s CPU time.
+[  237.794635] systemd[1]: testsuite-71.service: Main process exited, code=exited, status=1/FAILURE
+[  237.818469] systemd[1]: testsuite-71.service: Failed with result 'exit-code'.
+[  237.931415] systemd[1]: Failed to start testsuite-71.service.
+[  238.000833] systemd[1]: testsuite-71.service: Consumed 5.651s CPU time.
+[  238.181030] systemd[1]: Reached target testsuite.target.
+```
+
+Let's override the timeout in sd-bus as well to mitigate this.
+
+Follow-up to c78d18215b3e5b0f0896ddb1d0d72c666b5e830b.
+
+(cherry picked from commit e0cbb739113b9e2fbb67b27099430c351f03315c)
+
+Related: #2138081
+---
+ test/test-functions | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/test/test-functions b/test/test-functions
+index 6e4ea80d89..1608644cbb 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -1920,6 +1920,9 @@ EOF
+     <limit name="service_start_timeout">60000</limit>
+ </busconfig>
+ EOF
++        # Bump the client-side timeout in sd-bus as well
++        mkdir -p "$initdir/etc/systemd/system.conf.d"
++        echo -e '[Manager]\nDefaultEnvironment=SYSTEMD_BUS_TIMEOUT=60' >"$initdir/etc/systemd/system.conf.d/bus-timeout.conf"
+     fi
+ }
+ 

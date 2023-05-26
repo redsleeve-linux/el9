@@ -1,0 +1,278 @@
+commit e3e589829d16af9f7e73c7b70f74f3c5d5003e45
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Dec 9 09:49:32 2021 +0100
+
+    nptl: Add glibc.pthread.rseq tunable to control rseq registration
+    
+    This tunable allows applications to register the rseq area instead
+    of glibc.
+    
+    Reviewed-by: Szabolcs Nagy <szabolcs.nagy@arm.com>
+    Reviewed-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+
+diff --git a/manual/tunables.texi b/manual/tunables.texi
+index 658547c6137bf177..1f5c410288eeecec 100644
+--- a/manual/tunables.texi
++++ b/manual/tunables.texi
+@@ -413,6 +413,16 @@ The value is measured in bytes.  The default is @samp{41943040}
+ (fourty mibibytes).
+ @end deftp
+ 
++@deftp Tunable glibc.pthread.rseq
++The @code{glibc.pthread.rseq} tunable can be set to @samp{0}, to disable
++restartable sequences support in @theglibc{}.  This enables applications
++to perform direct restartable sequence registration with the kernel.
++The default is @samp{1}, which means that @theglibc{} performs
++registration on behalf of the application.
++
++Restartable sequences are a Linux-specific extension.
++@end deftp
++
+ @node Hardware Capability Tunables
+ @section Hardware Capability Tunables
+ @cindex hardware capability tunables
+diff --git a/nptl/pthread_create.c b/nptl/pthread_create.c
+index d2b40924dafad316..f405fa356c2955ce 100644
+--- a/nptl/pthread_create.c
++++ b/nptl/pthread_create.c
+@@ -369,7 +369,10 @@ start_thread (void *arg)
+   __ctype_init ();
+ 
+   /* Register rseq TLS to the kernel.  */
+-  rseq_register_current_thread (pd);
++  {
++    bool do_rseq = THREAD_GETMEM (pd, flags) & ATTR_FLAG_DO_RSEQ;
++    rseq_register_current_thread (pd, do_rseq);
++  }
+ 
+ #ifndef __ASSUME_SET_ROBUST_LIST
+   if (__nptl_set_robust_list_avail)
+@@ -678,6 +681,11 @@ __pthread_create_2_1 (pthread_t *newthread, const pthread_attr_t *attr,
+   pd->flags = ((iattr->flags & ~(ATTR_FLAG_SCHED_SET | ATTR_FLAG_POLICY_SET))
+ 	       | (self->flags & (ATTR_FLAG_SCHED_SET | ATTR_FLAG_POLICY_SET)));
+ 
++  /* Inherit rseq registration state.  Without seccomp filters, rseq
++     registration will either always fail or always succeed.  */
++  if ((int) THREAD_GETMEM_VOLATILE (self, rseq_area.cpu_id) >= 0)
++    pd->flags |= ATTR_FLAG_DO_RSEQ;
++
+   /* Initialize the field for the ID of the thread which is waiting
+      for us.  This is a self-reference in case the thread is created
+      detached.  */
+diff --git a/sysdeps/nptl/dl-tls_init_tp.c b/sysdeps/nptl/dl-tls_init_tp.c
+index fedb876fdb2642d2..b39dfbff2c6678d5 100644
+--- a/sysdeps/nptl/dl-tls_init_tp.c
++++ b/sysdeps/nptl/dl-tls_init_tp.c
+@@ -23,6 +23,9 @@
+ #include <tls.h>
+ #include <rseq-internal.h>
+ 
++#define TUNABLE_NAMESPACE pthread
++#include <dl-tunables.h>
++
+ #ifndef __ASSUME_SET_ROBUST_LIST
+ bool __nptl_set_robust_list_avail;
+ rtld_hidden_data_def (__nptl_set_robust_list_avail)
+@@ -92,7 +95,13 @@ __tls_init_tp (void)
+       }
+   }
+ 
+-  rseq_register_current_thread (pd);
++  {
++    bool do_rseq = true;
++#if HAVE_TUNABLES
++    do_rseq = TUNABLE_GET (rseq, int, NULL);
++#endif
++    rseq_register_current_thread (pd, do_rseq);
++  }
+ 
+   /* Set initial thread's stack block from 0 up to __libc_stack_end.
+      It will be bigger than it actually is, but for unwind.c/pt-longjmp.c
+diff --git a/sysdeps/nptl/dl-tunables.list b/sysdeps/nptl/dl-tunables.list
+index ac5d053298725468..d24f4be0d08ba407 100644
+--- a/sysdeps/nptl/dl-tunables.list
++++ b/sysdeps/nptl/dl-tunables.list
+@@ -27,5 +27,11 @@ glibc {
+       type: SIZE_T
+       default: 41943040
+     }
++    rseq {
++      type: INT_32
++      minval: 0
++      maxval: 1
++      default: 1
++    }
+   }
+ }
+diff --git a/sysdeps/nptl/internaltypes.h b/sysdeps/nptl/internaltypes.h
+index 50a2ad19ae7210ae..8205c6d15a918952 100644
+--- a/sysdeps/nptl/internaltypes.h
++++ b/sysdeps/nptl/internaltypes.h
+@@ -49,6 +49,7 @@ struct pthread_attr
+ #define ATTR_FLAG_OLDATTR		0x0010
+ #define ATTR_FLAG_SCHED_SET		0x0020
+ #define ATTR_FLAG_POLICY_SET		0x0040
++#define ATTR_FLAG_DO_RSEQ		0x0080
+ 
+ /* Used to allocate a pthread_attr_t object which is also accessed
+    internally.  */
+diff --git a/sysdeps/unix/sysv/linux/Makefile b/sysdeps/unix/sysv/linux/Makefile
+index f84ccd6bbb3b16ad..d30d21898b402d1e 100644
+--- a/sysdeps/unix/sysv/linux/Makefile
++++ b/sysdeps/unix/sysv/linux/Makefile
+@@ -135,6 +135,12 @@ tests-internal += \
+   tst-sigcontext-get_pc \
+   # tests-internal
+ 
++ifneq (no,$(have-tunables))
++tests-internal += \
++  tst-rseq-disable \
++  # tests-internal $(have-tunables)
++endif
++
+ tests-time64 += \
+   tst-adjtimex-time64 \
+   tst-clock_adjtime-time64 \
+@@ -226,6 +232,8 @@ $(objpfx)tst-mman-consts.out: ../sysdeps/unix/sysv/linux/tst-mman-consts.py
+ 	  < /dev/null > $@ 2>&1; $(evaluate-test)
+ $(objpfx)tst-mman-consts.out: $(sysdeps-linux-python-deps)
+ 
++tst-rseq-disable-ENV = GLIBC_TUNABLES=glibc.pthread.rseq=0
++
+ endif # $(subdir) == misc
+ 
+ ifeq ($(subdir),time)
+diff --git a/sysdeps/unix/sysv/linux/rseq-internal.h b/sysdeps/unix/sysv/linux/rseq-internal.h
+index 909f5478251d3d13..15bc7ffd6eda632d 100644
+--- a/sysdeps/unix/sysv/linux/rseq-internal.h
++++ b/sysdeps/unix/sysv/linux/rseq-internal.h
+@@ -21,22 +21,27 @@
+ #include <sysdep.h>
+ #include <errno.h>
+ #include <kernel-features.h>
++#include <stdbool.h>
+ #include <stdio.h>
+ #include <sys/rseq.h>
+ 
+ #ifdef RSEQ_SIG
+ static inline void
+-rseq_register_current_thread (struct pthread *self)
++rseq_register_current_thread (struct pthread *self, bool do_rseq)
+ {
+-  int ret = INTERNAL_SYSCALL_CALL (rseq,
+-                                   &self->rseq_area, sizeof (self->rseq_area),
+-                                   0, RSEQ_SIG);
+-  if (INTERNAL_SYSCALL_ERROR_P (ret))
+-    THREAD_SETMEM (self, rseq_area.cpu_id, RSEQ_CPU_ID_REGISTRATION_FAILED);
++  if (do_rseq)
++    {
++      int ret = INTERNAL_SYSCALL_CALL (rseq, &self->rseq_area,
++                                       sizeof (self->rseq_area),
++                                       0, RSEQ_SIG);
++      if (!INTERNAL_SYSCALL_ERROR_P (ret))
++        return;
++    }
++  THREAD_SETMEM (self, rseq_area.cpu_id, RSEQ_CPU_ID_REGISTRATION_FAILED);
+ }
+ #else /* RSEQ_SIG */
+ static inline void
+-rseq_register_current_thread (struct pthread *self)
++rseq_register_current_thread (struct pthread *self, bool do_rseq)
+ {
+   THREAD_SETMEM (self, rseq_area.cpu_id, RSEQ_CPU_ID_REGISTRATION_FAILED);
+ }
+diff --git a/sysdeps/unix/sysv/linux/tst-rseq-disable.c b/sysdeps/unix/sysv/linux/tst-rseq-disable.c
+new file mode 100644
+index 0000000000000000..000e351872fc2f76
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/tst-rseq-disable.c
+@@ -0,0 +1,89 @@
++/* Test disabling of rseq registration via tunable.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <stdio.h>
++#include <support/check.h>
++#include <support/namespace.h>
++#include <support/xthread.h>
++#include <sysdep.h>
++#include <unistd.h>
++
++#ifdef RSEQ_SIG
++
++/* Check that rseq can be registered and has not been taken by glibc.  */
++static void
++check_rseq_disabled (void)
++{
++  struct pthread *pd = THREAD_SELF;
++  TEST_COMPARE ((int) pd->rseq_area.cpu_id, RSEQ_CPU_ID_REGISTRATION_FAILED);
++
++  int ret = syscall (__NR_rseq, &pd->rseq_area, sizeof (pd->rseq_area),
++                     0, RSEQ_SIG);
++  if (ret == 0)
++    {
++      ret = syscall (__NR_rseq, &pd->rseq_area, sizeof (pd->rseq_area),
++                     RSEQ_FLAG_UNREGISTER, RSEQ_SIG);
++      TEST_COMPARE (ret, 0);
++      pd->rseq_area.cpu_id = RSEQ_CPU_ID_REGISTRATION_FAILED;
++    }
++  else
++    {
++      TEST_VERIFY (errno != -EINVAL);
++      TEST_VERIFY (errno != -EBUSY);
++    }
++}
++
++static void *
++thread_func (void *ignored)
++{
++  check_rseq_disabled ();
++  return NULL;
++}
++
++static void
++proc_func (void *ignored)
++{
++  check_rseq_disabled ();
++}
++
++static int
++do_test (void)
++{
++  puts ("info: checking main thread");
++  check_rseq_disabled ();
++
++  puts ("info: checking main thread (2)");
++  check_rseq_disabled ();
++
++  puts ("info: checking new thread");
++  xpthread_join (xpthread_create (NULL, thread_func, NULL));
++
++  puts ("info: checking subprocess");
++  support_isolate_in_subprocess (proc_func, NULL);
++
++  return 0;
++}
++#else /* !RSEQ_SIG */
++static int
++do_test (void)
++{
++  FAIL_UNSUPPORTED ("glibc does not define RSEQ_SIG, skipping test");
++}
++#endif
++
++#include <support/test-driver.c>

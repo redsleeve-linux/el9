@@ -1,0 +1,71 @@
+From 7f0f2caa082e7490c160b2c992a094116474a95f Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 4 Nov 2022 18:26:42 +0100
+Subject: [PATCH] dissect: fix fsck
+
+Since f7725647bb41c3398a867f139efe526efe8aa1b3 when dissecting a disk
+image we operate with fds to the device nodes in question wherever we
+can. This includes when we fork off fsck, where we pass a /proc/self/fd/
+path as argument. This only works if we keep that fd open however and
+disable O_CLOEXEC on the fd. Hence do so, and fix fsck this way.
+
+(Without this, all fsck will fail, since the fd path is invalid)
+
+(cherry picked from commit f8ab781223bcb0330ee4499b879a62e84fee313e)
+
+Related: #2138081
+---
+ src/shared/dissect-image.c | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/src/shared/dissect-image.c b/src/shared/dissect-image.c
+index 6a991c877a..7676636723 100644
+--- a/src/shared/dissect-image.c
++++ b/src/shared/dissect-image.c
+@@ -1309,11 +1309,11 @@ static int is_loop_device(const char *path) {
+         return true;
+ }
+ 
+-static int run_fsck(const char *node, const char *fstype) {
++static int run_fsck(int node_fd, const char *fstype) {
+         int r, exit_status;
+         pid_t pid;
+ 
+-        assert(node);
++        assert(node_fd >= 0);
+         assert(fstype);
+ 
+         r = fsck_exists_for_fstype(fstype);
+@@ -1322,16 +1322,20 @@ static int run_fsck(const char *node, const char *fstype) {
+                 return 0;
+         }
+         if (r == 0) {
+-                log_debug("Not checking partition %s, as fsck for %s does not exist.", node, fstype);
++                log_debug("Not checking partition %s, as fsck for %s does not exist.", FORMAT_PROC_FD_PATH(node_fd), fstype);
+                 return 0;
+         }
+ 
+-        r = safe_fork("(fsck)", FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_NULL_STDIO, &pid);
++        r = safe_fork_full(
++                        "(fsck)",
++                        &node_fd, 1, /* Leave the node fd open */
++                        FORK_RESET_SIGNALS|FORK_CLOSE_ALL_FDS|FORK_RLIMIT_NOFILE_SAFE|FORK_DEATHSIG|FORK_NULL_STDIO|FORK_CLOEXEC_OFF,
++                        &pid);
+         if (r < 0)
+                 return log_debug_errno(r, "Failed to fork off fsck: %m");
+         if (r == 0) {
+                 /* Child */
+-                execl("/sbin/fsck", "/sbin/fsck", "-aT", node, NULL);
++                execl("/sbin/fsck", "/sbin/fsck", "-aT", FORMAT_PROC_FD_PATH(node_fd), NULL);
+                 log_open();
+                 log_debug_errno(errno, "Failed to execl() fsck: %m");
+                 _exit(FSCK_OPERATIONAL_ERROR);
+@@ -1421,7 +1425,7 @@ static int mount_partition(
+         rw = m->rw && !(flags & DISSECT_IMAGE_MOUNT_READ_ONLY);
+ 
+         if (FLAGS_SET(flags, DISSECT_IMAGE_FSCK) && rw) {
+-                r = run_fsck(node, fstype);
++                r = run_fsck(m->mount_node_fd, fstype);
+                 if (r < 0)
+                         return r;
+         }

@@ -1,0 +1,302 @@
+From 9f0a8620bd7d325e6d42417b08daff3e55cb88f6 Mon Sep 17 00:00:00 2001
+From: Ayush Singh <ayushsingh1325@gmail.com>
+Date: Sat, 5 Nov 2022 14:36:38 +0530
+Subject: [PATCH] Improve generating Custom entry function
+
+This commit is aimed at making compiler generated entry functions
+(Basically just C `main` right now) more generic so other targets can do
+similar things for custom entry. This was initially implemented as part
+of https://github.com/rust-lang/rust/pull/100316.
+
+Currently, this moves the entry function name and Call convention to the
+target spec.
+
+Signed-off-by: Ayush Singh <ayushsingh1325@gmail.com>
+---
+ compiler/rustc_codegen_llvm/src/abi.rs        | 40 +++++++++++--------
+ compiler/rustc_codegen_llvm/src/context.rs    | 10 ++++-
+ compiler/rustc_codegen_llvm/src/declare.rs    | 22 ++++++++++
+ .../src/back/symbol_export.rs                 |  3 +-
+ compiler/rustc_target/src/abi/call/mod.rs     | 28 +++++++++++++
+ compiler/rustc_target/src/json.rs             | 25 ++++++++++++
+ compiler/rustc_target/src/spec/mod.rs         | 27 +++++++++++++
+ 7 files changed, 135 insertions(+), 20 deletions(-)
+
+diff --git a/compiler/rustc_codegen_llvm/src/abi.rs b/compiler/rustc_codegen_llvm/src/abi.rs
+index d478efc863a9..a6fd2a7de6bd 100644
+--- a/compiler/rustc_codegen_llvm/src/abi.rs
++++ b/compiler/rustc_codegen_llvm/src/abi.rs
+@@ -398,23 +398,7 @@ fn ptr_to_llvm_type(&self, cx: &CodegenCx<'ll, 'tcx>) -> &'ll Type {
+     }
+ 
+     fn llvm_cconv(&self) -> llvm::CallConv {
+-        match self.conv {
+-            Conv::C | Conv::Rust | Conv::CCmseNonSecureCall => llvm::CCallConv,
+-            Conv::RustCold => llvm::ColdCallConv,
+-            Conv::AmdGpuKernel => llvm::AmdGpuKernel,
+-            Conv::AvrInterrupt => llvm::AvrInterrupt,
+-            Conv::AvrNonBlockingInterrupt => llvm::AvrNonBlockingInterrupt,
+-            Conv::ArmAapcs => llvm::ArmAapcsCallConv,
+-            Conv::Msp430Intr => llvm::Msp430Intr,
+-            Conv::PtxKernel => llvm::PtxKernel,
+-            Conv::X86Fastcall => llvm::X86FastcallCallConv,
+-            Conv::X86Intr => llvm::X86_Intr,
+-            Conv::X86Stdcall => llvm::X86StdcallCallConv,
+-            Conv::X86ThisCall => llvm::X86_ThisCall,
+-            Conv::X86VectorCall => llvm::X86_VectorCall,
+-            Conv::X86_64SysV => llvm::X86_64_SysV,
+-            Conv::X86_64Win64 => llvm::X86_64_Win64,
+-        }
++        self.conv.into()
+     }
+ 
+     fn apply_attrs_llfn(&self, cx: &CodegenCx<'ll, 'tcx>, llfn: &'ll Value) {
+@@ -596,3 +580,25 @@ fn get_param(&mut self, index: usize) -> Self::Value {
+         llvm::get_param(self.llfn(), index as c_uint)
+     }
+ }
++
++impl From<Conv> for llvm::CallConv {
++    fn from(conv: Conv) -> Self {
++        match conv {
++            Conv::C | Conv::Rust | Conv::CCmseNonSecureCall => llvm::CCallConv,
++            Conv::RustCold => llvm::ColdCallConv,
++            Conv::AmdGpuKernel => llvm::AmdGpuKernel,
++            Conv::AvrInterrupt => llvm::AvrInterrupt,
++            Conv::AvrNonBlockingInterrupt => llvm::AvrNonBlockingInterrupt,
++            Conv::ArmAapcs => llvm::ArmAapcsCallConv,
++            Conv::Msp430Intr => llvm::Msp430Intr,
++            Conv::PtxKernel => llvm::PtxKernel,
++            Conv::X86Fastcall => llvm::X86FastcallCallConv,
++            Conv::X86Intr => llvm::X86_Intr,
++            Conv::X86Stdcall => llvm::X86StdcallCallConv,
++            Conv::X86ThisCall => llvm::X86_ThisCall,
++            Conv::X86VectorCall => llvm::X86_VectorCall,
++            Conv::X86_64SysV => llvm::X86_64_SysV,
++            Conv::X86_64Win64 => llvm::X86_64_Win64,
++        }
++    }
++}
+diff --git a/compiler/rustc_codegen_llvm/src/context.rs b/compiler/rustc_codegen_llvm/src/context.rs
+index 79ddfd884dfa..f3ef618fff54 100644
+--- a/compiler/rustc_codegen_llvm/src/context.rs
++++ b/compiler/rustc_codegen_llvm/src/context.rs
+@@ -570,8 +570,14 @@ fn apply_target_cpu_attr(&self, llfn: &'ll Value) {
+     }
+ 
+     fn declare_c_main(&self, fn_type: Self::Type) -> Option<Self::Function> {
+-        if self.get_declared_value("main").is_none() {
+-            Some(self.declare_cfn("main", llvm::UnnamedAddr::Global, fn_type))
++        let entry_name = self.sess().target.entry_name.as_ref();
++        if self.get_declared_value(entry_name).is_none() {
++            Some(self.declare_entry_fn(
++                entry_name,
++                self.sess().target.entry_abi.into(),
++                llvm::UnnamedAddr::Global,
++                fn_type,
++            ))
+         } else {
+             // If the symbol already exists, it is an error: for example, the user wrote
+             // #[no_mangle] extern "C" fn main(..) {..}
+diff --git a/compiler/rustc_codegen_llvm/src/declare.rs b/compiler/rustc_codegen_llvm/src/declare.rs
+index f79ef11720df..dc21a02cec44 100644
+--- a/compiler/rustc_codegen_llvm/src/declare.rs
++++ b/compiler/rustc_codegen_llvm/src/declare.rs
+@@ -90,6 +90,28 @@ pub fn declare_cfn(
+         declare_raw_fn(self, name, llvm::CCallConv, unnamed, visibility, fn_type)
+     }
+ 
++    /// Declare an entry Function
++    ///
++    /// The ABI of this function can change depending on the target (although for now the same as
++    /// `declare_cfn`)
++    ///
++    /// If there’s a value with the same name already declared, the function will
++    /// update the declaration and return existing Value instead.
++    pub fn declare_entry_fn(
++        &self,
++        name: &str,
++        callconv: llvm::CallConv,
++        unnamed: llvm::UnnamedAddr,
++        fn_type: &'ll Type,
++    ) -> &'ll Value {
++        let visibility = if self.tcx.sess.target.default_hidden_visibility {
++            llvm::Visibility::Hidden
++        } else {
++            llvm::Visibility::Default
++        };
++        declare_raw_fn(self, name, callconv, unnamed, visibility, fn_type)
++    }
++
+     /// Declare a Rust function.
+     ///
+     /// If there’s a value with the same name already declared, the function will
+diff --git a/compiler/rustc_codegen_ssa/src/back/symbol_export.rs b/compiler/rustc_codegen_ssa/src/back/symbol_export.rs
+index 752f6b1ef40c..22f534d909ab 100644
+--- a/compiler/rustc_codegen_ssa/src/back/symbol_export.rs
++++ b/compiler/rustc_codegen_ssa/src/back/symbol_export.rs
+@@ -180,7 +180,8 @@ fn exported_symbols_provider_local<'tcx>(
+         .collect();
+ 
+     if tcx.entry_fn(()).is_some() {
+-        let exported_symbol = ExportedSymbol::NoDefId(SymbolName::new(tcx, "main"));
++        let exported_symbol =
++            ExportedSymbol::NoDefId(SymbolName::new(tcx, tcx.sess.target.entry_name.as_ref()));
+ 
+         symbols.push((
+             exported_symbol,
+diff --git a/compiler/rustc_target/src/abi/call/mod.rs b/compiler/rustc_target/src/abi/call/mod.rs
+index 9e5f0e4d158b..c622bd36b00c 100644
+--- a/compiler/rustc_target/src/abi/call/mod.rs
++++ b/compiler/rustc_target/src/abi/call/mod.rs
+@@ -3,6 +3,7 @@
+ use crate::spec::{self, HasTargetSpec};
+ use rustc_span::Symbol;
+ use std::fmt;
++use std::str::FromStr;
+ 
+ mod aarch64;
+ mod amdgpu;
+@@ -735,6 +736,33 @@ pub fn adjust_for_foreign_abi<C>(
+     }
+ }
+ 
++impl FromStr for Conv {
++    type Err = String;
++
++    fn from_str(s: &str) -> Result<Self, Self::Err> {
++        match s {
++            "C" => Ok(Conv::C),
++            "Rust" => Ok(Conv::Rust),
++            "RustCold" => Ok(Conv::Rust),
++            "ArmAapcs" => Ok(Conv::ArmAapcs),
++            "CCmseNonSecureCall" => Ok(Conv::CCmseNonSecureCall),
++            "Msp430Intr" => Ok(Conv::Msp430Intr),
++            "PtxKernel" => Ok(Conv::PtxKernel),
++            "X86Fastcall" => Ok(Conv::X86Fastcall),
++            "X86Intr" => Ok(Conv::X86Intr),
++            "X86Stdcall" => Ok(Conv::X86Stdcall),
++            "X86ThisCall" => Ok(Conv::X86ThisCall),
++            "X86VectorCall" => Ok(Conv::X86VectorCall),
++            "X86_64SysV" => Ok(Conv::X86_64SysV),
++            "X86_64Win64" => Ok(Conv::X86_64Win64),
++            "AmdGpuKernel" => Ok(Conv::AmdGpuKernel),
++            "AvrInterrupt" => Ok(Conv::AvrInterrupt),
++            "AvrNonBlockingInterrupt" => Ok(Conv::AvrNonBlockingInterrupt),
++            _ => Err(format!("'{}' is not a valid value for entry function call convetion.", s)),
++        }
++    }
++}
++
+ // Some types are used a lot. Make sure they don't unintentionally get bigger.
+ #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+ mod size_asserts {
+diff --git a/compiler/rustc_target/src/json.rs b/compiler/rustc_target/src/json.rs
+index b5d926352122..75bb76a9de08 100644
+--- a/compiler/rustc_target/src/json.rs
++++ b/compiler/rustc_target/src/json.rs
+@@ -89,3 +89,28 @@ fn to_json(&self) -> Json {
+         }
+     }
+ }
++
++impl ToJson for crate::abi::call::Conv {
++    fn to_json(&self) -> Json {
++        let s = match self {
++            Self::C => "C",
++            Self::Rust => "Rust",
++            Self::RustCold => "RustCold",
++            Self::ArmAapcs => "ArmAapcs",
++            Self::CCmseNonSecureCall => "CCmseNonSecureCall",
++            Self::Msp430Intr => "Msp430Intr",
++            Self::PtxKernel => "PtxKernel",
++            Self::X86Fastcall => "X86Fastcall",
++            Self::X86Intr => "X86Intr",
++            Self::X86Stdcall => "X86Stdcall",
++            Self::X86ThisCall => "X86ThisCall",
++            Self::X86VectorCall => "X86VectorCall",
++            Self::X86_64SysV => "X86_64SysV",
++            Self::X86_64Win64 => "X86_64Win64",
++            Self::AmdGpuKernel => "AmdGpuKernel",
++            Self::AvrInterrupt => "AvrInterrupt",
++            Self::AvrNonBlockingInterrupt => "AvrNonBlockingInterrupt",
++        };
++        Json::String(s.to_owned())
++    }
++}
+diff --git a/compiler/rustc_target/src/spec/mod.rs b/compiler/rustc_target/src/spec/mod.rs
+index 72b088d663b1..617de46a55aa 100644
+--- a/compiler/rustc_target/src/spec/mod.rs
++++ b/compiler/rustc_target/src/spec/mod.rs
+@@ -34,6 +34,7 @@
+ //! the target's settings, though `target-feature` and `link-args` will *add*
+ //! to the list specified by the target, rather than replace.
+ 
++use crate::abi::call::Conv;
+ use crate::abi::Endian;
+ use crate::json::{Json, ToJson};
+ use crate::spec::abi::{lookup as lookup_abi, Abi};
+@@ -1668,6 +1669,14 @@ pub struct TargetOptions {
+     /// Whether the target supports stack canary checks. `true` by default,
+     /// since this is most common among tier 1 and tier 2 targets.
+     pub supports_stack_protector: bool,
++
++    // The name of entry function.
++    // Default value is "main"
++    pub entry_name: StaticCow<str>,
++
++    // The ABI of entry function.
++    // Default value is `Conv::C`, i.e. C call convention
++    pub entry_abi: Conv,
+ }
+ 
+ /// Add arguments for the given flavor and also for its "twin" flavors
+@@ -1884,6 +1893,8 @@ fn default() -> TargetOptions {
+             c_enum_min_bits: 32,
+             generate_arange_section: true,
+             supports_stack_protector: true,
++            entry_name: "main".into(),
++            entry_abi: Conv::C,
+         }
+     }
+ }
+@@ -2401,6 +2412,18 @@ macro_rules! key {
+                     }
+                 }
+             } );
++            ($key_name:ident, Conv) => ( {
++                let name = (stringify!($key_name)).replace("_", "-");
++                obj.remove(&name).and_then(|o| o.as_str().and_then(|s| {
++                    match Conv::from_str(s) {
++                        Ok(c) => {
++                            base.$key_name = c;
++                            Some(Ok(()))
++                        }
++                        Err(e) => Some(Err(e))
++                    }
++                })).unwrap_or(Ok(()))
++            } );
+         }
+ 
+         if let Some(j) = obj.remove("target-endian") {
+@@ -2520,6 +2543,8 @@ macro_rules! key {
+         key!(c_enum_min_bits, u64);
+         key!(generate_arange_section, bool);
+         key!(supports_stack_protector, bool);
++        key!(entry_name);
++        key!(entry_abi, Conv)?;
+ 
+         if base.is_builtin {
+             // This can cause unfortunate ICEs later down the line.
+@@ -2770,6 +2795,8 @@ macro_rules! target_option_val {
+         target_option_val!(c_enum_min_bits);
+         target_option_val!(generate_arange_section);
+         target_option_val!(supports_stack_protector);
++        target_option_val!(entry_name);
++        target_option_val!(entry_abi);
+ 
+         if let Some(abi) = self.default_adjusted_cabi {
+             d.insert("default-adjusted-cabi".into(), Abi::name(abi).to_json());
+-- 
+2.38.1
+

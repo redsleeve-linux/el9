@@ -1,0 +1,46 @@
+From 31f0c1b06bfd90d52009b59b9a4bf26c297790a7 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 14 Nov 2022 17:26:49 +0100
+Subject: [PATCH] tpm2-util: force default TCTI to be "device" with parameter
+ "/dev/tpmrm0"
+
+Apparently some distros default to tss-abmrd. Let's bypass that and
+always go to the kernel resource manager.
+
+abmrd cannot really work for us, since we want to access the TPM already
+in earliest boot i.e. in environments the abmrd service is not available
+in.
+
+Fixes: #25352
+(cherry picked from commit 34906680afe60d724ea435b79b9b830a4bf2e7e9)
+
+Related: #2138081
+---
+ src/shared/tpm2-util.c | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 65e8d48347..9d73316146 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -152,8 +152,19 @@ int tpm2_context_init(const char *device, struct tpm2_context *ret) {
+         if (r < 0)
+                 return log_error_errno(r, "TPM2 support not installed: %m");
+ 
+-        if (!device)
++        if (!device) {
+                 device = secure_getenv("SYSTEMD_TPM2_DEVICE");
++                if (device)
++                        /* Setting the env var to an empty string forces tpm2-tss' own device picking
++                         * logic to be used. */
++                        device = empty_to_null(device);
++                else
++                        /* If nothing was specified explicitly, we'll use a hardcoded default: the "device" tcti
++                         * driver and the "/dev/tpmrm0" device. We do this since on some distributions the tpm2-abrmd
++                         * might be used and we really don't want that, since it is a system service and that creates
++                         * various ordering issues/deadlocks during early boot. */
++                        device = "device:/dev/tpmrm0";
++        }
+ 
+         if (device) {
+                 const char *param, *driver, *fn;

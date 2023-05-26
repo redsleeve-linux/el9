@@ -1,0 +1,52 @@
+From 5b20ba25259da453a2aac5e65978a11bc2d048ed Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 15 Nov 2022 23:01:04 +0100
+Subject: [PATCH] tpm2: add some extra validation of device string before using
+ it
+
+Let's add some extra validation before constructing and using the .so
+name to load. This isn't really security sensitive, given that we
+used secure_getenv() to get the device string (and it thus should have
+been come from a trusted source) but let's better be safe than sorry.
+
+(cherry picked from commit 50a085143fa8f5dd6b6b3cef8a6ea2ec7c53ed0d)
+
+Related: #2138081
+---
+ src/shared/tpm2-util.c | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 9d73316146..4d0df944a9 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -174,15 +174,27 @@ int tpm2_context_init(const char *device, struct tpm2_context *ret) {
+ 
+                 param = strchr(device, ':');
+                 if (param) {
++                        /* Syntax #1: Pair of driver string and arbitrary parameter */
+                         driver = strndupa_safe(device, param - device);
++                        if (isempty(driver))
++                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "TPM2 driver name is empty, refusing.");
++
+                         param++;
+-                } else {
++                } else if (path_is_absolute(device) && path_is_valid(device)) {
++                        /* Syntax #2: TPM device node */
+                         driver = "device";
+                         param = device;
+-                }
++                } else
++                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid TPM2 driver string, refusing.");
++
++                log_debug("Using TPM2 TCTI driver '%s' with device '%s'.", driver, param);
+ 
+                 fn = strjoina("libtss2-tcti-", driver, ".so.0");
+ 
++                /* Better safe than sorry, let's refuse strings that cannot possibly be valid driver early, before going to disk. */
++                if (!filename_is_valid(fn))
++                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "TPM2 driver name '%s' not valid, refusing.", driver);
++
+                 dl = dlopen(fn, RTLD_NOW);
+                 if (!dl)
+                         return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "Failed to load %s: %s", fn, dlerror());

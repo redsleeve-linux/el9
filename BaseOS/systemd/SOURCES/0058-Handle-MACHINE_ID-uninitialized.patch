@@ -1,0 +1,31 @@
+From 89adb54468aff192fccc9dce793e24d98b26d994 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marcus=20Sch=C3=A4fer?= <marcus.schaefer@gmail.com>
+Date: Wed, 16 Nov 2022 16:25:08 +0100
+Subject: [PATCH] Handle MACHINE_ID=uninitialized
+
+systemd supports /etc/machine-id to be set to: uninitialized
+In this case the expectation is that systemd creates a new
+machine ID and replaces the value 'uninitialized' with the
+effective machine id. In the scope of kernel-install we
+should also enforce the creation of a new machine id in this
+condition
+
+(cherry picked from commit 305dd91adfde332e7e5c1b2470edb32774f9a032)
+
+Related: #2138081
+---
+ src/kernel-install/kernel-install.in | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/kernel-install/kernel-install.in b/src/kernel-install/kernel-install.in
+index bba22f8a20..fa2c0d5276 100755
+--- a/src/kernel-install/kernel-install.in
++++ b/src/kernel-install/kernel-install.in
+@@ -160,6 +160,7 @@ if [ -z "$MACHINE_ID" ] && [ -f /etc/machine-info ]; then
+ fi
+ if [ -z "$MACHINE_ID" ] && [ -s /etc/machine-id ]; then
+     read -r MACHINE_ID </etc/machine-id
++    [ "$MACHINE_ID" = "uninitialized" ] && unset MACHINE_ID
+     [ -n "$MACHINE_ID" ] && \
+         log_verbose "machine-id $MACHINE_ID acquired from /etc/machine-id"
+ fi

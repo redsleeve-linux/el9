@@ -6,7 +6,7 @@ set -e
 # directory.  Use it like this:
 #   ./copy-patches.sh
 
-rhel_version=9.1
+rhel_version=9.2
 
 # Check we're in the right directory.
 if [ ! -f libnbd.spec ]; then

@@ -1,0 +1,284 @@
+From 9489991adc3313efff58837010e53db80aebdd1b Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Tue, 22 Nov 2022 17:42:38 +0100
+Subject: [PATCH]  stub: Fix cmdline handling
+
+This fixes some bugs that could lead to garbage getting appended to the
+command line passed to the kernel:
+ 1. The .cmdline section is not guaranteed to be NUL-terminated, but it
+    was used as if it was.
+ 2. The conversion of the command line to ASCII that was passed to the
+    stub ate the NUL at the end.
+ 3. LoadOptions is not guaranteed to be a NUL-terminated EFI string (it
+    really should be and generally always is, though).
+
+This also fixes the inconsistent mangling of the command line. If the
+.cmdline section was used ASCII controls chars (new lines in particular)
+would not be converted to spaces.
+
+As part of this commit, we optimize conversion for the generic code
+instead of the (deprecated) EFI handover protocol. Previously we would
+convert to ASCII/UTF-8 and then back to EFI string for the (now) default
+generic code path. Instead we now convert to EFI string and mangle that
+back to ASCII in the EFI handover protocol path.
+
+(cherry picked from commit 927ebebe588970fa2dd082a0daaef246229f009b)
+
+Related: #2138081
+---
+ src/boot/efi/boot.c      | 10 ++++------
+ src/boot/efi/linux.c     | 12 ++++++------
+ src/boot/efi/linux.h     | 17 +++++++++++------
+ src/boot/efi/linux_x86.c | 21 ++++++++++++++-------
+ src/boot/efi/stub.c      | 38 +++++++++++++++++---------------------
+ src/boot/efi/util.c      |  7 +++++++
+ src/boot/efi/util.h      |  1 +
+ 7 files changed, 60 insertions(+), 46 deletions(-)
+
+diff --git a/src/boot/efi/boot.c b/src/boot/efi/boot.c
+index 581043df01..426bdc3cc2 100644
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -2242,13 +2242,11 @@ static void config_entry_add_unified(
+                 content = mfree(content);
+ 
+                 /* read the embedded cmdline file */
+-                err = file_read(linux_dir, f->FileName, offs[SECTION_CMDLINE], szs[SECTION_CMDLINE], &content, NULL);
++                size_t cmdline_len;
++                err = file_read(linux_dir, f->FileName, offs[SECTION_CMDLINE], szs[SECTION_CMDLINE], &content, &cmdline_len);
+                 if (err == EFI_SUCCESS) {
+-                        /* chomp the newline */
+-                        if (content[szs[SECTION_CMDLINE] - 1] == '\n')
+-                                content[szs[SECTION_CMDLINE] - 1] = '\0';
+-
+-                        entry->options = xstr8_to_16(content);
++                        entry->options = xstrn8_to_16(content, cmdline_len);
++                        mangle_stub_cmdline(entry->options);
+                 }
+         }
+ }
+diff --git a/src/boot/efi/linux.c b/src/boot/efi/linux.c
+index 668510fca3..48801f9dd8 100644
+--- a/src/boot/efi/linux.c
++++ b/src/boot/efi/linux.c
+@@ -93,15 +93,16 @@ static EFI_STATUS load_image(EFI_HANDLE parent, const void *source, size_t len,
+ 
+ EFI_STATUS linux_exec(
+                 EFI_HANDLE parent,
+-                const char *cmdline, UINTN cmdline_len,
+-                const void *linux_buffer, UINTN linux_length,
+-                const void *initrd_buffer, UINTN initrd_length) {
++                const char16_t *cmdline,
++                const void *linux_buffer,
++                size_t linux_length,
++                const void *initrd_buffer,
++                size_t initrd_length) {
+ 
+         uint32_t compat_address;
+         EFI_STATUS err;
+ 
+         assert(parent);
+-        assert(cmdline || cmdline_len == 0);
+         assert(linux_buffer && linux_length > 0);
+         assert(initrd_buffer || initrd_length == 0);
+ 
+@@ -113,7 +114,6 @@ EFI_STATUS linux_exec(
+                 return linux_exec_efi_handover(
+                                 parent,
+                                 cmdline,
+-                                cmdline_len,
+                                 linux_buffer,
+                                 linux_length,
+                                 initrd_buffer,
+@@ -133,7 +133,7 @@ EFI_STATUS linux_exec(
+                 return log_error_status_stall(err, u"Error getting kernel loaded image protocol: %r", err);
+ 
+         if (cmdline) {
+-                loaded_image->LoadOptions = xstrn8_to_16(cmdline, cmdline_len);
++                loaded_image->LoadOptions = (void *) cmdline;
+                 loaded_image->LoadOptionsSize = strsize16(loaded_image->LoadOptions);
+         }
+ 
+diff --git a/src/boot/efi/linux.h b/src/boot/efi/linux.h
+index 19e5f5c4a8..f0a6a37ed1 100644
+--- a/src/boot/efi/linux.h
++++ b/src/boot/efi/linux.h
+@@ -2,14 +2,19 @@
+ #pragma once
+ 
+ #include <efi.h>
++#include <uchar.h>
+ 
+ EFI_STATUS linux_exec(
+                 EFI_HANDLE parent,
+-                const char *cmdline, UINTN cmdline_len,
+-                const void *linux_buffer, UINTN linux_length,
+-                const void *initrd_buffer, UINTN initrd_length);
++                const char16_t *cmdline,
++                const void *linux_buffer,
++                size_t linux_length,
++                const void *initrd_buffer,
++                size_t initrd_length);
+ EFI_STATUS linux_exec_efi_handover(
+                 EFI_HANDLE parent,
+-                const char *cmdline, UINTN cmdline_len,
+-                const void *linux_buffer, UINTN linux_length,
+-                const void *initrd_buffer, UINTN initrd_length);
++                const char16_t *cmdline,
++                const void *linux_buffer,
++                size_t linux_length,
++                const void *initrd_buffer,
++                size_t initrd_length);
+diff --git a/src/boot/efi/linux_x86.c b/src/boot/efi/linux_x86.c
+index 64336ce348..6a5e431107 100644
+--- a/src/boot/efi/linux_x86.c
++++ b/src/boot/efi/linux_x86.c
+@@ -126,12 +126,13 @@ static void linux_efi_handover(EFI_HANDLE parent, uintptr_t kernel, BootParams *
+ 
+ EFI_STATUS linux_exec_efi_handover(
+                 EFI_HANDLE parent,
+-                const char *cmdline, UINTN cmdline_len,
+-                const void *linux_buffer, UINTN linux_length,
+-                const void *initrd_buffer, UINTN initrd_length) {
++                const char16_t *cmdline,
++                const void *linux_buffer,
++                size_t linux_length,
++                const void *initrd_buffer,
++                size_t initrd_length) {
+ 
+         assert(parent);
+-        assert(cmdline || cmdline_len == 0);
+         assert(linux_buffer);
+         assert(initrd_buffer || initrd_length == 0);
+ 
+@@ -185,14 +186,20 @@ EFI_STATUS linux_exec_efi_handover(
+ 
+         _cleanup_pages_ Pages cmdline_pages = {};
+         if (cmdline) {
++                size_t len = MIN(strlen16(cmdline), image_params->hdr.cmdline_size);
++
+                 cmdline_pages = xmalloc_pages(
+                                 can_4g ? AllocateAnyPages : AllocateMaxAddress,
+                                 EfiLoaderData,
+-                                EFI_SIZE_TO_PAGES(cmdline_len + 1),
++                                EFI_SIZE_TO_PAGES(len + 1),
+                                 CMDLINE_PTR_MAX);
+ 
+-                memcpy(PHYSICAL_ADDRESS_TO_POINTER(cmdline_pages.addr), cmdline, cmdline_len);
+-                ((char *) PHYSICAL_ADDRESS_TO_POINTER(cmdline_pages.addr))[cmdline_len] = 0;
++                /* Convert cmdline to ASCII. */
++                char *cmdline8 = PHYSICAL_ADDRESS_TO_POINTER(cmdline_pages.addr);
++                for (size_t i = 0; i < len; i++)
++                        cmdline8[i] = cmdline[i] <= 0x7E ? cmdline[i] : ' ';
++                cmdline8[len] = '\0';
++
+                 boot_params->hdr.cmd_line_ptr = (uint32_t) cmdline_pages.addr;
+                 boot_params->ext_cmd_line_ptr = cmdline_pages.addr >> 32;
+                 assert(can_4g || cmdline_pages.addr <= CMDLINE_PTR_MAX);
+diff --git a/src/boot/efi/stub.c b/src/boot/efi/stub.c
+index a842c5c679..841a0e41bd 100644
+--- a/src/boot/efi/stub.c
++++ b/src/boot/efi/stub.c
+@@ -132,14 +132,13 @@ static void export_variables(EFI_LOADED_IMAGE_PROTOCOL *loaded_image) {
+ 
+ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+         _cleanup_free_ void *credential_initrd = NULL, *global_credential_initrd = NULL, *sysext_initrd = NULL, *pcrsig_initrd = NULL, *pcrpkey_initrd = NULL;
+-        UINTN credential_initrd_size = 0, global_credential_initrd_size = 0, sysext_initrd_size = 0, pcrsig_initrd_size = 0, pcrpkey_initrd_size = 0;
+-        UINTN cmdline_len = 0, linux_size, initrd_size, dt_size;
++        size_t credential_initrd_size = 0, global_credential_initrd_size = 0, sysext_initrd_size = 0, pcrsig_initrd_size = 0, pcrpkey_initrd_size = 0;
++        size_t linux_size, initrd_size, dt_size;
+         EFI_PHYSICAL_ADDRESS linux_base, initrd_base, dt_base;
+         _cleanup_(devicetree_cleanup) struct devicetree_state dt_state = {};
+         EFI_LOADED_IMAGE_PROTOCOL *loaded_image;
+-        UINTN addrs[_UNIFIED_SECTION_MAX] = {}, szs[_UNIFIED_SECTION_MAX] = {};
+-        char *cmdline = NULL;
+-        _cleanup_free_ char *cmdline_owned = NULL;
++        size_t addrs[_UNIFIED_SECTION_MAX] = {}, szs[_UNIFIED_SECTION_MAX] = {};
++        _cleanup_free_ char16_t *cmdline = NULL;
+         int sections_measured = -1, parameters_measured = -1;
+         bool sysext_measured = false, m;
+         EFI_STATUS err;
+@@ -208,32 +207,29 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+         /* Show splash screen as early as possible */
+         graphics_splash((const uint8_t*) loaded_image->ImageBase + addrs[UNIFIED_SECTION_SPLASH], szs[UNIFIED_SECTION_SPLASH]);
+ 
+-        if (szs[UNIFIED_SECTION_CMDLINE] > 0) {
+-                cmdline = (char *) loaded_image->ImageBase + addrs[UNIFIED_SECTION_CMDLINE];
+-                cmdline_len = szs[UNIFIED_SECTION_CMDLINE];
+-        }
+-
+         /* if we are not in secure boot mode, or none was provided, accept a custom command line and replace
+          * the built-in one. We also do a superficial check whether first character of passed command line
+          * is printable character (for compat with some Dell systems which fill in garbage?). */
+-        if ((!secure_boot_enabled() || cmdline_len == 0) &&
+-            loaded_image->LoadOptionsSize > 0 &&
++        if ((!secure_boot_enabled() || szs[UNIFIED_SECTION_CMDLINE] == 0) &&
++            loaded_image->LoadOptionsSize > sizeof(char16_t) &&
+             ((char16_t *) loaded_image->LoadOptions)[0] > 0x1F) {
+-                cmdline_len = (loaded_image->LoadOptionsSize / sizeof(char16_t)) * sizeof(char);
+-                cmdline = cmdline_owned = xnew(char, cmdline_len);
+-
+-                for (UINTN i = 0; i < cmdline_len; i++) {
+-                        char16_t c = ((char16_t *) loaded_image->LoadOptions)[i];
+-                        cmdline[i] = c > 0x1F && c < 0x7F ? c : ' '; /* convert non-printable and non_ASCII characters to spaces. */
+-                }
++                /* Note that LoadOptions is a void*, so it could be anything! */
++                cmdline = xstrndup16(
++                                loaded_image->LoadOptions, loaded_image->LoadOptionsSize / sizeof(char16_t));
++                mangle_stub_cmdline(cmdline);
+ 
+                 /* Let's measure the passed kernel command line into the TPM. Note that this possibly
+                  * duplicates what we already did in the boot menu, if that was already used. However, since
+                  * we want the boot menu to support an EFI binary, and want to this stub to be usable from
+                  * any boot menu, let's measure things anyway. */
+                 m = false;
+-                (void) tpm_log_load_options(loaded_image->LoadOptions, &m);
++                (void) tpm_log_load_options(cmdline, &m);
+                 parameters_measured = m;
++        } else if (szs[UNIFIED_SECTION_CMDLINE] > 0) {
++                cmdline = xstrn8_to_16(
++                                (char *) loaded_image->ImageBase + addrs[UNIFIED_SECTION_CMDLINE],
++                                szs[UNIFIED_SECTION_CMDLINE]);
++                mangle_stub_cmdline(cmdline);
+         }
+ 
+         export_variables(loaded_image);
+@@ -374,7 +370,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+                         log_error_stall(L"Error loading embedded devicetree: %r", err);
+         }
+ 
+-        err = linux_exec(image, cmdline, cmdline_len,
++        err = linux_exec(image, cmdline,
+                          PHYSICAL_ADDRESS_TO_POINTER(linux_base), linux_size,
+                          PHYSICAL_ADDRESS_TO_POINTER(initrd_base), initrd_size);
+         graphics_mode(false);
+diff --git a/src/boot/efi/util.c b/src/boot/efi/util.c
+index 3268c511d0..1f07fbc38c 100644
+--- a/src/boot/efi/util.c
++++ b/src/boot/efi/util.c
+@@ -274,6 +274,13 @@ char16_t *xstr8_to_path(const char *str8) {
+         return path;
+ }
+ 
++void mangle_stub_cmdline(char16_t *cmdline) {
++        for (; *cmdline != '\0'; cmdline++)
++                /* Convert ASCII control characters to spaces. */
++                if (*cmdline <= 0x1F)
++                        *cmdline = ' ';
++}
++
+ EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, UINTN off, UINTN size, char **ret, UINTN *ret_size) {
+         _cleanup_(file_closep) EFI_FILE *handle = NULL;
+         _cleanup_free_ char *buf = NULL;
+diff --git a/src/boot/efi/util.h b/src/boot/efi/util.h
+index e4ab8138c4..f58d24fce1 100644
+--- a/src/boot/efi/util.h
++++ b/src/boot/efi/util.h
+@@ -114,6 +114,7 @@ EFI_STATUS efivar_get_boolean_u8(const EFI_GUID *vendor, const char16_t *name, b
+ 
+ void convert_efi_path(char16_t *path);
+ char16_t *xstr8_to_path(const char *stra);
++void mangle_stub_cmdline(char16_t *cmdline);
+ 
+ EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, UINTN off, UINTN size, char **content, UINTN *content_size);
+ 

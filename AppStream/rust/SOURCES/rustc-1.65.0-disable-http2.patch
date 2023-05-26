@@ -1,0 +1,90 @@
+--- rustc-beta-src/Cargo.lock.orig	2022-10-04 10:55:48.797517289 -0700
++++ rustc-beta-src/Cargo.lock	2022-10-04 10:55:48.799517248 -0700
+@@ -1026,7 +1026,6 @@
+ dependencies = [
+  "cc",
+  "libc",
+- "libnghttp2-sys",
+  "libz-sys",
+  "openssl-sys",
+  "pkg-config",
+@@ -1993,16 +1992,6 @@
+ checksum = "7fc7aa29613bd6a620df431842069224d8bc9011086b1db4c0e0cd47fa03ec9a"
+ 
+ [[package]]
+-name = "libnghttp2-sys"
+-version = "0.1.4+1.41.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "03624ec6df166e79e139a2310ca213283d6b3c30810c54844f307086d4488df1"
+-dependencies = [
+- "cc",
+- "libc",
+-]
+-
+-[[package]]
+ name = "libz-sys"
+ version = "1.1.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+--- rustc-beta-src/src/tools/cargo/Cargo.toml.orig	2022-10-04 10:55:48.799517248 -0700
++++ rustc-beta-src/src/tools/cargo/Cargo.toml	2022-10-04 11:00:55.057162743 -0700
+@@ -21,7 +21,7 @@
+ cargo-platform = { path = "crates/cargo-platform", version = "0.1.2" }
+ cargo-util = { path = "crates/cargo-util", version = "0.2.1" }
+ crates-io = { path = "crates/crates-io", version = "0.34.0" }
+-curl = { version = "0.4.43", features = ["http2"] }
++curl = { version = "0.4.43", features = [] }
+ curl-sys = "0.4.55"
+ env_logger = "0.9.0"
+ pretty_env_logger = { version = "0.4", optional = true }
+--- rustc-beta-src/src/tools/cargo/src/cargo/sources/registry/http_remote.rs.orig	2022-09-24 10:23:17.000000000 -0700
++++ rustc-beta-src/src/tools/cargo/src/cargo/sources/registry/http_remote.rs	2022-10-04 10:55:48.799517248 -0700
+@@ -192,16 +192,8 @@
+         }
+         self.fetch_started = true;
+ 
+-        // We've enabled the `http2` feature of `curl` in Cargo, so treat
+-        // failures here as fatal as it would indicate a build-time problem.
+-        self.multiplexing = self.config.http_config()?.multiplexing.unwrap_or(true);
+-
+-        self.multi
+-            .pipelining(false, self.multiplexing)
+-            .with_context(|| "failed to enable multiplexing/pipelining in curl")?;
+-
+-        // let's not flood the server with connections
+-        self.multi.set_max_host_connections(2)?;
++        // Multiplexing is disabled because the system libcurl doesn't support it.
++        self.multiplexing = false;
+ 
+         self.config
+             .shell()
+--- rustc-beta-src/src/tools/cargo/src/cargo/core/package.rs.orig	2022-09-24 10:23:17.000000000 -0700
++++ rustc-beta-src/src/tools/cargo/src/cargo/core/package.rs	2022-10-04 10:55:48.800517227 -0700
+@@ -403,16 +403,9 @@
+         sources: SourceMap<'cfg>,
+         config: &'cfg Config,
+     ) -> CargoResult<PackageSet<'cfg>> {
+-        // We've enabled the `http2` feature of `curl` in Cargo, so treat
+-        // failures here as fatal as it would indicate a build-time problem.
+-        let mut multi = Multi::new();
+-        let multiplexing = config.http_config()?.multiplexing.unwrap_or(true);
+-        multi
+-            .pipelining(false, multiplexing)
+-            .with_context(|| "failed to enable multiplexing/pipelining in curl")?;
+-
+-        // let's not flood crates.io with connections
+-        multi.set_max_host_connections(2)?;
++        // Multiplexing is disabled because the system libcurl doesn't support it.
++        let multi = Multi::new();
++        let multiplexing = false;
+ 
+         Ok(PackageSet {
+             packages: package_ids
+@@ -658,7 +651,7 @@
+ macro_rules! try_old_curl {
+     ($e:expr, $msg:expr) => {
+         let result = $e;
+-        if cfg!(target_os = "macos") {
++        if cfg!(any(target_os = "linux", target_os = "macos")) {
+             if let Err(e) = result {
+                 warn!("ignoring libcurl {} error: {}", $msg, e);
+             }

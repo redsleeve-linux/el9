@@ -1,0 +1,40 @@
+From 54c173eb34da7c94953ed3556b448da13a4dc5fa Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 1 Feb 2023 23:03:54 +0900
+Subject: [PATCH] test: make helper_check_device_units() log unit name
+
+(cherry picked from commit 5479d0f83a80810c475b14fbaf61872f4df6b20e)
+
+Related: #2138081
+---
+ test/units/testsuite-64.sh | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/test/units/testsuite-64.sh b/test/units/testsuite-64.sh
+index fd1ad7c041..c572671c20 100755
+--- a/test/units/testsuite-64.sh
++++ b/test/units/testsuite-64.sh
+@@ -89,6 +89,8 @@ check_device_unit() {(
+     path="${2?}"
+     unit=$(systemd-escape --path --suffix=device "$path")
+ 
++    [[ "$log_level" == 1 ]] && echo "INFO: check_device_unit($unit)"
++
+     syspath=$(systemctl show --value --property SysFSPath "$unit" 2>/dev/null)
+     if [[ -z "$syspath" ]]; then
+         [[ "$log_level" == 1 ]] && echo >&2 "ERROR: $unit not found."
+@@ -156,12 +158,11 @@ helper_check_device_units() {(
+ 
+     local i
+ 
+-    for ((i = 0; i < 20; i++)); do
+-        (( i == 0 )) || sleep .5
+-
++    for (( i = 0; i < 20; i++ )); do
+         if check_device_units 0 "$@"; then
+             return 0
+         fi
++        sleep .5
+     done
+ 
+     check_device_units 1 "$@"

@@ -1,0 +1,56 @@
+From 1ef6ffdf0923095752665c7ff6062514dfa6c6bf Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Fri, 4 Nov 2022 00:01:16 +0000
+Subject: [PATCH] firstboot: fix segfault when --locale-messages= is passed
+ without --locale=
+
+\#0  __strcmp_evex () at ../sysdeps/x86_64/multiarch/strcmp-evex.S:295
+No locals.
+\#1  0x0000557444eb172b in process_locale () at ../src/firstboot/firstboot.c:342
+        etc_localeconf = 0x7ffd40217b80 "/root/root/etc/locale.conf"
+        locales = {0x0, 0x0, 0x0}
+        i = 0
+        r = <optimized out>
+        __PRETTY_FUNCTION__ = "process_locale"
+        __func__ = "process_locale"
+\#2  0x0000557444eaff93 in run (argv=0x7ffd40217d98, argc=3) at ../src/firstboot/firstboot.c:1401
+        loop_device = 0x0
+        unlink_dir = 0x0
+        r = <optimized out>
+        loop_device = <optimized out>
+        unlink_dir = <optimized out>
+        r = <optimized out>
+        __func__ = <optimized out>
+        __PRETTY_FUNCTION__ = <optimized out>
+        enabled = <optimized out>
+        _error = <optimized out>
+        _level = <optimized out>
+        _e = <optimized out>
+        _level = <optimized out>
+        _e = <optimized out>
+\#3  main (argc=3, argv=0x7ffd40217d98) at ../src/firstboot/firstboot.c:1432
+        r = <optimized out>
+        __PRETTY_FUNCTION__ = "main"
+
+Fixes https://github.com/systemd/systemd/issues/25249
+
+(cherry picked from commit 4c4a73ce068ef16cfe7ad07c7c3386ac1dbc58fe)
+
+Related #2138081
+---
+ src/firstboot/firstboot.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/firstboot/firstboot.c b/src/firstboot/firstboot.c
+index 065ee896cd..63db78b52d 100644
+--- a/src/firstboot/firstboot.c
++++ b/src/firstboot/firstboot.c
+@@ -339,7 +339,7 @@ static int process_locale(void) {
+ 
+         if (!isempty(arg_locale))
+                 locales[i++] = strjoina("LANG=", arg_locale);
+-        if (!isempty(arg_locale_messages) && !streq(arg_locale_messages, arg_locale))
++        if (!isempty(arg_locale_messages) && !streq_ptr(arg_locale_messages, arg_locale))
+                 locales[i++] = strjoina("LC_MESSAGES=", arg_locale_messages);
+ 
+         if (i == 0)

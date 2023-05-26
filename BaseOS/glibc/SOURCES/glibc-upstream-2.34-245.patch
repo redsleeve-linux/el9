@@ -1,0 +1,197 @@
+commit be9240c84c67de44959905a829141576965a0588
+Author: Fangrui Song <maskray@google.com>
+Date:   Tue Apr 19 15:52:27 2022 -0700
+
+    elf: Remove __libc_init_secure
+    
+    After 73fc4e28b9464f0e13edc719a5372839970e7ddb,
+    __libc_enable_secure_decided is always 0 and a statically linked
+    executable may overwrite __libc_enable_secure without considering
+    AT_SECURE.
+    
+    The __libc_enable_secure has been correctly initialized in _dl_aux_init,
+    so just remove __libc_enable_secure_decided and __libc_init_secure.
+    This allows us to remove some startup_get*id functions from
+    22b79ed7f413cd980a7af0cf258da5bf82b6d5e5.
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+    (cherry picked from commit 3e9acce8c50883b6cd8a3fb653363d9fa21e1608)
+
+diff --git a/csu/libc-start.c b/csu/libc-start.c
+index d01e57ea59ceb880..a2fc2f6f9665a48f 100644
+--- a/csu/libc-start.c
++++ b/csu/libc-start.c
+@@ -285,9 +285,6 @@ LIBC_START_MAIN (int (*main) (int, char **, char ** MAIN_AUXVEC_DECL),
+         }
+     }
+ 
+-  /* Initialize very early so that tunables can use it.  */
+-  __libc_init_secure ();
+-
+   __tunables_init (__environ);
+ 
+   ARCH_INIT_CPU_FEATURES ();
+diff --git a/elf/enbl-secure.c b/elf/enbl-secure.c
+index 9e47526bd3e444e1..1208610bd0670c74 100644
+--- a/elf/enbl-secure.c
++++ b/elf/enbl-secure.c
+@@ -26,15 +26,5 @@
+ #include <startup.h>
+ #include <libc-internal.h>
+ 
+-/* If nonzero __libc_enable_secure is already set.  */
+-int __libc_enable_secure_decided;
+ /* Safest assumption, if somehow the initializer isn't run.  */
+ int __libc_enable_secure = 1;
+-
+-void
+-__libc_init_secure (void)
+-{
+-  if (__libc_enable_secure_decided == 0)
+-    __libc_enable_secure = (startup_geteuid () != startup_getuid ()
+-			    || startup_getegid () != startup_getgid ());
+-}
+diff --git a/include/libc-internal.h b/include/libc-internal.h
+index 749dfb919ce4a62d..44fcb6bdf8751c1c 100644
+--- a/include/libc-internal.h
++++ b/include/libc-internal.h
+@@ -21,9 +21,6 @@
+ 
+ #include <hp-timing.h>
+ 
+-/* Initialize the `__libc_enable_secure' flag.  */
+-extern void __libc_init_secure (void);
+-
+ /* Discover the tick frequency of the machine if something goes wrong,
+    we return 0, an impossible hertz.  */
+ extern int __profile_frequency (void);
+diff --git a/include/unistd.h b/include/unistd.h
+index 7849562c4272e2c9..5824485629793ccb 100644
+--- a/include/unistd.h
++++ b/include/unistd.h
+@@ -180,7 +180,6 @@ libc_hidden_proto (__sbrk)
+    and some functions contained in the C library ignore various
+    environment variables that normally affect them.  */
+ extern int __libc_enable_secure attribute_relro;
+-extern int __libc_enable_secure_decided;
+ rtld_hidden_proto (__libc_enable_secure)
+ 
+ 
+diff --git a/sysdeps/generic/startup.h b/sysdeps/generic/startup.h
+index 04f20cde474cea89..c3be5430bd8bbaa6 100644
+--- a/sysdeps/generic/startup.h
++++ b/sysdeps/generic/startup.h
+@@ -23,27 +23,3 @@
+ 
+ /* Use macro instead of inline function to avoid including <stdio.h>.  */
+ #define _startup_fatal(message) __libc_fatal ((message))
+-
+-static inline uid_t
+-startup_getuid (void)
+-{
+-  return __getuid ();
+-}
+-
+-static inline uid_t
+-startup_geteuid (void)
+-{
+-  return __geteuid ();
+-}
+-
+-static inline gid_t
+-startup_getgid (void)
+-{
+-  return __getgid ();
+-}
+-
+-static inline gid_t
+-startup_getegid (void)
+-{
+-  return __getegid ();
+-}
+diff --git a/sysdeps/mach/hurd/enbl-secure.c b/sysdeps/mach/hurd/enbl-secure.c
+deleted file mode 100644
+index 3e9a6b888d56754b..0000000000000000
+--- a/sysdeps/mach/hurd/enbl-secure.c
++++ /dev/null
+@@ -1,30 +0,0 @@
+-/* Define and initialize the `__libc_enable_secure' flag.  Hurd version.
+-   Copyright (C) 1998-2021 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-/* There is no need for this file in the Hurd; it is just a placeholder
+-   to prevent inclusion of the sysdeps/generic version.
+-   In the shared library, the `__libc_enable_secure' variable is defined
+-   by the dynamic linker in dl-sysdep.c and set there.
+-   In the static library, it is defined in init-first.c and set there.  */
+-
+-#include <libc-internal.h>
+-
+-void
+-__libc_init_secure (void)
+-{
+-}
+diff --git a/sysdeps/mach/hurd/i386/init-first.c b/sysdeps/mach/hurd/i386/init-first.c
+index a430aae085527163..4dc9017ec8754a1a 100644
+--- a/sysdeps/mach/hurd/i386/init-first.c
++++ b/sysdeps/mach/hurd/i386/init-first.c
+@@ -38,10 +38,6 @@ extern void __init_misc (int, char **, char **);
+ unsigned long int __hurd_threadvar_stack_offset;
+ unsigned long int __hurd_threadvar_stack_mask;
+ 
+-#ifndef SHARED
+-int __libc_enable_secure;
+-#endif
+-
+ extern int __libc_argc attribute_hidden;
+ extern char **__libc_argv attribute_hidden;
+ extern char **_dl_argv;
+diff --git a/sysdeps/unix/sysv/linux/i386/startup.h b/sysdeps/unix/sysv/linux/i386/startup.h
+index dee7a4f1d3d420be..192c765361c17ed1 100644
+--- a/sysdeps/unix/sysv/linux/i386/startup.h
++++ b/sysdeps/unix/sysv/linux/i386/startup.h
+@@ -32,30 +32,6 @@ _startup_fatal (const char *message __attribute__ ((unused)))
+   ABORT_INSTRUCTION;
+   __builtin_unreachable ();
+ }
+-
+-static inline uid_t
+-startup_getuid (void)
+-{
+-  return (uid_t) INTERNAL_SYSCALL_CALL (getuid32);
+-}
+-
+-static inline uid_t
+-startup_geteuid (void)
+-{
+-  return (uid_t) INTERNAL_SYSCALL_CALL (geteuid32);
+-}
+-
+-static inline gid_t
+-startup_getgid (void)
+-{
+-  return (gid_t) INTERNAL_SYSCALL_CALL (getgid32);
+-}
+-
+-static inline gid_t
+-startup_getegid (void)
+-{
+-  return (gid_t) INTERNAL_SYSCALL_CALL (getegid32);
+-}
+ #else
+ # include_next <startup.h>
+ #endif

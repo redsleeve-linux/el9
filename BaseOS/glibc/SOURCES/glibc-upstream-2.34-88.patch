@@ -1,0 +1,28 @@
+commit d084965adc7baa8ea804427cccf973cea556d697
+Author: Siddhesh Poyarekar <siddhesh@sourceware.org>
+Date:   Mon Jan 24 21:36:41 2022 +0530
+
+    realpath: Avoid overwriting preexisting error (CVE-2021-3998)
+    
+    Set errno and failure for paths that are too long only if no other error
+    occurred earlier.
+    
+    Related: BZ #28770
+    
+    Reviewed-by: Andreas Schwab <schwab@linux-m68k.org>
+    Signed-off-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+    (cherry picked from commit 84d2d0fe20bdf94feed82b21b4d7d136db471f03)
+
+diff --git a/stdlib/canonicalize.c b/stdlib/canonicalize.c
+index 7a23a51b3a395eb3..e2d4244fc7b8fa25 100644
+--- a/stdlib/canonicalize.c
++++ b/stdlib/canonicalize.c
+@@ -404,7 +404,7 @@ error:
+     {
+       if (dest - rname <= get_path_max ())
+ 	rname = strcpy (resolved, rname);
+-      else
++      else if (!failed)
+ 	{
+ 	  failed = true;
+ 	  __set_errno (ENAMETOOLONG);

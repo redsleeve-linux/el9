@@ -1,0 +1,47 @@
+From 60fa029fe83af62f27bf833dc86c0aeeb76b412b Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 4 Nov 2022 18:19:29 +0100
+Subject: [PATCH] fd-util: make fd_in_set() (and thus close_all_fds()) handle
+ invalidated fds in the array
+
+let's handle gracefully if fds in the specified array are already
+invalidated (i.e. negative). This is handy when putting together arrays
+on the fly.
+
+(cherry picked from commit d11c14a9817f6561a30d96d8faea126a4c811af8)
+
+Related: #2138081
+---
+ src/basic/fd-util.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/basic/fd-util.c b/src/basic/fd-util.c
+index cee20a9a81..6ed04449bf 100644
+--- a/src/basic/fd-util.c
++++ b/src/basic/fd-util.c
+@@ -177,9 +177,13 @@ int fd_cloexec(int fd, bool cloexec) {
+ _pure_ static bool fd_in_set(int fd, const int fdset[], size_t n_fdset) {
+         assert(n_fdset == 0 || fdset);
+ 
+-        for (size_t i = 0; i < n_fdset; i++)
++        for (size_t i = 0; i < n_fdset; i++) {
++                if (fdset[i] < 0)
++                        continue;
++
+                 if (fdset[i] == fd)
+                         return true;
++        }
+ 
+         return false;
+ }
+@@ -252,6 +256,10 @@ static int close_all_fds_special_case(const int except[], size_t n_except) {
+         if (!have_close_range)
+                 return 0;
+ 
++        if (n_except == 1 && except[0] < 0) /* Minor optimization: if we only got one fd, and it's invalid,
++                                             * we got none */
++                n_except = 0;
++
+         switch (n_except) {
+ 
+         case 0:

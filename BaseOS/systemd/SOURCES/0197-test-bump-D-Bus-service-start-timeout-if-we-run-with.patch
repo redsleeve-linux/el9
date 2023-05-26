@@ -1,0 +1,57 @@
+From f2a1b51350d535cbb6ed3a3d11071651e54f5c3c Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 17 Jan 2023 18:04:30 +0100
+Subject: [PATCH] test: bump D-Bus service start timeout if we run without
+ accel
+
+The default (25s) doesn't seem to be enough in some cases (especially
+in VMs without acceleration), causing spurious timeouts:
+
+[  174.297658] dbus-daemon[647]: [system] Activating via systemd: service name='org.freedesktop.hostname1' unit='dbus-org.freedesktop.hostname1.service' requested by ':1.0' (uid=0 pid=645 comm="hostnamectl " label="kernel")
+[  184.202313] systemd[1]: systemd-update-utmp-runlevel.service: Consumed 1.253s CPU time.
+[  197.335422] systemd[1]: Started dbus.service.
+[  199.211468] testsuite-71.sh[639]: + assert_in 'Static hostname: H' ''
+[  199.347192] dbus-daemon[647]: [system] Failed to activate service 'org.freedesktop.hostname1': timed out (service_start_timeout=25000ms)
+[  199.394879] testsuite-71.sh[657]: + set +ex
+[  199.438918] testsuite-71.sh[657]: FAIL: 'Static hostname: H' not found in:
+[  200.966006] systemd-logind[631]: Watching system buttons on /dev/input/event0 (Power Button)
+[  201.008178] systemd-logind[631]: Watching system buttons on /dev/input/event1 (AT Translated Set 2 keyboard)
+[  201.034106] systemd-logind[631]: New seat seat0.
+[  201.238267] sh[658]: + systemctl poweroff --no-block
+[  201.329890] systemd[1]: Starting systemd-hostnamed.service...
+[  202.156622] systemd[1]: systemd-update-utmp-runlevel.service: Deactivated successfully.
+[  204.818913] hostnamectl[645]: Failed to query system properties: Connection timed out
+[  205.195583] systemd[1]: testsuite-71.service: Main process exited, code=exited, status=1/FAILURE
+[  205.227237] systemd[1]: testsuite-71.service: Failed with result 'exit-code'.
+[  205.712780] systemd[1]: Failed to start testsuite-71.service.
+
+(cherry picked from commit c78d18215b3e5b0f0896ddb1d0d72c666b5e830b)
+
+Related: #2138081
+---
+ test/test-functions | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/test/test-functions b/test/test-functions
+index 94e11a686a..6e4ea80d89 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -1909,6 +1909,18 @@ install_dbus() {
+     </policy>
+ </busconfig>
+ EOF
++
++    # If we run without KVM, bump the service start timeout
++    if ! get_bool "$QEMU_KVM"; then
++        cat >"$initdir/etc/dbus-1/system.d/service.timeout.conf" <<EOF
++<?xml version="1.0"?>
++<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-BUS Bus Configuration 1.0//EN"
++        "https://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
++<busconfig>
++    <limit name="service_start_timeout">60000</limit>
++</busconfig>
++EOF
++    fi
+ }
+ 
+ install_user_dbus() {

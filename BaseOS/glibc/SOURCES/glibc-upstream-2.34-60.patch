@@ -1,0 +1,32 @@
+commit 9de8011c328021f10588a8acb418daf5121d5f3d
+Author: Aurelien Jarno <aurelien@aurel32.net>
+Date:   Tue Dec 14 22:44:35 2021 +0100
+
+    riscv: align stack in clone [BZ #28702]
+    
+    The RISC-V ABI [1] mandates that "the stack pointer shall be aligned to
+    a 128-bit boundary upon procedure entry". This as not the case in clone.
+    
+    This fixes the misc/tst-misalign-clone-internal and
+    misc/tst-misalign-clone tests.
+    
+    Fixes bug 28702.
+    
+    [1] https://github.com/riscv-non-isa/riscv-elf-psabi-doc
+    
+    (cherry picked from commit d2e594d71509faf36cf851a69370db34a4f5fa65)
+
+diff --git a/sysdeps/unix/sysv/linux/riscv/clone.S b/sysdeps/unix/sysv/linux/riscv/clone.S
+index 12f91a20d3bb34f5..161e83c7e3786b8d 100644
+--- a/sysdeps/unix/sysv/linux/riscv/clone.S
++++ b/sysdeps/unix/sysv/linux/riscv/clone.S
+@@ -32,6 +32,9 @@
+ 	.text
+ LEAF (__clone)
+ 
++	/* Align stack to a 128-bit boundary as per RISC-V ABI.  */
++	andi		a1,a1,ALMASK
++
+ 	/* Sanity check arguments.  */
+ 	beqz		a0,L (invalid)	/* No NULL function pointers.  */
+ 	beqz		a1,L (invalid)	/* No NULL stack pointers.  */

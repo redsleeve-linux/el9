@@ -1,0 +1,433 @@
+From 519625977d19b7842d9b2ded8be12ed0aecbaefc Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Tue, 15 Nov 2022 18:22:38 +0100
+Subject: [PATCH] boot: Rework security arch override
+
+This simplifies the caller interface for security arch overrides by only
+having to pass a validator and an optional context.
+
+(cherry picked from commit 5489c13bae119dc5f6e65be8d7f241aa7d54c023)
+
+Related: #2138081
+---
+ src/boot/efi/linux.c       |  61 ++++++++-------------
+ src/boot/efi/secure-boot.c | 105 +++++++++++++++++++++++++++++--------
+ src/boot/efi/secure-boot.h |  28 +++-------
+ src/boot/efi/shim.c        | 104 +++++++++++-------------------------
+ 4 files changed, 146 insertions(+), 152 deletions(-)
+
+diff --git a/src/boot/efi/linux.c b/src/boot/efi/linux.c
+index 75b9507709..dd7eb48c8c 100644
+--- a/src/boot/efi/linux.c
++++ b/src/boot/efi/linux.c
+@@ -20,35 +20,26 @@
+ #define STUB_PAYLOAD_GUID \
+         { 0x55c5d1f8, 0x04cd, 0x46b5, { 0x8a, 0x20, 0xe5, 0x6c, 0xbb, 0x30, 0x52, 0xd0 } }
+ 
+-static EFIAPI EFI_STATUS security_hook(
+-                const SecurityOverride *this, uint32_t authentication_status, const EFI_DEVICE_PATH *file) {
++typedef struct {
++        const void *addr;
++        size_t len;
++        const EFI_DEVICE_PATH *device_path;
++} ValidationContext;
+ 
+-        assert(this);
+-        assert(this->hook == security_hook);
++static bool validate_payload(
++                const void *ctx, const EFI_DEVICE_PATH *device_path, const void *file_buffer, size_t file_size) {
+ 
+-        if (file == this->payload_device_path)
+-                return EFI_SUCCESS;
++        const ValidationContext *payload = ASSERT_PTR(ctx);
+ 
+-        return this->original_security->FileAuthenticationState(
+-                        this->original_security, authentication_status, file);
+-}
+-
+-static EFIAPI EFI_STATUS security2_hook(
+-                const SecurityOverride *this,
+-                const EFI_DEVICE_PATH *device_path,
+-                void *file_buffer,
+-                size_t file_size,
+-                BOOLEAN boot_policy) {
+-
+-        assert(this);
+-        assert(this->hook == security2_hook);
++        if (device_path != payload->device_path)
++                return false;
+ 
+-        if (file_buffer == this->payload && file_size == this->payload_len &&
+-            device_path == this->payload_device_path)
+-                return EFI_SUCCESS;
++        /* Security arch (1) protocol does not provide a file buffer. Instead we are supposed to fetch the payload
++         * ourselves, which is not needed as we already have everything in memory and the device paths match. */
++        if (file_buffer && (file_buffer != payload->addr || file_size != payload->len))
++                return false;
+ 
+-        return this->original_security2->FileAuthentication(
+-                        this->original_security2, device_path, file_buffer, file_size, boot_policy);
++        return true;
+ }
+ 
+ static EFI_STATUS load_image(EFI_HANDLE parent, const void *source, size_t len, EFI_HANDLE *ret_image) {
+@@ -79,19 +70,13 @@ static EFI_STATUS load_image(EFI_HANDLE parent, const void *source, size_t len,
+ 
+         /* We want to support unsigned kernel images as payload, which is safe to do under secure boot
+          * because it is embedded in this stub loader (and since it is already running it must be trusted). */
+-        SecurityOverride security_override = {
+-                .hook = security_hook,
+-                .payload = source,
+-                .payload_len = len,
+-                .payload_device_path = &payload_device_path.payload.Header,
+-        }, security2_override = {
+-                .hook = security2_hook,
+-                .payload = source,
+-                .payload_len = len,
+-                .payload_device_path = &payload_device_path.payload.Header,
+-        };
+-
+-        install_security_override(&security_override, &security2_override);
++        install_security_override(
++                        validate_payload,
++                        &(ValidationContext) {
++                                .addr = source,
++                                .len = len,
++                                .device_path = &payload_device_path.payload.Header,
++                        });
+ 
+         EFI_STATUS ret = BS->LoadImage(
+                         /*BootPolicy=*/false,
+@@ -101,7 +86,7 @@ static EFI_STATUS load_image(EFI_HANDLE parent, const void *source, size_t len,
+                         len,
+                         ret_image);
+ 
+-        uninstall_security_override(&security_override, &security2_override);
++        uninstall_security_override();
+ 
+         return ret;
+ }
+diff --git a/src/boot/efi/secure-boot.c b/src/boot/efi/secure-boot.c
+index 171b2c96b3..0e615c55e0 100644
+--- a/src/boot/efi/secure-boot.c
++++ b/src/boot/efi/secure-boot.c
+@@ -127,10 +127,60 @@ out_deallocate:
+         return err;
+ }
+ 
+-static EFI_STATUS install_security_override_one(EFI_GUID guid, SecurityOverride *override) {
++static struct SecurityOverride {
++        /* Our own security arch instances that we register onto original_handle, thereby replacing the
++         * firmware provided instances. */
++        EFI_SECURITY_ARCH_PROTOCOL override;
++        EFI_SECURITY2_ARCH_PROTOCOL override2;
++
++        /* These are saved so we can uninstall our own instance later. */
++        EFI_HANDLE original_handle, original_handle2;
++        EFI_SECURITY_ARCH_PROTOCOL *original_security;
++        EFI_SECURITY2_ARCH_PROTOCOL *original_security2;
++
++        security_validator_t validator;
++        const void *validator_ctx;
++} security_override;
++
++static EFIAPI EFI_STATUS security_hook(
++                const EFI_SECURITY_ARCH_PROTOCOL *this,
++                uint32_t authentication_status,
++                const EFI_DEVICE_PATH *file) {
++
++        assert(security_override.validator);
++        assert(security_override.original_security);
++
++        if (security_override.validator(security_override.validator_ctx, file, NULL, 0))
++                return EFI_SUCCESS;
++
++        return security_override.original_security->FileAuthenticationState(
++                        security_override.original_security, authentication_status, file);
++}
++
++static EFIAPI EFI_STATUS security2_hook(
++                const EFI_SECURITY2_ARCH_PROTOCOL *this,
++                const EFI_DEVICE_PATH *device_path,
++                void *file_buffer,
++                size_t file_size,
++                BOOLEAN boot_policy) {
++
++        assert(security_override.validator);
++        assert(security_override.original_security2);
++
++        if (security_override.validator(security_override.validator_ctx, device_path, file_buffer, file_size))
++                return EFI_SUCCESS;
++
++        return security_override.original_security2->FileAuthentication(
++                        security_override.original_security2, device_path, file_buffer, file_size, boot_policy);
++}
++
++static EFI_STATUS install_security_override_one(
++                EFI_GUID guid, void *override, EFI_HANDLE *ret_original_handle, void **ret_original_security) {
+         EFI_STATUS err;
+ 
+         assert(override);
++        assert(ret_original_handle);
++        assert(ret_original_security);
+ 
+         _cleanup_free_ EFI_HANDLE *handles = NULL;
+         size_t n_handles = 0;
+@@ -152,8 +202,8 @@ static EFI_STATUS install_security_override_one(EFI_GUID guid, SecurityOverride
+         if (err != EFI_SUCCESS)
+                 return log_error_status_stall(err, u"Error overriding security arch protocol: %r", err);
+ 
+-        override->original = security;
+-        override->original_handle = handles[0];
++        *ret_original_security = security;
++        *ret_original_handle = handles[0];
+         return EFI_SUCCESS;
+ }
+ 
+@@ -161,35 +211,46 @@ static EFI_STATUS install_security_override_one(EFI_GUID guid, SecurityOverride
+  * Specification) with the provided override instances. If not running in secure boot or the protocols are
+  * not available nothing happens. The override instances are provided with the necessary info to undo this
+  * in uninstall_security_override(). */
+-void install_security_override(SecurityOverride *override, SecurityOverride *override2) {
+-        assert(override);
+-        assert(override2);
++void install_security_override(security_validator_t validator, const void *validator_ctx) {
++        assert(validator);
+ 
+         if (!secure_boot_enabled())
+                 return;
+ 
+-        (void) install_security_override_one((EFI_GUID) EFI_SECURITY_ARCH_PROTOCOL_GUID, override);
+-        (void) install_security_override_one((EFI_GUID) EFI_SECURITY2_ARCH_PROTOCOL_GUID, override2);
+-}
++        security_override = (struct SecurityOverride) {
++                { .FileAuthenticationState = security_hook, },
++                { .FileAuthentication = security2_hook, },
++                .validator = validator,
++                .validator_ctx = validator_ctx,
++        };
+ 
+-void uninstall_security_override(SecurityOverride *override, SecurityOverride *override2) {
+-        assert(override);
+-        assert(override2);
++        (void) install_security_override_one(
++                        (EFI_GUID) EFI_SECURITY_ARCH_PROTOCOL_GUID,
++                        &security_override.override,
++                        &security_override.original_handle,
++                        (void **) &security_override.original_security);
++        (void) install_security_override_one(
++                        (EFI_GUID) EFI_SECURITY2_ARCH_PROTOCOL_GUID,
++                        &security_override.override2,
++                        &security_override.original_handle2,
++                        (void **) &security_override.original_security2);
++}
+ 
++void uninstall_security_override(void) {
+         /* We use assert_se here to guarantee the system is not in a weird state in the unlikely case of an
+          * error restoring the original protocols. */
+ 
+-        if (override->original_handle)
++        if (security_override.original_handle)
+                 assert_se(BS->ReinstallProtocolInterface(
+-                                          override->original_handle,
+-                                          &(EFI_GUID) EFI_SECURITY_ARCH_PROTOCOL_GUID,
+-                                          override,
+-                                          override->original) == EFI_SUCCESS);
++                                security_override.original_handle,
++                                &(EFI_GUID) EFI_SECURITY_ARCH_PROTOCOL_GUID,
++                                &security_override.override,
++                                security_override.original_security) == EFI_SUCCESS);
+ 
+-        if (override2->original_handle)
++        if (security_override.original_handle2)
+                 assert_se(BS->ReinstallProtocolInterface(
+-                                          override2->original_handle,
+-                                          &(EFI_GUID) EFI_SECURITY2_ARCH_PROTOCOL_GUID,
+-                                          override2,
+-                                          override2->original) == EFI_SUCCESS);
++                                security_override.original_handle2,
++                                &(EFI_GUID) EFI_SECURITY2_ARCH_PROTOCOL_GUID,
++                                &security_override.override2,
++                                security_override.original_security2) == EFI_SUCCESS);
+ }
+diff --git a/src/boot/efi/secure-boot.h b/src/boot/efi/secure-boot.h
+index 91b6770edb..e98de81c2a 100644
+--- a/src/boot/efi/secure-boot.h
++++ b/src/boot/efi/secure-boot.h
+@@ -17,23 +17,11 @@ SecureBootMode secure_boot_mode(void);
+ 
+ EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path);
+ 
+-typedef struct {
+-        void *hook;
+-
+-        /* End of EFI_SECURITY_ARCH(2)_PROTOCOL. The rest is our own protocol instance data. */
+-
+-        EFI_HANDLE original_handle;
+-        union {
+-                void *original;
+-                EFI_SECURITY_ARCH_PROTOCOL *original_security;
+-                EFI_SECURITY2_ARCH_PROTOCOL *original_security2;
+-        };
+-
+-        /* Used by the stub to identify the embedded image. */
+-        const void *payload;
+-        size_t payload_len;
+-        const EFI_DEVICE_PATH *payload_device_path;
+-} SecurityOverride;
+-
+-void install_security_override(SecurityOverride *override, SecurityOverride *override2);
+-void uninstall_security_override(SecurityOverride *override, SecurityOverride *override2);
++typedef bool (*security_validator_t)(
++                const void *ctx,
++                const EFI_DEVICE_PATH *device_path,
++                const void *file_buffer,
++                size_t file_size);
++
++void install_security_override(security_validator_t validator, const void *validator_ctx);
++void uninstall_security_override(void);
+diff --git a/src/boot/efi/shim.c b/src/boot/efi/shim.c
+index 3ae058cb84..ac224336bc 100644
+--- a/src/boot/efi/shim.c
++++ b/src/boot/efi/shim.c
+@@ -23,7 +23,7 @@
+ #endif
+ 
+ struct ShimLock {
+-        EFI_STATUS __sysv_abi__ (*shim_verify) (void *buffer, uint32_t size);
++        EFI_STATUS __sysv_abi__ (*shim_verify) (const void *buffer, uint32_t size);
+ 
+         /* context is actually a struct for the PE header, but it isn't needed so void is sufficient just do define the interface
+          * see shim.c/shim.h and PeHeader.h in the github shim repo */
+@@ -41,79 +41,45 @@ bool shim_loaded(void) {
+         return BS->LocateProtocol((EFI_GUID*) SHIM_LOCK_GUID, NULL, (void**) &shim_lock) == EFI_SUCCESS;
+ }
+ 
+-static bool shim_validate(void *data, uint32_t size) {
+-        struct ShimLock *shim_lock;
+-
+-        if (!data)
+-                return false;
+-
+-        if (BS->LocateProtocol((EFI_GUID*) SHIM_LOCK_GUID, NULL, (void**) &shim_lock) != EFI_SUCCESS)
+-                return false;
+-
+-        if (!shim_lock)
+-                return false;
+-
+-        return shim_lock->shim_verify(data, size) == EFI_SUCCESS;
+-}
+-
+-static EFIAPI EFI_STATUS security2_hook(
+-                const SecurityOverride *this,
+-                const EFI_DEVICE_PATH *device_path,
+-                void *file_buffer,
+-                UINTN file_size,
+-                BOOLEAN boot_policy) {
+-
+-        assert(this);
+-        assert(this->hook == security2_hook);
+-
+-        if (shim_validate(file_buffer, file_size))
+-                return EFI_SUCCESS;
+-
+-        return this->original_security2->FileAuthentication(
+-                        this->original_security2, device_path, file_buffer, file_size, boot_policy);
+-}
+-
+-static EFIAPI EFI_STATUS security_hook(
+-                const SecurityOverride *this,
+-                uint32_t authentication_status,
+-                const EFI_DEVICE_PATH *device_path) {
++static bool shim_validate(
++                const void *ctx, const EFI_DEVICE_PATH *device_path, const void *file_buffer, size_t file_size) {
+ 
+         EFI_STATUS err;
++        _cleanup_free_ char *file_buffer_owned = NULL;
+ 
+-        assert(this);
+-        assert(this->hook == security_hook);
++        if (!file_buffer) {
++                if (!device_path)
++                        return false;
+ 
+-        if (!device_path)
+-                return this->original_security->FileAuthenticationState(
+-                                this->original_security, authentication_status, device_path);
++                EFI_HANDLE device_handle;
++                EFI_DEVICE_PATH *file_dp = (EFI_DEVICE_PATH *) device_path;
++                err = BS->LocateDevicePath(&FileSystemProtocol, &file_dp, &device_handle);
++                if (err != EFI_SUCCESS)
++                        return false;
+ 
+-        EFI_HANDLE device_handle;
+-        EFI_DEVICE_PATH *dp = (EFI_DEVICE_PATH *) device_path;
+-        err = BS->LocateDevicePath(&FileSystemProtocol, &dp, &device_handle);
+-        if (err != EFI_SUCCESS)
+-                return err;
++                _cleanup_(file_closep) EFI_FILE *root = NULL;
++                err = open_volume(device_handle, &root);
++                if (err != EFI_SUCCESS)
++                        return false;
+ 
+-        _cleanup_(file_closep) EFI_FILE *root = NULL;
+-        err = open_volume(device_handle, &root);
+-        if (err != EFI_SUCCESS)
+-                return err;
++                _cleanup_free_ char16_t *dp_str = NULL;
++                err = device_path_to_str(file_dp, &dp_str);
++                if (err != EFI_SUCCESS)
++                        return false;
+ 
+-        _cleanup_free_ char16_t *dp_str = NULL;
+-        err = device_path_to_str(dp, &dp_str);
+-        if (err != EFI_SUCCESS)
+-                return err;
++                err = file_read(root, dp_str, 0, 0, &file_buffer_owned, &file_size);
++                if (err != EFI_SUCCESS)
++                        return false;
+ 
+-        char *file_buffer;
+-        size_t file_size;
+-        err = file_read(root, dp_str, 0, 0, &file_buffer, &file_size);
+-        if (err != EFI_SUCCESS)
+-                return err;
++                file_buffer = file_buffer_owned;
++        }
+ 
+-        if (shim_validate(file_buffer, file_size))
+-                return EFI_SUCCESS;
++        struct ShimLock *shim_lock;
++        err = BS->LocateProtocol((EFI_GUID *) SHIM_LOCK_GUID, NULL, (void **) &shim_lock);
++        if (err != EFI_SUCCESS)
++                return false;
+ 
+-        return this->original_security->FileAuthenticationState(
+-                        this->original_security, authentication_status, device_path);
++        return shim_lock->shim_verify(file_buffer, file_size) == EFI_SUCCESS;
+ }
+ 
+ EFI_STATUS shim_load_image(EFI_HANDLE parent, const EFI_DEVICE_PATH *device_path, EFI_HANDLE *ret_image) {
+@@ -122,20 +88,14 @@ EFI_STATUS shim_load_image(EFI_HANDLE parent, const EFI_DEVICE_PATH *device_path
+ 
+         bool have_shim = shim_loaded();
+ 
+-        SecurityOverride security_override = {
+-                .hook = security_hook,
+-        }, security2_override = {
+-                .hook = security2_hook,
+-        };
+-
+         if (have_shim)
+-                install_security_override(&security_override, &security2_override);
++                install_security_override(shim_validate, NULL);
+ 
+         EFI_STATUS ret = BS->LoadImage(
+                         /*BootPolicy=*/false, parent, (EFI_DEVICE_PATH *) device_path, NULL, 0, ret_image);
+ 
+         if (have_shim)
+-                uninstall_security_override(&security_override, &security2_override);
++                uninstall_security_override();
+ 
+         return ret;
+ }

@@ -1,0 +1,78 @@
+From 9be28013e62ae471151fdc1f181e21cbd1e72dbd Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 10 Feb 2023 13:38:08 +0100
+Subject: [PATCH] core: when isolating to a unit, also keep units running that
+ are triggered by units we keep running
+
+Inspired by: #26364
+
+(this might even "fix" #26364, but without debug logs it's hard to make
+such claims)
+
+Fixes: #23055
+(cherry picked from commit 32d6707dd1692d41e12f5469dfdcbc10f14d6619)
+
+Resolves: #1952378
+---
+ src/core/transaction.c | 33 +++++++++++++++++++++++++++------
+ 1 file changed, 27 insertions(+), 6 deletions(-)
+
+diff --git a/src/core/transaction.c b/src/core/transaction.c
+index bafbb80b47..8ec853d58d 100644
+--- a/src/core/transaction.c
++++ b/src/core/transaction.c
+@@ -1092,6 +1092,20 @@ fail:
+         return r;
+ }
+ 
++static bool shall_stop_on_isolate(Transaction *tr, Unit *u) {
++        assert(tr);
++        assert(u);
++
++        if (u->ignore_on_isolate)
++                return false;
++
++        /* Is there already something listed for this? */
++        if (hashmap_get(tr->jobs, u))
++                return false;
++
++        return true;
++}
++
+ int transaction_add_isolate_jobs(Transaction *tr, Manager *m) {
+         Unit *u;
+         char *k;
+@@ -1101,20 +1115,27 @@ int transaction_add_isolate_jobs(Transaction *tr, Manager *m) {
+         assert(m);
+ 
+         HASHMAP_FOREACH_KEY(u, k, m->units) {
++                Unit *o;
+ 
+-                /* ignore aliases */
++                /* Ignore aliases */
+                 if (u->id != k)
+                         continue;
+ 
+-                if (u->ignore_on_isolate)
++                /* No need to stop inactive units */
++                if (UNIT_IS_INACTIVE_OR_FAILED(unit_active_state(u)) && !u->job)
+                         continue;
+ 
+-                /* No need to stop inactive jobs */
+-                if (UNIT_IS_INACTIVE_OR_FAILED(unit_active_state(u)) && !u->job)
++                if (!shall_stop_on_isolate(tr, u))
+                         continue;
+ 
+-                /* Is there already something listed for this? */
+-                if (hashmap_get(tr->jobs, u))
++                /* Keep units that are triggered by units we want to keep around. */
++                bool keep = false;
++                UNIT_FOREACH_DEPENDENCY(o, u, UNIT_ATOM_TRIGGERED_BY)
++                        if (!shall_stop_on_isolate(tr, o)) {
++                                keep = true;
++                                break;
++                        }
++                if (keep)
+                         continue;
+ 
+                 r = transaction_add_job_and_dependencies(tr, JOB_STOP, u, tr->anchor_job, true, false, false, false, NULL);

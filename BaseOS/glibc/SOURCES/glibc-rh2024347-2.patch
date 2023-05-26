@@ -1,0 +1,259 @@
+commit 23c77f60181eb549f11ec2f913b4270af29eee38
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Dec 3 16:28:07 2021 +0100
+
+    nptl: Increase default TCB alignment to 32
+    
+    rseq support will use a 32-byte aligned field in struct pthread,
+    so the whole struct needs to have at least that alignment.
+    
+    nptl/tst-tls3mod.c uses TCB_ALIGNMENT, therefore include <descr.h>
+    to obtain the fallback definition.
+    
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+
+diff --git a/nptl/descr.h b/nptl/descr.h
+index 4de84138fb960fa4..57be5b4fef564b36 100644
+--- a/nptl/descr.h
++++ b/nptl/descr.h
+@@ -37,7 +37,9 @@
+ #include <tls-internal-struct.h>
+ 
+ #ifndef TCB_ALIGNMENT
+-# define TCB_ALIGNMENT	sizeof (double)
++# define TCB_ALIGNMENT 32
++#elif TCB_ALIGNMENT < 32
++# error TCB_ALIGNMENT must be at least 32
+ #endif
+ 
+ 
+diff --git a/nptl/tst-tls3mod.c b/nptl/tst-tls3mod.c
+index cfd13aace1affcd5..77dcc550fc3b5017 100644
+--- a/nptl/tst-tls3mod.c
++++ b/nptl/tst-tls3mod.c
+@@ -24,6 +24,7 @@
+ #include <stdlib.h>
+ #include <unistd.h>
+ #include <pthreaddef.h>
++#include <descr.h>
+ 
+ 
+ extern pthread_barrier_t b;
+diff --git a/sysdeps/aarch64/nptl/pthreaddef.h b/sysdeps/aarch64/nptl/pthreaddef.h
+index 4d5ecf6661fd0fe6..8d9a10622d132a7a 100644
+--- a/sysdeps/aarch64/nptl/pthreaddef.h
++++ b/sysdeps/aarch64/nptl/pthreaddef.h
+@@ -28,8 +28,5 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK 2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT 16
+-
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/alpha/nptl/pthreaddef.h b/sysdeps/alpha/nptl/pthreaddef.h
+index 25edb5093e095548..660e5694a25ec60f 100644
+--- a/sysdeps/alpha/nptl/pthreaddef.h
++++ b/sysdeps/alpha/nptl/pthreaddef.h
+@@ -27,8 +27,5 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	4096
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		16
+-
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/arc/nptl/pthreaddef.h b/sysdeps/arc/nptl/pthreaddef.h
+index 873b9d149ac46a62..d4dbe9e079445353 100644
+--- a/sysdeps/arc/nptl/pthreaddef.h
++++ b/sysdeps/arc/nptl/pthreaddef.h
+@@ -28,8 +28,5 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		4
+-
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/arm/nptl/pthreaddef.h b/sysdeps/arm/nptl/pthreaddef.h
+index 332f4079c4c3f2bf..13769f5ae270b0ca 100644
+--- a/sysdeps/arm/nptl/pthreaddef.h
++++ b/sysdeps/arm/nptl/pthreaddef.h
+@@ -28,9 +28,6 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		16
+-
+ 
+ /* Location of current stack frame.
+ 
+diff --git a/sysdeps/csky/nptl/pthreaddef.h b/sysdeps/csky/nptl/pthreaddef.h
+index e78bc0016b43b450..7dde9131b9b1a6b0 100644
+--- a/sysdeps/csky/nptl/pthreaddef.h
++++ b/sysdeps/csky/nptl/pthreaddef.h
+@@ -28,8 +28,5 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		8
+-
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/ia64/nptl/pthreaddef.h b/sysdeps/ia64/nptl/pthreaddef.h
+index 3a0f6daf9ad871aa..c7420fd1e4ee6081 100644
+--- a/sysdeps/ia64/nptl/pthreaddef.h
++++ b/sysdeps/ia64/nptl/pthreaddef.h
+@@ -30,9 +30,6 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	16384
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		16
+-
+ 
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__stack_pointer
+diff --git a/sysdeps/m68k/nptl/pthreaddef.h b/sysdeps/m68k/nptl/pthreaddef.h
+index 13e785a86bbf47b4..ce9511cb02da69fd 100644
+--- a/sysdeps/m68k/nptl/pthreaddef.h
++++ b/sysdeps/m68k/nptl/pthreaddef.h
+@@ -28,9 +28,6 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		16
+-
+ 
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/microblaze/nptl/pthreaddef.h b/sysdeps/microblaze/nptl/pthreaddef.h
+index 517157444da556ad..19d7235782afde53 100644
+--- a/sysdeps/microblaze/nptl/pthreaddef.h
++++ b/sysdeps/microblaze/nptl/pthreaddef.h
+@@ -31,8 +31,5 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK  2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT       16
+-
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME __builtin_frame_address (0)
+diff --git a/sysdeps/mips/nptl/pthreaddef.h b/sysdeps/mips/nptl/pthreaddef.h
+index a7bccef6e512438f..322591c293ce5e15 100644
+--- a/sysdeps/mips/nptl/pthreaddef.h
++++ b/sysdeps/mips/nptl/pthreaddef.h
+@@ -27,9 +27,6 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		16
+-
+ 
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/nios2/nptl/pthreaddef.h b/sysdeps/nios2/nptl/pthreaddef.h
+index e01a0e6df72c089a..aa0709d0dc69f251 100644
+--- a/sysdeps/nios2/nptl/pthreaddef.h
++++ b/sysdeps/nios2/nptl/pthreaddef.h
+@@ -28,8 +28,5 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		4
+-
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/powerpc/nptl/pthreaddef.h b/sysdeps/powerpc/nptl/pthreaddef.h
+index ef5310e6315fde2c..117c35229ea68f48 100644
+--- a/sysdeps/powerpc/nptl/pthreaddef.h
++++ b/sysdeps/powerpc/nptl/pthreaddef.h
+@@ -28,9 +28,6 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	4096
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		16
+-
+ 
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/riscv/nptl/pthreaddef.h b/sysdeps/riscv/nptl/pthreaddef.h
+index 7bf93d6a63fdecd2..0f33cc48fe4fc728 100644
+--- a/sysdeps/riscv/nptl/pthreaddef.h
++++ b/sysdeps/riscv/nptl/pthreaddef.h
+@@ -28,8 +28,5 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		16
+-
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/s390/nptl/pthreaddef.h b/sysdeps/s390/nptl/pthreaddef.h
+index 091f82df24a4024c..0e32bd862f7fea48 100644
+--- a/sysdeps/s390/nptl/pthreaddef.h
++++ b/sysdeps/s390/nptl/pthreaddef.h
+@@ -28,9 +28,6 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		16
+-
+ 
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/sh/nptl/pthreaddef.h b/sysdeps/sh/nptl/pthreaddef.h
+index 3fa3d189ef969c90..f4e3a290df4ee6e6 100644
+--- a/sysdeps/sh/nptl/pthreaddef.h
++++ b/sysdeps/sh/nptl/pthreaddef.h
+@@ -29,9 +29,6 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		8
+-
+ 
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME	__builtin_frame_address (0)
+diff --git a/sysdeps/sparc/sparc32/pthreaddef.h b/sysdeps/sparc/sparc32/pthreaddef.h
+index 6526fb3d6e7e1448..7a0a04789dac478e 100644
+--- a/sysdeps/sparc/sparc32/pthreaddef.h
++++ b/sysdeps/sparc/sparc32/pthreaddef.h
+@@ -27,9 +27,6 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	2048
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		16
+-
+ 
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME  (stack_pointer + (2 * 64))
+diff --git a/sysdeps/sparc/sparc64/pthreaddef.h b/sysdeps/sparc/sparc64/pthreaddef.h
+index 3da9d7afc8054598..103842856d40432b 100644
+--- a/sysdeps/sparc/sparc64/pthreaddef.h
++++ b/sysdeps/sparc/sparc64/pthreaddef.h
+@@ -27,10 +27,6 @@
+ /* Minimal stack size after allocating thread descriptor and guard size.  */
+ #define MINIMAL_REST_STACK	4096
+ 
+-/* Alignment requirement for TCB.  */
+-#define TCB_ALIGNMENT		16
+-
+-
+ /* Location of current stack frame.  */
+ #define CURRENT_STACK_FRAME  (stack_pointer + (2 * 128))
+ register char *stack_pointer __asm__("%sp");

@@ -1,0 +1,377 @@
+commit 73558ffe841cf4c60ccb4c71cf6dcebf84f2b736
+Author: Joseph Myers <joseph@codesourcery.com>
+Date:   Wed Nov 10 15:21:19 2021 +0000
+
+    Update syscall lists for Linux 5.15
+    
+    Linux 5.15 has one new syscall, process_mrelease (and also enables the
+    clone3 syscall for RV32).  It also has a macro __NR_SYSCALL_MASK for
+    Arm, which is not a syscall but matches the pattern used for syscall
+    macro names.
+    
+    Add __NR_SYSCALL_MASK to the names filtered out in the code dealing
+    with syscall lists, update syscall-names.list for the new syscall and
+    regenerate the arch-syscall.h headers with build-many-glibcs.py
+    update-syscalls.
+    
+    Tested with build-many-glibcs.py.
+    
+    (cherry picked from commit 3387c40a8bbad5faf85b1feb56429cb20feaa640)
+
+diff --git a/sysdeps/unix/sysv/linux/aarch64/arch-syscall.h b/sysdeps/unix/sysv/linux/aarch64/arch-syscall.h
+index bedab1abbac7f6c1..74a809561a45edc4 100644
+--- a/sysdeps/unix/sysv/linux/aarch64/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/aarch64/arch-syscall.h
+@@ -180,6 +180,7 @@
+ #define __NR_preadv2 286
+ #define __NR_prlimit64 261
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 270
+ #define __NR_process_vm_writev 271
+ #define __NR_pselect6 72
+diff --git a/sysdeps/unix/sysv/linux/alpha/arch-syscall.h b/sysdeps/unix/sysv/linux/alpha/arch-syscall.h
+index 91354ed9e29b8d15..6fc0a23504c3b53d 100644
+--- a/sysdeps/unix/sysv/linux/alpha/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/alpha/arch-syscall.h
+@@ -328,6 +328,7 @@
+ #define __NR_preadv2 520
+ #define __NR_prlimit64 496
+ #define __NR_process_madvise 550
++#define __NR_process_mrelease 558
+ #define __NR_process_vm_readv 504
+ #define __NR_process_vm_writev 505
+ #define __NR_pselect6 463
+diff --git a/sysdeps/unix/sysv/linux/arc/arch-syscall.h b/sysdeps/unix/sysv/linux/arc/arch-syscall.h
+index ff5c7eb36db89494..0c66762bf868a992 100644
+--- a/sysdeps/unix/sysv/linux/arc/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/arc/arch-syscall.h
+@@ -182,6 +182,7 @@
+ #define __NR_preadv2 286
+ #define __NR_prlimit64 261
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 270
+ #define __NR_process_vm_writev 271
+ #define __NR_pselect6_time64 413
+diff --git a/sysdeps/unix/sysv/linux/arm/arch-syscall.h b/sysdeps/unix/sysv/linux/arm/arch-syscall.h
+index 5772333ceef6ce59..c41a864c6d530eb0 100644
+--- a/sysdeps/unix/sysv/linux/arm/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/arm/arch-syscall.h
+@@ -235,6 +235,7 @@
+ #define __NR_preadv2 392
+ #define __NR_prlimit64 369
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 376
+ #define __NR_process_vm_writev 377
+ #define __NR_pselect6 335
+diff --git a/sysdeps/unix/sysv/linux/csky/arch-syscall.h b/sysdeps/unix/sysv/linux/csky/arch-syscall.h
+index 4af6d6202f6df7ae..863ffa3e0cd34d3e 100644
+--- a/sysdeps/unix/sysv/linux/csky/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/csky/arch-syscall.h
+@@ -190,6 +190,7 @@
+ #define __NR_preadv2 286
+ #define __NR_prlimit64 261
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 270
+ #define __NR_process_vm_writev 271
+ #define __NR_pselect6 72
+diff --git a/sysdeps/unix/sysv/linux/filter-nr-syscalls.awk b/sysdeps/unix/sysv/linux/filter-nr-syscalls.awk
+index dddfd517471e5cc9..85b017918ef20736 100644
+--- a/sysdeps/unix/sysv/linux/filter-nr-syscalls.awk
++++ b/sysdeps/unix/sysv/linux/filter-nr-syscalls.awk
+@@ -22,7 +22,7 @@
+ }
+ 
+ # Skip pseudo-system calls which describe ranges.
+-/^#define __NR_(syscalls|arch_specific_syscall|(OABI_)?SYSCALL_BASE) / {
++/^#define __NR_(syscalls|arch_specific_syscall|(OABI_)?SYSCALL_BASE|SYSCALL_MASK) / {
+     next;
+ }
+ /^#define __NR_(|64_|[NO]32_)Linux(_syscalls)? / {
+diff --git a/sysdeps/unix/sysv/linux/glibcsyscalls.py b/sysdeps/unix/sysv/linux/glibcsyscalls.py
+index 621a202ed75cd725..fe7896eebe74cdf4 100644
+--- a/sysdeps/unix/sysv/linux/glibcsyscalls.py
++++ b/sysdeps/unix/sysv/linux/glibcsyscalls.py
+@@ -41,7 +41,7 @@ RE_PSEUDO_SYSCALL = re.compile(r"""__NR_(
+     (unused|reserved)[0-9]+
+ 
+     # Pseudo-system call which describes a range.
+-    |(syscalls|arch_specific_syscall|(OABI_)?SYSCALL_BASE)
++    |(syscalls|arch_specific_syscall|(OABI_)?SYSCALL_BASE|SYSCALL_MASK)
+     |(|64_|[NO]32_)Linux(_syscalls)?
+    )""", re.X)
+ 
+diff --git a/sysdeps/unix/sysv/linux/hppa/arch-syscall.h b/sysdeps/unix/sysv/linux/hppa/arch-syscall.h
+index b07fc8549de34157..6cf27cd17c1ad0c0 100644
+--- a/sysdeps/unix/sysv/linux/hppa/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/hppa/arch-syscall.h
+@@ -222,6 +222,7 @@
+ #define __NR_preadv2 347
+ #define __NR_prlimit64 321
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 330
+ #define __NR_process_vm_writev 331
+ #define __NR_pselect6 273
+diff --git a/sysdeps/unix/sysv/linux/i386/arch-syscall.h b/sysdeps/unix/sysv/linux/i386/arch-syscall.h
+index 6e4264698b5ce480..2512508b7daa8ed2 100644
+--- a/sysdeps/unix/sysv/linux/i386/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/i386/arch-syscall.h
+@@ -254,6 +254,7 @@
+ #define __NR_preadv2 378
+ #define __NR_prlimit64 340
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 347
+ #define __NR_process_vm_writev 348
+ #define __NR_prof 44
+diff --git a/sysdeps/unix/sysv/linux/ia64/arch-syscall.h b/sysdeps/unix/sysv/linux/ia64/arch-syscall.h
+index 1ca706d7216a3902..4a0c737369217367 100644
+--- a/sysdeps/unix/sysv/linux/ia64/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/ia64/arch-syscall.h
+@@ -209,6 +209,7 @@
+ #define __NR_preadv2 1348
+ #define __NR_prlimit64 1325
+ #define __NR_process_madvise 1464
++#define __NR_process_mrelease 1472
+ #define __NR_process_vm_readv 1332
+ #define __NR_process_vm_writev 1333
+ #define __NR_pselect6 1294
+diff --git a/sysdeps/unix/sysv/linux/m68k/arch-syscall.h b/sysdeps/unix/sysv/linux/m68k/arch-syscall.h
+index 2f10f71f90d225ff..e310eb5075fb22d8 100644
+--- a/sysdeps/unix/sysv/linux/m68k/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/m68k/arch-syscall.h
+@@ -243,6 +243,7 @@
+ #define __NR_preadv2 377
+ #define __NR_prlimit64 339
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 345
+ #define __NR_process_vm_writev 346
+ #define __NR_pselect6 301
+diff --git a/sysdeps/unix/sysv/linux/microblaze/arch-syscall.h b/sysdeps/unix/sysv/linux/microblaze/arch-syscall.h
+index 0607a4dfa6adaa23..b4ecad010c2a6abf 100644
+--- a/sysdeps/unix/sysv/linux/microblaze/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/microblaze/arch-syscall.h
+@@ -253,6 +253,7 @@
+ #define __NR_preadv2 393
+ #define __NR_prlimit64 370
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 377
+ #define __NR_process_vm_writev 378
+ #define __NR_prof 44
+diff --git a/sysdeps/unix/sysv/linux/mips/mips32/arch-syscall.h b/sysdeps/unix/sysv/linux/mips/mips32/arch-syscall.h
+index 0055eec0b169ba96..7e3d138ba969c57b 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips32/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/mips/mips32/arch-syscall.h
+@@ -238,6 +238,7 @@
+ #define __NR_preadv2 4361
+ #define __NR_prlimit64 4338
+ #define __NR_process_madvise 4440
++#define __NR_process_mrelease 4448
+ #define __NR_process_vm_readv 4345
+ #define __NR_process_vm_writev 4346
+ #define __NR_prof 4044
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n32/arch-syscall.h b/sysdeps/unix/sysv/linux/mips/mips64/n32/arch-syscall.h
+index 8e8e9f91ccfebfab..7e9e232e5256bc89 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n32/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n32/arch-syscall.h
+@@ -221,6 +221,7 @@
+ #define __NR_preadv2 6325
+ #define __NR_prlimit64 6302
+ #define __NR_process_madvise 6440
++#define __NR_process_mrelease 6448
+ #define __NR_process_vm_readv 6309
+ #define __NR_process_vm_writev 6310
+ #define __NR_pselect6 6264
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n64/arch-syscall.h b/sysdeps/unix/sysv/linux/mips/mips64/n64/arch-syscall.h
+index ebd1545f806564bb..f9e7ef72b0aa1749 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n64/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n64/arch-syscall.h
+@@ -209,6 +209,7 @@
+ #define __NR_preadv2 5321
+ #define __NR_prlimit64 5297
+ #define __NR_process_madvise 5440
++#define __NR_process_mrelease 5448
+ #define __NR_process_vm_readv 5304
+ #define __NR_process_vm_writev 5305
+ #define __NR_pselect6 5260
+diff --git a/sysdeps/unix/sysv/linux/nios2/arch-syscall.h b/sysdeps/unix/sysv/linux/nios2/arch-syscall.h
+index 2b530b1f88e4c52a..afd73fc1daca1fb4 100644
+--- a/sysdeps/unix/sysv/linux/nios2/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/nios2/arch-syscall.h
+@@ -189,6 +189,7 @@
+ #define __NR_preadv2 286
+ #define __NR_prlimit64 261
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 270
+ #define __NR_process_vm_writev 271
+ #define __NR_pselect6 72
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc32/arch-syscall.h b/sysdeps/unix/sysv/linux/powerpc/powerpc32/arch-syscall.h
+index a32984a9c17315ee..0ac2992028eda27e 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/arch-syscall.h
+@@ -247,6 +247,7 @@
+ #define __NR_preadv2 380
+ #define __NR_prlimit64 325
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 351
+ #define __NR_process_vm_writev 352
+ #define __NR_prof 44
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/arch-syscall.h b/sysdeps/unix/sysv/linux/powerpc/powerpc64/arch-syscall.h
+index b01e464fb906d632..c890bc644e14fe06 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/arch-syscall.h
+@@ -231,6 +231,7 @@
+ #define __NR_preadv2 380
+ #define __NR_prlimit64 325
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 351
+ #define __NR_process_vm_writev 352
+ #define __NR_prof 44
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv32/arch-syscall.h b/sysdeps/unix/sysv/linux/riscv/rv32/arch-syscall.h
+index 24d0a2c455caa630..cd336d755a42598a 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv32/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/riscv/rv32/arch-syscall.h
+@@ -16,6 +16,7 @@
+ #define __NR_clock_nanosleep_time64 407
+ #define __NR_clock_settime64 404
+ #define __NR_clone 220
++#define __NR_clone3 435
+ #define __NR_close 57
+ #define __NR_close_range 436
+ #define __NR_connect 203
+@@ -171,6 +172,7 @@
+ #define __NR_preadv2 286
+ #define __NR_prlimit64 261
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 270
+ #define __NR_process_vm_writev 271
+ #define __NR_pselect6_time64 413
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv64/arch-syscall.h b/sysdeps/unix/sysv/linux/riscv/rv64/arch-syscall.h
+index e526c89ae7b285cc..8edd21620bb4ef64 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv64/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/riscv/rv64/arch-syscall.h
+@@ -179,6 +179,7 @@
+ #define __NR_preadv2 286
+ #define __NR_prlimit64 261
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 270
+ #define __NR_process_vm_writev 271
+ #define __NR_pselect6 72
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-32/arch-syscall.h b/sysdeps/unix/sysv/linux/s390/s390-32/arch-syscall.h
+index d4c7b101b64c010f..1a4873f505765617 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-32/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/s390/s390-32/arch-syscall.h
+@@ -240,6 +240,7 @@
+ #define __NR_preadv2 376
+ #define __NR_prlimit64 334
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 340
+ #define __NR_process_vm_writev 341
+ #define __NR_pselect6 301
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-64/arch-syscall.h b/sysdeps/unix/sysv/linux/s390/s390-64/arch-syscall.h
+index bd8c78d7059a0f31..2af4607c1d36d173 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-64/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/s390/s390-64/arch-syscall.h
+@@ -211,6 +211,7 @@
+ #define __NR_preadv2 376
+ #define __NR_prlimit64 334
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 340
+ #define __NR_process_vm_writev 341
+ #define __NR_pselect6 301
+diff --git a/sysdeps/unix/sysv/linux/sh/arch-syscall.h b/sysdeps/unix/sysv/linux/sh/arch-syscall.h
+index 3b6ac3d084d74638..7b422ce268ba14d0 100644
+--- a/sysdeps/unix/sysv/linux/sh/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/sh/arch-syscall.h
+@@ -237,6 +237,7 @@
+ #define __NR_preadv2 381
+ #define __NR_prlimit64 339
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 365
+ #define __NR_process_vm_writev 366
+ #define __NR_pselect6 308
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc32/arch-syscall.h b/sysdeps/unix/sysv/linux/sparc/sparc32/arch-syscall.h
+index 35221a707e4d4a7c..77c3cc64f95ea7f3 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc32/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/sparc/sparc32/arch-syscall.h
+@@ -242,6 +242,7 @@
+ #define __NR_preadv2 358
+ #define __NR_prlimit64 331
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 338
+ #define __NR_process_vm_writev 339
+ #define __NR_pselect6 297
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc64/arch-syscall.h b/sysdeps/unix/sysv/linux/sparc/sparc64/arch-syscall.h
+index 5ba2b2050924df1c..7ad50bc4ad6cef04 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc64/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/sparc/sparc64/arch-syscall.h
+@@ -222,6 +222,7 @@
+ #define __NR_preadv2 358
+ #define __NR_prlimit64 331
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 338
+ #define __NR_process_vm_writev 339
+ #define __NR_pselect6 297
+diff --git a/sysdeps/unix/sysv/linux/syscall-names.list b/sysdeps/unix/sysv/linux/syscall-names.list
+index fd98893b0e44a606..1a74d090b72f4d61 100644
+--- a/sysdeps/unix/sysv/linux/syscall-names.list
++++ b/sysdeps/unix/sysv/linux/syscall-names.list
+@@ -21,8 +21,8 @@
+ # This file can list all potential system calls.  The names are only
+ # used if the installed kernel headers also provide them.
+ 
+-# The list of system calls is current as of Linux 5.14.
+-kernel 5.14
++# The list of system calls is current as of Linux 5.15.
++kernel 5.15
+ 
+ FAST_atomic_update
+ FAST_cmpxchg
+@@ -440,6 +440,7 @@ preadv
+ preadv2
+ prlimit64
+ process_madvise
++process_mrelease
+ process_vm_readv
+ process_vm_writev
+ prof
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/arch-syscall.h b/sysdeps/unix/sysv/linux/x86_64/64/arch-syscall.h
+index 26d6ac68a651ec98..3ce2a1fcfc1c15f2 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/64/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/x86_64/64/arch-syscall.h
+@@ -215,6 +215,7 @@
+ #define __NR_preadv2 327
+ #define __NR_prlimit64 302
+ #define __NR_process_madvise 440
++#define __NR_process_mrelease 448
+ #define __NR_process_vm_readv 310
+ #define __NR_process_vm_writev 311
+ #define __NR_pselect6 270
+diff --git a/sysdeps/unix/sysv/linux/x86_64/x32/arch-syscall.h b/sysdeps/unix/sysv/linux/x86_64/x32/arch-syscall.h
+index 36847783f6b91d5e..9e87e89baccc397c 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/x32/arch-syscall.h
++++ b/sysdeps/unix/sysv/linux/x86_64/x32/arch-syscall.h
+@@ -208,6 +208,7 @@
+ #define __NR_preadv2 1073742370
+ #define __NR_prlimit64 1073742126
+ #define __NR_process_madvise 1073742264
++#define __NR_process_mrelease 1073742272
+ #define __NR_process_vm_readv 1073742363
+ #define __NR_process_vm_writev 1073742364
+ #define __NR_pselect6 1073742094

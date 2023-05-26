@@ -1,0 +1,69 @@
+Very limited backport of the following upstream commit, to obtain
+the definition of __getrandom_nocancel.
+
+commit 6f4e0fcfa2d2b0915816a3a3a1d48b4763a7dee2
+Author: Adhemerval Zanella Netto <adhemerval.zanella@linaro.org>
+Date:   Thu Jul 21 10:04:59 2022 -0300
+
+    stdlib: Add arc4random, arc4random_buf, and arc4random_uniform (BZ #4417)
+
+With the INTERNAL_SYSCALL_CALL change from this patch already applied:
+
+commit 609c9d0951da387cd523b5db42a82d38dabc37c4
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Thu Sep 29 16:18:06 2022 -0300
+
+    malloc: Do not clobber errno on __getrandom_nocancel (BZ #29624)
+    
+    Use INTERNAL_SYSCALL_CALL instead of INLINE_SYSCALL_CALL.  This
+    requires emulate the semantic for hurd call (so __arc4random_buf
+    uses the fallback).
+    
+    Checked on x86_64-linux-gnu.
+    
+    Reviewed-by: Wilco Dijkstra  <Wilco.Dijkstra@arm.com>
+
+diff --git a/sysdeps/generic/not-cancel.h b/sysdeps/generic/not-cancel.h
+index 8a3772a1fe66271e..14188041c2c0ad57 100644
+--- a/sysdeps/generic/not-cancel.h
++++ b/sysdeps/generic/not-cancel.h
+@@ -49,5 +49,7 @@
+   (void) __writev (fd, iov, n)
+ #define __fcntl64_nocancel(fd, cmd, ...) \
+   __fcntl64 (fd, cmd, __VA_ARGS__)
++#define __getrandom_nocancel(buf, size, flags) \
++  __getrandom (buf, size, flags)
+ 
+ #endif /* NOT_CANCEL_H  */
+diff --git a/sysdeps/mach/hurd/not-cancel.h b/sysdeps/mach/hurd/not-cancel.h
+index cd320cb721e6ff7e..7a3d2cc3532cf866 100644
+--- a/sysdeps/mach/hurd/not-cancel.h
++++ b/sysdeps/mach/hurd/not-cancel.h
+@@ -75,6 +75,9 @@ __typeof (__fcntl) __fcntl_nocancel;
+ #define __fcntl64_nocancel(...) \
+   __fcntl_nocancel (__VA_ARGS__)
+ 
++#define __getrandom_nocancel(buf, size, flags) \
++  __getrandom (buf, size, flags)
++
+ #if IS_IN (libc)
+ hidden_proto (__close_nocancel)
+ hidden_proto (__close_nocancel_nostatus)
+diff --git a/sysdeps/unix/sysv/linux/not-cancel.h b/sysdeps/unix/sysv/linux/not-cancel.h
+index f06d57426a40227e..d2bb59acddbcfee0 100644
+--- a/sysdeps/unix/sysv/linux/not-cancel.h
++++ b/sysdeps/unix/sysv/linux/not-cancel.h
+@@ -68,6 +68,13 @@ __writev_nocancel_nostatus (int fd, const struct iovec *iov, int iovcnt)
+   INTERNAL_SYSCALL_CALL (writev, fd, iov, iovcnt);
+ }
+ 
++static inline int
++__getrandom_nocancel (void *buf, size_t buflen, unsigned int flags)
++{
++  return INTERNAL_SYSCALL_CALL (getrandom, buf, buflen, flags);
++}
++
++
+ /* Uncancelable fcntl.  */
+ __typeof (__fcntl) __fcntl64_nocancel;
+ 

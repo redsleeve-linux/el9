@@ -1,0 +1,28 @@
+From 7c2898cac4e05e24b24743e5d7d738f437d1e6f8 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 22 Nov 2022 12:56:38 +0100
+Subject: [PATCH] utmp-wtmp: fix error in case isatty() fails
+
+(cherry picked from commit 80b780ba178a84b248ecee47eef82358480c9492)
+
+Related: #2137584
+---
+ src/shared/utmp-wtmp.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/shared/utmp-wtmp.c b/src/shared/utmp-wtmp.c
+index d2c8473c60..20add0e81b 100644
+--- a/src/shared/utmp-wtmp.c
++++ b/src/shared/utmp-wtmp.c
+@@ -292,8 +292,10 @@ static int write_to_terminal(const char *tty, const char *message) {
+         assert(message);
+ 
+         fd = open(tty, O_WRONLY|O_NONBLOCK|O_NOCTTY|O_CLOEXEC);
+-        if (fd < 0 || !isatty(fd))
++        if (fd < 0)
+                 return -errno;
++        if (!isatty(fd))
++                return -ENOTTY;
+ 
+         p = message;
+         left = strlen(message);

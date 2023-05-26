@@ -1,0 +1,42 @@
+Downstream-only patch to disable rseq by default.  This is necessary
+because CRIU does not yet support rseq:
+
+  criu: Implement rseq support
+  <https://bugzilla.redhat.com/show_bug.cgi?id=2033446>
+
+diff --git a/manual/tunables.texi b/manual/tunables.texi
+index 28ff502990c2a10f..f559c44dcec4624b 100644
+--- a/manual/tunables.texi
++++ b/manual/tunables.texi
+@@ -425,11 +425,13 @@ The value is measured in bytes.  The default is @samp{41943040}
+ @end deftp
+ 
+ @deftp Tunable glibc.pthread.rseq
+-The @code{glibc.pthread.rseq} tunable can be set to @samp{0}, to disable
+-restartable sequences support in @theglibc{}.  This enables applications
+-to perform direct restartable sequence registration with the kernel.
+-The default is @samp{1}, which means that @theglibc{} performs
+-registration on behalf of the application.
++The @code{glibc.pthread.rseq} tunable can be set to @samp{1}, to enable
++restartable sequences support.  @Theglibc{} uses this to optimize the
++@code{sched_getcpu} function.
++
++The default is @samp{0}, which means that applications can perform
++restartable sequences registration, but @code{sched_getcpu} is not
++accelerated.
+ 
+ Restartable sequences are a Linux-specific extension.
+ @end deftp
+diff --git a/sysdeps/nptl/dl-tunables.list b/sysdeps/nptl/dl-tunables.list
+index d24f4be0d08ba407..df2a39ce01858d3b 100644
+--- a/sysdeps/nptl/dl-tunables.list
++++ b/sysdeps/nptl/dl-tunables.list
+@@ -31,7 +31,7 @@ glibc {
+       type: INT_32
+       minval: 0
+       maxval: 1
+-      default: 1
++      default: 0
+     }
+   }
+ }

@@ -1,0 +1,150 @@
+From 5685a8b01abf34ec5da7c43a99ede6e3bb7394eb Mon Sep 17 00:00:00 2001
+From: Franck Bui <fbui@suse.com>
+Date: Fri, 4 Nov 2022 12:50:04 +0100
+Subject: [PATCH] tests: minor simplification in test-execute
+
+No functional change.
+
+(cherry picked from commit 09415aef940f4a471da7cb899b9a66f1504d7c77)
+
+Related #2138081
+---
+ ...xec-dynamicuser-fixeduser-one-supplementarygroup.service | 2 +-
+ test/test-execute/exec-dynamicuser-fixeduser.service        | 2 +-
+ .../exec-dynamicuser-supplementarygroups.service            | 4 ++--
+ ...mentarygroups-multiple-groups-default-group-user.service | 6 +++---
+ ...exec-supplementarygroups-multiple-groups-withgid.service | 4 ++--
+ ...exec-supplementarygroups-multiple-groups-withuid.service | 4 ++--
+ .../exec-supplementarygroups-single-group-user.service      | 2 +-
+ .../exec-supplementarygroups-single-group.service           | 2 +-
+ test/test-execute/exec-supplementarygroups.service          | 4 ++--
+ 9 files changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/test/test-execute/exec-dynamicuser-fixeduser-one-supplementarygroup.service b/test/test-execute/exec-dynamicuser-fixeduser-one-supplementarygroup.service
+index 0c2a218be0..bbb1af5fb3 100644
+--- a/test/test-execute/exec-dynamicuser-fixeduser-one-supplementarygroup.service
++++ b/test/test-execute/exec-dynamicuser-fixeduser-one-supplementarygroup.service
+@@ -3,7 +3,7 @@
+ Description=Test DynamicUser with User= and SupplementaryGroups=
+ 
+ [Service]
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "1" && HAVE=1; done; test "$$HAVE" -eq 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "1" && exit 0; done; exit 1'
+ ExecStart=/bin/sh -x -c 'test "$$(id -g)" = "1" && test "$$(id -u)" = "1"'
+ Type=oneshot
+ User=1
+diff --git a/test/test-execute/exec-dynamicuser-fixeduser.service b/test/test-execute/exec-dynamicuser-fixeduser.service
+index 061bbd2b93..c5828c2a93 100644
+--- a/test/test-execute/exec-dynamicuser-fixeduser.service
++++ b/test/test-execute/exec-dynamicuser-fixeduser.service
+@@ -3,7 +3,7 @@
+ Description=Test DynamicUser with User=
+ 
+ [Service]
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "1" && HAVE=1; done; test "$$HAVE" -eq 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "1" && exit 0; done; exit 1'
+ ExecStart=/bin/sh -x -c 'test "$$(id -g)" = "1" && test "$$(id -u)" = "1"'
+ Type=oneshot
+ User=1
+diff --git a/test/test-execute/exec-dynamicuser-supplementarygroups.service b/test/test-execute/exec-dynamicuser-supplementarygroups.service
+index 53ba0ec7cb..d601af272e 100644
+--- a/test/test-execute/exec-dynamicuser-supplementarygroups.service
++++ b/test/test-execute/exec-dynamicuser-supplementarygroups.service
+@@ -3,8 +3,8 @@
+ Description=Test DynamicUser with SupplementaryGroups=
+ 
+ [Service]
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "1" && HAVE=1; done; test "$$HAVE" -eq 1'
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "2" && HAVE=1; done; test "$$HAVE" -eq 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "1" && exit 0; done; exit 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "2" && exit 0; done; exit 1'
+ Type=oneshot
+ DynamicUser=yes
+ SupplementaryGroups=1 2
+diff --git a/test/test-execute/exec-supplementarygroups-multiple-groups-default-group-user.service b/test/test-execute/exec-supplementarygroups-multiple-groups-default-group-user.service
+index 4cb0326320..0ecc34441c 100644
+--- a/test/test-execute/exec-supplementarygroups-multiple-groups-default-group-user.service
++++ b/test/test-execute/exec-supplementarygroups-multiple-groups-default-group-user.service
+@@ -3,9 +3,9 @@
+ Description=Test for Supplementary Group with multiple groups without Group and User
+ 
+ [Service]
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "%G" && HAVE=1; done; test "$$HAVE" -eq 1'
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "1" && HAVE=1; done; test "$$HAVE" -eq 1'
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "2" && HAVE=1; done; test "$$HAVE" -eq 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "%G" && exit 0; done; exit 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "1" && exit 0; done; exit 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "2" && exit 0; done; exit 1'
+ ExecStart=/bin/sh -x -c 'test "$$(id -g)" = "%G" && test "$$(id -u)" = "%U"'
+ Type=oneshot
+ SupplementaryGroups=1 2
+diff --git a/test/test-execute/exec-supplementarygroups-multiple-groups-withgid.service b/test/test-execute/exec-supplementarygroups-multiple-groups-withgid.service
+index e11743d754..cd1021bbdf 100644
+--- a/test/test-execute/exec-supplementarygroups-multiple-groups-withgid.service
++++ b/test/test-execute/exec-supplementarygroups-multiple-groups-withgid.service
+@@ -3,8 +3,8 @@
+ Description=Test for Supplementary Group with multiple groups and Group=1
+ 
+ [Service]
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "1" && HAVE=1; done; test "$$HAVE" -eq 1'
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "2" && HAVE=1; done; test "$$HAVE" -eq 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "1" && exit 0; done; exit 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "2" && exit 0; done; exit 1'
+ ExecStart=/bin/sh -x -c 'test "$$(id -g)" = "1" && test "$$(id -u)" = "%U"'
+ Type=oneshot
+ Group=1
+diff --git a/test/test-execute/exec-supplementarygroups-multiple-groups-withuid.service b/test/test-execute/exec-supplementarygroups-multiple-groups-withuid.service
+index 3efbbfb0f9..7913a2c2ed 100644
+--- a/test/test-execute/exec-supplementarygroups-multiple-groups-withuid.service
++++ b/test/test-execute/exec-supplementarygroups-multiple-groups-withuid.service
+@@ -3,8 +3,8 @@
+ Description=Test for Supplementary Group with multiple groups and Uid=1
+ 
+ [Service]
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "1" && HAVE=1; done; test "$$HAVE" -eq 1'
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "2" && HAVE=1; done; test "$$HAVE" -eq 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "1" && exit 0; done; exit 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "2" && exit 0; done; exit 1'
+ Type=oneshot
+ User=1
+ SupplementaryGroups=1 2
+diff --git a/test/test-execute/exec-supplementarygroups-single-group-user.service b/test/test-execute/exec-supplementarygroups-single-group-user.service
+index aae71d0a30..ee4017e74e 100644
+--- a/test/test-execute/exec-supplementarygroups-single-group-user.service
++++ b/test/test-execute/exec-supplementarygroups-single-group-user.service
+@@ -3,7 +3,7 @@
+ Description=Test for Supplementary Group with only one group and uid 1
+ 
+ [Service]
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "1" && HAVE=1; done; test "$$HAVE" -eq 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "1" && exit 0; done; exit 1'
+ ExecStart=/bin/sh -x -c 'test "$$(id -g)" = "1" && test "$$(id -u)" = "1"'
+ Type=oneshot
+ User=1
+diff --git a/test/test-execute/exec-supplementarygroups-single-group.service b/test/test-execute/exec-supplementarygroups-single-group.service
+index c870774382..62275201cc 100644
+--- a/test/test-execute/exec-supplementarygroups-single-group.service
++++ b/test/test-execute/exec-supplementarygroups-single-group.service
+@@ -3,7 +3,7 @@
+ Description=Test for Supplementary Group with only one group
+ 
+ [Service]
+-ExecStart=/bin/sh -x -c 'HAVE=; for g in $$(id -G); do test "$$g" = "1" && HAVE=1; done; test "$$HAVE" -eq 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "1" && exit 0; done; exit 1'
+ ExecStart=/bin/sh -x -c 'test "$$(id -g)" = "1" && test "$$(id -u)" = "0"'
+ Type=oneshot
+ Group=1
+diff --git a/test/test-execute/exec-supplementarygroups.service b/test/test-execute/exec-supplementarygroups.service
+index 75601eab57..03406c3ee8 100644
+--- a/test/test-execute/exec-supplementarygroups.service
++++ b/test/test-execute/exec-supplementarygroups.service
+@@ -3,7 +3,7 @@
+ Description=Test for Supplementary Group
+ 
+ [Service]
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "%G" && HAVE=1; done; test "$$HAVE" -eq 1'
+-ExecStart=/bin/sh -x -c 'HAVE=0; for g in $$(id -G); do test "$$g" = "1" && HAVE=1; done; test "$$HAVE" -eq 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "%G" && exit 0; done; exit 1'
++ExecStart=/bin/sh -x -c 'for g in $$(id -G); do test "$$g" = "1" && exit 0; done; exit 1'
+ Type=oneshot
+ SupplementaryGroups=1

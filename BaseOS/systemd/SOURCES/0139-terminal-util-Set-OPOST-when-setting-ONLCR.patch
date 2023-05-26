@@ -1,0 +1,44 @@
+From c5e4b6b9b2a1dea35f58f3e1c3313bca76a90162 Mon Sep 17 00:00:00 2001
+From: Ray Strode <rstrode@redhat.com>
+Date: Wed, 30 Nov 2022 14:07:29 -0500
+Subject: [PATCH] terminal-util: Set OPOST when setting ONLCR
+
+reset_terminal_fd sets certain minimum required terminal attributes
+that systemd relies on.
+
+One of those attributes is `ONLCR` which ensures that when a new line
+is sent to the terminal, that the cursor not only moves to the next
+line, but also moves to the very beginning of that line.
+
+In order for `ONLCR` to work, the terminal needs to perform output
+post-processing. That requires an additional attribute, `OPOST`,
+which reset_terminal_fd currently fails to ensure is set.
+
+In most cases `OPOST` (and `ONLCR` actually) are both set anyway, so
+it's not an issue, but it could be a problem if, e.g., the terminal was
+put in raw mode by a program and the program unexpectedly died before
+restoring settings.
+
+This commit ensures when `ONLCR` is set `OPOST` is set too, which is
+the only thing that really makes sense to do.
+
+(cherry picked from commit 9fe26523a189435d75b9d745188e09c17928d89e)
+
+Related: #2138081
+---
+ src/basic/terminal-util.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/basic/terminal-util.c b/src/basic/terminal-util.c
+index 0c092597eb..a75234f354 100644
+--- a/src/basic/terminal-util.c
++++ b/src/basic/terminal-util.c
+@@ -269,7 +269,7 @@ int reset_terminal_fd(int fd, bool switch_to_text) {
+ 
+         termios.c_iflag &= ~(IGNBRK | BRKINT | ISTRIP | INLCR | IGNCR | IUCLC);
+         termios.c_iflag |= ICRNL | IMAXBEL | IUTF8;
+-        termios.c_oflag |= ONLCR;
++        termios.c_oflag |= ONLCR | OPOST;
+         termios.c_cflag |= CREAD;
+         termios.c_lflag = ISIG | ICANON | IEXTEN | ECHO | ECHOE | ECHOK | ECHOCTL | ECHOPRT | ECHOKE;
+ 

@@ -1,0 +1,30 @@
+From 9e51ecd3ec0484d7ffefb0ceaf242e96b31195bb Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Tue, 21 Dec 2021 10:46:17 +0100
+Subject: [PATCH] Treat EPERM as "not available" too
+
+We need to do this because idmapped mounts habe been disabled in RHEL-9
+kernel: https://bugzilla.redhat.com/show_bug.cgi?id=2018141 .
+
+RHEL-only
+
+Fixes #55
+
+Related: #2138081
+---
+ src/nspawn/nspawn.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/nspawn/nspawn.c b/src/nspawn/nspawn.c
+index 01a67b5553..93d646ed56 100644
+--- a/src/nspawn/nspawn.c
++++ b/src/nspawn/nspawn.c
+@@ -3806,7 +3806,7 @@ static int outer_child(
+             arg_uid_shift != 0) {
+ 
+                 r = remount_idmap(directory, arg_uid_shift, arg_uid_range, UID_INVALID, REMOUNT_IDMAPPING_HOST_ROOT);
+-                if (r == -EINVAL || ERRNO_IS_NOT_SUPPORTED(r)) {
++                if (IN_SET(r, -EINVAL, -EPERM) || ERRNO_IS_NOT_SUPPORTED(r)) {
+                         /* This might fail because the kernel or file system doesn't support idmapping. We
+                          * can't really distinguish this nicely, nor do we have any guarantees about the
+                          * error codes we see, could be EOPNOTSUPP or EINVAL. */

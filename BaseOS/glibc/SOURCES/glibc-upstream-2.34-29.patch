@@ -1,0 +1,101 @@
+commit e870aac8974cda746157a5a3c9f452ccd70da29b
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Mon Sep 6 12:22:54 2021 -0300
+
+    misc: Add __get_nprocs_sched
+    
+    This is an internal function meant to return the number of avaliable
+    processor where the process can scheduled, different than the
+    __get_nprocs which returns a the system available online CPU.
+    
+    The Linux implementation currently only calls __get_nprocs(), which
+    in tuns calls sched_getaffinity.
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+    (cherry picked from commit 11a02b035b464ab6813676adfd19c4a59c36d907)
+
+diff --git a/include/sys/sysinfo.h b/include/sys/sysinfo.h
+index 7388356a19269335..c490561581733038 100644
+--- a/include/sys/sysinfo.h
++++ b/include/sys/sysinfo.h
+@@ -9,10 +9,15 @@
+ extern int __get_nprocs_conf (void);
+ libc_hidden_proto (__get_nprocs_conf)
+ 
+-/* Return number of available processors.  */
++/* Return number of available processors (not all of them will be
++   available to the caller process).  */
+ extern int __get_nprocs (void);
+ libc_hidden_proto (__get_nprocs)
+ 
++/* Return the number of available processors which the process can
++   be scheduled.  */
++extern int __get_nprocs_sched (void) attribute_hidden;
++
+ /* Return number of physical pages of memory in the system.  */
+ extern long int __get_phys_pages (void);
+ libc_hidden_proto (__get_phys_pages)
+diff --git a/malloc/arena.c b/malloc/arena.c
+index 667484630ed0afa5..f1f0af86489d0063 100644
+--- a/malloc/arena.c
++++ b/malloc/arena.c
+@@ -879,7 +879,7 @@ arena_get2 (size_t size, mstate avoid_arena)
+             narenas_limit = mp_.arena_max;
+           else if (narenas > mp_.arena_test)
+             {
+-              int n = __get_nprocs ();
++              int n = __get_nprocs_sched ();
+ 
+               if (n >= 1)
+                 narenas_limit = NARENAS_FROM_NCORES (n);
+diff --git a/misc/getsysstats.c b/misc/getsysstats.c
+index 0eedface6d2b0f75..57d93601e21265d7 100644
+--- a/misc/getsysstats.c
++++ b/misc/getsysstats.c
+@@ -45,6 +45,12 @@ weak_alias (__get_nprocs, get_nprocs)
+ link_warning (get_nprocs, "warning: get_nprocs will always return 1")
+ 
+ 
++int
++__get_nprocs_sched (void)
++{
++  return 1;
++}
++
+ long int
+ __get_phys_pages (void)
+ {
+diff --git a/sysdeps/mach/getsysstats.c b/sysdeps/mach/getsysstats.c
+index 1267f39da26aee38..cc8023f979bf6f74 100644
+--- a/sysdeps/mach/getsysstats.c
++++ b/sysdeps/mach/getsysstats.c
+@@ -62,6 +62,12 @@ __get_nprocs (void)
+ libc_hidden_def (__get_nprocs)
+ weak_alias (__get_nprocs, get_nprocs)
+ 
++int
++__get_nprocs_sched (void)
++{
++  return __get_nprocs ();
++}
++
+ /* Return the number of physical pages on the system. */
+ long int
+ __get_phys_pages (void)
+diff --git a/sysdeps/unix/sysv/linux/getsysstats.c b/sysdeps/unix/sysv/linux/getsysstats.c
+index 1391e360b8f8e86c..120ce1bb756b09cc 100644
+--- a/sysdeps/unix/sysv/linux/getsysstats.c
++++ b/sysdeps/unix/sysv/linux/getsysstats.c
+@@ -88,6 +88,12 @@ __get_nprocs (void)
+ libc_hidden_def (__get_nprocs)
+ weak_alias (__get_nprocs, get_nprocs)
+ 
++int
++__get_nprocs_sched (void)
++{
++  return __get_nprocs ();
++}
++
+ 
+ /* On some architectures it is possible to distinguish between configured
+    and active cpus.  */

@@ -1,0 +1,73 @@
+commit cb976fba4c51ede7bf8cee5035888527c308dfbc
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Dec 15 16:06:25 2021 +0100
+
+    powerpc: Use global register variable in <thread_pointer.h>
+    
+    A local register variable is merely a compiler hint, and so not
+    appropriate in this context.  Move the global register variable into
+    <thread_pointer.h> and include it from <tls.h>, as there can only
+    be one global definition for one particular register.
+    
+    Fixes commit 8dbeb0561eeb876f557ac9eef5721912ec074ea5
+    ("nptl: Add <thread_pointer.h> for defining __thread_pointer").
+    
+    Reported-by: Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+    Reviewed-by: Raphael M Zinsly <rzinsly@linux.ibm.com>
+
+diff --git a/sysdeps/powerpc/nptl/thread_pointer.h b/sysdeps/powerpc/nptl/thread_pointer.h
+index 8fd5ba671f6f5e64..4feba5961062cfaf 100644
+--- a/sysdeps/powerpc/nptl/thread_pointer.h
++++ b/sysdeps/powerpc/nptl/thread_pointer.h
+@@ -19,15 +19,16 @@
+ #ifndef _SYS_THREAD_POINTER_H
+ #define _SYS_THREAD_POINTER_H
+ 
+-static inline void *
+-__thread_pointer (void)
+-{
+ #ifdef __powerpc64__
+-  register void *__result asm ("r13");
++register void *__thread_register asm ("r13");
+ #else
+-  register void *__result asm ("r2");
++register void *__thread_register asm ("r2");
+ #endif
+-  return __result;
++
++static inline void *
++__thread_pointer (void)
++{
++  return __thread_register;
+ }
+ 
+ #endif /* _SYS_THREAD_POINTER_H */
+diff --git a/sysdeps/powerpc/nptl/tls.h b/sysdeps/powerpc/nptl/tls.h
+index e194b334216eaa02..050beb06a8f7de65 100644
+--- a/sysdeps/powerpc/nptl/tls.h
++++ b/sysdeps/powerpc/nptl/tls.h
+@@ -26,6 +26,7 @@
+ # include <stddef.h>
+ # include <stdint.h>
+ # include <dl-dtv.h>
++# include <thread_pointer.h>
+ 
+ #else /* __ASSEMBLER__ */
+ # include <tcb-offsets.h>
+@@ -36,16 +37,10 @@
+ #ifndef __powerpc64__
+ /* Register r2 (tp) is reserved by the ABI as "thread pointer". */
+ # define PT_THREAD_POINTER PT_R2
+-# ifndef __ASSEMBLER__
+-register void *__thread_register __asm__ ("r2");
+-# endif
+ 
+ #else /* __powerpc64__ */
+ /* Register r13 (tp) is reserved by the ABI as "thread pointer". */
+ # define PT_THREAD_POINTER PT_R13
+-# ifndef __ASSEMBLER__
+-register void *__thread_register __asm__ ("r13");
+-# endif
+ #endif /* __powerpc64__ */
+ 
+ #ifndef __ASSEMBLER__

@@ -1,0 +1,45 @@
+From 711aca5f4820c2345489136cbbde7428d9f9da1b Mon Sep 17 00:00:00 2001
+From: Jan Synacek <jsynacek@redhat.com>
+Date: Tue, 15 May 2018 09:24:20 +0200
+Subject: [PATCH] Avoid /tmp being mounted as tmpfs without the user's will
+
+Ensure PrivateTmp doesn't require tmpfs through tmp.mount, but rather
+adds an After relationship.
+
+RHEL-only
+
+Related: #2138081
+---
+ src/core/unit.c    | 7 +------
+ units/basic.target | 3 ++-
+ 2 files changed, 3 insertions(+), 7 deletions(-)
+
+diff --git a/src/core/unit.c b/src/core/unit.c
+index d08c73613b..1fad0b0ac8 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -1301,12 +1301,7 @@ int unit_add_exec_dependencies(Unit *u, ExecContext *c) {
+         }
+ 
+         if (c->private_tmp) {
+-
+-                /* FIXME: for now we make a special case for /tmp and add a weak dependency on
+-                 * tmp.mount so /tmp being masked is supported. However there's no reason to treat
+-                 * /tmp specifically and masking other mount units should be handled more
+-                 * gracefully too, see PR#16894. */
+-                r = unit_add_two_dependencies_by_name(u, UNIT_AFTER, UNIT_WANTS, "tmp.mount", true, UNIT_DEPENDENCY_FILE);
++                r = unit_add_dependency_by_name(u, UNIT_AFTER, "tmp.mount", true, UNIT_DEPENDENCY_FILE);
+                 if (r < 0)
+                         return r;
+ 
+diff --git a/units/basic.target b/units/basic.target
+index d8cdd5ac14..9eae0782a2 100644
+--- a/units/basic.target
++++ b/units/basic.target
+@@ -19,4 +19,5 @@ After=sysinit.target sockets.target paths.target slices.target tmp.mount
+ # require /var and /var/tmp, but only add a Wants= type dependency on /tmp, as
+ # we support that unit being masked, and this should not be considered an error.
+ RequiresMountsFor=/var /var/tmp
+-Wants=tmp.mount
++# RHEL-only: Disable /tmp on tmpfs.
++#Wants=tmp.mount

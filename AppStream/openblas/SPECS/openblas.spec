@@ -14,8 +14,8 @@
 # "obsoleted" features are still kept in the spec.
 
 Name:           openblas
-Version:        0.3.15
-Release:        3%{?dist}.redsleeve
+Version:        0.3.21
+Release:        2%{?dist}
 Summary:        An optimized BLAS library based on GotoBLAS2
 License:        BSD
 URL:            https://github.com/xianyi/OpenBLAS/
@@ -28,8 +28,8 @@ Patch1:         openblas-0.2.5-libname.patch
 Patch2:         openblas-0.2.15-constructor.patch
 # Supply the proper flags to the test makefile
 Patch3:         openblas-0.3.11-tests.patch
-# Fix out of bounds read in ?llarv (Reference-LAPACK PR 625)
-Patch4:         openblas-0.3.15-out-of-bounds-read.patch
+# Fix SBGEMM test to work with INTERFACE64
+Patch4:         openblas-0.3.21-sbgemm-test.patch
 
 BuildRequires: make
 BuildRequires:  gcc
@@ -243,7 +243,7 @@ cd OpenBLAS-%{version}
 %patch2 -p1 -b .constructor
 %endif
 %patch3 -p1 -b .tests
-%patch4 -p1 -b .out-of-bound-read
+%patch4 -p1 -b .sbgemm
 
 # Fix source permissions
 find -name \*.f -exec chmod 644 {} \;
@@ -362,9 +362,6 @@ export AVX="NO_AVX2=1"
 %endif
 
 %endif
-%ifarch armv6hl
-TARGET="TARGET=ARMV6 DYNAMIC_ARCH=0"
-%endif
 %ifarch armv7hl
 # ARM v7 still doesn't have runtime cpu detection...
 TARGET="TARGET=ARMV7 DYNAMIC_ARCH=0"
@@ -430,7 +427,7 @@ make -C openmp64_   $TARGET USE_THREAD=1 USE_OPENMP=1 FC=gfortran CC=gcc COMMON_
 %install
 rm -rf %{buildroot}
 # Install serial library and headers
-make -C serial USE_THREAD=0 PREFIX=%{buildroot} OPENBLAS_LIBRARY_DIR=%{buildroot}%{_libdir} OPENBLAS_INCLUDE_DIR=%{buildroot}%{_includedir}/%name OPENBLAS_BINARY_DIR=%{buildroot}%{_bindir} OPENBLAS_CMAKE_DIR=%{buildroot}%{_libdir}/cmake install
+make -C serial USE_THREAD=0 DESTDIR=%{buildroot} OPENBLAS_LIBRARY_DIR=%{_libdir} OPENBLAS_INCLUDE_DIR=%{_includedir}/%name OPENBLAS_BINARY_DIR=%{_bindir} OPENBLAS_CMAKE_DIR=%{_libdir}/cmake install
 
 # Copy lapacke include files
 %if %{with system_lapack} && %{lapacke}
@@ -443,9 +440,6 @@ cp -a %{_includedir}/lapacke %{buildroot}%{_includedir}/%{name}
 # Fix name of libraries: runtime CPU detection has none
 suffix=""
 # but archs that don't have it do have one
-%ifarch armv6hl
-suffix="_armv6"
-%endif
 %ifarch armv7hl
 suffix="_armv7"
 %endif
@@ -565,8 +559,6 @@ done
 
 # Get rid of generated CMake config
 rm -rf %{buildroot}%{_libdir}/cmake
-# Get rid of generated pkgconfig
-rm -rf %{buildroot}%{_libdir}/pkgconfig
 
 %ldconfig_scriptlets
 
@@ -629,6 +621,8 @@ rm -rf %{buildroot}%{_libdir}/pkgconfig
 
 %files devel
 %{_includedir}/%{name}/
+%{_libdir}/pkgconfig/
+%{_libdir}/pkgconfig/%{name}.pc
 %{_libdir}/lib%{name}.so
 %{_libdir}/lib%{name}o.so
 %{_libdir}/lib%{name}p.so
@@ -655,8 +649,14 @@ rm -rf %{buildroot}%{_libdir}/pkgconfig
 %endif
 
 %changelog
-* Sun Jul 31 2022 Jacco Ligthart <jacco@redsleeve.org> - 0.3.15-3.redsleeve
-- added armv6hl
+* Tue Jan 31 2023 Matej Mužila <mmuzila@redhat.com> - 0.3.21-2
+- Include openblas.pc
+  Resolves: #2115737
+
+* Wed Aug 24 2022 Honza Horak <hhorak@redhat.com> - 0.3.21-1
+- Update to 0.3.21
+  Resolves: #2112099
+- Fix SBGEMM test to work with INTERFACE64 (rhbz#2120974)
 
 * Tue Jan 11 2022 Honza Horak <hhorak@redhat.com> - 0.3.15-3
 - Fix out of bounds read in ?llarv (Reference-LAPACK PR 625)

@@ -1,0 +1,34 @@
+From 058fab8aaad9fc6ececc647e369bf447a8327a4a Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 15 Dec 2022 16:28:52 +0900
+Subject: [PATCH] Revert "test: wait for the monitoring service to become
+ active"
+
+This reverts commit 5dd34c2604567320707625bc009cf01c3769605f.
+
+`resolvectl monitor` sends notify event, and systemd-run wait for the
+service being in active state. Hence, the loop is not necessary.
+
+(cherry picked from commit 133708b8790ab79e35ade63506c16e4d1e79a025)
+
+Related: #2138081
+---
+ test/units/testsuite-75.sh | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/test/units/testsuite-75.sh b/test/units/testsuite-75.sh
+index d0c7133412..844dbaebcc 100755
+--- a/test/units/testsuite-75.sh
++++ b/test/units/testsuite-75.sh
+@@ -212,11 +212,6 @@ resolvectl log-level debug
+ 
+ # Start monitoring queries
+ systemd-run -u resmontest.service -p Type=notify resolvectl monitor
+-# Wait for the monitoring service to become active
+-for _ in {0..9}; do
+-    [[ "$(systemctl show -P ActiveState resmontest.service)" == "active" ]] && break
+-    sleep .5
+-done
+ 
+ # We need to manually propagate the DS records of onlinesign.test. to the parent
+ # zone, since they're generated online

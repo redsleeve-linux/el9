@@ -1,8 +1,8 @@
 
 Name:    annobin
 Summary: Annotate and examine compiled binary files
-Version: 10.73
-Release: 3%{?dist}.redsleeve
+Version: 11.05
+Release: 1%{?dist}
 License: GPLv3+
 # Maintainer: nickc@redhat.com
 # Web Page: https://sourceware.org/annobin/
@@ -248,11 +248,6 @@ CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" CXXFLAGS="$CFLAGS" %configure ${CONFIG_ARGS}
 export CLANG_TARGET_OPTIONS="-fcf-protection"
 %endif
 
-%ifarch armv6hl
-# FIXME: There should be a better way to do this.
-export CLANG_TARGET_OPTIONS="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
-%endif
-
 %make_build
 
 %if %{with plugin_rebuild}
@@ -266,7 +261,12 @@ make -C gcc-plugin clean
 BUILD_FLAGS="-fplugin=%{_tmppath}/tmp_annobin.so"
 
 # Disable the standard annobin plugin so that we do get conflicts.
+# Note - Fedora's rpm uses a different way of evaluating macros. 
+%if 0%{?fedora} == 0
 OPTS="$(rpm --eval '%undefine _annotated_build %build_cflags %build_ldflags')"
+%else
+OPTS="$(rpm --undefine=_annotated_build --eval '%build_cflags %build_ldflags')"
+%endif
 
 # If building on RHEL7, enable the next option as the .attach_to_group
 # assembler pseudo op is not available in the assembler.
@@ -318,12 +318,10 @@ rm -f %{buildroot}%{_infodir}/dir
 
 %if %{with tests}
 %check
-# Change the following line to "make check || :" on RHEL7 or if you need to see the
-# test suite logs in order to diagnose a test failure.
-make -k check CLANG_TESTS="check-pre-clang-13"
-if [ -f tests/test-suite.log ]; then
-    cat tests/test-suite.log
-fi
+make check CLANG_TESTS="check-pre-clang-13" || :
+res=$?
+cat tests/*.log
+exit $res
 %endif
 
 #---------------------------------------------------------------------------------
@@ -360,6 +358,7 @@ fi
 %files annocheck
 %{_includedir}/libannocheck.h
 %{_libdir}/libannocheck.*
+%{_libdir}/pkgconfig/libannocheck.pc
 %{_bindir}/annocheck
 %{_mandir}/man1/annocheck.1*
 %endif
@@ -367,8 +366,58 @@ fi
 #---------------------------------------------------------------------------------
 
 %changelog
-* Fri Dec 30 2022 Jacco Ligthart <jacco@redsleeve.org> - 10.73-3.redsleeve
-- added compiler flags for armv6
+* Mon Jan 09 2023 Nick Clifton  <nickc@redhat.com> - 11.05-1
+- Annocheck: Fix handling of empty files.  (#2159292)
+
+* Mon Jan 09 2023 Nick Clifton  <nickc@redhat.com> - 11.04-1
+- Annocheck: Add crti.o and crtn.o to the list of known glibc special files.  (#2158740)
+- Annocheck: Fix memory leaks.
+
+* Thu Jan 05 2023 Nick Clifton  <nickc@redhat.com> - 11.02-1
+- Annocheck: Do not treat object files as if they did not contain any code.  (#2158182)
+
+* Wed Jan 04 2023 Nick Clifton  <nickc@redhat.com> - 11.01-1
+- Annocheck: Add more special glibc filenames.
+
+* Wed Dec 21 2022 Nick Clifton  <nickc@redhat.com> - 10.99-1
+- Annocheck: Improve handling of tool versions.
+- GCC plugin: Fix building with gcc-13.
+
+* Fri Dec 16 2022 Nick Clifton  <nickc@redhat.com> - 10.97-1
+- Annocheck: Add test for binaries built by cross compilers.
+
+* Wed Dec 14 2022 Nick Clifton  <nickc@redhat.com> - 10.96-1
+- Annocheck: Improve heuristic used to detect binaries without code. (#2144533)
+
+* Mon Dec 12 2022 Nick Clifton  <nickc@redhat.com> - 10.95-1
+- Annocheck: Avoid using debug filename when parsing notes in a debuginfo file.  (#2152280)
+
+* Wed Dec 07 2022 Nick Clifton  <nickc@redhat.com> - 10.94-1
+- Rebase to 10.94.  (#2151308)
+- Annocheck: Better detection of binaries which do not contain code.  (#2144533)
+- Annocheck: Provide more information when a test is skipped because the file being tested was not compiled.
+- Annocheck: Try harder not to run mutually exclusive tests.
+- Tests: Fix future-test so that it properly handles the situation where the compiler does not support the new options.
+- Libannocheck: Actually set result fields after tests are run.
+- Libannocheck: Replace libannocheck_version variable with LIBANNOCHECK_VERSION define.
+- Libannocheck: Remove 'Requires binutils-devel' from libannocheck.pc.
+- Libannocheck: Move into separate sub-package.
+- Libannocheck: Add libannocheck.pc pkgconfig file.
+- Libannocheck: Add libannocheck_reinit().
+- GCC Plugin: Record -ftrivial-auto-var-init and -fzero-call-used-regs.
+- Annocheck: Add future tests for  -ftrivial-auto-var-init and -fzero-call-used-regs.
+- Clang Plugin: Fix for building with Clang-15.  (#2125875)
+- Annocheck: Add a test for the inconsistent use of -Ofast.  (#1248744)
+- GCC Plugin: Fix top level configuration support for RiscV.
+- Annocheck: Improvements to the size tool.
+- Annocheck: Fixes for libannocheck.h.
+- Annocheck: Add automatic profile selection.
+- Annocheck: Improve gap detection and reporting.
+- Annocheck: Check build-id of separate debuginfo files.
+- Annocheck: Add GAPS test replacing --ignore-gaps.
+- Annocheck: Fix covscan detected race condition between stat() and open().
+- Annocheck: Handle binaries created by Rust 1.18.  (#2094420)
+- Annocheck: Add optional function name to --skip arguments.  (PR 29229)
 
 * Wed Jul 20 2022 Florian Weimer <fweimer@redhat.com> - 10.73-3
 - Rebuild to switch back to system annobin (#2106262)

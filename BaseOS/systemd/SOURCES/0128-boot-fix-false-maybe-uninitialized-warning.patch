@@ -1,0 +1,64 @@
+From fdb8d8dee1821dc91c44b8f8195f959b9eae12ee Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 6 Dec 2022 12:57:43 +0900
+Subject: [PATCH] boot: fix false maybe-uninitialized warning
+
+Fixes #25641.
+
+(cherry picked from commit febe556191c739fb79a22cf742dd447c75e90446)
+
+Related: #2141979
+---
+ src/boot/efi/boot.c        | 4 ++--
+ src/boot/efi/cpio.c        | 2 +-
+ src/boot/efi/secure-boot.c | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/boot/efi/boot.c b/src/boot/efi/boot.c
+index b490a1d972..db6ca97df4 100644
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -1572,7 +1572,7 @@ static EFI_STATUS efivar_get_timeout(const char16_t *var, uint32_t *ret_value) {
+ 
+ static void config_load_defaults(Config *config, EFI_FILE *root_dir) {
+         _cleanup_free_ char *content = NULL;
+-        UINTN value;
++        UINTN value = 0;  /* avoid false maybe-uninitialized warning */
+         EFI_STATUS err;
+ 
+         assert(root_dir);
+@@ -2258,7 +2258,7 @@ static void config_load_xbootldr(
+                 EFI_HANDLE *device) {
+ 
+         _cleanup_(file_closep) EFI_FILE *root_dir = NULL;
+-        EFI_HANDLE new_device;
++        EFI_HANDLE new_device = NULL;  /* avoid false maybe-uninitialized warning */
+         EFI_STATUS err;
+ 
+         assert(config);
+diff --git a/src/boot/efi/cpio.c b/src/boot/efi/cpio.c
+index 648f9f000f..1dbfe5f380 100644
+--- a/src/boot/efi/cpio.c
++++ b/src/boot/efi/cpio.c
+@@ -485,7 +485,7 @@ EFI_STATUS pack_cpio(
+ 
+         for (UINTN i = 0; i < n_items; i++) {
+                 _cleanup_free_ char *content = NULL;
+-                UINTN contentsize;
++                UINTN contentsize = 0;  /* avoid false maybe-uninitialized warning */
+ 
+                 err = file_read(extra_dir, items[i], 0, 0, &content, &contentsize);
+                 if (err != EFI_SUCCESS) {
+diff --git a/src/boot/efi/secure-boot.c b/src/boot/efi/secure-boot.c
+index 65457bf423..6212868134 100644
+--- a/src/boot/efi/secure-boot.c
++++ b/src/boot/efi/secure-boot.c
+@@ -6,7 +6,7 @@
+ #include "util.h"
+ 
+ bool secure_boot_enabled(void) {
+-        bool secure;
++        bool secure = false;  /* avoid false maybe-uninitialized warning */
+         EFI_STATUS err;
+ 
+         err = efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"SecureBoot", &secure);

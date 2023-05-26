@@ -1,0 +1,30 @@
+From ba5d26d85d0c4250b10a46a5c9cd3a3e1f0ce43b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Christian=20G=C3=B6ttsche?= <cgzones@googlemail.com>
+Date: Fri, 4 Nov 2022 19:36:31 +0100
+Subject: [PATCH] loop-util: open lock fd read-only
+
+flock(2) works with file descriptors opened with O_RDONLY.
+
+This affects SELinux systems where access to block devices is quite
+restricted to avoid bypasses on filesystem objects.
+
+(cherry picked from commit 3e6b7d2626de9c0faf8b34b2629e8d6d8fa85a7d)
+
+Related #2138081
+---
+ src/shared/loop-util.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/shared/loop-util.c b/src/shared/loop-util.c
+index 731ce29112..fb7e80b1b5 100644
+--- a/src/shared/loop-util.c
++++ b/src/shared/loop-util.c
+@@ -77,7 +77,7 @@ static int open_lock_fd(int primary_fd, int operation) {
+         assert(primary_fd >= 0);
+         assert(IN_SET(operation & ~LOCK_NB, LOCK_SH, LOCK_EX));
+ 
+-        lock_fd = fd_reopen(primary_fd, O_RDWR|O_CLOEXEC|O_NONBLOCK|O_NOCTTY);
++        lock_fd = fd_reopen(primary_fd, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY);
+         if (lock_fd < 0)
+                 return lock_fd;
+ 

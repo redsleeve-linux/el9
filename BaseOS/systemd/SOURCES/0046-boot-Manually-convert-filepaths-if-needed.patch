@@ -1,0 +1,75 @@
+From 806165285b822436023df84ca0a3e5b28a3099d6 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Mon, 14 Nov 2022 15:24:32 +0100
+Subject: [PATCH] boot: Manually convert filepaths if needed
+
+The conversion of a filepath device path to text is needed for the stub
+loader to find credential files.
+
+(cherry picked from commit 679007044fbbcf82c66cf20b99f2f5086b7df6b4)
+
+Related: #2138081
+---
+ src/boot/efi/util.c | 40 ++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 36 insertions(+), 4 deletions(-)
+
+diff --git a/src/boot/efi/util.c b/src/boot/efi/util.c
+index 5547d288de..57436dbf0c 100644
+--- a/src/boot/efi/util.c
++++ b/src/boot/efi/util.c
+@@ -772,19 +772,51 @@ EFI_STATUS make_file_device_path(EFI_HANDLE device, const char16_t *file, EFI_DE
+ EFI_STATUS device_path_to_str(const EFI_DEVICE_PATH *dp, char16_t **ret) {
+         EFI_DEVICE_PATH_TO_TEXT_PROTOCOL *dp_to_text;
+         EFI_STATUS err;
++        _cleanup_free_ char16_t *str = NULL;
+ 
+         assert(dp);
+         assert(ret);
+ 
+         err = BS->LocateProtocol(&(EFI_GUID) EFI_DEVICE_PATH_TO_TEXT_PROTOCOL_GUID, NULL, (void **) &dp_to_text);
+-        if (err != EFI_SUCCESS)
+-                return err;
++        if (err != EFI_SUCCESS) {
++                /* If the device path to text protocol is not available we can still do a best-effort attempt
++                 * to convert it ourselves if we are given filepath-only device path. */
++
++                size_t size = 0;
++                for (const EFI_DEVICE_PATH *node = dp; !IsDevicePathEnd(node);
++                     node = NextDevicePathNode(node)) {
++
++                        if (DevicePathType(node) != MEDIA_DEVICE_PATH ||
++                            DevicePathSubType(node) != MEDIA_FILEPATH_DP)
++                                return err;
++
++                        size_t path_size = DevicePathNodeLength(node);
++                        if (path_size <= offsetof(FILEPATH_DEVICE_PATH, PathName) || path_size % sizeof(char16_t))
++                                return EFI_INVALID_PARAMETER;
++                        path_size -= offsetof(FILEPATH_DEVICE_PATH, PathName);
++
++                        _cleanup_free_ char16_t *old = str;
++                        str = xmalloc(size + path_size);
++                        if (old) {
++                                memcpy(str, old, size);
++                                str[size / sizeof(char16_t) - 1] = '\\';
++                        }
++
++                        memcpy(str + (size / sizeof(char16_t)),
++                               ((uint8_t *) node) + offsetof(FILEPATH_DEVICE_PATH, PathName),
++                               path_size);
++                        size += path_size;
++                }
++
++                *ret = TAKE_PTR(str);
++                return EFI_SUCCESS;
++        }
+ 
+-        char16_t *str = dp_to_text->ConvertDevicePathToText(dp, false, false);
++        str = dp_to_text->ConvertDevicePathToText(dp, false, false);
+         if (!str)
+                 return EFI_OUT_OF_RESOURCES;
+ 
+-        *ret = str;
++        *ret = TAKE_PTR(str);
+         return EFI_SUCCESS;
+ }
+ 

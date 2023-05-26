@@ -1,0 +1,43 @@
+From eb9135c9499f6be627323929df48bc9efc93926a Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <fsumsal@redhat.com>
+Date: Thu, 8 Dec 2022 10:56:42 +0100
+Subject: [PATCH] Revert "basic: add fallback in chase_symlinks_and_opendir()
+ for cases when /proc is not mounted"
+
+This reverts commit 47c0c5108b39d01283ba040c41d556b160d45a55.
+
+Related: #2138081
+---
+ src/basic/chase-symlinks.c | 14 +++-----------
+ 1 file changed, 3 insertions(+), 11 deletions(-)
+
+diff --git a/src/basic/chase-symlinks.c b/src/basic/chase-symlinks.c
+index c09aab389e..afab54f067 100644
+--- a/src/basic/chase-symlinks.c
++++ b/src/basic/chase-symlinks.c
+@@ -466,22 +466,14 @@ int chase_symlinks_and_opendir(
+                 return 0;
+         }
+ 
+-        r = chase_symlinks(path, root, chase_flags, &p, &path_fd);
++        r = chase_symlinks(path, root, chase_flags, ret_path ? &p : NULL, &path_fd);
+         if (r < 0)
+                 return r;
+         assert(path_fd >= 0);
+ 
+         d = opendir(FORMAT_PROC_FD_PATH(path_fd));
+-        if (!d) {
+-                /* Hmm, we have the fd already but we got ENOENT, most likely /proc is not mounted.
+-                 * Let's try opendir() again on the full path. */
+-                if (errno == ENOENT) {
+-                        d = opendir(p);
+-                        if (!d)
+-                                return -errno;
+-                } else
+-                        return -errno;
+-        }
++        if (!d)
++                return -errno;
+ 
+         if (ret_path)
+                 *ret_path = TAKE_PTR(p);

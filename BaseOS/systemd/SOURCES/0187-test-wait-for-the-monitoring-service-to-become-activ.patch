@@ -1,0 +1,65 @@
+From 874959f2d9dfadd027f3d7e399ef8a32a408e1c8 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 7 Dec 2022 20:44:07 +0100
+Subject: [PATCH] test: wait for the monitoring service to become active
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Otherwise we might start querying resolved too early, causing the
+monitoring service to miss stuff:
+
+```
+[ 1103.149474] testsuite-75.sh[35]: + systemd-run -u resmontest.service -p Type=notify resolvectl monitor
+[ 1103.353803] testsuite-75.sh[423]: Running as unit: resmontest.service
+[ 1103.353989] testsuite-75.sh[35]: + knotc zone-begin test.
+[ 1103.354160] testsuite-75.sh[425]: OK
+...
+[ 1103.355298] testsuite-75.sh[35]: + knotc reload
+[ 1103.355363] testsuite-75.sh[438]: Reloaded
+[ 1103.355536] testsuite-75.sh[35]: + : '--- nss-resolve/nss-myhostname tests'
+[ 1103.355536] testsuite-75.sh[35]: + run getent -s resolve hosts ns1.unsigned.test
+[ 1103.356127] testsuite-75.sh[443]: + getent -s resolve hosts ns1.unsigned.test
+[ 1103.356505] testsuite-75.sh[444]: + tee /tmp/tmp.bXg5Uj5Jkk
+[ 1103.359591] resolvectl[424]: → Q: ns1.unsigned.test IN AAAA
+[ 1103.359591] resolvectl[424]: ← S: success
+[ 1103.359850] testsuite-75.sh[444]: 10.0.0.1        ns1.unsigned.test
+[ 1103.359939] resolvectl[424]: → Q: ns1.unsigned.test IN A
+[ 1103.359939] resolvectl[424]: ← S: success
+[ 1103.359939] resolvectl[424]: ← A: ns1.unsigned.test IN A 10.0.0.1
+[ 1103.360149] testsuite-75.sh[35]: + grep -qE '^10\.0\.0\.1\s+ns1\.unsigned\.test' /tmp/tmp.bXg5Uj5Jkk
+[ 1103.362119] systemd[1]: Starting resmontest.service...
+[ 1103.362633] systemd[1]: Started resmontest.service.
+[ 1103.363263] testsuite-75.sh[35]: + monitor_check_rr 'ns1.unsigned.test IN A 10.0.0.1'
+[ 1103.363263] testsuite-75.sh[35]: + local 'match=ns1.unsigned.test IN A 10.0.0.1'
+[ 1103.363377] testsuite-75.sh[35]: + set +o pipefail
+[ 1103.363836] testsuite-75.sh[458]: + journalctl -u resmontest.service -f --full
+[ 1103.364042] testsuite-75.sh[459]: + grep -m1 'ns1.unsigned.test IN A 10.0.0.1'
+...
+Trying to halt container. Send SIGTERM again to trigger immediate termination.
+Container TEST-75 terminated by signal KILL.
+```
+
+(cherry picked from commit 5dd34c2604567320707625bc009cf01c3769605f)
+
+Related: #2138081
+---
+ test/units/testsuite-75.sh | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/test/units/testsuite-75.sh b/test/units/testsuite-75.sh
+index 0c68e0636f..d2062c7b05 100755
+--- a/test/units/testsuite-75.sh
++++ b/test/units/testsuite-75.sh
+@@ -212,6 +212,11 @@ resolvectl log-level debug
+ 
+ # Start monitoring queries
+ systemd-run -u resmontest.service -p Type=notify resolvectl monitor
++# Wait for the monitoring service to become active
++for _ in {0..9}; do
++    [[ "$(systemctl show -P ActiveState resmontest.service)" == "active" ]] && break
++    sleep .5
++done
+ 
+ # We need to manually propagate the DS records of onlinesign.test. to the parent
+ # zone, since they're generated online

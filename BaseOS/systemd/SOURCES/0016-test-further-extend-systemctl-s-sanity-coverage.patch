@@ -1,0 +1,115 @@
+From cce2e337e37524df5ff81e758dbcfa91bf8b696a Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 2 Nov 2022 11:44:00 +0100
+Subject: [PATCH] test: further extend systemctl's sanity coverage
+
+Also, fix a race condition introduced by d16684fe13:
+```
+[   16.904218] H testsuite-26.sh[394]: + systemd-run --unit failed.service /bin/false
+[   16.964783] H systemd[845]: failed.service: Executing: /bin/false
+[   16.965062] H systemd[1]: Started failed.service.
+[   16.965462] H testsuite-26.sh[844]: Running as unit: failed.service
+[   16.966390] H testsuite-26.sh[394]: + systemctl is-failed failed.service
+[   16.977970] H testsuite-26.sh[846]: active
+[   16.978403] H systemd[1]: failed.service: Main process exited, code=exited, status=1/FAILURE
+[   16.978478] H systemd[1]: failed.service: Failed with result 'exit-code'.
+```
+
+(cherry picked from commit 23f3a6f5ff864fd26063c6c35fdaa6d85de566c7)
+
+Related #2138081
+---
+ test/units/testsuite-26.sh | 61 +++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 60 insertions(+), 1 deletion(-)
+
+diff --git a/test/units/testsuite-26.sh b/test/units/testsuite-26.sh
+index b83f85917b..7c7a12b1ae 100755
+--- a/test/units/testsuite-26.sh
++++ b/test/units/testsuite-26.sh
+@@ -58,6 +58,9 @@ systemctl list-units
+ systemctl list-units --recursive
+ systemctl list-units --type=socket
+ systemctl list-units --type=service,timer
++# Compat: --type= allows load states for compatibility reasons
++systemctl list-units --type=loaded
++systemctl list-units --type=loaded,socket
+ systemctl list-units --legend=yes -a "systemd-*"
+ systemctl list-units --state=active
+ systemctl list-units --with-dependencies systemd-journald.service
+@@ -160,7 +163,7 @@ systemctl revert "$UNIT_NAME"
+ (! grep -r "CPUQuota=" "/run/systemd/system.control/${UNIT_NAME}.d/")
+ 
+ # Failed-unit related tests
+-systemd-run --unit "failed.service" /bin/false
++(! systemd-run --wait --unit "failed.service" /bin/false)
+ systemctl is-failed failed.service
+ systemctl --state=failed | grep failed.service
+ systemctl --failed | grep failed.service
+@@ -189,11 +192,67 @@ for value in pretty us µs utc us+utc µs+utc; do
+     systemctl show -P KernelTimestamp --timestamp="$value"
+ done
+ 
++# set-default/get-default
++target="$(systemctl get-default)"
++systemctl set-default emergency.target
++[[ "$(systemctl get-default)" == emergency.target ]]
++systemctl set-default "$target"
++[[ "$(systemctl get-default)" == "$target" ]]
++
++# show/status
++systemctl show --property ""
++# Pick a heavily sandboxed unit for the best effect on coverage
++systemctl show systemd-logind.service
++systemctl status
++# Ignore the exit code in this case, as it might try to load non-existing units
++systemctl status -a >/dev/null || :
++systemctl status -a --state active,running,plugged >/dev/null
++systemctl status "systemd-*.timer"
++systemctl status "systemd-journald*.socket"
++systemctl status "sys-devices-*-ttyS0.device"
++systemctl status -- -.mount
++
++# --marked
++systemctl restart "$UNIT_NAME"
++systemctl set-property "$UNIT_NAME" Markers=needs-restart
++systemctl show -P Markers "$UNIT_NAME" | grep needs-restart
++systemctl reload-or-restart --marked
++(! systemctl show -P Markers "$UNIT_NAME" | grep needs-restart)
++
++# --dry-run with destructive verbs
++# kexec is skipped intentionally, as it requires a bit more involved setup
++VERBS=(
++    default
++    emergency
++    exit
++    halt
++    hibernate
++    hybrid-sleep
++    poweroff
++    reboot
++    rescue
++    suspend
++    suspend-then-hibernate
++)
++
++for verb in "${VERBS[@]}"; do
++    systemctl --dry-run "$verb"
++
++    if [[ "$verb" =~ (halt|poweroff|reboot) ]]; then
++        systemctl --dry-run --message "Hello world" "$verb"
++        systemctl --dry-run --no-wall "$verb"
++        systemctl --dry-run -f "$verb"
++        systemctl --dry-run -ff "$verb"
++    fi
++done
++
+ # Aux verbs & assorted checks
+ systemctl is-active "*-journald.service"
+ systemctl cat "*journal*"
+ systemctl cat "$UNIT_NAME"
+ systemctl help "$UNIT_NAME"
++systemctl service-watchdogs
++systemctl service-watchdogs "$(systemctl service-watchdogs)"
+ 
+ # show/set-environment
+ # Make sure PATH is set

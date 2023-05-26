@@ -1,27 +1,26 @@
+%global toolchain clang
 %bcond_without check
 
-#global rc_ver 1
 %global lld_srcdir lld-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
-%global maj_ver 14
+%global maj_ver 15
 %global min_ver 0
-%global patch_ver 6
+%global patch_ver 7
 
-# Don't include unittests in automatic generation of provides or requires.
-%global __provides_exclude_from ^%{_libdir}/lld/.*$
-%global __requires_exclude ^libgtest.*$
+%global pkg_name lld
+%global install_prefix /usr
+%global install_includedir %{_includedir}
+%global install_libdir %{_libdir}
 
-Name:		lld
+Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}
-Release:	1%{?dist}.redsleeve
+Release:	4%{?dist}
 Summary:	The LLVM Linker
 
 License:	NCSA
 URL:		http://llvm.org
-Source0:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{version}%{?rc_ver:-rc%{rc_ver}}/%{lld_srcdir}.tar.xz
-Source1:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{version}%{?rc_ver:-rc%{rc_ver}}/%{lld_srcdir}.tar.xz.sig
-Source2:	tstellar-gpg-key.asc
-Source3:	run-lit-tests
-Source4:	lit.lld-test.cfg.py
+Source0:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{lld_srcdir}.tar.xz
+Source1:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{lld_srcdir}.tar.xz.sig
+Source2:	release-keys.asc
 
 ExcludeArch:	s390x
 
@@ -30,21 +29,19 @@ Patch0:		0001-PATCH-lld-CMake-Check-for-gtest-headers-even-if-lit..patch
 # Bundle libunwind header need during build for MachO support
 Patch1:		0002-PATCH-lld-Import-compact_unwind_encoding.h-from-libu.patch
 
-Patch1000:	1000_patch_atomic_arm.patch
-
-BuildRequires:	gcc
-BuildRequires:	gcc-c++
+BuildRequires:	clang
 BuildRequires:	cmake
 BuildRequires:	ninja-build
 BuildRequires:	llvm-devel = %{version}
 BuildRequires:	llvm-test = %{version}
+BuildRequires:	llvm-googletest = %{version}
 BuildRequires:	ncurses-devel
 BuildRequires:	zlib-devel
 
 # For make check:
 BuildRequires:	python3-rpm-macros
 BuildRequires:	python3-lit
-BuildRequires:	llvm-googletest = %{version}
+
 
 # For gpg source verification
 BuildRequires:	gnupg2
@@ -52,14 +49,16 @@ BuildRequires:	gnupg2
 Requires(post): %{_sbindir}/update-alternatives
 Requires(preun): %{_sbindir}/update-alternatives
 
-Requires: lld-libs = %{version}-%{release}
+Requires: %{name}-libs = %{version}-%{release}
+
+Obsoletes: lld-test < 15.0.7
 
 %description
 The LLVM project linker.
 
 %package devel
 Summary:	Libraries and header files for LLD
-Requires: lld-libs%{?_isa} = %{version}-%{release}
+Requires: %{name}-libs%{?_isa} = %{version}-%{release}
 # lld tools are referenced in the cmake files, so we need to add lld as a
 # dependency.
 Requires: %{name}%{?_isa} = %{version}-%{release}
@@ -74,15 +73,6 @@ Summary:	LLD shared libraries
 %description libs
 Shared libraries for LLD.
 
-%package test
-Summary: LLD regression tests
-Requires:	%{name}%{?_isa} = %{version}-%{release}
-Requires:	python3-lit
-Requires:	llvm-test(major) = %{maj_ver}
-Requires:	lld-libs = %{version}-%{release}
-
-%description test
-LLVM regression tests.
 
 %prep
 %{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
@@ -96,68 +86,32 @@ LLVM regression tests.
 
 %cmake \
 	-GNinja \
+	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
+	-DCMAKE_INSTALL_PREFIX=%{install_prefix} \
 	-DLLVM_LINK_LLVM_DYLIB:BOOL=ON \
 	-DLLVM_DYLIB_COMPONENTS="all" \
 	-DCMAKE_SKIP_RPATH:BOOL=ON \
 	-DPYTHON_EXECUTABLE=%{__python3} \
 	-DLLVM_INCLUDE_TESTS=ON \
-	-DLLVM_MAIN_SRC_DIR=%{_datadir}/llvm/src \
 	-DLLVM_EXTERNAL_LIT=%{_bindir}/lit \
 	-DLLVM_LIT_ARGS="-sv \
-	--path %{_libdir}/llvm" \
+	--path %{install_libdir}/llvm" \
 %if 0%{?__isa_bits} == 64
-	-DLLVM_LIBDIR_SUFFIX=64
+	-DLLVM_LIBDIR_SUFFIX=64 \
 %else
-	-DLLVM_LIBDIR_SUFFIX=
+	-DLLVM_LIBDIR_SUFFIX= \
 %endif
+	-DLLVM_MAIN_SRC_DIR=%{_datadir}/llvm/src
 
 %cmake_build
 
-# Build the unittests so we can install them.
-%cmake_build --target lld-test-depends
-
 %install
-
-%global lit_cfg test/%{_arch}.site.cfg.py
-%global lit_unit_cfg test/Unit/%{_arch}.site.cfg.py
-%global lit_lld_test_cfg_install_path %{_datadir}/lld/lit.lld-test.cfg.py
-
-# Generate lit config files.  Strip off the last line that initiates the
-# test run, so we can customize the configuration.
-head -n -1 %{__cmake_builddir}/test/lit.site.cfg.py >> %{lit_cfg}
-head -n -1 %{__cmake_builddir}/test/Unit/lit.site.cfg.py >> %{lit_unit_cfg}
-
-# Patch lit config files to load custom config:
-for f in %{lit_cfg} %{lit_unit_cfg}; do
-  echo "lit_config.load_config(config, '%{lit_lld_test_cfg_install_path}')" >> $f
-done
-
-# Install test files
-install -d %{buildroot}%{_datadir}/lld/src
-cp %{SOURCE4} %{buildroot}%{_datadir}/lld/
-
-# The various tar options are there to make sur the archive is the same on 32 and 64 bit arch, i.e.
-# the archive creation is reproducible. Move arch-specific content out of the tarball
-mv %{lit_cfg} %{buildroot}%{_datadir}/lld/src/%{_arch}.site.cfg.py
-mv %{lit_unit_cfg} %{buildroot}%{_datadir}/lld/src/%{_arch}.Unit.site.cfg.py
-tar --sort=name --mtime='UTC 2020-01-01' -c test/ | gzip -n > %{buildroot}%{_datadir}/lld/src/test.tar.gz
-
-install -d %{buildroot}%{_libexecdir}/tests/lld
-install -m 0755 %{SOURCE3} %{buildroot}%{_libexecdir}/tests/lld
-
-# Install unit test binaries
-install -d %{buildroot}%{_libdir}/lld/
-
-rm -rf $(find %{buildroot}%{_libdir}/lld/ -iname '*make*')
-
-# Install gtest libraries
-cp %{__cmake_builddir}/%{_lib}/libgtest*so* %{buildroot}%{_libdir}/lld/
 
 # Install libraries and binaries
 %cmake_install
 
 # This is generated by Patch1 during build and (probably) must be removed afterward
-rm %{buildroot}%{_includedir}/mach-o/compact_unwind_encoding.h
+rm %{buildroot}%{install_includedir}/mach-o/compact_unwind_encoding.h
 
 # Required when using update-alternatives:
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/Alternatives/
@@ -173,11 +127,8 @@ fi
 
 %check
 
-# armv7lhl tests disabled because of arm issue, see https://koji.fedoraproject.org/koji/taskinfo?taskID=33660162
-%ifnarch %{arm}
 %if %{with check}
 %cmake_build --target check-lld
-%endif
 %endif
 
 %ldconfig_scriptlets libs
@@ -191,24 +142,32 @@ fi
 %{_bindir}/wasm-ld
 
 %files devel
-%{_includedir}/lld
-%{_libdir}/liblld*.so
-%{_libdir}/cmake/lld/
+%{install_includedir}/lld
+%{install_libdir}/liblld*.so
+%{install_libdir}/cmake/lld/
 
 %files libs
-%{_libdir}/liblld*.so.*
+%{install_libdir}/liblld*.so.*
 
-%files test
-%{_libexecdir}/tests/lld/
-%{_libdir}/lld/
-%{_datadir}/lld/src/test.tar.gz
-%{_datadir}/lld/src/%{_arch}.site.cfg.py
-%{_datadir}/lld/src/%{_arch}.Unit.site.cfg.py
-%{_datadir}/lld/lit.lld-test.cfg.py
 
 %changelog
-* Thu Dec 22 2022 Jacco Ligthart < jacco@redsleeve.org> - 14.0.6-1.redsleeve
-- link COFF with atomic
+* Tue Jan 31 2023 Konrad Kleine <kkleine@redhat.com> - 15.0.7-4
+- Fixup for obsoleting lld-test < 15.0.7
+
+* Mon Jan 30 2023 Konrad Kleine <kkleine@redhat.com> - 15.0.7-3
+- Obsolete lld-test < 15.0.7
+
+* Mon Jan 16 2023 Konrad Kleine <kkleine@redhat.com> - 15.0.7-2
+- Update to LLVM 15.0.7
+
+* Fri Dec 09 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.6-1
+- Update to LLVM 15.0.6
+
+* Tue Oct 25 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.1-2
+- Remove lld-test package
+
+* Thu Sep 29 2022 Konrad Kleine <kkleine@redhat.com> - 15.0.1-1
+- 15.0.1 Release
 
 * Wed Jul 20 2022 Timm Bäder <tbaeder@redhat.com> - 14.0.6-1
 - 14.0.6 Release

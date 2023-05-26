@@ -1,0 +1,31 @@
+From b546d82758e0149fd235d2ff8f9c4fdc8d0bd29c Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 22 Nov 2022 12:55:10 +0100
+Subject: [PATCH] homed: handle EINTR gracefully when waiting for device node
+
+(cherry picked from commit f3d9278f38f0a9e03ed29215f27d8ca21c1fa6a1)
+
+Related: #2137584
+---
+ src/home/homework-luks.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/home/homework-luks.c b/src/home/homework-luks.c
+index 97fb5a1051..5e1d5bbd65 100644
+--- a/src/home/homework-luks.c
++++ b/src/home/homework-luks.c
+@@ -2017,9 +2017,12 @@ static int wait_for_devlink(const char *path) {
+                 if (w >= until)
+                         return log_error_errno(SYNTHETIC_ERRNO(ETIMEDOUT), "Device link %s still hasn't shown up, giving up.", path);
+ 
+-                r = fd_wait_for_event(inotify_fd, POLLIN, usec_sub_unsigned(until, w));
+-                if (r < 0)
++                r = fd_wait_for_event(inotify_fd, POLLIN, until - w);
++                if (r < 0) {
++                        if (ERRNO_IS_TRANSIENT(r))
++                                continue;
+                         return log_error_errno(r, "Failed to watch inotify: %m");
++                }
+ 
+                 (void) flush_fd(inotify_fd);
+         }

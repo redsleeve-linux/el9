@@ -1,0 +1,52 @@
+From a8a0c31123f7a8c1c317bb1a83548f15b02974d0 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <fsumsal@redhat.com>
+Date: Thu, 24 Nov 2022 15:23:12 +0100
+Subject: [PATCH] test: don't test buses we don't ship
+
+rhel-only
+Related: #2138081
+---
+ test/units/testsuite-21.sh | 18 ++----------------
+ 1 file changed, 2 insertions(+), 16 deletions(-)
+
+diff --git a/test/units/testsuite-21.sh b/test/units/testsuite-21.sh
+index d931e63167..e7d97ae06e 100755
+--- a/test/units/testsuite-21.sh
++++ b/test/units/testsuite-21.sh
+@@ -27,13 +27,13 @@ systemctl log-level info
+ # TODO
+ #   * check for possibly newly introduced buses?
+ BUS_LIST=(
+-    org.freedesktop.home1
++#    org.freedesktop.home1
+     org.freedesktop.hostname1
+     org.freedesktop.import1
+     org.freedesktop.locale1
+     org.freedesktop.login1
+     org.freedesktop.machine1
+-    org.freedesktop.portable1
++#    org.freedesktop.portable1
+     org.freedesktop.resolve1
+     org.freedesktop.systemd1
+     org.freedesktop.timedate1
+@@ -46,20 +46,6 @@ if tail -n +1 /proc/pressure/{cpu,io,memory}; then
+     )
+ fi
+ 
+-# Some services require specific conditions:
+-#   - systemd-timesyncd can't run in a container
+-#   - systemd-networkd can run in a container if it has CAP_NET_ADMIN capability
+-if ! systemd-detect-virt --container; then
+-    BUS_LIST+=(
+-        org.freedesktop.network1
+-        org.freedesktop.timesync1
+-    )
+-elif busctl introspect org.freedesktop.network1 / &>/dev/null; then
+-    BUS_LIST+=(
+-        org.freedesktop.network1
+-    )
+-fi
+-
+ SESSION_BUS_LIST=(
+     org.freedesktop.systemd1
+ )

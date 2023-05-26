@@ -1,0 +1,68 @@
+From f0f59e43e9d1c5a6f9f7e03f07850ee40bac0ab3 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 15 Feb 2023 18:08:35 +0100
+Subject: [PATCH] journalctl: actually run the static destructors
+
+In journalctl we don't run the static destructors defined via
+the STATIC_DESTRUCTOR_REGISTER() macro, since it requires a corresponding
+static_destruct() call. In most cases this is handled by
+the DEFINE_(TEST_)?MAIN*() macros, but journalctl defines its own main
+function, so let's handle that as well.
+
+$ valgrind --suppressions=valgrind.supp --show-leak-kinds=all --leak-check=full build/journalctl --no-pager -u system.slice -n 10 >/dev/null
+==2778093== Memcheck, a memory error detector
+==2778093== Copyright (C) 2002-2022, and GNU GPL'd, by Julian Seward et al.
+==2778093== Using Valgrind-3.19.0 and LibVEX; rerun with -h for copyright info
+==2778093== Command: build/journalctl --no-pager -u system.slice -n 10
+==2778093==
+==2778093==
+==2778093== HEAP SUMMARY:
+==2778093==     in use at exit: 8,221 bytes in 4 blocks
+==2778093==   total heap usage: 458 allocs, 454 frees, 255,182 bytes allocated
+==2778093==
+==2778093== 13 bytes in 1 blocks are still reachable in loss record 1 of 4
+==2778093==    at 0x484586F: malloc (vg_replace_malloc.c:381)
+==2778093==    by 0x4DA256D: strdup (strdup.c:42)
+==2778093==    by 0x4ADB747: strv_extend_with_size (strv.c:544)
+==2778093==    by 0x405386: strv_extend (strv.h:45)
+==2778093==    by 0x40816F: parse_argv (journalctl.c:933)
+==2778093==    by 0x40EAB5: main (journalctl.c:2111)
+==2778093==
+==2778093== 16 bytes in 1 blocks are still reachable in loss record 2 of 4
+==2778093==    at 0x484578A: malloc (vg_replace_malloc.c:380)
+==2778093==    by 0x484A70B: realloc (vg_replace_malloc.c:1437)
+==2778093==    by 0x4ADB2A3: strv_push_with_size (strv.c:423)
+==2778093==    by 0x4ADB620: strv_consume_with_size (strv.c:496)
+==2778093==    by 0x4ADB770: strv_extend_with_size (strv.c:548)
+==2778093==    by 0x405386: strv_extend (strv.h:45)
+==2778093==    by 0x40816F: parse_argv (journalctl.c:933)
+==2778093==    by 0x40EAB5: main (journalctl.c:2111)
+==2778093==
+==2778093== LEAK SUMMARY:
+==2778093==    definitely lost: 0 bytes in 0 blocks
+==2778093==    indirectly lost: 0 bytes in 0 blocks
+==2778093==      possibly lost: 0 bytes in 0 blocks
+==2778093==    still reachable: 29 bytes in 2 blocks
+==2778093==         suppressed: 8,192 bytes in 2 blocks
+==2778093==
+==2778093== For lists of detected and suppressed errors, rerun with: -s
+==2778093== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
+
+(cherry picked from commit 9259d71d505ba1771ba5e3caa522da50bdc58bed)
+
+Related: #2122500
+---
+ src/journal/journalctl.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/journal/journalctl.c b/src/journal/journalctl.c
+index 11de07fcfa..e9faa24cae 100644
+--- a/src/journal/journalctl.c
++++ b/src/journal/journalctl.c
+@@ -2746,5 +2746,6 @@ finish:
+                  * in scripts and such */
+                 r = -ENOENT;
+ 
++        static_destruct();
+         return r < 0 ? EXIT_FAILURE : EXIT_SUCCESS;
+ }

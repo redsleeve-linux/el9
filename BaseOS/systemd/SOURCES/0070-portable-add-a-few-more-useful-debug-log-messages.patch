@@ -1,0 +1,48 @@
+From e44e907f58d3c89e0de01e8ff4e25079f1ca505e Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Wed, 23 Nov 2022 16:06:48 +0000
+Subject: [PATCH] portable: add a few more useful debug log messages
+
+When attaching and /etc/systemd/system.attached can't be created or used
+(eg: dead symlink) the logs are pretty much useless as even at debug
+level there's no indication of what is going wrong.
+Add some debug logs, and return a more specific error string over D-Bus.
+
+(cherry picked from commit 80d95fcd6e1947a7887b96b22a32dbca115baac9)
+
+Related: #2138081
+---
+ src/portable/portable.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/portable/portable.c b/src/portable/portable.c
+index be906f786c..fbc4497014 100644
+--- a/src/portable/portable.c
++++ b/src/portable/portable.c
+@@ -1131,7 +1131,7 @@ static int attach_unit_file(
+         (void) mkdir_parents(where, 0755);
+         if (mkdir(where, 0755) < 0) {
+                 if (errno != EEXIST)
+-                        return -errno;
++                        return log_debug_errno(errno, "Failed to create attach directory %s: %m", where);
+         } else
+                 (void) portable_changes_add(changes, n_changes, PORTABLE_MKDIR, where, NULL);
+ 
+@@ -1145,7 +1145,7 @@ static int attach_unit_file(
+ 
+         if (mkdir(dropin_dir, 0755) < 0) {
+                 if (errno != EEXIST)
+-                        return -errno;
++                        return log_debug_errno(errno, "Failed to create drop-in directory %s: %m", dropin_dir);
+         } else
+                 (void) portable_changes_add(changes, n_changes, PORTABLE_MKDIR, dropin_dir, NULL);
+ 
+@@ -1392,7 +1392,7 @@ int portable_attach(
+                 r = attach_unit_file(&paths, image->path, image->type, extension_images,
+                                      item, profile, flags, changes, n_changes);
+                 if (r < 0)
+-                        return r;
++                        return sd_bus_error_set_errnof(error, r, "Failed to attach unit '%s': %m", item->name);
+         }
+ 
+         /* We don't care too much for the image symlink, it's just a convenience thing, it's not necessary for proper

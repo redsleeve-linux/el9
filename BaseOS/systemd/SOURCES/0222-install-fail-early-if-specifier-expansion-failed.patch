@@ -1,0 +1,40 @@
+From b9fb1769f8b6de65abf1f57a85b0d0a22f84c754 Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Tue, 21 Feb 2023 14:10:33 +0100
+Subject: [PATCH] install: fail early if specifier expansion failed
+
+Before:
+
+systemd[1]: Assertion 'path' failed at src/shared/install.c:288, function install_changes_add(). Aborting.
+systemd[1]: Caught <ABRT> from our own process.
+systemd[1]: Caught <ABRT>, dumped core as pid 2525.
+systemd[1]: Freezing execution
+
+After:
+
+Failed to enable unit: Invalid specifier in user-%J.service
+
+Fixes #26467.
+
+Follow-up for: f5a0162
+
+(cherry picked from commit f8979e869812988835f6951fb73a68e30a4c608c)
+
+Related: #2138081
+---
+ src/shared/install.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/shared/install.c b/src/shared/install.c
+index a760726628..8d4aa5ab2c 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -1982,6 +1982,8 @@ static int install_info_symlink_wants(
+                         install_changes_add(changes, n_changes, q, *s, NULL);
+                         if (r >= 0)
+                                 r = q;
++
++                        continue;
+                 }
+ 
+                 if (!unit_name_is_valid(dst, valid_dst_type)) {

@@ -1,0 +1,45 @@
+From 0894f502ad5a89a98a0a88ee739c0c5f516338c2 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 1 Feb 2023 21:25:40 +0900
+Subject: [PATCH] test: add a testcase for lvextend
+
+For RHBZ#2158628 (https://bugzilla.redhat.com/show_bug.cgi?id=2158628)
+
+(cherry picked from commit d60e3482613d26e559fc4dc5a56b8edaa765a318)
+
+Related: #2138081
+---
+ test/units/testsuite-64.sh | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/test/units/testsuite-64.sh b/test/units/testsuite-64.sh
+index c572671c20..4017f61f59 100755
+--- a/test/units/testsuite-64.sh
++++ b/test/units/testsuite-64.sh
+@@ -425,6 +425,26 @@ testcase_lvm_basic() {
+     helper_check_device_symlinks "/dev/disk" "/dev/$vgroup"
+     helper_check_device_units
+ 
++    # Mount mypart1 through by-label devlink
++    mkdir -p /tmp/mypart1-mount-point
++    mount /dev/disk/by-label/mylvpart1 /tmp/mypart1-mount-point
++    timeout 30 bash -c "while ! systemctl -q is-active /tmp/mypart1-mount-point; do sleep .2; done"
++    # Extend the partition and check if the device and mount units are still active.
++    # See https://bugzilla.redhat.com/show_bug.cgi?id=2158628
++    # Note, the test below may be unstable with LVM2 without the following patch:
++    # https://github.com/lvmteam/lvm2/pull/105
++    # But, to reproduce the issue, udevd must start to process the first 'change' uevent
++    # earlier than extending the volume has been finished, and in most case, the extension
++    # is hopefully fast.
++    lvm lvextend -y --size 8M "/dev/$vgroup/mypart1"
++    udevadm wait --settle --timeout="$timeout" "/dev/disk/by-label/mylvpart1"
++    timeout 30 bash -c "while ! systemctl -q is-active '/dev/$vgroup/mypart1'; do sleep .2; done"
++    timeout 30 bash -c "while ! systemctl -q is-active /tmp/mypart1-mount-point; do sleep .2; done"
++    # Umount the partition, otherwise the underlying device unit will stay in
++    # the inactive state and not be collected, and helper_check_device_units() will fail.
++    systemctl show /tmp/mypart1-mount-point
++    umount /tmp/mypart1-mount-point
++
+     # Rename partitions (see issue #24518)
+     lvm lvrename "/dev/$vgroup/mypart1" renamed1
+     lvm lvrename "/dev/$vgroup/mypart2" renamed2

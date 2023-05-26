@@ -1,0 +1,38 @@
+From 45fcc7ad41216a93bafb452f7d7a4507d52722cd Mon Sep 17 00:00:00 2001
+From: Michal Schmidt <mschmidt@redhat.com>
+Date: Wed, 1 Feb 2023 23:30:52 +0100
+Subject: [PATCH 3/3] libibnetdisc: fix printing a possibly non-NUL-terminated
+ string
+
+Found by a static check (covscan).
+
+Fixes: d974c4e398d2 ("Fix max length of node description (ibnetdiscover and smpquery)")
+Signed-off-by: Michal Schmidt <mschmidt@redhat.com>
+---
+ libibnetdisc/chassis.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/libibnetdisc/chassis.c b/libibnetdisc/chassis.c
+index a3ec1d82807c..bc1a8aff8acb 100644
+--- a/libibnetdisc/chassis.c
++++ b/libibnetdisc/chassis.c
+@@ -597,7 +597,7 @@ static int fill_mellanox_chassis_record(ibnd_node_t * node)
+ 	int p = 0;
+ 	ibnd_port_t *port;
+ 
+-	char node_desc[IB_SMP_DATA_SIZE];
++	char node_desc[IB_SMP_DATA_SIZE + 1];
+ 	char *system_name;
+ 	char *system_type;
+ 	char *system_slot_name;
+@@ -617,6 +617,7 @@ static int fill_mellanox_chassis_record(ibnd_node_t * node)
+ 	 */
+ 
+ 	memcpy(node_desc, node->nodedesc, IB_SMP_DATA_SIZE);
++	node_desc[IB_SMP_DATA_SIZE] = '\0';
+ 
+ 	IBND_DEBUG("fill_mellanox_chassis_record: node_desc:%s \n",node_desc);
+ 
+-- 
+2.39.1
+

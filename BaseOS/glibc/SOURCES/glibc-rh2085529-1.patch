@@ -1,0 +1,605 @@
+commit c901c3e764d7c7079f006b4e21e877d5036eb4f5
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Dec 9 09:49:32 2021 +0100
+
+    nptl: Add public rseq symbols and <sys/rseq.h>
+    
+    The relationship between the thread pointer and the rseq area
+    is made explicit.  The constant offset can be used by JIT compilers
+    to optimize rseq access (e.g., for really fast sched_getcpu).
+    
+    Extensibility is provided through __rseq_size and __rseq_flags.
+    (In the future, the kernel could request a different rseq size
+    via the auxiliary vector.)
+    
+    Co-Authored-By: Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+    Reviewed-by: Szabolcs Nagy <szabolcs.nagy@arm.com>
+
+diff --git a/manual/threads.texi b/manual/threads.texi
+index 7f166bfa87e88c36..4869f69d2ceed255 100644
+--- a/manual/threads.texi
++++ b/manual/threads.texi
+@@ -629,6 +629,8 @@ the standard.
+ * Waiting with Explicit Clocks::          Functions for waiting with an
+                                           explicit clock specification.
+ * Single-Threaded::                       Detecting single-threaded execution.
++* Restartable Sequences::                 Linux-specific restartable sequences
++                                          integration.
+ @end menu
+ 
+ @node Default Thread Attributes
+@@ -958,6 +960,85 @@ application-created thread because future versions of @theglibc{} may
+ create background threads after the first thread has been created, and
+ the application has no way of knowning that these threads are present.
+ 
++@node Restartable Sequences
++@subsubsection Restartable Sequences
++
++This section describes restartable sequences integration for
++@theglibc{}.  This functionality is only available on Linux.
++
++@deftp {Data Type} {struct rseq}
++@standards{Linux, sys/rseq.h}
++The type of the restartable sequences area.  Future versions
++of Linux may add additional fields to the end of this structure.
++
++
++Users need to obtain the address of the restartable sequences area using
++the thread pointer and the @code{__rseq_offset} variable, described
++below.
++
++One use of the restartable sequences area is to read the current CPU
++number from its @code{cpu_id} field, as an inline version of
++@code{sched_getcpu}.  @Theglibc{} sets the @code{cpu_id} field to
++@code{RSEQ_CPU_ID_REGISTRATION_FAILED} if registration failed or was
++explicitly disabled.
++
++Furthermore, users can store the address of a @code{struct rseq_cs}
++object into the @code{rseq_cs} field of @code{struct rseq}, thus
++informing the kernel that the thread enters a restartable sequence
++critical section.  This pointer and the code areas it itself points to
++must not be left pointing to memory areas which are freed or re-used.
++Several approaches can guarantee this.  If the application or library
++can guarantee that the memory used to hold the @code{struct rseq_cs} and
++the code areas it refers to are never freed or re-used, no special
++action must be taken.  Else, before that memory is re-used of freed, the
++application is responsible for setting the @code{rseq_cs} field to
++@code{NULL} in each thread's restartable sequence area to guarantee that
++it does not leak dangling references.  Because the application does not
++typically have knowledge of libraries' use of restartable sequences, it
++is recommended that libraries using restartable sequences which may end
++up freeing or re-using their memory set the @code{rseq_cs} field to
++@code{NULL} before returning from library functions which use
++restartable sequences.
++
++The manual for the @code{rseq} system call can be found
++at @uref{https://git.kernel.org/pub/scm/libs/librseq/librseq.git/tree/doc/man/rseq.2}.
++@end deftp
++
++@deftypevar {int} __rseq_offset
++@standards{Linux, sys/rseq.h}
++This variable contains the offset between the thread pointer (as defined
++by @code{__builtin_thread_pointer} or the thread pointer register for
++the architecture) and the restartable sequences area.  This value is the
++same for all threads in the process.  If the restartable sequences area
++is located at a lower address than the location to which the thread
++pointer points, the value is negative.
++@end deftypevar
++
++@deftypevar {unsigned int} __rseq_size
++@standards{Linux, sys/rseq.h}
++This variable is either zero (if restartable sequence registration
++failed or has been disabled) or the size of the restartable sequence
++registration.  This can be different from the size of @code{struct rseq}
++if the kernel has extended the size of the registration.  If
++registration is successful, @code{__rseq_size} is at least 32 (the
++initial size of @code{struct rseq}).
++@end deftypevar
++
++@deftypevar {unsigned int} __rseq_flags
++@standards{Linux, sys/rseq.h}
++The flags used during restartable sequence registration with the kernel.
++Currently zero.
++@end deftypevar
++
++@deftypevr Macro int RSEQ_SIG
++@standards{Linux, sys/rseq.h}
++Each supported architecture provides a @code{RSEQ_SIG} macro in
++@file{sys/rseq.h} which contains a signature.  That signature is
++expected to be present in the code before each restartable sequences
++abort handler.  Failure to provide the expected signature may terminate
++the process with a segmentation fault.
++@end deftypevr
++
+ @c FIXME these are undocumented:
+ @c pthread_atfork
+ @c pthread_attr_destroy
+diff --git a/sysdeps/nptl/dl-tls_init_tp.c b/sysdeps/nptl/dl-tls_init_tp.c
+index 23aa4cfc0b784dfc..0f5280a75d546d2f 100644
+--- a/sysdeps/nptl/dl-tls_init_tp.c
++++ b/sysdeps/nptl/dl-tls_init_tp.c
+@@ -22,6 +22,7 @@
+ #include <pthreadP.h>
+ #include <tls.h>
+ #include <rseq-internal.h>
++#include <thread_pointer.h>
+ 
+ #define TUNABLE_NAMESPACE pthread
+ #include <dl-tunables.h>
+@@ -43,6 +44,10 @@ rtld_mutex_dummy (pthread_mutex_t *lock)
+ }
+ #endif
+ 
++const unsigned int __rseq_flags;
++const unsigned int __rseq_size attribute_relro;
++const int __rseq_offset attribute_relro;
++
+ void
+ __tls_pre_init_tp (void)
+ {
+@@ -100,7 +105,23 @@ __tls_init_tp (void)
+ #if HAVE_TUNABLES
+     do_rseq = TUNABLE_GET (rseq, int, NULL);
+ #endif
+-    rseq_register_current_thread (pd, do_rseq);
++    if (rseq_register_current_thread (pd, do_rseq))
++      {
++        /* We need a writable view of the variables.  They are in
++           .data.relro and are not yet write-protected.  */
++        extern unsigned int size __asm__ ("__rseq_size");
++        size = sizeof (pd->rseq_area);
++      }
++
++#ifdef RSEQ_SIG
++    /* This should be a compile-time constant, but the current
++       infrastructure makes it difficult to determine its value.  Not
++       all targets support __thread_pointer, so set __rseq_offset only
++       if thre rseq registration may have happened because RSEQ_SIG is
++       defined.  */
++    extern int offset __asm__ ("__rseq_offset");
++    offset = (char *) &pd->rseq_area - (char *) __thread_pointer ();
++#endif
+   }
+ 
+   /* Set initial thread's stack block from 0 up to __libc_stack_end.
+diff --git a/sysdeps/unix/sysv/linux/Makefile b/sysdeps/unix/sysv/linux/Makefile
+index 5c772f69d1b1f1f1..9b7e214219943531 100644
+--- a/sysdeps/unix/sysv/linux/Makefile
++++ b/sysdeps/unix/sysv/linux/Makefile
+@@ -110,7 +110,8 @@ sysdep_headers += sys/mount.h sys/acct.h \
+ 		  bits/types/struct_semid64_ds_helper.h \
+ 		  bits/types/struct_shmid64_ds.h \
+ 		  bits/types/struct_shmid64_ds_helper.h \
+-		  bits/pthread_stack_min.h bits/pthread_stack_min-dynamic.h
++		  bits/pthread_stack_min.h bits/pthread_stack_min-dynamic.h \
++		  sys/rseq.h bits/rseq.h
+ 
+ tests += tst-clone tst-clone2 tst-clone3 tst-fanotify tst-personality \
+ 	 tst-quota tst-sync_file_range tst-sysconf-iov_max tst-ttyname \
+diff --git a/sysdeps/unix/sysv/linux/Versions b/sysdeps/unix/sysv/linux/Versions
+index 26452f3f17b5421d..3f8809a1581f27d0 100644
+--- a/sysdeps/unix/sysv/linux/Versions
++++ b/sysdeps/unix/sysv/linux/Versions
+@@ -316,6 +316,11 @@ librt {
+ }
+ 
+ ld {
++  GLIBC_2.35 {
++    __rseq_flags;
++    __rseq_offset;
++    __rseq_size;
++  }
+   GLIBC_PRIVATE {
+     __nptl_change_stack_perm;
+   }
+diff --git a/sysdeps/unix/sysv/linux/aarch64/ld.abilist b/sysdeps/unix/sysv/linux/aarch64/ld.abilist
+index b7196a80e2df8efc..bf4d4f9b6f2ddf97 100644
+--- a/sysdeps/unix/sysv/linux/aarch64/ld.abilist
++++ b/sysdeps/unix/sysv/linux/aarch64/ld.abilist
+@@ -4,3 +4,6 @@ GLIBC_2.17 __tls_get_addr F
+ GLIBC_2.17 _dl_mcount F
+ GLIBC_2.17 _r_debug D 0x28
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/alpha/ld.abilist b/sysdeps/unix/sysv/linux/alpha/ld.abilist
+index 13f7fc74af62941d..a23325a566419b41 100644
+--- a/sysdeps/unix/sysv/linux/alpha/ld.abilist
++++ b/sysdeps/unix/sysv/linux/alpha/ld.abilist
+@@ -3,4 +3,7 @@ GLIBC_2.1 __libc_stack_end D 0x8
+ GLIBC_2.1 _dl_mcount F
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x8
+diff --git a/sysdeps/unix/sysv/linux/arc/ld.abilist b/sysdeps/unix/sysv/linux/arc/ld.abilist
+index 7284383a6bea8e64..55f0c2ab9c6f7d91 100644
+--- a/sysdeps/unix/sysv/linux/arc/ld.abilist
++++ b/sysdeps/unix/sysv/linux/arc/ld.abilist
+@@ -4,3 +4,6 @@ GLIBC_2.32 __tls_get_addr F
+ GLIBC_2.32 _dl_mcount F
+ GLIBC_2.32 _r_debug D 0x14
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/arm/be/ld.abilist b/sysdeps/unix/sysv/linux/arm/be/ld.abilist
+index 7987bbae1112aa3d..f1da2c636ddb359d 100644
+--- a/sysdeps/unix/sysv/linux/arm/be/ld.abilist
++++ b/sysdeps/unix/sysv/linux/arm/be/ld.abilist
+@@ -1,4 +1,7 @@
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __libc_stack_end D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x4
+ GLIBC_2.4 __tls_get_addr F
+diff --git a/sysdeps/unix/sysv/linux/arm/le/ld.abilist b/sysdeps/unix/sysv/linux/arm/le/ld.abilist
+index 7987bbae1112aa3d..f1da2c636ddb359d 100644
+--- a/sysdeps/unix/sysv/linux/arm/le/ld.abilist
++++ b/sysdeps/unix/sysv/linux/arm/le/ld.abilist
+@@ -1,4 +1,7 @@
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __libc_stack_end D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x4
+ GLIBC_2.4 __tls_get_addr F
+diff --git a/sysdeps/unix/sysv/linux/csky/ld.abilist b/sysdeps/unix/sysv/linux/csky/ld.abilist
+index 4939b20631dc6c54..7f482276ed8df1d5 100644
+--- a/sysdeps/unix/sysv/linux/csky/ld.abilist
++++ b/sysdeps/unix/sysv/linux/csky/ld.abilist
+@@ -4,3 +4,6 @@ GLIBC_2.29 __tls_get_addr F
+ GLIBC_2.29 _dl_mcount F
+ GLIBC_2.29 _r_debug D 0x14
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/hppa/ld.abilist b/sysdeps/unix/sysv/linux/hppa/ld.abilist
+index 7cc9ebd792c2aadc..7f5527fb301b913c 100644
+--- a/sysdeps/unix/sysv/linux/hppa/ld.abilist
++++ b/sysdeps/unix/sysv/linux/hppa/ld.abilist
+@@ -3,4 +3,7 @@ GLIBC_2.2 _dl_mcount F
+ GLIBC_2.2 _r_debug D 0x14
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x4
+diff --git a/sysdeps/unix/sysv/linux/i386/ld.abilist b/sysdeps/unix/sysv/linux/i386/ld.abilist
+index e8d187b14d722a64..9c4a45d8dc525e52 100644
+--- a/sysdeps/unix/sysv/linux/i386/ld.abilist
++++ b/sysdeps/unix/sysv/linux/i386/ld.abilist
+@@ -4,3 +4,6 @@ GLIBC_2.1 _dl_mcount F
+ GLIBC_2.3 ___tls_get_addr F
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/ia64/ld.abilist b/sysdeps/unix/sysv/linux/ia64/ld.abilist
+index be5122650ae2b327..8ccb5be911e0e9a2 100644
+--- a/sysdeps/unix/sysv/linux/ia64/ld.abilist
++++ b/sysdeps/unix/sysv/linux/ia64/ld.abilist
+@@ -3,3 +3,6 @@ GLIBC_2.2 _dl_mcount F
+ GLIBC_2.2 _r_debug D 0x28
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/m68k/coldfire/ld.abilist b/sysdeps/unix/sysv/linux/m68k/coldfire/ld.abilist
+index 7987bbae1112aa3d..f1da2c636ddb359d 100644
+--- a/sysdeps/unix/sysv/linux/m68k/coldfire/ld.abilist
++++ b/sysdeps/unix/sysv/linux/m68k/coldfire/ld.abilist
+@@ -1,4 +1,7 @@
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __libc_stack_end D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x4
+ GLIBC_2.4 __tls_get_addr F
+diff --git a/sysdeps/unix/sysv/linux/m68k/m680x0/ld.abilist b/sysdeps/unix/sysv/linux/m68k/m680x0/ld.abilist
+index 4f2854edf7746958..dadbf852d0522e77 100644
+--- a/sysdeps/unix/sysv/linux/m68k/m680x0/ld.abilist
++++ b/sysdeps/unix/sysv/linux/m68k/m680x0/ld.abilist
+@@ -3,4 +3,7 @@ GLIBC_2.1 __libc_stack_end D 0x4
+ GLIBC_2.1 _dl_mcount F
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x4
+diff --git a/sysdeps/unix/sysv/linux/microblaze/ld.abilist b/sysdeps/unix/sysv/linux/microblaze/ld.abilist
+index 9f0fdeca38890a34..89a0b7e4fd5a95fa 100644
+--- a/sysdeps/unix/sysv/linux/microblaze/ld.abilist
++++ b/sysdeps/unix/sysv/linux/microblaze/ld.abilist
+@@ -4,3 +4,6 @@ GLIBC_2.18 __tls_get_addr F
+ GLIBC_2.18 _dl_mcount F
+ GLIBC_2.18 _r_debug D 0x14
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/mips/mips32/ld.abilist b/sysdeps/unix/sysv/linux/mips/mips32/ld.abilist
+index f750067d5c34bf42..e304d1bb464b28f4 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips32/ld.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips32/ld.abilist
+@@ -3,4 +3,7 @@ GLIBC_2.2 __libc_stack_end D 0x4
+ GLIBC_2.2 _dl_mcount F
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x4
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n32/ld.abilist b/sysdeps/unix/sysv/linux/mips/mips64/n32/ld.abilist
+index f750067d5c34bf42..e304d1bb464b28f4 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n32/ld.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n32/ld.abilist
+@@ -3,4 +3,7 @@ GLIBC_2.2 __libc_stack_end D 0x4
+ GLIBC_2.2 _dl_mcount F
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x4
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n64/ld.abilist b/sysdeps/unix/sysv/linux/mips/mips64/n64/ld.abilist
+index 2fba6a9b6ec92e47..37a47ebc0a0d16c8 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n64/ld.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n64/ld.abilist
+@@ -3,4 +3,7 @@ GLIBC_2.2 __libc_stack_end D 0x8
+ GLIBC_2.2 _dl_mcount F
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x8
+diff --git a/sysdeps/unix/sysv/linux/nios2/ld.abilist b/sysdeps/unix/sysv/linux/nios2/ld.abilist
+index 57dfad5a53b739e8..811ae9da2fa85399 100644
+--- a/sysdeps/unix/sysv/linux/nios2/ld.abilist
++++ b/sysdeps/unix/sysv/linux/nios2/ld.abilist
+@@ -4,3 +4,6 @@ GLIBC_2.21 __tls_get_addr F
+ GLIBC_2.21 _dl_mcount F
+ GLIBC_2.21 _r_debug D 0x14
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc32/ld.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc32/ld.abilist
+index e89660739262c6ab..5a68aeb9eed33844 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/ld.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/ld.abilist
+@@ -5,3 +5,6 @@ GLIBC_2.22 __tls_get_addr_opt F
+ GLIBC_2.23 __parse_hwcap_and_convert_at_platform F
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/ld.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/ld.abilist
+index ce0bc639597c4bd9..da24dc7fb52ad2d4 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/ld.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/ld.abilist
+@@ -5,3 +5,6 @@ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.3 _dl_mcount F
+ GLIBC_2.3 _r_debug D 0x28
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/ld.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/ld.abilist
+index 65b22674d2462e96..b9ae89ae8d90ed9e 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/ld.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/ld.abilist
+@@ -5,3 +5,6 @@ GLIBC_2.17 _r_debug D 0x28
+ GLIBC_2.22 __tls_get_addr_opt F
+ GLIBC_2.23 __parse_hwcap_and_convert_at_platform F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv32/ld.abilist b/sysdeps/unix/sysv/linux/riscv/rv32/ld.abilist
+index 5ad4c81d12d7a612..068368878eb2406e 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv32/ld.abilist
++++ b/sysdeps/unix/sysv/linux/riscv/rv32/ld.abilist
+@@ -4,3 +4,6 @@ GLIBC_2.33 __tls_get_addr F
+ GLIBC_2.33 _dl_mcount F
+ GLIBC_2.33 _r_debug D 0x14
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv64/ld.abilist b/sysdeps/unix/sysv/linux/riscv/rv64/ld.abilist
+index 479efdea9bb654bb..48431c91a9fd16b0 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv64/ld.abilist
++++ b/sysdeps/unix/sysv/linux/riscv/rv64/ld.abilist
+@@ -4,3 +4,6 @@ GLIBC_2.27 __tls_get_addr F
+ GLIBC_2.27 _dl_mcount F
+ GLIBC_2.27 _r_debug D 0x28
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/rseq-internal.h b/sysdeps/unix/sysv/linux/rseq-internal.h
+index 6a3441f2cc49e7c4..9e8f99fd51a063b1 100644
+--- a/sysdeps/unix/sysv/linux/rseq-internal.h
++++ b/sysdeps/unix/sysv/linux/rseq-internal.h
+@@ -41,7 +41,7 @@ rseq_register_current_thread (struct pthread *self, bool do_rseq)
+   return false;
+ }
+ #else /* RSEQ_SIG */
+-static inline void
++static inline bool
+ rseq_register_current_thread (struct pthread *self, bool do_rseq)
+ {
+   THREAD_SETMEM (self, rseq_area.cpu_id, RSEQ_CPU_ID_REGISTRATION_FAILED);
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-32/ld.abilist b/sysdeps/unix/sysv/linux/s390/s390-32/ld.abilist
+index d5ecb636bb792bdf..c15288394a232a8c 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-32/ld.abilist
++++ b/sysdeps/unix/sysv/linux/s390/s390-32/ld.abilist
+@@ -3,3 +3,6 @@ GLIBC_2.1 __libc_stack_end D 0x4
+ GLIBC_2.1 _dl_mcount F
+ GLIBC_2.3 __tls_get_offset F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-64/ld.abilist b/sysdeps/unix/sysv/linux/s390/s390-64/ld.abilist
+index 62a5e1d99a2e6f42..117d1430a4c6272e 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-64/ld.abilist
++++ b/sysdeps/unix/sysv/linux/s390/s390-64/ld.abilist
+@@ -3,3 +3,6 @@ GLIBC_2.2 _dl_mcount F
+ GLIBC_2.2 _r_debug D 0x28
+ GLIBC_2.3 __tls_get_offset F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/sh/be/ld.abilist b/sysdeps/unix/sysv/linux/sh/be/ld.abilist
+index 7cc9ebd792c2aadc..7f5527fb301b913c 100644
+--- a/sysdeps/unix/sysv/linux/sh/be/ld.abilist
++++ b/sysdeps/unix/sysv/linux/sh/be/ld.abilist
+@@ -3,4 +3,7 @@ GLIBC_2.2 _dl_mcount F
+ GLIBC_2.2 _r_debug D 0x14
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x4
+diff --git a/sysdeps/unix/sysv/linux/sh/le/ld.abilist b/sysdeps/unix/sysv/linux/sh/le/ld.abilist
+index 7cc9ebd792c2aadc..7f5527fb301b913c 100644
+--- a/sysdeps/unix/sysv/linux/sh/le/ld.abilist
++++ b/sysdeps/unix/sysv/linux/sh/le/ld.abilist
+@@ -3,4 +3,7 @@ GLIBC_2.2 _dl_mcount F
+ GLIBC_2.2 _r_debug D 0x14
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+ GLIBC_2.4 __stack_chk_guard D 0x4
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc32/ld.abilist b/sysdeps/unix/sysv/linux/sparc/sparc32/ld.abilist
+index 2e6054349871e7d5..3aac73f3df646cb6 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc32/ld.abilist
++++ b/sysdeps/unix/sysv/linux/sparc/sparc32/ld.abilist
+@@ -3,3 +3,6 @@ GLIBC_2.1 __libc_stack_end D 0x4
+ GLIBC_2.1 _dl_mcount F
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc64/ld.abilist b/sysdeps/unix/sysv/linux/sparc/sparc64/ld.abilist
+index be5122650ae2b327..8ccb5be911e0e9a2 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc64/ld.abilist
++++ b/sysdeps/unix/sysv/linux/sparc/sparc64/ld.abilist
+@@ -3,3 +3,6 @@ GLIBC_2.2 _dl_mcount F
+ GLIBC_2.2 _r_debug D 0x28
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/sys/rseq.h b/sysdeps/unix/sysv/linux/sys/rseq.h
+index c8edff50d40e29b6..1215b5d086b8852b 100644
+--- a/sysdeps/unix/sysv/linux/sys/rseq.h
++++ b/sysdeps/unix/sysv/linux/sys/rseq.h
+@@ -171,4 +171,14 @@ struct rseq
+ 
+ #endif /* __GLIBC_HAVE_KERNEL_RSEQ */
+ 
++/* Offset from the thread pointer to the rseq area.  */
++extern const int __rseq_offset;
++
++/* Size of the registered rseq area.  0 if the registration was
++   unsuccessful.  */
++extern const unsigned int __rseq_size;
++
++/* Flags used during rseq registration.  */
++extern const unsigned int __rseq_flags;
++
+ #endif /* sys/rseq.h */
+diff --git a/sysdeps/unix/sysv/linux/tst-rseq-disable.c b/sysdeps/unix/sysv/linux/tst-rseq-disable.c
+index 000e351872fc2f76..6d73f77e9621da42 100644
+--- a/sysdeps/unix/sysv/linux/tst-rseq-disable.c
++++ b/sysdeps/unix/sysv/linux/tst-rseq-disable.c
+@@ -21,6 +21,7 @@
+ #include <support/namespace.h>
+ #include <support/xthread.h>
+ #include <sysdep.h>
++#include <thread_pointer.h>
+ #include <unistd.h>
+ 
+ #ifdef RSEQ_SIG
+@@ -30,6 +31,11 @@ static void
+ check_rseq_disabled (void)
+ {
+   struct pthread *pd = THREAD_SELF;
++
++  TEST_COMPARE (__rseq_flags, 0);
++  TEST_VERIFY ((char *) __thread_pointer () + __rseq_offset
++               == (char *) &pd->rseq_area);
++  TEST_COMPARE (__rseq_size, 0);
+   TEST_COMPARE ((int) pd->rseq_area.cpu_id, RSEQ_CPU_ID_REGISTRATION_FAILED);
+ 
+   int ret = syscall (__NR_rseq, &pd->rseq_area, sizeof (pd->rseq_area),
+diff --git a/sysdeps/unix/sysv/linux/tst-rseq.c b/sysdeps/unix/sysv/linux/tst-rseq.c
+index 926376b6a5446ece..572c11166f8b6533 100644
+--- a/sysdeps/unix/sysv/linux/tst-rseq.c
++++ b/sysdeps/unix/sysv/linux/tst-rseq.c
+@@ -29,12 +29,20 @@
+ # include <stdlib.h>
+ # include <string.h>
+ # include <syscall.h>
++# include <thread_pointer.h>
++# include <tls.h>
+ # include "tst-rseq.h"
+ 
+ static void
+ do_rseq_main_test (void)
+ {
++  struct pthread *pd = THREAD_SELF;
++
+   TEST_VERIFY_EXIT (rseq_thread_registered ());
++  TEST_COMPARE (__rseq_flags, 0);
++  TEST_VERIFY ((char *) __thread_pointer () + __rseq_offset
++               == (char *) &pd->rseq_area);
++  TEST_COMPARE (__rseq_size, sizeof (pd->rseq_area));
+ }
+ 
+ static void
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/ld.abilist b/sysdeps/unix/sysv/linux/x86_64/64/ld.abilist
+index afddaec57c11f837..ae622bdf9710bdbd 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/64/ld.abilist
++++ b/sysdeps/unix/sysv/linux/x86_64/64/ld.abilist
+@@ -3,3 +3,6 @@ GLIBC_2.2.5 _dl_mcount F
+ GLIBC_2.2.5 _r_debug D 0x28
+ GLIBC_2.3 __tls_get_addr F
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4
+diff --git a/sysdeps/unix/sysv/linux/x86_64/x32/ld.abilist b/sysdeps/unix/sysv/linux/x86_64/x32/ld.abilist
+index defc488d137c61c3..e17496d124b0c7b7 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/x32/ld.abilist
++++ b/sysdeps/unix/sysv/linux/x86_64/x32/ld.abilist
+@@ -3,3 +3,6 @@ GLIBC_2.16 __tls_get_addr F
+ GLIBC_2.16 _dl_mcount F
+ GLIBC_2.16 _r_debug D 0x14
+ GLIBC_2.34 __rtld_version_placeholder F
++GLIBC_2.35 __rseq_flags D 0x4
++GLIBC_2.35 __rseq_offset D 0x4
++GLIBC_2.35 __rseq_size D 0x4

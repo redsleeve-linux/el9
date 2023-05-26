@@ -1,0 +1,136 @@
+From 79c16ad7a09623b987a50a0d04a61fed41e45a77 Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Sun, 27 Nov 2022 21:18:44 +0800
+Subject: [PATCH] systemctl: allow suppress the warning of no install info
+ using --no-warn
+
+In cases like packaging scripts, it might be desired to use
+enable/disable on units without install info. So, adding an
+option '--no-warn' to suppress the warning.
+
+(cherry picked from commit 108d35ac7d435b4f1378a9c0fa50858263475e09)
+
+Related: #2141979
+---
+ man/systemctl.xml                | 18 ++++++++++++++++--
+ src/systemctl/systemctl-enable.c |  2 +-
+ src/systemctl/systemctl.c        |  9 +++++++++
+ src/systemctl/systemctl.h        |  1 +
+ 4 files changed, 27 insertions(+), 3 deletions(-)
+
+diff --git a/man/systemctl.xml b/man/systemctl.xml
+index f743c182fe..d909dc4db4 100644
+--- a/man/systemctl.xml
++++ b/man/systemctl.xml
+@@ -771,6 +771,9 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
+             account.
+             </para>
+ 
++            <para>When using this operation on units without install information, a warning about it is shown.
++            <option>--no-warn</option> can be used to suppress the warning.</para>
++
+             <para>Enabling units should not be confused with starting (activating) units, as done by the
+             <command>start</command> command. Enabling and starting units is orthogonal: units may be enabled without
+             being started and started without being enabled. Enabling simply hooks the unit into various suggested
+@@ -814,8 +817,8 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
+             executed. This output may be suppressed by passing <option>--quiet</option>.
+             </para>
+ 
+-            <para>This command honors <option>--system</option>, <option>--user</option>, <option>--runtime</option>
+-            and <option>--global</option> in a similar way as <command>enable</command>.</para>
++            <para>This command honors <option>--system</option>, <option>--user</option>, <option>--runtime</option>,
++            <option>--global</option> and <option>--no-warn</option> in a similar way as <command>enable</command>.</para>
+           </listitem>
+         </varlistentry>
+ 
+@@ -1997,6 +2000,17 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
+         </listitem>
+       </varlistentry>
+ 
++      <varlistentry>
++        <term><option>--no-warn</option></term>
++
++        <listitem>
++          <para>Don't generate the warning shown by default when using
++          <command>enable</command> or <command>disable</command> on units
++          without install information (i.e. don't have or have an empty
++          [Install] section).</para>
++        </listitem>
++      </varlistentry>
++
+       <varlistentry>
+         <term><option>--no-block</option></term>
+ 
+diff --git a/src/systemctl/systemctl-enable.c b/src/systemctl/systemctl-enable.c
+index aea66872de..86d9f602fa 100644
+--- a/src/systemctl/systemctl-enable.c
++++ b/src/systemctl/systemctl-enable.c
+@@ -67,7 +67,7 @@ int verb_enable(int argc, char *argv[], void *userdata) {
+         InstallChange *changes = NULL;
+         size_t n_changes = 0;
+         int carries_install_info = -1;
+-        bool ignore_carries_install_info = arg_quiet;
++        bool ignore_carries_install_info = arg_quiet || arg_no_warn;
+         int r;
+ 
+         if (!argv[1])
+diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
+index 91954d91e6..57e9966d3c 100644
+--- a/src/systemctl/systemctl.c
++++ b/src/systemctl/systemctl.c
+@@ -83,6 +83,7 @@ bool arg_show_types = false;
+ int arg_check_inhibitors = -1;
+ bool arg_dry_run = false;
+ bool arg_quiet = false;
++bool arg_no_warn = false;
+ bool arg_full = false;
+ bool arg_recursive = false;
+ bool arg_with_dependencies = false;
+@@ -276,6 +277,8 @@ static int systemctl_help(void) {
+                "                             kexec, suspend, hibernate, suspend-then-hibernate,\n"
+                "                             hybrid-sleep, default, rescue, emergency, and exit.\n"
+                "  -q --quiet             Suppress output\n"
++               "     --no-warn           Don't generate warning when trying to enable/disable\n"
++               "                         units without install information\n"
+                "     --wait              For (re)start, wait until service stopped again\n"
+                "                         For is-system-running, wait until startup is completed\n"
+                "     --no-block          Do not wait until operation finished\n"
+@@ -432,6 +435,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
+                 ARG_READ_ONLY,
+                 ARG_MKDIR,
+                 ARG_MARKED,
++                ARG_NO_WARN,
+         };
+ 
+         static const struct option options[] = {
+@@ -464,6 +468,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
+                 { "no-wall",             no_argument,       NULL, ARG_NO_WALL             },
+                 { "dry-run",             no_argument,       NULL, ARG_DRY_RUN             },
+                 { "quiet",               no_argument,       NULL, 'q'                     },
++                { "no-warn",             no_argument,       NULL, ARG_NO_WARN             },
+                 { "root",                required_argument, NULL, ARG_ROOT                },
+                 { "image",               required_argument, NULL, ARG_IMAGE               },
+                 { "force",               no_argument,       NULL, 'f'                     },
+@@ -925,6 +930,10 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
+                         arg_marked = true;
+                         break;
+ 
++                case ARG_NO_WARN:
++                        arg_no_warn = true;
++                        break;
++
+                 case '.':
+                         /* Output an error mimicking getopt, and print a hint afterwards */
+                         log_error("%s: invalid option -- '.'", program_invocation_name);
+diff --git a/src/systemctl/systemctl.h b/src/systemctl/systemctl.h
+index 2454c4c714..1a7a6e28d3 100644
+--- a/src/systemctl/systemctl.h
++++ b/src/systemctl/systemctl.h
+@@ -65,6 +65,7 @@ extern bool arg_show_types;
+ extern int arg_check_inhibitors;
+ extern bool arg_dry_run;
+ extern bool arg_quiet;
++extern bool arg_no_warn;
+ extern bool arg_full;
+ extern bool arg_recursive;
+ extern bool arg_with_dependencies;

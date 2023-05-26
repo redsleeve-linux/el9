@@ -1,0 +1,30 @@
+From ca92c2e035d5702f23f9a8d1cd705425b5605822 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Mon, 7 Nov 2022 11:55:29 +0100
+Subject: [PATCH] test: don't ignore non-existent paths in inst_recursive()
+
+The process substitution in the while loop hides errors raised by the
+find utility, which might (and did), in turn, hide errors in test setup.
+
+(cherry picked from commit eb5d7730e1b3b1bddecb80be37e5a4c938183f61)
+
+Related #2138081
+---
+ test/test-functions | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/test/test-functions b/test/test-functions
+index 16d9da637b..80ce383e64 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -2773,6 +2773,10 @@ inst_recursive() {
+     local p item
+ 
+     for p in "$@"; do
++        # Make sure the source exists, as the process substitution below
++        # suppresses errors
++        stat "$p" >/dev/null || return 1
++
+         while read -r item; do
+             if [[ -d "$item" ]]; then
+                 inst_dir "$item"

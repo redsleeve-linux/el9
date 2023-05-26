@@ -1,0 +1,34 @@
+From 4dbbdc956cb49804f9b451081eb7c442a689b1f1 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 21 Feb 2023 19:15:13 +0100
+Subject: [PATCH] test: add coverage for #26467
+
+(cherry picked from commit 4190124b3ca005830d893303bbc563baaf9984ed)
+
+Related: #2138081
+---
+ test/units/testsuite-26.sh | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/test/units/testsuite-26.sh b/test/units/testsuite-26.sh
+index 916a6704d7..debee91dde 100755
+--- a/test/units/testsuite-26.sh
++++ b/test/units/testsuite-26.sh
+@@ -400,5 +400,17 @@ EOF
+     systemctl stop issue-24990
+ fi
+ 
++# %J in WantedBy= causes ABRT (#26467)
++cat >/run/systemd/system/test-WantedBy.service <<EOF
++[Service]
++ExecStart=true
++
++[Install]
++WantedBy=user-%i@%J.service
++EOF
++systemctl daemon-reload
++systemctl enable --now test-WantedBy.service || :
++systemctl daemon-reload
++
+ touch /testok
+ rm /failed

@@ -1,0 +1,55 @@
+From b9223cd76c73fa5cf3ed19a2238980047bf13826 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 4 Nov 2022 18:20:19 +0100
+Subject: [PATCH] fd-util: add new fd_cloexec_many() helper
+
+(cherry picked from commit ed18c22c989495aab36512f03449222cfcf79aa7)
+
+Related: #2138081
+---
+ src/basic/fd-util.c | 19 +++++++++++++++++++
+ src/basic/fd-util.h |  1 +
+ 2 files changed, 20 insertions(+)
+
+diff --git a/src/basic/fd-util.c b/src/basic/fd-util.c
+index 6ed04449bf..66bb7569bb 100644
+--- a/src/basic/fd-util.c
++++ b/src/basic/fd-util.c
+@@ -174,6 +174,25 @@ int fd_cloexec(int fd, bool cloexec) {
+         return RET_NERRNO(fcntl(fd, F_SETFD, nflags));
+ }
+ 
++int fd_cloexec_many(const int fds[], size_t n_fds, bool cloexec) {
++        int ret = 0, r;
++
++        assert(n_fds == 0 || fds);
++
++        for (size_t i = 0; i < n_fds; i++) {
++                if (fds[i] < 0) /* Skip gracefully over already invalidated fds */
++                        continue;
++
++                r = fd_cloexec(fds[i], cloexec);
++                if (r < 0 && ret >= 0) /* Continue going, but return first error */
++                        ret = r;
++                else
++                        ret = 1; /* report if we did anything */
++        }
++
++        return ret;
++}
++
+ _pure_ static bool fd_in_set(int fd, const int fdset[], size_t n_fdset) {
+         assert(n_fdset == 0 || fdset);
+ 
+diff --git a/src/basic/fd-util.h b/src/basic/fd-util.h
+index d9896e27e8..29c7d86f27 100644
+--- a/src/basic/fd-util.h
++++ b/src/basic/fd-util.h
+@@ -56,6 +56,7 @@ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(DIR*, closedir, NULL);
+ 
+ int fd_nonblock(int fd, bool nonblock);
+ int fd_cloexec(int fd, bool cloexec);
++int fd_cloexec_many(const int fds[], size_t n_fds, bool cloexec);
+ 
+ int get_max_fd(void);
+ 

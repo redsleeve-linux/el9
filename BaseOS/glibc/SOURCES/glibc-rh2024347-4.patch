@@ -1,0 +1,130 @@
+commit 8dbeb0561eeb876f557ac9eef5721912ec074ea5
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Dec 9 09:49:32 2021 +0100
+
+    nptl: Add <thread_pointer.h> for defining __thread_pointer
+    
+    <tls.h> already contains a definition that is quite similar,
+    but it is not consistent across architectures.
+    
+    Only architectures for which rseq support is added are covered.
+    
+    Reviewed-by: Szabolcs Nagy <szabolcs.nagy@arm.com>
+
+diff --git a/sysdeps/nptl/thread_pointer.h b/sysdeps/nptl/thread_pointer.h
+new file mode 100644
+index 0000000000000000..92f2f3093eba55bb
+--- /dev/null
++++ b/sysdeps/nptl/thread_pointer.h
+@@ -0,0 +1,28 @@
++/* __thread_pointer definition.  Generic version.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library.  If not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _SYS_THREAD_POINTER_H
++#define _SYS_THREAD_POINTER_H
++
++static inline void *
++__thread_pointer (void)
++{
++  return __builtin_thread_pointer ();
++}
++
++#endif /* _SYS_THREAD_POINTER_H */
+diff --git a/sysdeps/powerpc/nptl/thread_pointer.h b/sysdeps/powerpc/nptl/thread_pointer.h
+new file mode 100644
+index 0000000000000000..8fd5ba671f6f5e64
+--- /dev/null
++++ b/sysdeps/powerpc/nptl/thread_pointer.h
+@@ -0,0 +1,33 @@
++/* __thread_pointer definition.  powerpc version.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library.  If not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _SYS_THREAD_POINTER_H
++#define _SYS_THREAD_POINTER_H
++
++static inline void *
++__thread_pointer (void)
++{
++#ifdef __powerpc64__
++  register void *__result asm ("r13");
++#else
++  register void *__result asm ("r2");
++#endif
++  return __result;
++}
++
++#endif /* _SYS_THREAD_POINTER_H */
+diff --git a/sysdeps/x86/nptl/thread_pointer.h b/sysdeps/x86/nptl/thread_pointer.h
+new file mode 100644
+index 0000000000000000..6b71b6f7e1401e4c
+--- /dev/null
++++ b/sysdeps/x86/nptl/thread_pointer.h
+@@ -0,0 +1,38 @@
++/* __thread_pointer definition.  x86 version.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library.  If not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _SYS_THREAD_POINTER_H
++#define _SYS_THREAD_POINTER_H
++
++static inline void *
++__thread_pointer (void)
++{
++#if __GNUC_PREREQ (11, 1)
++  return __builtin_thread_pointer ();
++#else
++  void *__result;
++# ifdef __x86_64__
++  __asm__ ("mov %%fs:0, %0" : "=r" (__result));
++# else
++  __asm__ ("mov %%gs:0, %0" : "=r" (__result));
++# endif
++  return __result;
++#endif /* !GCC 11 */
++}
++
++#endif /* _SYS_THREAD_POINTER_H */

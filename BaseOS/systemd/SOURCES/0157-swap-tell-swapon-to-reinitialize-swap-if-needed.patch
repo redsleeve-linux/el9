@@ -1,0 +1,29 @@
+From 94bab389194116ab10a68bca3d72c5b06f332645 Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Mon, 12 Dec 2022 16:21:30 +0100
+Subject: [PATCH] swap: tell swapon to reinitialize swap if needed
+
+If the page size of a swap space doesn't match the page size of the
+currently running kernel, swapon will fail. Let's instruct it to
+reinitialize the swap space instead.
+
+(cherry picked from commit cc137d53e36da5e57b060be5e621864f572b2cac)
+
+Resolves: #2151993
+---
+ src/core/swap.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/swap.c b/src/core/swap.c
+index 2196793ad1..5c83c4780f 100644
+--- a/src/core/swap.c
++++ b/src/core/swap.c
+@@ -827,7 +827,7 @@ static void swap_enter_activating(Swap *s) {
+                 }
+         }
+ 
+-        r = exec_command_set(s->control_command, "/sbin/swapon", NULL);
++        r = exec_command_set(s->control_command, "/sbin/swapon", "--fixpgsz", NULL);
+         if (r < 0)
+                 goto fail;
+ 

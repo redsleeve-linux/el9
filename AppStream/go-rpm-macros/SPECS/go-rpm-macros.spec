@@ -1,5 +1,5 @@
 %global forgeurl  https://pagure.io/go-rpm-macros
-Version:   3.0.9
+Version:   3.2.0
 %forgemeta
 
 #https://src.fedoraproject.org/rpms/redhat-rpm-config/pull-request/51
@@ -10,7 +10,7 @@ Version:   3.0.9
 %global golang_arches   %{ix86} x86_64 %{arm} aarch64 ppc64le s390x
 %global gccgo_arches    %{mips}
 %if 0%{?rhel} >= 9
-%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
+%global golang_arches   x86_64 aarch64 ppc64le s390x
 %endif
 # Go sources can contain arch-specific files and our macros will package the
 # correct files for each architecture. Therefore, move gopath to _libdir and
@@ -35,7 +35,7 @@ Version:   3.0.9
 ExclusiveArch: %{golang_arches} %{gccgo_arches}
 
 Name:      go-rpm-macros
-Release:   9%{?dist}.redsleeve
+Release:   1%{?dist}
 Summary:   Build-stage rpm automation for Go packages
 
 License:   GPLv3+
@@ -73,6 +73,12 @@ Patch0: update-default-gobuild-args.patch
 # command line parser backend to bootstrap golist
 # without dependencies.
 Patch1: golist-bootstrap-cli-no-vendor.patch
+
+# RHEL 8 only provides the macros.go-srpm file which includes gobuild and gotest.
+# C9S also only provides the macros.go-srpm file but it also follows upstream which includes gobuild and gotest in the macros.go-compilers-gcc.
+# For a simple fix, this patch ports both RHEL 8 macros to macros.go-srpm.
+# Resolves: rhbz#1965292
+Patch2: add-gobuild-and-gotest.patch
 
 %description
 This package provides build-stage rpm automation to simplify the creation of Go
@@ -147,6 +153,8 @@ if [[ ! -e %{golist_builddir}/src/%{golist_goipath} ]]; then
 
 fi
 %endif
+
+%patch2 -p1
 
 %build
 # build golist
@@ -242,8 +250,14 @@ sed -i "s,golist,%{golist_execdir}/golist,g" %{buildroot}%{_bindir}/go-rpm-integ
 %{_spectemplatedir}/*.spec
 
 %changelog
-* Thu Jul 21 2022 Jaccco Ligthart <jacco@redsleeve.org> 3.0.9-9.redsleeve
-- added arm to golang_arches
+* Wed Nov 23 2022 Alejandro Sáez <asm@redhat.com> - 3.2.0-1
+- Update to 3.2.0
+- Add add-gobuild-and-gotest.patch
+- Resolves: rhbz#1965292
+
+* Wed Jan 26 2022 Alejandro Sáez <asm@redhat.com> - 3.0.9-10
+- Fix typos in update-default-gobuild-args.patch
+- Related: rhbz#2043107
 
 * Tue Jan 18 2022 David Benoit <dbenoit@redhat.com> 3.0.9-9
 - Delete remove-fedora-dependency-automation.patch

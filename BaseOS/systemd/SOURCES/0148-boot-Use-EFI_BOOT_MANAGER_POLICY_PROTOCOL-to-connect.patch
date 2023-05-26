@@ -1,0 +1,75 @@
+From 071cef46b87b605f8b4918a95dcecae08b843e23 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Sun, 27 Nov 2022 13:38:18 +0100
+Subject: [PATCH] boot: Use EFI_BOOT_MANAGER_POLICY_PROTOCOL to connect console
+ devices
+
+(cherry picked from commit b99bf5811850afdb2502ba37251c48348da63c82)
+
+Related: #2138081
+---
+ src/boot/efi/console.c     | 16 ++++++++++++++++
+ src/boot/efi/missing_efi.h | 19 +++++++++++++++++++
+ 2 files changed, 35 insertions(+)
+
+diff --git a/src/boot/efi/console.c b/src/boot/efi/console.c
+index 14c0008afb..cd980fd535 100644
+--- a/src/boot/efi/console.c
++++ b/src/boot/efi/console.c
+@@ -12,6 +12,20 @@
+ #define VERTICAL_MAX_OK 1080
+ #define VIEWPORT_RATIO 10
+ 
++static EFI_STATUS console_connect(void) {
++        EFI_BOOT_MANAGER_POLICY_PROTOCOL *boot_policy;
++        EFI_STATUS err;
++
++        /* This should make console devices appear/fully initialize on fastboot firmware. */
++
++        err = BS->LocateProtocol(
++                        &(EFI_GUID) EFI_BOOT_MANAGER_POLICY_PROTOCOL_GUID, NULL, (void **) &boot_policy);
++        if (err != EFI_SUCCESS)
++                return err;
++
++        return boot_policy->ConnectDeviceClass(boot_policy, &(EFI_GUID) EFI_BOOT_MANAGER_POLICY_CONSOLE_GUID);
++}
++
+ static inline void event_closep(EFI_EVENT *event) {
+         if (!*event)
+                 return;
+@@ -47,6 +61,8 @@ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
+         assert(key);
+ 
+         if (!checked) {
++                console_connect();
++
+                 /* Get the *first* TextInputEx device.*/
+                 err = BS->LocateProtocol(&SimpleTextInputExProtocol, NULL, (void **) &extraInEx);
+                 if (err != EFI_SUCCESS || BS->CheckEvent(extraInEx->WaitForKeyEx) == EFI_INVALID_PARAMETER)
+diff --git a/src/boot/efi/missing_efi.h b/src/boot/efi/missing_efi.h
+index 250c84c248..b446e0399f 100644
+--- a/src/boot/efi/missing_efi.h
++++ b/src/boot/efi/missing_efi.h
+@@ -398,3 +398,22 @@ typedef struct {
+         void *StdErr;
+ } EFI_SHELL_PARAMETERS_PROTOCOL;
+ #endif
++
++#ifndef EFI_BOOT_MANAGER_POLICY_PROTOCOL_GUID
++#define EFI_BOOT_MANAGER_POLICY_PROTOCOL_GUID \
++        { 0xFEDF8E0C, 0xE147, 0x11E3, { 0x99, 0x03, 0xB8, 0xE8, 0x56, 0x2C, 0xBA, 0xFA } }
++#define EFI_BOOT_MANAGER_POLICY_CONSOLE_GUID \
++        { 0xCAB0E94C, 0xE15F, 0x11E3, { 0x91, 0x8D, 0xB8, 0xE8, 0x56, 0x2C, 0xBA, 0xFA } }
++
++typedef struct EFI_BOOT_MANAGER_POLICY_PROTOCOL EFI_BOOT_MANAGER_POLICY_PROTOCOL;
++struct EFI_BOOT_MANAGER_POLICY_PROTOCOL {
++        UINT64 Revision;
++        EFI_STATUS (EFIAPI *ConnectDevicePath)(
++                EFI_BOOT_MANAGER_POLICY_PROTOCOL *This,
++                EFI_DEVICE_PATH *DevicePath,
++                BOOLEAN Recursive);
++        EFI_STATUS (EFIAPI *ConnectDeviceClass)(
++                EFI_BOOT_MANAGER_POLICY_PROTOCOL *This,
++                EFI_GUID *Class);
++};
++#endif

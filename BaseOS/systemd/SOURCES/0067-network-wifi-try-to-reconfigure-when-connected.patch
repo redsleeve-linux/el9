@@ -1,0 +1,70 @@
+From ff7e9a0e3bf9229b2ea55ac0e832358fe13b97b4 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 22 Nov 2022 14:24:32 +0900
+Subject: [PATCH] network: wifi: try to reconfigure when connected
+
+Sometimes, RTM_NEWLINK message with carrier is received earlier than
+NL80211_CMD_CONNECT. To make SSID= or other WiFi related settings in
+[Match] section work, let's try to reconfigure the interface.
+
+Fixes a bug introduced by 96f5f9ef9a1ba5146d3357c1548fb675d3bd5b68.
+
+Fixes #25384.
+
+(cherry picked from commit 8a4ad01a72481a6a7c0309064dd2dbd814818c94)
+
+Related: #2138081
+---
+ src/network/networkd-link.c |  2 +-
+ src/network/networkd-link.h |  1 +
+ src/network/networkd-wifi.c | 12 ++++++++++++
+ 3 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index 00e4e451ef..788c7957d3 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -1178,7 +1178,7 @@ static int link_get_network(Link *link, Network **ret) {
+         return -ENOENT;
+ }
+ 
+-static int link_reconfigure_impl(Link *link, bool force) {
++int link_reconfigure_impl(Link *link, bool force) {
+         Network *network = NULL;
+         NetDev *netdev = NULL;
+         int r;
+diff --git a/src/network/networkd-link.h b/src/network/networkd-link.h
+index 9f1cdca312..65b0164106 100644
+--- a/src/network/networkd-link.h
++++ b/src/network/networkd-link.h
+@@ -234,6 +234,7 @@ int link_stop_engines(Link *link, bool may_keep_dhcp);
+ const char* link_state_to_string(LinkState s) _const_;
+ LinkState link_state_from_string(const char *s) _pure_;
+ 
++int link_reconfigure_impl(Link *link, bool force);
+ int link_reconfigure(Link *link, bool force);
+ int link_reconfigure_after_sleep(Link *link);
+ 
+diff --git a/src/network/networkd-wifi.c b/src/network/networkd-wifi.c
+index 4bf798a9eb..62cbca0cf9 100644
+--- a/src/network/networkd-wifi.c
++++ b/src/network/networkd-wifi.c
+@@ -269,6 +269,18 @@ int manager_genl_process_nl80211_mlme(sd_netlink *genl, sd_netlink_message *mess
+                 if (link->wlan_iftype == NL80211_IFTYPE_STATION && link->ssid)
+                         log_link_info(link, "Connected WiFi access point: %s (%s)",
+                                       link->ssid, ETHER_ADDR_TO_STR(&link->bssid));
++
++                /* Sometimes, RTM_NEWLINK message with carrier is received earlier than NL80211_CMD_CONNECT.
++                 * To make SSID= or other WiFi related settings in [Match] section work, let's try to
++                 * reconfigure the interface. */
++                if (link->ssid && link_has_carrier(link)) {
++                        r = link_reconfigure_impl(link, /* force = */ false);
++                        if (r < 0) {
++                                log_link_warning_errno(link, r, "Failed to reconfigure interface: %m");
++                                link_enter_failed(link);
++                                return 0;
++                        }
++                }
+                 break;
+         }
+         case NL80211_CMD_DISCONNECT:

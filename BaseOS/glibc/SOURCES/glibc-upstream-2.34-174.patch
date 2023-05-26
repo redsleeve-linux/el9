@@ -1,0 +1,42 @@
+commit b5a44a6a471aafd3677659a610f32468c40a666b
+Author: Noah Goldstein <goldstein.w.n@gmail.com>
+Date:   Tue Sep 21 18:31:49 2021 -0500
+
+    x86: Modify ENTRY in sysdep.h so that p2align can be specified
+    
+    No bug.
+    
+    This change adds a new macro ENTRY_P2ALIGN which takes a second
+    argument, log2 of the desired function alignment.
+    
+    The old ENTRY(name) macro is just ENTRY_P2ALIGN(name, 4) so this
+    doesn't affect any existing functionality.
+    
+    Signed-off-by: Noah Goldstein <goldstein.w.n@gmail.com>
+    (cherry picked from commit fc5bd179ef3a953dff8d1655bd530d0e230ffe71)
+
+diff --git a/sysdeps/x86/sysdep.h b/sysdeps/x86/sysdep.h
+index cac1d762fb3f99d0..937180c1bd791570 100644
+--- a/sysdeps/x86/sysdep.h
++++ b/sysdeps/x86/sysdep.h
+@@ -78,15 +78,18 @@ enum cf_protection_level
+ #define ASM_SIZE_DIRECTIVE(name) .size name,.-name;
+ 
+ /* Define an entry point visible from C.  */
+-#define	ENTRY(name)							      \
++#define	ENTRY_P2ALIGN(name, alignment)					      \
+   .globl C_SYMBOL_NAME(name);						      \
+   .type C_SYMBOL_NAME(name),@function;					      \
+-  .align ALIGNARG(4);							      \
++  .align ALIGNARG(alignment);						      \
+   C_LABEL(name)								      \
+   cfi_startproc;							      \
+   _CET_ENDBR;								      \
+   CALL_MCOUNT
+ 
++/* Common entry 16 byte aligns.  */
++#define ENTRY(name) ENTRY_P2ALIGN (name, 4)
++
+ #undef	END
+ #define END(name)							      \
+   cfi_endproc;								      \

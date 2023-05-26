@@ -1,0 +1,43 @@
+From 44843b307d9acbe4f17b7af710cf66932667533a Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Tue, 22 Nov 2022 16:24:54 +0000
+Subject: [PATCH] repart: respect --discard=no also for block devices
+
+It's only used to avoid BLKDISCARD on individual partitions at the moment.
+It can take a lot of time to run on very slow devices, so avoid it for
+them too.
+
+(cherry picked from commit 0dce448bbc97c861520c287b01d632b887442925)
+
+Related: #2138081
+---
+ src/partition/repart.c | 16 +++++++++-------
+ 1 file changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/src/partition/repart.c b/src/partition/repart.c
+index 8e3cfece89..c4ca9840c8 100644
+--- a/src/partition/repart.c
++++ b/src/partition/repart.c
+@@ -4387,13 +4387,15 @@ static int context_write_partition_table(
+ 
+                 log_info("Wiped block device.");
+ 
+-                r = context_discard_range(context, 0, context->total);
+-                if (r == -EOPNOTSUPP)
+-                        log_info("Storage does not support discard, not discarding entire block device data.");
+-                else if (r < 0)
+-                        return log_error_errno(r, "Failed to discard entire block device: %m");
+-                else if (r > 0)
+-                        log_info("Discarded entire block device.");
++                if (arg_discard) {
++                        r = context_discard_range(context, 0, context->total);
++                        if (r == -EOPNOTSUPP)
++                                log_info("Storage does not support discard, not discarding entire block device data.");
++                        else if (r < 0)
++                                return log_error_errno(r, "Failed to discard entire block device: %m");
++                        else if (r > 0)
++                                log_info("Discarded entire block device.");
++                }
+         }
+ 
+         r = fdisk_get_partitions(context->fdisk_context, &original_table);

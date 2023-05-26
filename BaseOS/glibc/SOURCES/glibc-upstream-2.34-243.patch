@@ -1,0 +1,36 @@
+commit 28bdb03b1b2bdb2d2dc62a9beeaa7d9bd2b10679
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Feb 11 19:03:04 2022 +0100
+
+    Linux: Include <dl-auxv.h> in dl-sysdep.c only for SHARED
+    
+    Otherwise, <dl-auxv.h> on POWER ends up being included twice,
+    once in dl-sysdep.c, once in dl-support.c.  That leads to a linker
+    failure due to multiple definitions of _dl_cache_line_size.
+    
+    Fixes commit d96d2995c1121d3310102afda2deb1f35761b5e6
+    ("Revert "Linux: Consolidate auxiliary vector parsing").
+    
+    (cherry picked from commit 098c795e85fbd05c5ef59c2d0ce59529331bea27)
+
+diff --git a/sysdeps/unix/sysv/linux/dl-sysdep.c b/sysdeps/unix/sysv/linux/dl-sysdep.c
+index facaaba3b9d091b3..3487976b06ad7f58 100644
+--- a/sysdeps/unix/sysv/linux/dl-sysdep.c
++++ b/sysdeps/unix/sysv/linux/dl-sysdep.c
+@@ -18,7 +18,6 @@
+ 
+ #include <_itoa.h>
+ #include <assert.h>
+-#include <dl-auxv.h>
+ #include <dl-hwcap-check.h>
+ #include <dl-osinfo.h>
+ #include <dl-procinfo.h>
+@@ -46,6 +45,8 @@
+ #include <dl-machine.h>
+ 
+ #ifdef SHARED
++# include <dl-auxv.h>
++
+ extern char **_environ attribute_hidden;
+ extern char _end[] attribute_hidden;
+ 

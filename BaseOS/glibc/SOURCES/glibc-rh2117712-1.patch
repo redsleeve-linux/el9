@@ -1,0 +1,154 @@
+commit cca9684f2d7a74fc0b28bfb1859955e0e28d7b4b
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Aug 3 11:41:53 2022 +0200
+
+    stdio: Clean up __libc_message after unconditional abort
+    
+    Since commit ec2c1fcefb200c6cb7e09553f3c6af8815013d83 ("malloc:
+    Abort on heap corruption, without a backtrace [BZ #21754]"),
+    __libc_message always terminates the process.  Since commit
+    a289ea09ea843ced6e5277c2f2e63c357bc7f9a3 ("Do not print backtraces
+    on fatal glibc errors"), the backtrace facility has been removed.
+    Therefore, remove enum __libc_message_action and the action
+    argument of __libc_message, and mark __libc_message as _No_return.
+    
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff --git a/debug/fortify_fail.c b/debug/fortify_fail.c
+index 9fa07af4867c2bd1..1b490d9da78b8d0d 100644
+--- a/debug/fortify_fail.c
++++ b/debug/fortify_fail.c
+@@ -21,8 +21,6 @@ void
+ __attribute__ ((noreturn))
+ __fortify_fail (const char *msg)
+ {
+-  /* The loop is added only to keep gcc happy.  */
+-  while (1)
+-    __libc_message (do_abort, "*** %s ***: terminated\n", msg);
++  __libc_message ("*** %s ***: terminated\n", msg);
+ }
+ libc_hidden_def (__fortify_fail)
+diff --git a/include/stdio.h b/include/stdio.h
+index 23b7fd288cdaba66..3d4544575318a934 100644
+--- a/include/stdio.h
++++ b/include/stdio.h
+@@ -143,18 +143,11 @@ extern int __gen_tempname (char *__tmpl, int __suffixlen, int __flags,
+ #  define __GT_DIR	1	/* create a directory */
+ #  define __GT_NOCREATE	2	/* just find a name not currently in use */
+ 
+-enum __libc_message_action
+-{
+-  do_message	= 0,		/* Print message.  */
+-  do_abort	= 1 << 0,	/* Abort.  */
+-};
+-
+ /* Print out MESSAGE (which should end with a newline) on the error output
+    and abort.  */
+ extern void __libc_fatal (const char *__message)
+      __attribute__ ((__noreturn__));
+-extern void __libc_message (enum __libc_message_action action,
+-			    const char *__fnt, ...) attribute_hidden;
++_Noreturn void __libc_message (const char *__fnt, ...) attribute_hidden;
+ extern void __fortify_fail (const char *msg) __attribute__ ((__noreturn__));
+ libc_hidden_proto (__fortify_fail)
+ 
+diff --git a/malloc/malloc.c b/malloc/malloc.c
+index d31e985ecce968fe..918e7936f1983437 100644
+--- a/malloc/malloc.c
++++ b/malloc/malloc.c
+@@ -298,8 +298,7 @@ _Noreturn static void
+ __malloc_assert (const char *assertion, const char *file, unsigned int line,
+ 		 const char *function)
+ {
+-  __libc_message (do_abort, "\
+-Fatal glibc error: malloc assertion failure in %s: %s\n",
++  __libc_message ("Fatal glibc error: malloc assertion failure in %s: %s\n",
+ 		  function, assertion);
+   __builtin_unreachable ();
+ }
+@@ -5528,7 +5527,7 @@ static void
+ malloc_printerr (const char *str)
+ {
+ #if IS_IN (libc)
+-  __libc_message (do_abort, "%s\n", str);
++  __libc_message ("%s\n", str);
+ #else
+   __libc_fatal (str);
+ #endif
+diff --git a/sysdeps/posix/libc_fatal.c b/sysdeps/posix/libc_fatal.c
+index 6d24bee6134856d1..1feacfbeba765035 100644
+--- a/sysdeps/posix/libc_fatal.c
++++ b/sysdeps/posix/libc_fatal.c
+@@ -54,7 +54,7 @@ struct str_list
+ 
+ /* Abort with an error message.  */
+ void
+-__libc_message (enum __libc_message_action action, const char *fmt, ...)
++__libc_message (const char *fmt, ...)
+ {
+   va_list ap;
+   int fd = -1;
+@@ -123,36 +123,31 @@ __libc_message (enum __libc_message_action action, const char *fmt, ...)
+ 
+       WRITEV_FOR_FATAL (fd, iov, nlist, total);
+ 
+-      if ((action & do_abort))
++      total = (total + 1 + GLRO(dl_pagesize) - 1) & ~(GLRO(dl_pagesize) - 1);
++      struct abort_msg_s *buf = __mmap (NULL, total,
++					PROT_READ | PROT_WRITE,
++					MAP_ANON | MAP_PRIVATE, -1, 0);
++      if (__glibc_likely (buf != MAP_FAILED))
+ 	{
+-	  total = ((total + 1 + GLRO(dl_pagesize) - 1)
+-		   & ~(GLRO(dl_pagesize) - 1));
+-	  struct abort_msg_s *buf = __mmap (NULL, total,
+-					    PROT_READ | PROT_WRITE,
+-					    MAP_ANON | MAP_PRIVATE, -1, 0);
+-	  if (__glibc_likely (buf != MAP_FAILED))
+-	    {
+-	      buf->size = total;
+-	      char *wp = buf->msg;
+-	      for (int cnt = 0; cnt < nlist; ++cnt)
+-		wp = mempcpy (wp, iov[cnt].iov_base, iov[cnt].iov_len);
+-	      *wp = '\0';
+-
+-	      /* We have to free the old buffer since the application might
+-		 catch the SIGABRT signal.  */
+-	      struct abort_msg_s *old = atomic_exchange_acq (&__abort_msg,
+-							     buf);
+-	      if (old != NULL)
+-		__munmap (old, old->size);
+-	    }
++	  buf->size = total;
++	  char *wp = buf->msg;
++	  for (int cnt = 0; cnt < nlist; ++cnt)
++	    wp = mempcpy (wp, iov[cnt].iov_base, iov[cnt].iov_len);
++	  *wp = '\0';
++
++	  /* We have to free the old buffer since the application might
++	     catch the SIGABRT signal.  */
++	  struct abort_msg_s *old = atomic_exchange_acq (&__abort_msg,
++							 buf);
++	  if (old != NULL)
++	    __munmap (old, old->size);
+ 	}
+     }
+ 
+   va_end (ap);
+ 
+-  if ((action & do_abort))
+-    /* Kill the application.  */
+-    abort ();
++  /* Kill the application.  */
++  abort ();
+ }
+ 
+ 
+@@ -161,6 +156,6 @@ __libc_fatal (const char *message)
+ {
+   /* The loop is added only to keep gcc happy.  */
+   while (1)
+-    __libc_message (do_abort, "%s", message);
++    __libc_message ("%s", message);
+ }
+ libc_hidden_def (__libc_fatal)

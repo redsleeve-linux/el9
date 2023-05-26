@@ -1,0 +1,27 @@
+From 57b58ec8a72f00a66b43e7975ed3825dc28b851f Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Sun, 27 Nov 2022 13:53:30 +0100
+Subject: [PATCH] boot: Make sure all partitions drivers are connected
+
+(cherry picked from commit 7f19be808c9cb9cabcaf1e48ccff875fa8191d3a)
+
+Related: #2138081
+---
+ src/boot/efi/xbootldr.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/boot/efi/xbootldr.c b/src/boot/efi/xbootldr.c
+index e5b9ca7268..7fef909312 100644
+--- a/src/boot/efi/xbootldr.c
++++ b/src/boot/efi/xbootldr.c
+@@ -201,6 +201,10 @@ static EFI_STATUS find_device(EFI_HANDLE *device, EFI_DEVICE_PATH **ret_device_p
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
++        /* The drivers for other partitions on this drive may not be initialized on fastboot firmware, so we
++         * have to ask the firmware to do just that. */
++        (void) BS->ConnectController(disk_handle, NULL, NULL, true);
++
+         err = BS->HandleProtocol(disk_handle, &BlockIoProtocol, (void **)&block_io);
+         if (err != EFI_SUCCESS)
+                 return err;

@@ -1,0 +1,592 @@
+commit 627f5ede70d70c77bdaf857db07404e8bf7f60af
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Dec 9 17:57:11 2021 +0100
+
+    Remove TLS_TCB_ALIGN and TLS_INIT_TCB_ALIGN
+    
+    TLS_INIT_TCB_ALIGN is not actually used.  TLS_TCB_ALIGN was likely
+    introduced to support a configuration where the thread pointer
+    has not the same alignment as THREAD_SELF.  Only ia64 seems to use
+    that, but for the stack/pointer guard, not for storing tcbhead_t.
+    Some ports use TLS_TCB_OFFSET and TLS_PRE_TCB_SIZE to shift
+    the thread pointer, potentially landing in a different residue class
+    modulo the alignment, but the changes should not impact that.
+    
+    In general, given that TLS variables have their own alignment
+    requirements, having different alignment for the (unshifted) thread
+    pointer and struct pthread would potentially result in dynamic
+    offsets, leading to more complexity.
+    
+    hppa had different values before: __alignof__ (tcbhead_t), which
+    seems to be 4, and __alignof__ (struct pthread), which was 8
+    (old default) and is now 32.  However, it defines THREAD_SELF as:
+    
+    /* Return the thread descriptor for the current thread.  */
+    # define THREAD_SELF \
+      ({ struct pthread *__self;                    \
+            __self = __get_cr27();                  \
+            __self - 1;                             \
+       })
+    
+    So the thread pointer points after struct pthread (hence __self - 1),
+    and they have to have the same alignment on hppa as well.
+    
+    Similarly, on ia64, the definitions were different.  We have:
+    
+    # define TLS_PRE_TCB_SIZE \
+      (sizeof (struct pthread)                                              \
+       + (PTHREAD_STRUCT_END_PADDING < 2 * sizeof (uintptr_t)               \
+          ? ((2 * sizeof (uintptr_t) + __alignof__ (struct pthread) - 1)    \
+             & ~(__alignof__ (struct pthread) - 1))                         \
+          : 0))
+    # define THREAD_SELF \
+      ((struct pthread *) ((char *) __thread_self - TLS_PRE_TCB_SIZE))
+    
+    And TLS_PRE_TCB_SIZE is a multiple of the struct pthread alignment
+    (confirmed by the new _Static_assert in sysdeps/ia64/libc-tls.c).
+    
+    On m68k, we have a larger gap between tcbhead_t and struct pthread.
+    But as far as I can tell, the port is fine with that.  The definition
+    of TCB_OFFSET is sufficient to handle the shifted TCB scenario.
+    
+    This fixes commit 23c77f60181eb549f11ec2f913b4270af29eee38
+    ("nptl: Increase default TCB alignment to 32").
+    
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+
+diff --git a/csu/libc-tls.c b/csu/libc-tls.c
+index 5515204863218163..d83e69f6257ae981 100644
+--- a/csu/libc-tls.c
++++ b/csu/libc-tls.c
+@@ -24,6 +24,7 @@
+ #include <stdio.h>
+ #include <sys/param.h>
+ #include <array_length.h>
++#include <pthreadP.h>
+ 
+ #ifdef SHARED
+  #error makefile bug, this file is for static only
+@@ -89,7 +90,7 @@ init_static_tls (size_t memsz, size_t align)
+ {
+   /* That is the size of the TLS memory for this object.  */
+   GL(dl_tls_static_size) = roundup (memsz + GLRO(dl_tls_static_surplus),
+-				    TLS_TCB_ALIGN);
++				    TCB_ALIGNMENT);
+ #if TLS_TCB_AT_TP
+   GL(dl_tls_static_size) += TLS_TCB_SIZE;
+ #endif
+@@ -214,5 +215,5 @@ __libc_setup_tls (void)
+   memsz += tcb_offset;
+ #endif
+ 
+-  init_static_tls (memsz, MAX (TLS_TCB_ALIGN, max_align));
++  init_static_tls (memsz, MAX (TCB_ALIGNMENT, max_align));
+ }
+diff --git a/elf/dl-tls.c b/elf/dl-tls.c
+index 40263cf586e74c64..e2012d0cd515103b 100644
+--- a/elf/dl-tls.c
++++ b/elf/dl-tls.c
+@@ -219,7 +219,7 @@ _dl_count_modids (void)
+ void
+ _dl_determine_tlsoffset (void)
+ {
+-  size_t max_align = TLS_TCB_ALIGN;
++  size_t max_align = TCB_ALIGNMENT;
+   size_t freetop = 0;
+   size_t freebottom = 0;
+ 
+@@ -350,7 +350,7 @@ _dl_determine_tlsoffset (void)
+ 
+   GL(dl_tls_static_used) = offset;
+   GLRO (dl_tls_static_size) = roundup (offset + GLRO(dl_tls_static_surplus),
+-				       TLS_TCB_ALIGN);
++				       TCB_ALIGNMENT);
+ #else
+ # error "Either TLS_TCB_AT_TP or TLS_DTV_AT_TP must be defined"
+ #endif
+diff --git a/sysdeps/aarch64/nptl/tls.h b/sysdeps/aarch64/nptl/tls.h
+index cd9abb5d1d073593..75c469d51b532a89 100644
+--- a/sysdeps/aarch64/nptl/tls.h
++++ b/sysdeps/aarch64/nptl/tls.h
+@@ -52,18 +52,12 @@ typedef struct
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE	sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	__alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE		sizeof (tcbhead_t)
+ 
+ /* This is the size we need before TCB.  */
+ # define TLS_PRE_TCB_SIZE	sizeof (struct pthread)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		__alignof__ (struct pthread)
+-
+ /* Install the dtv pointer.  The pointer passed is to the element with
+    index -1 which contain the length.  */
+ # define INSTALL_DTV(tcbp, dtvp) \
+diff --git a/sysdeps/alpha/nptl/tls.h b/sysdeps/alpha/nptl/tls.h
+index 5f4843b28e7f1ad1..c0b6c93891546480 100644
+--- a/sysdeps/alpha/nptl/tls.h
++++ b/sysdeps/alpha/nptl/tls.h
+@@ -46,18 +46,12 @@ typedef struct
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE	sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	16
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE		sizeof (tcbhead_t)
+ 
+ /* This is the size we need before TCB.  */
+ # define TLS_PRE_TCB_SIZE	sizeof (struct pthread)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		16
+-
+ /* Install the dtv pointer.  The pointer passed is to the element with
+    index -1 which contain the length.  */
+ # define INSTALL_DTV(tcbp, dtvp) \
+diff --git a/sysdeps/arc/nptl/tls.h b/sysdeps/arc/nptl/tls.h
+index d9ada2f38089e6cd..d5d282297d12ec98 100644
+--- a/sysdeps/arc/nptl/tls.h
++++ b/sysdeps/arc/nptl/tls.h
+@@ -48,17 +48,11 @@ typedef struct
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE	sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	__alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  */
+ #ifndef TLS_TCB_SIZE
+ # define TLS_TCB_SIZE		sizeof (tcbhead_t)
+ #endif
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		__alignof__ (struct pthread)
+-
+ /* This is the size we need before TCB.  */
+ # define TLS_PRE_TCB_SIZE	sizeof (struct pthread)
+ 
+diff --git a/sysdeps/arm/nptl/tls.h b/sysdeps/arm/nptl/tls.h
+index 354aae3318291395..8475c66588f99cae 100644
+--- a/sysdeps/arm/nptl/tls.h
++++ b/sysdeps/arm/nptl/tls.h
+@@ -50,18 +50,12 @@ typedef struct
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE	sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	16
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE		sizeof (tcbhead_t)
+ 
+ /* This is the size we need before TCB.  */
+ # define TLS_PRE_TCB_SIZE	sizeof (struct pthread)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		16
+-
+ /* Install the dtv pointer.  The pointer passed is to the element with
+    index -1 which contain the length.  */
+ # define INSTALL_DTV(tcbp, dtvp) \
+diff --git a/sysdeps/csky/nptl/tls.h b/sysdeps/csky/nptl/tls.h
+index f3fa3fcb02748776..e81d4552d27e0378 100644
+--- a/sysdeps/csky/nptl/tls.h
++++ b/sysdeps/csky/nptl/tls.h
+@@ -61,15 +61,9 @@ typedef struct
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE	sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	8
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE		sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		8
+-
+ /* This is the size we need before TCB.  */
+ # define TLS_PRE_TCB_SIZE	sizeof (struct pthread)
+ 
+diff --git a/sysdeps/generic/tls.h b/sysdeps/generic/tls.h
+index e86d70e6cebba5c8..9214ed39b6383e8c 100644
+--- a/sysdeps/generic/tls.h
++++ b/sysdeps/generic/tls.h
+@@ -19,6 +19,11 @@
+ /* An architecture-specific version of this file has to defined a
+    number of symbols:
+ 
++     TCB_ALIGNMENT
++
++     Alignment of THREAD_SELF (struct pthread *) and the thread
++     pointer.
++
+      TLS_TCB_AT_TP  or  TLS_DTV_AT_TP
+ 
+      The presence of one of these symbols signals which variant of
+@@ -43,15 +48,6 @@
+      dynamic linker itself.  There are no threads in use at that time.
+ 
+ 
+-     TLS_TCB_ALIGN
+-
+-     Alignment requirements for the TCB structure.
+-
+-     TLS_INIT_TCB_ALIGN
+-
+-     Similarly, but for the structure used at startup time.
+-
+-
+      INSTALL_DTV(tcb, init_dtv)
+ 
+      This macro must install the given initial DTV into the thread control
+diff --git a/sysdeps/hppa/nptl/tls.h b/sysdeps/hppa/nptl/tls.h
+index f0e274c45fb5e91e..88a6b902c0b7e2fd 100644
+--- a/sysdeps/hppa/nptl/tls.h
++++ b/sysdeps/hppa/nptl/tls.h
+@@ -52,15 +52,9 @@ typedef struct
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE	sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	__alignof__ (tcbhead_t)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE		sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		__alignof__ (struct pthread)
+-
+ /* This is the size we need before TCB */
+ # define TLS_PRE_TCB_SIZE	sizeof (struct pthread)
+ 
+diff --git a/sysdeps/i386/nptl/tls.h b/sysdeps/i386/nptl/tls.h
+index 111c9ee59df30bc3..06ab9784a5358b0b 100644
+--- a/sysdeps/i386/nptl/tls.h
++++ b/sysdeps/i386/nptl/tls.h
+@@ -102,15 +102,9 @@ union user_desc_init
+    struct pthread even when not linked with -lpthread.  */
+ # define TLS_INIT_TCB_SIZE sizeof (struct pthread)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN __alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE sizeof (struct pthread)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN __alignof__ (struct pthread)
+-
+ /* The TCB can have any size and the memory following the address the
+    thread pointer points to is unspecified.  Allocate the TCB there.  */
+ # define TLS_TCB_AT_TP	1
+diff --git a/sysdeps/ia64/libc-tls.c b/sysdeps/ia64/libc-tls.c
+index a01edceab36d375e..ede1e8f463b135b4 100644
+--- a/sysdeps/ia64/libc-tls.c
++++ b/sysdeps/ia64/libc-tls.c
+@@ -18,6 +18,9 @@
+ 
+ #include <csu/libc-tls.c>
+ 
++_Static_assert (TLS_PRE_TCB_SIZE % __alignof (struct pthread) == 0,
++		"__thread_self and THREAD_SELF have same alignment");
++
+ /* On IA-64, as it lacks linker optimizations, __tls_get_addr can be
+    called even in statically linked binaries.
+    In this case module must be always 1 and PT_TLS segment
+diff --git a/sysdeps/ia64/nptl/tls.h b/sysdeps/ia64/nptl/tls.h
+index 26fe555cb4b5e164..ca8f1280aeeed3d5 100644
+--- a/sysdeps/ia64/nptl/tls.h
++++ b/sysdeps/ia64/nptl/tls.h
+@@ -53,9 +53,6 @@ register struct pthread *__thread_self __asm__("r13");
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN __alignof__ (tcbhead_t)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE sizeof (tcbhead_t)
+ 
+@@ -70,9 +67,6 @@ register struct pthread *__thread_self __asm__("r13");
+ 	 & ~(__alignof__ (struct pthread) - 1))				\
+       : 0))
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN __alignof__ (struct pthread)
+-
+ /* The DTV is allocated at the TP; the TCB is placed elsewhere.  */
+ # define TLS_DTV_AT_TP	1
+ # define TLS_TCB_AT_TP	0
+diff --git a/sysdeps/m68k/nptl/tls.h b/sysdeps/m68k/nptl/tls.h
+index 9f562c38288df200..b88ef0c9c74ae0b0 100644
+--- a/sysdeps/m68k/nptl/tls.h
++++ b/sysdeps/m68k/nptl/tls.h
+@@ -54,20 +54,15 @@ typedef struct
+    pointer, we don't need this.  */
+ # define TLS_INIT_TCB_SIZE	0
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	__alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  Because our TCB is before the thread
+    pointer, we don't need this.  */
+ # define TLS_TCB_SIZE		0
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		__alignof__ (struct pthread)
+-
+ /* This is the size we need before TCB - actually, it includes the TCB.  */
+ # define TLS_PRE_TCB_SIZE						\
+   (sizeof (struct pthread)						\
+-   + ((sizeof (tcbhead_t) + TLS_TCB_ALIGN - 1) & ~(TLS_TCB_ALIGN - 1)))
++   + ((sizeof (tcbhead_t) + __alignof (struct pthread) - 1)		\
++      & ~(__alignof (struct pthread) - 1)))
+ 
+ /* The thread pointer (TP) points to the end of the
+    TCB + 0x7000, as for PowerPC and MIPS.  This implies that TCB address is
+diff --git a/sysdeps/mach/hurd/tls.h b/sysdeps/mach/hurd/tls.h
+index f83956d3d7ca4f9f..773a2a0c36d5d57d 100644
+--- a/sysdeps/mach/hurd/tls.h
++++ b/sysdeps/mach/hurd/tls.h
+@@ -29,20 +29,12 @@
+ # include <mach.h>
+ # include <atomic.h>
+ 
+-
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN __alignof__ (tcbhead_t)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE TLS_INIT_TCB_SIZE	/* XXX */
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN TLS_INIT_TCB_ALIGN /* XXX */
+-
+-
+ /* Install the dtv pointer.  The pointer passed is to the element with
+    index -1 which contain the length.  */
+ # define INSTALL_DTV(descr, dtvp) \
+diff --git a/sysdeps/microblaze/nptl/tls.h b/sysdeps/microblaze/nptl/tls.h
+index bfa6efa78049bb2d..b69d7b4f28f3b757 100644
+--- a/sysdeps/microblaze/nptl/tls.h
++++ b/sysdeps/microblaze/nptl/tls.h
+@@ -56,18 +56,12 @@ typedef struct
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE  sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN __alignof__ (tcbhead_t)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE       sizeof (tcbhead_t)
+ 
+ /* This is the size we need before TCB.  */
+ # define TLS_PRE_TCB_SIZE   sizeof (struct pthread)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN      __alignof__ (struct pthread)
+-
+ /* Install the dtv pointer.  The pointer passed is to the element with
+    index -1 which contain the length.  */
+ # define INSTALL_DTV(tcbp, dtvp) \
+diff --git a/sysdeps/mips/nptl/tls.h b/sysdeps/mips/nptl/tls.h
+index ef99aa646c898e76..6ccaf9804a68634a 100644
+--- a/sysdeps/mips/nptl/tls.h
++++ b/sysdeps/mips/nptl/tls.h
+@@ -83,20 +83,15 @@ typedef struct
+    pointer, we don't need this.  */
+ # define TLS_INIT_TCB_SIZE	0
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	__alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  Because our TCB is before the thread
+    pointer, we don't need this.  */
+ # define TLS_TCB_SIZE		0
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		__alignof__ (struct pthread)
+-
+ /* This is the size we need before TCB - actually, it includes the TCB.  */
+ # define TLS_PRE_TCB_SIZE \
+   (sizeof (struct pthread)						      \
+-   + ((sizeof (tcbhead_t) + TLS_TCB_ALIGN - 1) & ~(TLS_TCB_ALIGN - 1)))
++   + ((sizeof (tcbhead_t) + __alignof (struct pthread) - 1)		      \
++      & ~(__alignof (struct pthread) - 1)))
+ 
+ /* The thread pointer (in hardware register $29) points to the end of
+    the TCB + 0x7000, as for PowerPC.  The pthread_descr structure is
+diff --git a/sysdeps/nios2/nptl/tls.h b/sysdeps/nios2/nptl/tls.h
+index 7110cfccad7131f4..6ab6bd27b00a70ee 100644
+--- a/sysdeps/nios2/nptl/tls.h
++++ b/sysdeps/nios2/nptl/tls.h
+@@ -59,20 +59,15 @@ register struct pthread *__thread_self __asm__("r23");
+    pointer, we don't need this.  */
+ # define TLS_INIT_TCB_SIZE	0
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	__alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  Because our TCB is before the thread
+    pointer, we don't need this.  */
+ # define TLS_TCB_SIZE		0
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		__alignof__ (struct pthread)
+-
+ /* This is the size we need before TCB - actually, it includes the TCB.  */
+ # define TLS_PRE_TCB_SIZE \
+   (sizeof (struct pthread)						      \
+-   + ((sizeof (tcbhead_t) + TLS_TCB_ALIGN - 1) & ~(TLS_TCB_ALIGN - 1)))
++   + ((sizeof (tcbhead_t) + __alignof (struct pthread) - 1)		      \
++      & ~(__alignof (struct pthread) - 1)))
+ 
+ /* The thread pointer (in hardware register r23) points to the end of
+    the TCB + 0x7000, as for PowerPC and MIPS.  */
+diff --git a/sysdeps/powerpc/nptl/tls.h b/sysdeps/powerpc/nptl/tls.h
+index 110d085d30c86302..e194b334216eaa02 100644
+--- a/sysdeps/powerpc/nptl/tls.h
++++ b/sysdeps/powerpc/nptl/tls.h
+@@ -108,19 +108,14 @@ typedef struct
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE	0
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	__alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE		0
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		__alignof__ (struct pthread)
+-
+ /* This is the size we need before TCB.  */
+ # define TLS_PRE_TCB_SIZE \
+   (sizeof (struct pthread)						      \
+-   + ((sizeof (tcbhead_t) + TLS_TCB_ALIGN - 1) & ~(TLS_TCB_ALIGN - 1)))
++   + ((sizeof (tcbhead_t) + __alignof (struct pthread) - 1)		      \
++      & ~(__alignof (struct pthread) - 1)))
+ 
+ /* The following assumes that TP (R2 or R13) points to the end of the
+    TCB + 0x7000 (per the ABI).  This implies that TCB address is
+diff --git a/sysdeps/riscv/nptl/tls.h b/sysdeps/riscv/nptl/tls.h
+index bdc0a3a6f91b51e8..8c12d8f971adeddb 100644
+--- a/sysdeps/riscv/nptl/tls.h
++++ b/sysdeps/riscv/nptl/tls.h
+@@ -50,20 +50,15 @@ typedef struct
+    pointer, we don't need this.  */
+ # define TLS_INIT_TCB_SIZE	0
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN	__alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  Because our TCB is before the thread
+    pointer, we don't need this.  */
+ # define TLS_TCB_SIZE		0
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN		__alignof__ (struct pthread)
+-
+ /* This is the size we need before TCB - actually, it includes the TCB.  */
+ # define TLS_PRE_TCB_SIZE \
+   (sizeof (struct pthread)						      \
+-   + ((sizeof (tcbhead_t) + TLS_TCB_ALIGN - 1) & ~(TLS_TCB_ALIGN - 1)))
++   + ((sizeof (tcbhead_t) + __alignof (struct pthread) - 1)		      \
++      & ~(__alignof (struct pthread) - 1)))
+ 
+ /* The thread pointer tp points to the end of the TCB.
+    The pthread_descr structure is immediately in front of the TCB.  */
+diff --git a/sysdeps/s390/nptl/tls.h b/sysdeps/s390/nptl/tls.h
+index 2cdd18eb2907c060..3b4c0ab32a9439a3 100644
+--- a/sysdeps/s390/nptl/tls.h
++++ b/sysdeps/s390/nptl/tls.h
+@@ -66,15 +66,9 @@ typedef struct
+    struct pthread even when not linked with -lpthread.  */
+ # define TLS_INIT_TCB_SIZE sizeof (struct pthread)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN __alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE sizeof (struct pthread)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN __alignof__ (struct pthread)
+-
+ /* The TCB can have any size and the memory following the address the
+    thread pointer points to is unspecified.  Allocate the TCB there.  */
+ # define TLS_TCB_AT_TP	1
+diff --git a/sysdeps/sh/nptl/tls.h b/sysdeps/sh/nptl/tls.h
+index 390640020e45f716..3e4d480b35951253 100644
+--- a/sysdeps/sh/nptl/tls.h
++++ b/sysdeps/sh/nptl/tls.h
+@@ -51,18 +51,12 @@ typedef struct
+ /* This is the size of the initial TCB.  */
+ # define TLS_INIT_TCB_SIZE sizeof (tcbhead_t)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN __alignof__ (tcbhead_t)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE sizeof (tcbhead_t)
+ 
+ /* This is the size we need before TCB.  */
+ # define TLS_PRE_TCB_SIZE sizeof (struct pthread)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN __alignof__ (struct pthread)
+-
+ /* The TLS blocks start right after the TCB.  */
+ # define TLS_DTV_AT_TP	1
+ # define TLS_TCB_AT_TP	0
+diff --git a/sysdeps/sparc/nptl/tls.h b/sysdeps/sparc/nptl/tls.h
+index 376d729989e35660..3fb4ce6e6dacf28c 100644
+--- a/sysdeps/sparc/nptl/tls.h
++++ b/sysdeps/sparc/nptl/tls.h
+@@ -63,15 +63,9 @@ register struct pthread *__thread_self __asm__("%g7");
+    struct pthread even when not linked with -lpthread.  */
+ # define TLS_INIT_TCB_SIZE sizeof (struct pthread)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN __alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE sizeof (struct pthread)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN __alignof__ (struct pthread)
+-
+ /* The TCB can have any size and the memory following the address the
+    thread pointer points to is unspecified.  Allocate the TCB there.  */
+ # define TLS_TCB_AT_TP	1
+diff --git a/sysdeps/x86_64/nptl/tls.h b/sysdeps/x86_64/nptl/tls.h
+index 3af1836e28b26fdb..50f7e8b544f9e6fc 100644
+--- a/sysdeps/x86_64/nptl/tls.h
++++ b/sysdeps/x86_64/nptl/tls.h
+@@ -106,15 +106,9 @@ _Static_assert (offsetof (tcbhead_t, __glibc_unused2) == 0x80,
+    struct pthread even when not linked with -lpthread.  */
+ # define TLS_INIT_TCB_SIZE sizeof (struct pthread)
+ 
+-/* Alignment requirements for the initial TCB.  */
+-# define TLS_INIT_TCB_ALIGN __alignof__ (struct pthread)
+-
+ /* This is the size of the TCB.  */
+ # define TLS_TCB_SIZE sizeof (struct pthread)
+ 
+-/* Alignment requirements for the TCB.  */
+-# define TLS_TCB_ALIGN __alignof__ (struct pthread)
+-
+ /* The TCB can have any size and the memory following the address the
+    thread pointer points to is unspecified.  Allocate the TCB there.  */
+ # define TLS_TCB_AT_TP	1

@@ -1,0 +1,34 @@
+From 98ae83daae67e9e7663b8345eced1de8c667271f Mon Sep 17 00:00:00 2001
+From: Dan Gohman <dev@sunfishcode.online>
+Date: Thu, 8 Dec 2022 10:35:46 -0800
+Subject: [PATCH] Mangle "main" as "__main_void" on wasm32-wasi
+
+On wasm, the age-old C trick of having a main function which can either have
+no arguments or argc+argv doesn't work, because wasm requires caller and
+callee signatures to match. WASI's current strategy is to have compilers
+mangle main's name to indicate which signature they're using. Rust uses the
+no-argument form, which should be mangled as `__main_void`.
+
+This is needed on wasm32-wasi as of #105395.
+---
+ compiler/rustc_target/src/spec/wasm32_wasi.rs | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/compiler/rustc_target/src/spec/wasm32_wasi.rs b/compiler/rustc_target/src/spec/wasm32_wasi.rs
+index 6f0bbf0672d4..a0476d542e64 100644
+--- a/compiler/rustc_target/src/spec/wasm32_wasi.rs
++++ b/compiler/rustc_target/src/spec/wasm32_wasi.rs
+@@ -104,6 +104,10 @@ pub fn target() -> Target {
+     // `args::args()` makes the WASI API calls itself.
+     options.main_needs_argc_argv = false;
+ 
++    // And, WASI mangles the name of "main" to distinguish between different
++    // signatures.
++    options.entry_name = "__main_void".into();
++
+     Target {
+         llvm_target: "wasm32-wasi".into(),
+         pointer_width: 32,
+-- 
+2.38.1
+

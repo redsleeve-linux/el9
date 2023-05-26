@@ -1,0 +1,22 @@
+commit 8fabe0e632bd441c760f878d1022c378f04f8497
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Aug 4 06:17:50 2022 +0200
+
+    Linux: Remove exit system call from _exit
+    
+    exit only terminates the current thread, not the whole process, so it
+    is the wrong fallback system call in this context.  All supported
+    Linux versions implement the exit_group system call anyway.
+
+diff --git a/sysdeps/unix/sysv/linux/_exit.c b/sysdeps/unix/sysv/linux/_exit.c
+index 2f0ec35459f25314..cd1270ac9b2b5b2b 100644
+--- a/sysdeps/unix/sysv/linux/_exit.c
++++ b/sysdeps/unix/sysv/linux/_exit.c
+@@ -28,7 +28,6 @@ _exit (int status)
+   while (1)
+     {
+       INLINE_SYSCALL (exit_group, 1, status);
+-      INLINE_SYSCALL (exit, 1, status);
+ 
+ #ifdef ABORT_INSTRUCTION
+       ABORT_INSTRUCTION;

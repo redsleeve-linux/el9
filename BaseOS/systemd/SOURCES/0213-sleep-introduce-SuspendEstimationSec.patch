@@ -1,0 +1,270 @@
+From db8a187c67e4829e39fe28e25003816b64db80db Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 14 Nov 2022 02:08:05 +0900
+Subject: [PATCH] sleep: introduce SuspendEstimationSec=
+
+Before v252, HibernateDelaySec= specifies the maximum timespan that the
+system in suspend state, and the system hibernate after the timespan.
+
+However, after 96d662fa4c8cab24da57523c5e49e6ef3967fc13, the setting is
+repurposed as the default interval to measure battery charge level and
+estimate the battery discharging late. And if the system has enough
+battery capacity, then the system will stay in suspend state and not
+hibernate even if the time passed. See issue #25269.
+
+To keep the backward compatibility, let's introduce another setting
+SuspendEstimationSec= for controlling the interval to measure
+battery charge level, and make HibernateDelaySec= work as of v251.
+
+This also drops implementation details from the man page.
+
+Fixes #25269.
+
+(cherry picked from commit 4f58b656d92b09a953b7cffcfd1ee6d5136a57ed)
+
+Resolves: #2151612
+---
+ man/systemd-sleep.conf.xml | 58 ++++++++++++++++++++------------------
+ src/shared/sleep-config.c  | 11 ++++++--
+ src/shared/sleep-config.h  |  3 ++
+ src/sleep/sleep.c          | 48 ++++++++++++++++++++++---------
+ src/sleep/sleep.conf       |  3 +-
+ 5 files changed, 77 insertions(+), 46 deletions(-)
+
+diff --git a/man/systemd-sleep.conf.xml b/man/systemd-sleep.conf.xml
+index be04f2cdf1..79ebef1fef 100644
+--- a/man/systemd-sleep.conf.xml
++++ b/man/systemd-sleep.conf.xml
+@@ -77,29 +77,16 @@
+       <varlistentry>
+         <term>suspend-then-hibernate</term>
+ 
+-        <listitem><para>A low power state where initially user.slice unit is freezed.
+-        If the hardware supports low-battery alarms (ACPI _BTP), then the system is
+-        first suspended (the state is stored in RAM) and then hibernates if the system
+-        is woken up by the hardware via ACPI low-battery signal. Unit user.slice is
+-        thawed when system returns from hibernation. If the hardware does not support
+-        low-battery alarms (ACPI _BTP), then the system is suspended based on battery's
+-        current percentage capacity. If the current battery capacity is higher than 5%, the
+-        system suspends for interval calculated using battery discharge rate per hour or
+-        <command>HibernateDelaySec=</command>
+-        if former is not available.
+-        Battery discharge rate per hour is stored in a file which is created after
+-        initial suspend-resume cycle. The value is calculated using battery decreasing
+-        charge level over a timespan for which system was suspended. For each battery
+-        connected to the system, there is a unique entry. After RTC alarm wakeup from
+-        suspend, battery discharge rate per hour is again estimated. If the current battery
+-        charge level is equal to or less than 5%, the system will be hibernated (the state
+-        is then stored on disk) else the system goes back to suspend for the interval
+-        calculated using battery discharge rate per hour.
+-        In case of manual wakeup, if the battery was discharged while the system was
+-        suspended, the battery discharge rate is estimated and stored on the filesystem.
+-        In case the system is woken up by the hardware via the ACPI low-battery signal,
+-        then it hibernates.
+-        </para></listitem>
++        <listitem>
++          <para>A low power state where the system is initially suspended (the state is stored in
++          RAM). If the system supports low-battery alarms (ACPI _BTP), then the system will be woken up by
++          the ACPI low-battery signal and hibernated (the state is then stored on disk). Also, if not
++          interrupted within the timespan specified by <varname>HibernateDelaySec=</varname> or the estimated
++          timespan until the system battery charge level goes down to 5%, then the system will be woken up by the
++          RTC alarm and hibernated. The estimated timespan is calculated from the change of the battery
++          capacity level after the time specified by <varname>SuspendEstimationSec=</varname> or when
++          the system is woken up from the suspend.</para>
++        </listitem>
+       </varlistentry>
+ 
+     </variablelist>
+@@ -189,13 +176,28 @@
+         uses the value of <varname>SuspendState=</varname> when suspending and the value of <varname>HibernateState=</varname> when hibernating.
+         </para></listitem>
+       </varlistentry>
++
+       <varlistentry>
+         <term><varname>HibernateDelaySec=</varname></term>
+-        <listitem><para>The amount of time the system spends in suspend mode
+-        before the RTC alarm wakes the system, before the battery discharge rate
+-        can be estimated and used instead to calculate the suspension interval.
+-        <citerefentry><refentrytitle>systemd-suspend-then-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>. Defaults
+-        to 2h.</para></listitem>
++
++        <listitem>
++          <para>The amount of time the system spends in suspend mode before the system is
++          automatically put into hibernate mode. Only used by
++          <citerefentry><refentrytitle>systemd-suspend-then-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
++          If the system has a battery, then defaults to the estimated timespan until the system battery charge level goes down to 5%.
++          If the system has no battery, then defaults to 2h.</para>
++        </listitem>
++      </varlistentry>
++
++      <varlistentry>
++        <term><varname>SuspendEstimationSec=</varname></term>
++
++        <listitem>
++          <para>The RTC alarm will wake the system after the specified timespan to measure the system battery
++          capacity level and estimate battery discharging rate, which is used for estimating timespan until the system battery charge
++          level goes down to 5%. Only used by
++          <citerefentry><refentrytitle>systemd-suspend-then-hibernate.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.
++          Defaults to 2h.</para></listitem>
+       </varlistentry>
+     </variablelist>
+   </refsect1>
+diff --git a/src/shared/sleep-config.c b/src/shared/sleep-config.c
+index 359d293fd0..74653effa2 100644
+--- a/src/shared/sleep-config.c
++++ b/src/shared/sleep-config.c
+@@ -65,10 +65,14 @@ int parse_sleep_config(SleepConfig **ret_sleep_config) {
+         int allow_suspend = -1, allow_hibernate = -1,
+             allow_s2h = -1, allow_hybrid_sleep = -1;
+ 
+-        sc = new0(SleepConfig, 1);
++        sc = new(SleepConfig, 1);
+         if (!sc)
+                 return log_oom();
+ 
++        *sc = (SleepConfig) {
++                .hibernate_delay_usec = USEC_INFINITY,
++        };
++
+         const ConfigTableItem items[] = {
+                 { "Sleep", "AllowSuspend",              config_parse_tristate, 0, &allow_suspend                  },
+                 { "Sleep", "AllowHibernation",          config_parse_tristate, 0, &allow_hibernate                },
+@@ -83,6 +87,7 @@ int parse_sleep_config(SleepConfig **ret_sleep_config) {
+                 { "Sleep", "HybridSleepState",          config_parse_strv,     0, sc->states + SLEEP_HYBRID_SLEEP },
+ 
+                 { "Sleep", "HibernateDelaySec",         config_parse_sec,      0, &sc->hibernate_delay_usec       },
++                { "Sleep", "SuspendEstimationSec",      config_parse_sec,      0, &sc->suspend_estimation_usec    },
+                 {}
+         };
+ 
+@@ -113,8 +118,8 @@ int parse_sleep_config(SleepConfig **ret_sleep_config) {
+                 sc->modes[SLEEP_HYBRID_SLEEP] = strv_new("suspend", "platform", "shutdown");
+         if (!sc->states[SLEEP_HYBRID_SLEEP])
+                 sc->states[SLEEP_HYBRID_SLEEP] = strv_new("disk");
+-        if (sc->hibernate_delay_usec == 0)
+-                sc->hibernate_delay_usec = 2 * USEC_PER_HOUR;
++        if (sc->suspend_estimation_usec == 0)
++                sc->suspend_estimation_usec = DEFAULT_SUSPEND_ESTIMATION_USEC;
+ 
+         /* ensure values set for all required fields */
+         if (!sc->states[SLEEP_SUSPEND] || !sc->modes[SLEEP_HIBERNATE]
+diff --git a/src/shared/sleep-config.h b/src/shared/sleep-config.h
+index 226fab4b9f..480e90c95b 100644
+--- a/src/shared/sleep-config.h
++++ b/src/shared/sleep-config.h
+@@ -6,6 +6,8 @@
+ #include "hashmap.h"
+ #include "time-util.h"
+ 
++#define DEFAULT_SUSPEND_ESTIMATION_USEC (1 * USEC_PER_HOUR)
++
+ typedef enum SleepOperation {
+         SLEEP_SUSPEND,
+         SLEEP_HIBERNATE,
+@@ -20,6 +22,7 @@ typedef struct SleepConfig {
+         char **modes[_SLEEP_OPERATION_MAX];
+         char **states[_SLEEP_OPERATION_MAX];
+         usec_t hibernate_delay_usec;
++        usec_t suspend_estimation_usec;
+ } SleepConfig;
+ 
+ SleepConfig* free_sleep_config(SleepConfig *sc);
+diff --git a/src/sleep/sleep.c b/src/sleep/sleep.c
+index 039b123dcc..0bbea9e856 100644
+--- a/src/sleep/sleep.c
++++ b/src/sleep/sleep.c
+@@ -268,10 +268,13 @@ static int execute(
+ 
+ static int custom_timer_suspend(const SleepConfig *sleep_config) {
+         _cleanup_hashmap_free_ Hashmap *last_capacity = NULL, *current_capacity = NULL;
++        usec_t hibernate_timestamp;
+         int r;
+ 
+         assert(sleep_config);
+ 
++        hibernate_timestamp = usec_add(now(CLOCK_BOOTTIME), sleep_config->hibernate_delay_usec);
++
+         while (battery_is_low() == 0) {
+                 _cleanup_close_ int tfd = -1;
+                 struct itimerspec ts = {};
+@@ -287,14 +290,25 @@ static int custom_timer_suspend(const SleepConfig *sleep_config) {
+                 if (r < 0)
+                         return log_error_errno(r, "Error fetching battery capacity percentage: %m");
+ 
+-                r = get_total_suspend_interval(last_capacity, &suspend_interval);
+-                if (r < 0) {
+-                        log_debug_errno(r, "Failed to estimate suspend interval using previous discharge rate, ignoring: %m");
+-                        /* In case of no battery or any errors, system suspend interval will be set to HibernateDelaySec=. */
+-                        suspend_interval = sleep_config->hibernate_delay_usec;
++                if (hashmap_isempty(last_capacity))
++                        /* In case of no battery, system suspend interval will be set to HibernateDelaySec= or 2 hours. */
++                        suspend_interval = timestamp_is_set(hibernate_timestamp) ? sleep_config->hibernate_delay_usec : DEFAULT_SUSPEND_ESTIMATION_USEC;
++                else {
++                        r = get_total_suspend_interval(last_capacity, &suspend_interval);
++                        if (r < 0) {
++                                log_debug_errno(r, "Failed to estimate suspend interval using previous discharge rate, ignoring: %m");
++                                /* In case of any errors, especially when we do not know the battery
++                                 * discharging rate, system suspend interval will be set to
++                                 * SuspendEstimationSec=. */
++                                suspend_interval = sleep_config->suspend_estimation_usec;
++                        }
+                 }
+ 
++                /* Do not suspend more than HibernateDelaySec= */
+                 usec_t before_timestamp = now(CLOCK_BOOTTIME);
++                suspend_interval = MIN(suspend_interval, usec_sub_unsigned(hibernate_timestamp, before_timestamp));
++                if (suspend_interval <= 0)
++                        break; /* system should hibernate */
+ 
+                 log_debug("Set timerfd wake alarm for %s", FORMAT_TIMESPAN(suspend_interval, USEC_PER_SEC));
+                 /* Wake alarm for system with or without battery to hibernate or estimate discharge rate whichever is applicable */
+@@ -377,7 +391,7 @@ static int freeze_thaw_user_slice(const char **method) {
+ 
+ static int execute_s2h(const SleepConfig *sleep_config) {
+         _unused_ _cleanup_(freeze_thaw_user_slice) const char *auto_method_thaw = NULL;
+-        int r, k;
++        int r;
+ 
+         assert(sleep_config);
+ 
+@@ -387,15 +401,21 @@ static int execute_s2h(const SleepConfig *sleep_config) {
+         else
+                 auto_method_thaw = "ThawUnit"; /* from now on we want automatic thawing */;
+ 
+-        r = check_wakeup_type();
+-        if (r < 0)
+-                log_debug_errno(r, "Failed to check hardware wakeup type, ignoring: %m");
+-
+-        k = battery_trip_point_alarm_exists();
+-        if (k < 0)
+-                log_debug_errno(k, "Failed to check whether acpi_btp support is enabled or not, ignoring: %m");
++        /* Only check if we have automated battery alarms if HibernateDelaySec= is not set, as in that case
++         * we'll busy poll for the configured interval instead */
++        if (!timestamp_is_set(sleep_config->hibernate_delay_usec)) {
++                r = check_wakeup_type();
++                if (r < 0)
++                        log_debug_errno(r, "Failed to check hardware wakeup type, ignoring: %m");
++                else {
++                        r = battery_trip_point_alarm_exists();
++                        if (r < 0)
++                                log_debug_errno(r, "Failed to check whether acpi_btp support is enabled or not, ignoring: %m");
++                }
++        } else
++                r = 0;  /* Force fallback path */
+ 
+-        if (r >= 0 && k > 0) {
++        if (r > 0) { /* If we have both wakeup alarms and battery trip point support, use them */
+                 log_debug("Attempting to suspend...");
+                 r = execute(sleep_config, SLEEP_SUSPEND, NULL);
+                 if (r < 0)
+diff --git a/src/sleep/sleep.conf b/src/sleep/sleep.conf
+index a3d31140d8..4c8e8b9680 100644
+--- a/src/sleep/sleep.conf
++++ b/src/sleep/sleep.conf
+@@ -23,4 +23,5 @@
+ #HibernateState=disk
+ #HybridSleepMode=suspend platform shutdown
+ #HybridSleepState=disk
+-#HibernateDelaySec=120min
++#HibernateDelaySec=
++#SuspendEstimationSec=60min

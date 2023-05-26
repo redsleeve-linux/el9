@@ -1,0 +1,36 @@
+From 87b1eac151e5bbb9322d3213072dc2e5fba24f4e Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 24 Nov 2022 18:42:08 +0100
+Subject: [PATCH] resolved: remove inappropriate assert()
+
+A NULL Bitmap object is by all our code considered identical to an empty
+bitmap. Hence let's remove the entirely unnecessary assert().
+
+The assert() can be triggered if debug monitoring is used an an empty
+NSEC or NSEC3 RR is included in an answer resolved returns.
+
+it's not really a security issue since enabling debug monitoring is a
+manual step requiring root privileges, that is off by default. Moreover,
+it's a "clean" assert(), i.e. the worst that happens is tha a coredump
+is generated and resolved restarted.
+
+Fixes: #25449
+(cherry picked from commit fb896517aeecc2a8ec16586a34a0249606eb9f66)
+
+Related: #2138081
+---
+ src/resolve/resolved-dns-rr.c | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/src/resolve/resolved-dns-rr.c b/src/resolve/resolved-dns-rr.c
+index 8123ca1f98..d47cdbbd8e 100644
+--- a/src/resolve/resolved-dns-rr.c
++++ b/src/resolve/resolved-dns-rr.c
+@@ -1865,7 +1865,6 @@ static int type_bitmap_to_json(Bitmap *b, JsonVariant **ret) {
+         unsigned t;
+         int r;
+ 
+-        assert(b);
+         assert(ret);
+ 
+         BITMAP_FOREACH(t, b) {

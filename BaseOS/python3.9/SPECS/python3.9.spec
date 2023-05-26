@@ -13,16 +13,12 @@ URL: https://www.python.org/
 
 #  WARNING  When rebasing to a new Python version,
 #           remember to update the python3-docs package as well
-%global general_version %{pybasever}.14
+%global general_version %{pybasever}.16
 #global prerel ...
 %global upstream_version %{general_version}%{?prerel}
 Version: %{general_version}%{?prerel:~%{prerel}}
-Release: 1%{?dist}.2.redsleeve
+Release: 1%{?dist}
 License: Python
-
-%ifarch armv6hl
-%define _gnu "-gnueabihf"
-%endif
 
 
 # ==================================
@@ -402,35 +398,6 @@ Patch329: 00329-fips.patch
 # Python/importlib_external.h to this patch but it'd make rebasing
 # a nightmare because it's basically a binary file.
 Patch353: 00353-architecture-names-upstream-downstream.patch
-
-# 00382 # 9e275dcdf3934b827994ecc3247d583d5bab7985
-# CVE-2015-20107
-#
-# Make mailcap refuse to match unsafe filenames/types/params (GH-91993)
-#
-# Upstream: https://github.com/python/cpython/issues/68966
-#
-# Tracker bug: https://bugzilla.redhat.com/show_bug.cgi?id=2075390
-Patch382: 00382-cve-2015-20107.patch
-
-# 00391 #
-# CVE-2022-42919
-#
-# Local privilege escalation via the multiprocessing forkserver start method.
-#
-# Upstream: https://github.com/python/cpython/issues/97514
-#
-# Tracker bug: https://bugzilla.redhat.com/show_bug.cgi?id=2138705
-Patch391: 00391-cve-2022-42919.patch
-
-# 00394 #
-# CVE-2022-45061: CPU denial of service via inefficient IDNA decoder
-#
-# gh-98433: Fix quadratic time idna decoding.
-#
-# There was an unnecessary quadratic loop in idna decoding. This restores
-# the behavior to linear.
-Patch394: 00394-cve-2022-45061-cpu-denial-of-service-via-inefficient-idna-decoder.patch
 
 # (New patches go here ^^^)
 #
@@ -1030,10 +997,10 @@ InstallPython() {
 %endif # with gdb_hooks
 
   # Rename the -devel script that differs on different arches to arch specific name
-#  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
-#  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
-#    %{buildroot}%{_bindir}/python${LDVersion}-config
-#    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
+  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
+  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
+    %{buildroot}%{_bindir}/python${LDVersion}-config
+    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
 
   # Make python3-devel multilib-ready
   mv %{buildroot}%{_includedir}/python${LDVersion}/pyconfig.h \
@@ -1218,7 +1185,7 @@ ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python
 ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python%{pybasever}
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python-config
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-config
-#ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
+ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
 # There were also executables with %%{LDVERSION_optimized} in RHEL 8,
 # but since Python 3.8 %%{LDVERSION_optimized} == %%{pybasever}.
 # We list both in the %%files section to assert this.
@@ -1226,7 +1193,7 @@ ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-p
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python-debug
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}
 ln -s %{_bindir}/python%{LDVERSION_debug}-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-config
-#ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
+ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
 %endif
 %endif
 
@@ -1308,12 +1275,6 @@ CheckPython() {
     %endif
     %ifarch %{mips64}
     -x test_ctypes \
-    %endif
-    %ifarch %{arm}
-    -x test_gdb \
-    -x test_minidom \
-    -x test_xml_etree \
-    -x test_xml_etree_c \
     %endif
 
   echo FINISHED: CHECKING OF PYTHON FOR CONFIGURATION: $ConfName
@@ -1616,7 +1577,7 @@ CheckPython optimized
 
 %{_bindir}/python%{pybasever}-config
 %{_bindir}/python%{LDVERSION_optimized}-config
-#%{_bindir}/python%{LDVERSION_optimized}-*-config
+%{_bindir}/python%{LDVERSION_optimized}-*-config
 %{_libdir}/libpython%{LDVERSION_optimized}.so
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}.pc
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}-embed.pc
@@ -1627,8 +1588,8 @@ CheckPython optimized
 %{_libexecdir}/platform-python-config
 %{_libexecdir}/platform-python%{pybasever}-config
 %{_libexecdir}/platform-python%{LDVERSION_optimized}-config
-#%{_libexecdir}/platform-python%{pybasever}-*-config
-#%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
+%{_libexecdir}/platform-python%{pybasever}-*-config
+%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
 %endif
 
 
@@ -1788,7 +1749,7 @@ CheckPython optimized
 %{pylibdir}/config-%{LDVERSION_debug}-%{platform_triplet}
 %{_includedir}/python%{LDVERSION_debug}
 %{_bindir}/python%{LDVERSION_debug}-config
-#%{_bindir}/python%{LDVERSION_debug}-*-config
+%{_bindir}/python%{LDVERSION_debug}-*-config
 %{_libdir}/libpython%{LDVERSION_debug}.so
 %{_libdir}/libpython%{LDVERSION_debug}.so.%{py_SOVERSION}
 %{_libdir}/pkgconfig/python-%{LDVERSION_debug}.pc
@@ -1798,7 +1759,7 @@ CheckPython optimized
 %{_libexecdir}/platform-python-debug
 %{_libexecdir}/platform-python%{LDVERSION_debug}
 %{_libexecdir}/platform-python%{LDVERSION_debug}-config
-#%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
+%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
 %endif
 
 # Analog of the -tools subpackage's files:
@@ -1839,16 +1800,10 @@ CheckPython optimized
 # ======================================================
 
 %changelog
-* Sat Mar 04 2023 Jacco Ligthart <jacco@redsleeve.org> - 3.9.14-1.2.redsleeve
-- three minor changes for armv6
-
-* Mon Jan 09 2023 Charalampos Stratakis <cstratak@redhat.com> - 3.9.14-1.2
-- Security fix for CVE-2022-45061
-Resolves: rhbz#2144072
-
-* Mon Nov 07 2022 Lumír Balhar <lbalhar@redhat.com> - 3.9.14-1.1
-- Fix for CVE-2022-42919
-Resolves: rhbz#2138705
+* Thu Dec 08 2022 Charalampos Stratakis <cstratak@redhat.com> - 3.9.16-1
+- Update to 3.9.16
+- Security fixes for CVE-2022-42919 and CVE-2022-45061
+Resolves: rhbz#2138705, rhbz#2144072
 
 * Wed Sep 21 2022 Charalampos Stratakis <cstratak@redhat.com> - 3.9.14-1
 - Update to 3.9.14

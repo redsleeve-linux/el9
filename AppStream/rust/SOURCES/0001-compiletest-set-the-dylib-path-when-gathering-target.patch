@@ -1,0 +1,185 @@
+From 2bdbc5fbf7f84c62f8c7b1007f3b6fd6d3da06f6 Mon Sep 17 00:00:00 2001
+From: Josh Stone <jistone@redhat.com>
+Date: Fri, 14 Oct 2022 16:11:28 -0700
+Subject: [PATCH] compiletest: set the dylib path when gathering target cfg
+
+If the compiler is built with `rpath = false`, then it won't find its
+own libraries unless the library search path is set. We already do that
+while running the actual compiletests, but #100260 added another rustc
+command for getting the target cfg.
+
+    Check compiletest suite=codegen mode=codegen (x86_64-unknown-linux-gnu -> x86_64-unknown-linux-gnu)
+    thread 'main' panicked at 'error: failed to get cfg info from "[...]/build/x86_64-unknown-linux-gnu/stage1/bin/rustc"
+    --- stdout
+
+    --- stderr
+    [...]/build/x86_64-unknown-linux-gnu/stage1/bin/rustc: error while loading shared libraries: librustc_driver-a2a76dc626cd02d2.so: cannot open shared object file: No such file or directory
+    ', src/tools/compiletest/src/common.rs:476:13
+
+Now the library path is set here as well, so it works without rpath.
+
+(cherry picked from commit f8a0cc2ca8a644ddb63867526711ba17cb7508c8)
+---
+ src/tools/compiletest/src/common.rs  | 20 +++++++++++---------
+ src/tools/compiletest/src/runtest.rs | 27 +++------------------------
+ src/tools/compiletest/src/util.rs    | 23 +++++++++++++++++++++++
+ 3 files changed, 37 insertions(+), 33 deletions(-)
+
+diff --git a/src/tools/compiletest/src/common.rs b/src/tools/compiletest/src/common.rs
+index 0260f6848386..9a432f11f82f 100644
+--- a/src/tools/compiletest/src/common.rs
++++ b/src/tools/compiletest/src/common.rs
+@@ -2,11 +2,12 @@
+ 
+ use std::ffi::OsString;
+ use std::fmt;
++use std::iter;
+ use std::path::{Path, PathBuf};
+ use std::process::Command;
+ use std::str::FromStr;
+ 
+-use crate::util::PathBufExt;
++use crate::util::{add_dylib_path, PathBufExt};
+ use lazycell::LazyCell;
+ use test::ColorConfig;
+ 
+@@ -385,8 +386,7 @@ pub fn run_enabled(&self) -> bool {
+     }
+ 
+     fn target_cfg(&self) -> &TargetCfg {
+-        self.target_cfg
+-            .borrow_with(|| TargetCfg::new(&self.rustc_path, &self.target, &self.target_rustcflags))
++        self.target_cfg.borrow_with(|| TargetCfg::new(self))
+     }
+ 
+     pub fn matches_arch(&self, arch: &str) -> bool {
+@@ -457,21 +457,23 @@ pub enum Endian {
+ }
+ 
+ impl TargetCfg {
+-    fn new(rustc_path: &Path, target: &str, target_rustcflags: &Vec<String>) -> TargetCfg {
+-        let output = match Command::new(rustc_path)
++    fn new(config: &Config) -> TargetCfg {
++        let mut command = Command::new(&config.rustc_path);
++        add_dylib_path(&mut command, iter::once(&config.compile_lib_path));
++        let output = match command
+             .arg("--print=cfg")
+             .arg("--target")
+-            .arg(target)
+-            .args(target_rustcflags)
++            .arg(&config.target)
++            .args(&config.target_rustcflags)
+             .output()
+         {
+             Ok(output) => output,
+-            Err(e) => panic!("error: failed to get cfg info from {:?}: {e}", rustc_path),
++            Err(e) => panic!("error: failed to get cfg info from {:?}: {e}", config.rustc_path),
+         };
+         if !output.status.success() {
+             panic!(
+                 "error: failed to get cfg info from {:?}\n--- stdout\n{}\n--- stderr\n{}",
+-                rustc_path,
++                config.rustc_path,
+                 String::from_utf8(output.stdout).unwrap(),
+                 String::from_utf8(output.stderr).unwrap(),
+             );
+diff --git a/src/tools/compiletest/src/runtest.rs b/src/tools/compiletest/src/runtest.rs
+index 8af5f1da694b..f8903f754f09 100644
+--- a/src/tools/compiletest/src/runtest.rs
++++ b/src/tools/compiletest/src/runtest.rs
+@@ -13,7 +13,7 @@
+ use crate::header::TestProps;
+ use crate::json;
+ use crate::read2::read2_abbreviated;
+-use crate::util::{logv, PathBufExt};
++use crate::util::{add_dylib_path, dylib_env_var, logv, PathBufExt};
+ use crate::ColorConfig;
+ use regex::{Captures, Regex};
+ use rustfix::{apply_suggestions, get_suggestions_from_json, Filter};
+@@ -26,6 +26,7 @@
+ use std::hash::{Hash, Hasher};
+ use std::io::prelude::*;
+ use std::io::{self, BufReader};
++use std::iter;
+ use std::path::{Path, PathBuf};
+ use std::process::{Child, Command, ExitStatus, Output, Stdio};
+ use std::str;
+@@ -72,19 +73,6 @@ fn disable_error_reporting<F: FnOnce() -> R, R>(f: F) -> R {
+     f()
+ }
+ 
+-/// The name of the environment variable that holds dynamic library locations.
+-pub fn dylib_env_var() -> &'static str {
+-    if cfg!(windows) {
+-        "PATH"
+-    } else if cfg!(target_os = "macos") {
+-        "DYLD_LIBRARY_PATH"
+-    } else if cfg!(target_os = "haiku") {
+-        "LIBRARY_PATH"
+-    } else {
+-        "LD_LIBRARY_PATH"
+-    }
+-}
+-
+ /// The platform-specific library name
+ pub fn get_lib_name(lib: &str, dylib: bool) -> String {
+     // In some casess (e.g. MUSL), we build a static
+@@ -1811,16 +1799,7 @@ fn compose_and_run(
+ 
+         // Need to be sure to put both the lib_path and the aux path in the dylib
+         // search path for the child.
+-        let mut path =
+-            env::split_paths(&env::var_os(dylib_env_var()).unwrap_or_default()).collect::<Vec<_>>();
+-        if let Some(p) = aux_path {
+-            path.insert(0, PathBuf::from(p))
+-        }
+-        path.insert(0, PathBuf::from(lib_path));
+-
+-        // Add the new dylib search path var
+-        let newpath = env::join_paths(&path).unwrap();
+-        command.env(dylib_env_var(), newpath);
++        add_dylib_path(&mut command, iter::once(lib_path).chain(aux_path));
+ 
+         let mut child = disable_error_reporting(|| command.spawn())
+             .unwrap_or_else(|_| panic!("failed to exec `{:?}`", &command));
+diff --git a/src/tools/compiletest/src/util.rs b/src/tools/compiletest/src/util.rs
+index e5ff0906be8a..ec36f1e4fb72 100644
+--- a/src/tools/compiletest/src/util.rs
++++ b/src/tools/compiletest/src/util.rs
+@@ -2,6 +2,7 @@
+ use std::env;
+ use std::ffi::OsStr;
+ use std::path::PathBuf;
++use std::process::Command;
+ 
+ use tracing::*;
+ 
+@@ -111,3 +112,25 @@ fn with_extra_extension<S: AsRef<OsStr>>(&self, extension: S) -> PathBuf {
+         }
+     }
+ }
++
++/// The name of the environment variable that holds dynamic library locations.
++pub fn dylib_env_var() -> &'static str {
++    if cfg!(windows) {
++        "PATH"
++    } else if cfg!(target_os = "macos") {
++        "DYLD_LIBRARY_PATH"
++    } else if cfg!(target_os = "haiku") {
++        "LIBRARY_PATH"
++    } else {
++        "LD_LIBRARY_PATH"
++    }
++}
++
++/// Adds a list of lookup paths to `cmd`'s dynamic library lookup path.
++/// If the dylib_path_var is already set for this cmd, the old value will be overwritten!
++pub fn add_dylib_path(cmd: &mut Command, paths: impl Iterator<Item = impl Into<PathBuf>>) {
++    let path_env = env::var_os(dylib_env_var());
++    let old_paths = path_env.as_ref().map(env::split_paths);
++    let new_paths = paths.map(Into::into).chain(old_paths.into_iter().flatten());
++    cmd.env(dylib_env_var(), env::join_paths(new_paths).unwrap());
++}
+-- 
+2.38.1
+

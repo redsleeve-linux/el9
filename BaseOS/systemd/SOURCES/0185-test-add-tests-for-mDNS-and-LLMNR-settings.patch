@@ -1,0 +1,96 @@
+From 0845d4d0f5a37493d3da68624aba1a576382e961 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 10 Nov 2022 15:52:57 +0900
+Subject: [PATCH] test: add tests for mDNS and LLMNR settings
+
+(cherry picked from commit b77899af0d75ea59c35ba454d869fa759fe7b3a1)
+
+Related: #2138081
+---
+ test/units/testsuite-75.sh | 73 ++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 73 insertions(+)
+
+diff --git a/test/units/testsuite-75.sh b/test/units/testsuite-75.sh
+index 53ceced641..1a656fcdc1 100755
+--- a/test/units/testsuite-75.sh
++++ b/test/units/testsuite-75.sh
+@@ -55,6 +55,79 @@ echo nameserver 10.0.3.1 10.0.3.2 | "$RESOLVCONF" -a hoge.inet.ipsec.192.168.35
+ echo nameserver 10.0.3.3 10.0.3.4 | "$RESOLVCONF" -a hoge.foo.dhcp
+ assert_in '10.0.3.1 10.0.3.2' "$(resolvectl dns hoge)"
+ assert_in '10.0.3.3 10.0.3.4' "$(resolvectl dns hoge.foo)"
++
++# Tests for mDNS and LLMNR settings
++mkdir -p /run/systemd/resolved.conf.d
++{
++    echo "[Resolve]"
++    echo "MulticastDNS=yes"
++    echo "LLMNR=yes"
++} >/run/systemd/resolved.conf.d/mdns-llmnr.conf
++systemctl restart systemd-resolved.service
++systemctl service-log-level systemd-resolved.service debug
++# make sure networkd is not running.
++systemctl stop systemd-networkd.service
++# defaults to yes (both the global and per-link settings are yes)
++assert_in 'yes' "$(resolvectl mdns hoge)"
++assert_in 'yes' "$(resolvectl llmnr hoge)"
++# set per-link setting
++resolvectl mdns hoge yes
++resolvectl llmnr hoge yes
++assert_in 'yes' "$(resolvectl mdns hoge)"
++assert_in 'yes' "$(resolvectl llmnr hoge)"
++resolvectl mdns hoge resolve
++resolvectl llmnr hoge resolve
++assert_in 'resolve' "$(resolvectl mdns hoge)"
++assert_in 'resolve' "$(resolvectl llmnr hoge)"
++resolvectl mdns hoge no
++resolvectl llmnr hoge no
++assert_in 'no' "$(resolvectl mdns hoge)"
++assert_in 'no' "$(resolvectl llmnr hoge)"
++# downgrade global setting to resolve
++{
++    echo "[Resolve]"
++    echo "MulticastDNS=resolve"
++    echo "LLMNR=resolve"
++} >/run/systemd/resolved.conf.d/mdns-llmnr.conf
++systemctl restart systemd-resolved.service
++systemctl service-log-level systemd-resolved.service debug
++# set per-link setting
++resolvectl mdns hoge yes
++resolvectl llmnr hoge yes
++assert_in 'resolve' "$(resolvectl mdns hoge)"
++assert_in 'resolve' "$(resolvectl llmnr hoge)"
++resolvectl mdns hoge resolve
++resolvectl llmnr hoge resolve
++assert_in 'resolve' "$(resolvectl mdns hoge)"
++assert_in 'resolve' "$(resolvectl llmnr hoge)"
++resolvectl mdns hoge no
++resolvectl llmnr hoge no
++assert_in 'no' "$(resolvectl mdns hoge)"
++assert_in 'no' "$(resolvectl llmnr hoge)"
++# downgrade global setting to no
++{
++    echo "[Resolve]"
++    echo "MulticastDNS=no"
++    echo "LLMNR=no"
++} >/run/systemd/resolved.conf.d/mdns-llmnr.conf
++systemctl restart systemd-resolved.service
++systemctl service-log-level systemd-resolved.service debug
++# set per-link setting
++resolvectl mdns hoge yes
++resolvectl llmnr hoge yes
++assert_in 'no' "$(resolvectl mdns hoge)"
++assert_in 'no' "$(resolvectl llmnr hoge)"
++resolvectl mdns hoge resolve
++resolvectl llmnr hoge resolve
++assert_in 'no' "$(resolvectl mdns hoge)"
++assert_in 'no' "$(resolvectl llmnr hoge)"
++resolvectl mdns hoge no
++resolvectl llmnr hoge no
++assert_in 'no' "$(resolvectl mdns hoge)"
++assert_in 'no' "$(resolvectl llmnr hoge)"
++
++# Cleanup
++rm -f /run/systemd/resolved.conf.d/mdns-llmnr.conf
+ ip link del hoge
+ ip link del hoge.foo
+ 

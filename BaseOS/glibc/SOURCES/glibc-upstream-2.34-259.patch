@@ -1,0 +1,30 @@
+commit b349fe072275bfc5763110a49fe6ef1b44d60289
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Tue May 31 11:46:59 2022 -0300
+
+    misc: Use 64 bit stat for daemon (BZ# 29203)
+    
+    This is a missing spot initially from 52a5fe70a2c77935.
+    
+    Checked on i686-linux-gnu.
+    
+    (cherry picked from commit 3fbc33010c76721d34f676d8efb45bcc54e0d575)
+
+diff --git a/misc/daemon.c b/misc/daemon.c
+index 0e688f4d7482e335..3c73ac2ab8709812 100644
+--- a/misc/daemon.c
++++ b/misc/daemon.c
+@@ -61,11 +61,10 @@ daemon (int nochdir, int noclose)
+ 		(void)__chdir("/");
+ 
+ 	if (!noclose) {
+-		struct stat64 st;
++		struct __stat64_t64 st;
+ 
+ 		if ((fd = __open_nocancel(_PATH_DEVNULL, O_RDWR, 0)) != -1
+-		    && (__builtin_expect (__fstat64 (fd, &st), 0)
+-			== 0)) {
++		    && __glibc_likely (__fstat64_time64 (fd, &st) == 0)) {
+ 			if (__builtin_expect (S_ISCHR (st.st_mode), 1) != 0
+ #if defined DEV_NULL_MAJOR && defined DEV_NULL_MINOR
+ 			    && (st.st_rdev

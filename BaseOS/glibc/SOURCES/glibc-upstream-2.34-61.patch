@@ -1,0 +1,34 @@
+commit aa3a97496c82a8443039248ebee650322c9480f4
+Author: Aurelien Jarno <aurelien@aurel32.net>
+Date:   Thu Dec 16 00:06:28 2021 +0100
+
+    riscv: align stack before calling _dl_init [BZ #28703]
+    
+    Align the stack pointer to 128 bits during the call to _dl_init() as
+    specified by the RISC-V ABI [1]. This fixes the elf/tst-align2 test.
+    
+    Fixes bug 28703.
+    
+    [1] https://github.com/riscv-non-isa/riscv-elf-psabi-doc
+    
+    (cherry picked from commit 225da459cebef1037dcd78b56471edc0721e1c41)
+
+diff --git a/sysdeps/riscv/dl-machine.h b/sysdeps/riscv/dl-machine.h
+index aedf69fcdd8aff50..951268923da26a37 100644
+--- a/sysdeps/riscv/dl-machine.h
++++ b/sysdeps/riscv/dl-machine.h
+@@ -127,8 +127,14 @@ elf_machine_load_address (void)
+ 	sll a3, a1, " STRINGXP (PTRLOG) "\n\
+ 	add a3, a3, a2\n\
+ 	add a3, a3, " STRINGXP (SZREG) "\n\
++	# Stash the stack pointer in s1.\n\
++	mv s1, sp\n\
++	# Align stack to 128 bits for the _dl_init call.\n\
++	andi sp, sp,-16\n\
+ 	# Call the function to run the initializers.\n\
+ 	jal _dl_init\n\
++	# Restore the stack pointer for _start.\n\
++	mv sp, s1\n\
+ 	# Pass our finalizer function to _start.\n\
+ 	lla a0, _dl_fini\n\
+ 	# Jump to the user entry point.\n\

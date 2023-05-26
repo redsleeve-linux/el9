@@ -1,0 +1,23 @@
+Downstream-only patch from Mark Wielaard <mjw@redhat.com> to avoid a
+crash in backtrace if the vDSO is not available.
+
+Upstream, this code was removed in commit 82fd7314c7df8c5555dce02
+("powerpc: Remove backtrace implementation"), so patch is not needed
+there.
+
+diff --git a/sysdeps/powerpc/powerpc64/backtrace.c b/sysdeps/powerpc/powerpc64/backtrace.c
+index 37de9b5bdd73c316..0ffa7509dfa4862a 100644
+--- a/sysdeps/powerpc/powerpc64/backtrace.c
++++ b/sysdeps/powerpc/powerpc64/backtrace.c
+@@ -68,8 +68,9 @@ static inline bool
+ is_sigtramp_address (void *nip)
+ {
+ #ifdef HAVE_SIGTRAMP_RT64
+-  if (nip == GLRO (dl_vdso_sigtramp_rt64) ||
+-      nip == GLRO (dl_vdso_sigtramp_rt64) + 4)
++  if ((nip == GLRO (dl_vdso_sigtramp_rt64) ||
++       nip == GLRO (dl_vdso_sigtramp_rt64) + 4)
++      && nip != NULL)
+     return true;
+ #endif
+   return false;

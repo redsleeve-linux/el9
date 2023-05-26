@@ -1,0 +1,30 @@
+commit 1fcc7bfee22a07064508b6729cdaa6289851a2b4
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Mon Aug 22 11:04:47 2022 +0200
+
+    alpha: Fix generic brk system call emulation in __brk_call (bug 29490)
+    
+    The kernel special-cases the zero argument for alpha brk, and we can
+    use that to restore the generic Linux error handling behavior.
+    
+    Fixes commit b57ab258c1140bc45464b4b9908713e3e0ee35aa ("Linux:
+    Introduce __brk_call for invoking the brk system call").
+    
+    (cherry picked from commit e7ad26ee3cb74e61d0637c888f24dd478d77af58)
+
+diff --git a/sysdeps/unix/sysv/linux/alpha/brk_call.h b/sysdeps/unix/sysv/linux/alpha/brk_call.h
+index b8088cf13f938c88..0b851b6c8664e8d5 100644
+--- a/sysdeps/unix/sysv/linux/alpha/brk_call.h
++++ b/sysdeps/unix/sysv/linux/alpha/brk_call.h
+@@ -21,8 +21,7 @@ __brk_call (void *addr)
+ {
+   unsigned long int result = INTERNAL_SYSCALL_CALL (brk, addr);
+   if (result == -ENOMEM)
+-    /* Mimic the default error reporting behavior.  */
+-    return addr;
+-  else
+-    return (void *) result;
++    /* Mimic the generic error reporting behavior.  */
++    result = INTERNAL_SYSCALL_CALL (brk, 0);
++  return (void *) result;
+ }

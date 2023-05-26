@@ -1,0 +1,619 @@
+commit 23645707f12f2dd9d80b51effb2d9618a7b65565
+Author: Siddhesh Poyarekar <siddhesh@sourceware.org>
+Date:   Wed Dec 8 11:21:26 2021 +0530
+
+    Replace --enable-static-pie with --disable-default-pie
+    
+    Build glibc programs and tests as PIE by default and enable static-pie
+    automatically if the architecture and toolchain supports it.
+    
+    Also add a new configuration option --disable-default-pie to prevent
+    building programs as PIE.
+    
+    Only the following architectures now have PIE disabled by default
+    because they do not work at the moment.  hppa, ia64, alpha and csky
+    don't work because the linker is unable to handle a pcrel relocation
+    generated from PIE objects.  The microblaze compiler is currently
+    failing with an ICE.  GNU hurd tries to enable static-pie, which does
+    not work and hence fails.  All these targets have default PIE disabled
+    at the moment and I have left it to the target maintainers to enable PIE
+    on their targets.
+    
+    build-many-glibcs runs clean for all targets.  I also tested x86_64 on
+    Fedora and Ubuntu, to verify that the default build as well as
+    --disable-default-pie work as expected with both system toolchains.
+    
+    Signed-off-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+    Reviewed-by: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+
+diff --git a/INSTALL b/INSTALL
+index 02dcf6b1ca3a4c43..d6d93ec9be4262d7 100644
+--- a/INSTALL
++++ b/INSTALL
+@@ -111,16 +111,14 @@ if 'CFLAGS' is specified it must enable optimization.  For example:
+      systems support shared libraries; you need ELF support and
+      (currently) the GNU linker.
+ 
+-'--enable-static-pie'
+-     Enable static position independent executable (static PIE) support.
+-     Static PIE is similar to static executable, but can be loaded at
+-     any address without help from a dynamic linker.  All static
+-     programs as well as static tests are built as static PIE, except
+-     for those marked with no-pie.  The resulting glibc can be used with
+-     the GCC option, -static-pie, which is available with GCC 8 or
+-     above, to create static PIE. This option also implies that glibc
+-     programs and tests are created as dynamic position independent
+-     executables (PIE) by default.
++'--disable-default-pie'
++     Don't build glibc programs and the testsuite as position
++     independent executables (PIE). By default, glibc programs and tests
++     are created as position independent executables on targets that
++     support it.  If the toolchain and architecture support it, static
++     executables are built as static PIE and the resulting glibc can be
++     used with the GCC option, -static-pie, which is available with GCC
++     8 or above, to create static PIE.
+ 
+ '--enable-cet'
+ '--enable-cet=permissive'
+diff --git a/Makeconfig b/Makeconfig
+index 2fa0884b4eee5e53..8bc5540292c7b6fa 100644
+--- a/Makeconfig
++++ b/Makeconfig
+@@ -1,4 +1,5 @@
+ # Copyright (C) 1991-2021 Free Software Foundation, Inc.
++# Copyright (C) The GNU Toolchain Authors.
+ # This file is part of the GNU C Library.
+ 
+ # The GNU C Library is free software; you can redistribute it and/or
+@@ -376,19 +377,24 @@ LDFLAGS.so += $(hashstyle-LDFLAGS)
+ LDFLAGS-rtld += $(hashstyle-LDFLAGS)
+ endif
+ 
+-ifeq (yes,$(enable-static-pie))
++ifeq (no,$(build-pie-default))
++pie-default = $(no-pie-ccflag)
++else # build-pie-default
+ pic-default = -DPIC
+ # Compile libc.a and libc_p.a with -fPIE/-fpie for static PIE.
+ pie-default = $(pie-ccflag)
++
++ifeq (yes,$(enable-static-pie))
+ ifeq (yes,$(have-static-pie))
+-default-pie-ldflag = -static-pie
++static-pie-ldflag = -static-pie
+ else
+ # Static PIE can't have dynamic relocations in read-only segments since
+ # static PIE is mapped into memory by kernel.  --eh-frame-hdr is needed
+ # for PIE to support exception.
+-default-pie-ldflag = -Wl,-pie,--no-dynamic-linker,--eh-frame-hdr,-z,text
+-endif
+-endif
++static-pie-ldflag = -Wl,-pie,--no-dynamic-linker,--eh-frame-hdr,-z,text
++endif # have-static-pie
++endif # enable-static-pie
++endif # build-pie-default
+ 
+ # If lazy relocations are disabled, add the -z now flag.  Use
+ # LDFLAGS-lib.so instead of LDFLAGS.so, to avoid adding the flag to
+@@ -444,7 +450,7 @@ endif
+ # Command for statically linking programs with the C library.
+ ifndef +link-static
+ +link-static-before-inputs = -nostdlib -nostartfiles -static \
+-	      $(if $($(@F)-no-pie),$(no-pie-ldflag),$(default-pie-ldflag)) \
++	      $(if $($(@F)-no-pie),$(no-pie-ldflag),$(static-pie-ldflag)) \
+ 	      $(sysdep-LDFLAGS) $(LDFLAGS) $(LDFLAGS-$(@F))  \
+ 	      $(firstword $(CRT-$(@F)) $(csu-objpfx)$(real-static-start-installed-name)) \
+ 	      $(+preinit) $(+prectorT)
+@@ -479,7 +485,7 @@ ifeq (yes,$(build-pie-default))
+ +link-tests-after-inputs = $(link-libc-tests) $(+link-pie-after-libc)
+ +link-printers-tests = $(+link-pie-printers-tests)
+ else  # not build-pie-default
+-+link-before-inputs = -nostdlib -nostartfiles \
+++link-before-inputs = -nostdlib -nostartfiles $(no-pie-ldflag) \
+ 	      $(sysdep-LDFLAGS) $(LDFLAGS) $(LDFLAGS-$(@F)) \
+ 	      $(combreloc-LDFLAGS) $(relro-LDFLAGS) $(hashstyle-LDFLAGS) \
+ 	      $(firstword $(CRT-$(@F)) $(csu-objpfx)$(start-installed-name)) \
+@@ -1047,6 +1053,7 @@ PIC-ccflag = -fPIC
+ endif
+ # This can be changed by a sysdep makefile
+ pie-ccflag = -fpie
++no-pie-ccflag = -fno-pie
+ # This one should always stay like this unless there is a very good reason.
+ PIE-ccflag = -fPIE
+ ifeq (yes,$(build-profile))
+diff --git a/config.h.in b/config.h.in
+index 8b45a3a61d774714..458342887e4e9380 100644
+--- a/config.h.in
++++ b/config.h.in
+@@ -277,6 +277,9 @@
+ /* Build glibc with tunables support.  */
+ #define HAVE_TUNABLES 0
+ 
++/* Define if PIE is unsupported.  */
++#undef PIE_UNSUPPORTED
++
+ /* Define if static PIE is supported.  */
+ #undef SUPPORT_STATIC_PIE
+ 
+diff --git a/config.make.in b/config.make.in
+index cbf59114b0b9ae4f..e8630a8d0ccf874d 100644
+--- a/config.make.in
++++ b/config.make.in
+@@ -90,9 +90,6 @@ static-nss-crypt = @libc_cv_static_nss_crypt@
+ 
+ # Configuration options.
+ build-shared = @shared@
+-build-pic-default= @libc_cv_pic_default@
+-build-pie-default= @libc_cv_pie_default@
+-cc-pie-default= @libc_cv_cc_pie_default@
+ build-profile = @profile@
+ build-static-nss = @static_nss@
+ cross-compiling = @cross_compiling@
+diff --git a/configure b/configure
+index 9619c10991d04362..e9d2b1f398c4dba0 100755
+--- a/configure
++++ b/configure
+@@ -596,9 +596,6 @@ DEFINES
+ static_nss
+ profile
+ libc_cv_multidir
+-libc_cv_pie_default
+-libc_cv_cc_pie_default
+-libc_cv_pic_default
+ shared
+ static
+ ldd_rewrite_script
+@@ -767,7 +764,7 @@ with_nonshared_cflags
+ enable_sanity_checks
+ enable_shared
+ enable_profile
+-enable_static_pie
++enable_default_pie
+ enable_timezone_tools
+ enable_hardcoded_path_in_tests
+ enable_hidden_plt
+@@ -1423,8 +1420,8 @@ Optional Features:
+                           in special situations) [default=yes]
+   --enable-shared         build shared library [default=yes if GNU ld]
+   --enable-profile        build profiled library [default=no]
+-  --enable-static-pie     enable static PIE support and use it in the
+-                          testsuite [default=no]
++  --disable-default-pie   Do not build glibc programs and the testsuite as PIE
++                          [default=no]
+   --disable-timezone-tools
+                           do not install timezone tools [default=install]
+   --enable-hardcoded-path-in-tests
+@@ -3408,11 +3405,11 @@ else
+   profile=no
+ fi
+ 
+-# Check whether --enable-static-pie was given.
+-if test "${enable_static_pie+set}" = set; then :
+-  enableval=$enable_static_pie; static_pie=$enableval
++# Check whether --enable-default-pie was given.
++if test "${enable_default_pie+set}" = set; then :
++  enableval=$enable_default_pie; default_pie=$enableval
+ else
+-  static_pie=no
++  default_pie=yes
+ fi
+ 
+ # Check whether --enable-timezone-tools was given.
+@@ -6912,7 +6909,8 @@ rm -f conftest.*
+ fi
+ { $as_echo "$as_me:${as_lineno-$LINENO}: result: $libc_cv_pic_default" >&5
+ $as_echo "$libc_cv_pic_default" >&6; }
+-
++config_vars="$config_vars
++build-pic-default = $libc_cv_pic_default"
+ 
+ { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether -fPIE is default" >&5
+ $as_echo_n "checking whether -fPIE is default... " >&6; }
+@@ -6932,17 +6930,37 @@ rm -f conftest.*
+ fi
+ { $as_echo "$as_me:${as_lineno-$LINENO}: result: $libc_cv_cc_pie_default" >&5
+ $as_echo "$libc_cv_cc_pie_default" >&6; }
+-libc_cv_pie_default=$libc_cv_cc_pie_default
+-
+-
+-
+-# Set the `multidir' variable by grabbing the variable from the compiler.
+-# We do it once and save the result in a generated makefile.
+-libc_cv_multidir=`${CC-cc} $CFLAGS $CPPFLAGS -print-multi-directory`
+-
++config_vars="$config_vars
++cc-pie-default = $libc_cv_cc_pie_default"
+ 
+-if test "$static_pie" = yes; then
+-  # Check target support for static PIE
++{ $as_echo "$as_me:${as_lineno-$LINENO}: checking if we can build programs as PIE" >&5
++$as_echo_n "checking if we can build programs as PIE... " >&6; }
++if test "x$default_pie" != xno; then
++  # Disable build-pie-default if target does not support it.
++  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
++/* end confdefs.h.  */
++#ifdef PIE_UNSUPPORTED
++# error PIE is not supported
++#endif
++_ACEOF
++if ac_fn_c_try_compile "$LINENO"; then :
++  libc_cv_pie_default=yes
++else
++  libc_cv_pie_default=no
++fi
++rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
++fi
++{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $libc_cv_pie_default" >&5
++$as_echo "$libc_cv_pie_default" >&6; }
++config_vars="$config_vars
++build-pie-default = $libc_cv_pie_default"
++
++{ $as_echo "$as_me:${as_lineno-$LINENO}: checking if we can build static PIE programs" >&5
++$as_echo_n "checking if we can build static PIE programs... " >&6; }
++libc_cv_static_pie=$libc_cv_pie_default
++if test "x$libc_cv_pie_default" != xno \
++   -a "$libc_cv_no_dynamic_linker" = yes; then
++  # Enable static-pie if available
+   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+ /* end confdefs.h.  */
+ #ifndef SUPPORT_STATIC_PIE
+@@ -6950,22 +6968,25 @@ if test "$static_pie" = yes; then
+ #endif
+ _ACEOF
+ if ac_fn_c_try_compile "$LINENO"; then :
+-
++  libc_cv_static_pie=yes
+ else
+-  as_fn_error $? "the architecture does not support static PIE" "$LINENO" 5
++  libc_cv_static_pie=no
+ fi
+ rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+-  # The linker must support --no-dynamic-linker.
+-  if test "$libc_cv_no_dynamic_linker" != yes; then
+-    as_fn_error $? "linker support for --no-dynamic-linker needed" "$LINENO" 5
+-  fi
+-  # Default to PIE.
+-  libc_cv_pie_default=yes
+-  $as_echo "#define ENABLE_STATIC_PIE 1" >>confdefs.h
++  if test "$libc_cv_static_pie" = "yes"; then
++    $as_echo "#define ENABLE_STATIC_PIE 1" >>confdefs.h
+ 
++  fi
+ fi
++{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $libc_cv_static_pie" >&5
++$as_echo "$libc_cv_static_pie" >&6; }
+ config_vars="$config_vars
+-enable-static-pie = $static_pie"
++enable-static-pie = $libc_cv_static_pie"
++
++# Set the `multidir' variable by grabbing the variable from the compiler.
++# We do it once and save the result in a generated makefile.
++libc_cv_multidir=`${CC-cc} $CFLAGS $CPPFLAGS -print-multi-directory`
++
+ 
+ 
+ 
+diff --git a/configure.ac b/configure.ac
+index 34ecbba540546337..79f6822d29ce21cf 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -179,11 +179,11 @@ AC_ARG_ENABLE([profile],
+ 			     [build profiled library @<:@default=no@:>@]),
+ 	      [profile=$enableval],
+ 	      [profile=no])
+-AC_ARG_ENABLE([static-pie],
+-	      AS_HELP_STRING([--enable-static-pie],
+-			     [enable static PIE support and use it in the testsuite @<:@default=no@:>@]),
+-	      [static_pie=$enableval],
+-	      [static_pie=no])
++AC_ARG_ENABLE([default-pie],
++	      AS_HELP_STRING([--disable-default-pie],
++			     [Do not build glibc programs and the testsuite as PIE @<:@default=no@:>@]),
++	      [default_pie=$enableval],
++	      [default_pie=yes])
+ AC_ARG_ENABLE([timezone-tools],
+ 	      AS_HELP_STRING([--disable-timezone-tools],
+ 			     [do not install timezone tools @<:@default=install@:>@]),
+@@ -1856,7 +1856,7 @@ if eval "${CC-cc} -S conftest.c 2>&AS_MESSAGE_LOG_FD 1>&AS_MESSAGE_LOG_FD"; then
+   libc_cv_pic_default=no
+ fi
+ rm -f conftest.*])
+-AC_SUBST(libc_cv_pic_default)
++LIBC_CONFIG_VAR([build-pic-default], [$libc_cv_pic_default])
+ 
+ AC_CACHE_CHECK([whether -fPIE is default], libc_cv_cc_pie_default,
+ [libc_cv_cc_pie_default=yes
+@@ -1869,30 +1869,38 @@ if eval "${CC-cc} -S conftest.c 2>&AS_MESSAGE_LOG_FD 1>&AS_MESSAGE_LOG_FD"; then
+   libc_cv_cc_pie_default=no
+ fi
+ rm -f conftest.*])
+-libc_cv_pie_default=$libc_cv_cc_pie_default
+-AC_SUBST(libc_cv_cc_pie_default)
+-AC_SUBST(libc_cv_pie_default)
++LIBC_CONFIG_VAR([cc-pie-default], [$libc_cv_cc_pie_default])
++
++AC_MSG_CHECKING(if we can build programs as PIE)
++if test "x$default_pie" != xno; then
++  # Disable build-pie-default if target does not support it.
++  AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#ifdef PIE_UNSUPPORTED
++# error PIE is not supported
++#endif]])], [libc_cv_pie_default=yes], [libc_cv_pie_default=no])
++fi
++AC_MSG_RESULT($libc_cv_pie_default)
++LIBC_CONFIG_VAR([build-pie-default], [$libc_cv_pie_default])
++
++AC_MSG_CHECKING(if we can build static PIE programs)
++libc_cv_static_pie=$libc_cv_pie_default
++if test "x$libc_cv_pie_default" != xno \
++   -a "$libc_cv_no_dynamic_linker" = yes; then
++  # Enable static-pie if available
++  AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#ifndef SUPPORT_STATIC_PIE
++# error static PIE is not supported
++#endif]])], [libc_cv_static_pie=yes], [libc_cv_static_pie=no])
++  if test "$libc_cv_static_pie" = "yes"; then
++    AC_DEFINE(ENABLE_STATIC_PIE)
++  fi
++fi
++AC_MSG_RESULT($libc_cv_static_pie)
++LIBC_CONFIG_VAR([enable-static-pie], [$libc_cv_static_pie])
+ 
+ # Set the `multidir' variable by grabbing the variable from the compiler.
+ # We do it once and save the result in a generated makefile.
+ libc_cv_multidir=`${CC-cc} $CFLAGS $CPPFLAGS -print-multi-directory`
+ AC_SUBST(libc_cv_multidir)
+ 
+-if test "$static_pie" = yes; then
+-  # Check target support for static PIE
+-  AC_COMPILE_IFELSE([AC_LANG_SOURCE([[#ifndef SUPPORT_STATIC_PIE
+-# error static PIE is not supported
+-#endif]])], , AC_MSG_ERROR([the architecture does not support static PIE]))
+-  # The linker must support --no-dynamic-linker.
+-  if test "$libc_cv_no_dynamic_linker" != yes; then
+-    AC_MSG_ERROR([linker support for --no-dynamic-linker needed])
+-  fi
+-  # Default to PIE.
+-  libc_cv_pie_default=yes
+-  AC_DEFINE(ENABLE_STATIC_PIE)
+-fi
+-LIBC_CONFIG_VAR([enable-static-pie], [$static_pie])
+-
+ AC_SUBST(profile)
+ AC_SUBST(static_nss)
+ 
+diff --git a/manual/install.texi b/manual/install.texi
+index 46f73b538d3fee6f..1320ac69b3c645f2 100644
+--- a/manual/install.texi
++++ b/manual/install.texi
+@@ -141,15 +141,13 @@ Don't build shared libraries even if it is possible.  Not all systems
+ support shared libraries; you need ELF support and (currently) the GNU
+ linker.
+ 
+-@item --enable-static-pie
+-Enable static position independent executable (static PIE) support.
+-Static PIE is similar to static executable, but can be loaded at any
+-address without help from a dynamic linker.  All static programs as
+-well as static tests are built as static PIE, except for those marked
+-with no-pie.  The resulting glibc can be used with the GCC option,
+--static-pie, which is available with GCC 8 or above, to create static
+-PIE.  This option also implies that glibc programs and tests are created
+-as dynamic position independent executables (PIE) by default.
++@item --disable-default-pie
++Don't build glibc programs and the testsuite as position independent
++executables (PIE).  By default, glibc programs and tests are created as
++position independent executables on targets that support it.  If the toolchain
++and architecture support it, static executables are built as static PIE and the
++resulting glibc can be used with the GCC option, -static-pie, which is
++available with GCC 8 or above, to create static PIE.
+ 
+ @item --enable-cet
+ @itemx --enable-cet=permissive
+diff --git a/scripts/build-many-glibcs.py b/scripts/build-many-glibcs.py
+index 86537fa8005cfd3d..2fd82a5d054c51ca 100755
+--- a/scripts/build-many-glibcs.py
++++ b/scripts/build-many-glibcs.py
+@@ -1,6 +1,7 @@
+ #!/usr/bin/python3
+ # Build many configurations of glibc.
+ # Copyright (C) 2016-2021 Free Software Foundation, Inc.
++# Copyright (C) The GNU Toolchain Authors.
+ # This file is part of the GNU C Library.
+ #
+ # The GNU C Library is free software; you can redistribute it and/or
+@@ -435,15 +436,15 @@ class Context(object):
+                                                '--disable-experimental-malloc',
+                                                '--disable-build-nscd',
+                                                '--disable-nscd']},
+-                                      {'variant': 'static-pie',
+-                                       'cfg': ['--enable-static-pie']},
+-                                      {'variant': 'x32-static-pie',
++                                      {'variant': 'no-pie',
++                                       'cfg': ['--disable-default-pie']},
++                                      {'variant': 'x32-no-pie',
+                                        'ccopts': '-mx32',
+-                                       'cfg': ['--enable-static-pie']},
+-                                      {'variant': 'static-pie',
++                                       'cfg': ['--disable-default-pie']},
++                                      {'variant': 'no-pie',
+                                        'arch': 'i686',
+                                        'ccopts': '-m32 -march=i686',
+-                                       'cfg': ['--enable-static-pie']},
++                                       'cfg': ['--disable-default-pie']},
+                                       {'variant': 'disable-multi-arch',
+                                        'arch': 'i686',
+                                        'ccopts': '-m32 -march=i686',
+diff --git a/sysdeps/alpha/configure b/sysdeps/alpha/configure
+index 464b5965276dca19..3d665d96f2b40c4e 100644
+--- a/sysdeps/alpha/configure
++++ b/sysdeps/alpha/configure
+@@ -5,4 +5,9 @@
+ # symbols in a position independent way.
+ $as_echo "#define PI_STATIC_AND_HIDDEN 1" >>confdefs.h
+ 
++
++# PIE builds fail on binutils 2.37 and earlier, see:
++# https://sourceware.org/bugzilla/show_bug.cgi?id=28672
++$as_echo "#define PIE_UNSUPPORTED 1" >>confdefs.h
++
+ # work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/alpha/configure.ac b/sysdeps/alpha/configure.ac
+index 38e52e71ac2a5bc0..8f9a39ed2e4a29cb 100644
+--- a/sysdeps/alpha/configure.ac
++++ b/sysdeps/alpha/configure.ac
+@@ -4,4 +4,8 @@ GLIBC_PROVIDES dnl See aclocal.m4 in the top level source directory.
+ # With required gcc+binutils, we can always access static and hidden
+ # symbols in a position independent way.
+ AC_DEFINE(PI_STATIC_AND_HIDDEN)
++
++# PIE builds fail on binutils 2.37 and earlier, see:
++# https://sourceware.org/bugzilla/show_bug.cgi?id=28672
++AC_DEFINE(PIE_UNSUPPORTED)
+ # work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/csky/configure b/sysdeps/csky/configure
+index 19acb084fb43d9ea..27464eb707ebd6c6 100644
+--- a/sysdeps/csky/configure
++++ b/sysdeps/csky/configure
+@@ -2,3 +2,10 @@
+  # Local configure fragment for sysdeps/csky.
+ 
+ $as_echo "#define PI_STATIC_AND_HIDDEN 1" >>confdefs.h
++
++
++# PIE builds fail on binutils 2.37 and earlier, see:
++# https://sourceware.org/bugzilla/show_bug.cgi?id=28672
++$as_echo "#define PIE_UNSUPPORTED 1" >>confdefs.h
++
++# work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/csky/configure.ac b/sysdeps/csky/configure.ac
+index 5656b665da698d05..8e008249094d9e5a 100644
+--- a/sysdeps/csky/configure.ac
++++ b/sysdeps/csky/configure.ac
+@@ -2,3 +2,8 @@ GLIBC_PROVIDES dnl See aclocal.m4 in the top level source directory.
+ # Local configure fragment for sysdeps/csky.
+ 
+ AC_DEFINE(PI_STATIC_AND_HIDDEN)
++
++# PIE builds fail on binutils 2.37 and earlier, see:
++# https://sourceware.org/bugzilla/show_bug.cgi?id=28672
++AC_DEFINE(PIE_UNSUPPORTED)
++# work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/hppa/configure b/sysdeps/hppa/configure
+index 2cfe6cbea14549d0..cf5acf966dad67ba 100644
+--- a/sysdeps/hppa/configure
++++ b/sysdeps/hppa/configure
+@@ -30,3 +30,10 @@ $as_echo "$libc_cv_asm_line_sep" >&6; }
+ cat >>confdefs.h <<_ACEOF
+ #define ASM_LINE_SEP $libc_cv_asm_line_sep
+ _ACEOF
++
++
++# PIE builds fail on binutils 2.37 and earlier, see:
++# https://sourceware.org/bugzilla/show_bug.cgi?id=28672
++$as_echo "#define PIE_UNSUPPORTED 1" >>confdefs.h
++
++# work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/hppa/configure.ac b/sysdeps/hppa/configure.ac
+index 1ec417b9474c3382..3e1c35bbd992f548 100644
+--- a/sysdeps/hppa/configure.ac
++++ b/sysdeps/hppa/configure.ac
+@@ -19,3 +19,8 @@ else
+ fi
+ rm -f conftest*])
+ AC_DEFINE_UNQUOTED(ASM_LINE_SEP, $libc_cv_asm_line_sep)
++
++# PIE builds fail on binutils 2.37 and earlier, see:
++# https://sourceware.org/bugzilla/show_bug.cgi?id=28672
++AC_DEFINE(PIE_UNSUPPORTED)
++# work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/ia64/configure b/sysdeps/ia64/configure
+index 1ef70921bc5266db..748cb526012adeb8 100644
+--- a/sysdeps/ia64/configure
++++ b/sysdeps/ia64/configure
+@@ -3,4 +3,9 @@
+ 
+ $as_echo "#define PI_STATIC_AND_HIDDEN 1" >>confdefs.h
+ 
++
++# PIE builds fail on binutils 2.37 and earlier, see:
++# https://sourceware.org/bugzilla/show_bug.cgi?id=28672
++$as_echo "#define PIE_UNSUPPORTED 1" >>confdefs.h
++
+ # work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/ia64/configure.ac b/sysdeps/ia64/configure.ac
+index 3bae9fc5e1a3ff45..8e5fba32c3ec8bfc 100644
+--- a/sysdeps/ia64/configure.ac
++++ b/sysdeps/ia64/configure.ac
+@@ -4,4 +4,8 @@ GLIBC_PROVIDES dnl See aclocal.m4 in the top level source directory.
+ dnl It is always possible to access static and hidden symbols in an
+ dnl position independent way.
+ AC_DEFINE(PI_STATIC_AND_HIDDEN)
++
++# PIE builds fail on binutils 2.37 and earlier, see:
++# https://sourceware.org/bugzilla/show_bug.cgi?id=28672
++AC_DEFINE(PIE_UNSUPPORTED)
+ # work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/mach/hurd/configure b/sysdeps/mach/hurd/configure
+index 8d0702ad438d1c0a..3303e5dff8ef5ecf 100644
+--- a/sysdeps/mach/hurd/configure
++++ b/sysdeps/mach/hurd/configure
+@@ -49,3 +49,9 @@ fi
+ 
+ # Hurd has libpthread as a separate library.
+ pthread_in_libc=no
++
++# Hurd build needs to be updated to support static pie, see:
++# https://sourceware.org/bugzilla/show_bug.cgi?id=28671
++$as_echo "#define PIE_UNSUPPORTED 1" >>confdefs.h
++
++# work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/mach/hurd/configure.ac b/sysdeps/mach/hurd/configure.ac
+index 82d085af33701aa2..022c2eff79fc0d08 100644
+--- a/sysdeps/mach/hurd/configure.ac
++++ b/sysdeps/mach/hurd/configure.ac
+@@ -29,3 +29,8 @@ fi
+ 
+ # Hurd has libpthread as a separate library.
+ pthread_in_libc=no
++
++# Hurd build needs to be updated to support static pie, see:
++# https://sourceware.org/bugzilla/show_bug.cgi?id=28671
++AC_DEFINE(PIE_UNSUPPORTED)
++# work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/microblaze/configure b/sysdeps/microblaze/configure
+new file mode 100755
+index 0000000000000000..e6652562d212b688
+--- /dev/null
++++ b/sysdeps/microblaze/configure
+@@ -0,0 +1,8 @@
++# This file is generated from configure.ac by Autoconf.  DO NOT EDIT!
++ # Local configure fragment for sysdeps/microblaze.
++
++# gcc 11.2.1 and earlier crash with an internal compiler error, see:
++# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=103613
++$as_echo "#define PIE_UNSUPPORTED 1" >>confdefs.h
++
++# work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/microblaze/configure.ac b/sysdeps/microblaze/configure.ac
+new file mode 100644
+index 0000000000000000..1c58f70a7bdfebcb
+--- /dev/null
++++ b/sysdeps/microblaze/configure.ac
+@@ -0,0 +1,7 @@
++GLIBC_PROVIDES dnl See aclocal.m4 in the top level source directory.
++# Local configure fragment for sysdeps/microblaze.
++
++# gcc 11.2.1 and earlier crash with an internal compiler error, see:
++# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=103613
++AC_DEFINE(PIE_UNSUPPORTED)
++# work around problem with autoconf and empty lines at the end of files
+diff --git a/sysdeps/sparc/Makefile b/sysdeps/sparc/Makefile
+index 1be9a3db2ca12216..12c2c1b085fd4ae2 100644
+--- a/sysdeps/sparc/Makefile
++++ b/sysdeps/sparc/Makefile
+@@ -2,6 +2,7 @@
+ long-double-fcts = yes
+ 
+ pie-ccflag = -fPIE
++no-pie-ccflag = -fno-PIE
+ 
+ ifeq ($(subdir),gmon)
+ sysdep_routines += sparc-mcount

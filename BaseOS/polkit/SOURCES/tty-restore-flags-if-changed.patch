@@ -1,0 +1,77 @@
+diff -up ./src/polkitagent/polkitagenttextlistener.c.ori ./src/polkitagent/polkitagenttextlistener.c
+--- ./src/polkitagent/polkitagenttextlistener.c.ori	2018-05-31 13:52:23.000000000 +0200
++++ ./src/polkitagent/polkitagenttextlistener.c	2022-10-21 17:21:11.227665209 +0200
+@@ -121,6 +121,12 @@ polkit_agent_text_listener_class_init (P
+   listener_class = POLKIT_AGENT_LISTENER_CLASS (klass);
+   listener_class->initiate_authentication        = polkit_agent_text_listener_initiate_authentication;
+   listener_class->initiate_authentication_finish = polkit_agent_text_listener_initiate_authentication_finish;
++
++  g_signal_new("tty_attrs_changed",
++               G_TYPE_FROM_CLASS(gobject_class),
++               G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS,
++               0, NULL, NULL, NULL,
++               G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
+ }
+ 
+ /**
+@@ -268,6 +274,7 @@ on_request (PolkitAgentSession *session,
+    *       the problem.
+    */
+ 
++  g_signal_emit_by_name(listener, "tty_attrs_changed", TRUE);
+   tcgetattr (fileno (listener->tty), &ts);
+   ots = ts;
+   ts.c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL);
+@@ -296,6 +303,7 @@ on_request (PolkitAgentSession *session,
+         }
+     }
+   tcsetattr (fileno (listener->tty), TCSAFLUSH, &ots);
++  g_signal_emit_by_name(listener, "tty_attrs_changed", FALSE);
+   putc ('\n', listener->tty);
+ 
+   polkit_agent_session_response (session, str->str);
+diff -up ./src/programs/pkttyagent.c.ori ./src/programs/pkttyagent.c
+--- ./src/programs/pkttyagent.c.ori	2020-01-28 14:16:32.000000000 +0100
++++ ./src/programs/pkttyagent.c	2022-10-21 16:56:12.449760361 +0200
+@@ -34,6 +34,7 @@
+ 
+ 
+ static volatile sig_atomic_t tty_flags_saved;
++static volatile sig_atomic_t tty_flags_changed;
+ struct termios ts;
+ FILE *tty = NULL;
+ struct sigaction savesigterm, savesigint, savesigtstp;
+@@ -54,7 +55,7 @@ static void tty_handler(int signal)
+       break;
+   }
+ 
+-  if (tty_flags_saved)
++  if (tty_flags_saved && tty_flags_changed)
+   {
+     tcsetattr (fileno (tty), TCSADRAIN, &ts);
+   }
+@@ -63,6 +64,14 @@ static void tty_handler(int signal)
+ }
+ 
+ 
++static void tty_attrs_changed(PolkitAgentListener *listener G_GNUC_UNUSED,
++                              gboolean changed,
++                              gpointer user_data G_GNUC_UNUSED)
++{
++  tty_flags_changed = changed;
++}
++
++
+ int
+ main (int argc, char *argv[])
+ {
+@@ -221,6 +230,9 @@ main (int argc, char *argv[])
+       ret = 127;
+       goto out;
+     }
++  g_signal_connect(G_OBJECT(listener), "tty_attrs_changed",
++                   G_CALLBACK(tty_attrs_changed), NULL);
++
+   local_agent_handle = polkit_agent_listener_register_with_options (listener,
+                                                                     POLKIT_AGENT_REGISTER_FLAGS_RUN_IN_THREAD,
+                                                                     subject,

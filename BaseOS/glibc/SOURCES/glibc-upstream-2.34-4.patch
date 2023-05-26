@@ -1,0 +1,24 @@
+commit 7ff4da3dc26de351a5abe7c2905038cbe55c8041
+Author: Siddhesh Poyarekar <siddhesh@sourceware.org>
+Date:   Tue Aug 3 21:10:53 2021 +0530
+
+    copy_and_spawn_sgid: Avoid double calls to close()
+    
+    If close() on infd and outfd succeeded, reset the fd numbers so that
+    we don't attempt to close them again.
+    
+    Reviewed-by: Arjun Shankar <arjun@redhat.com>
+    (cherry picked from commit 45caed9d67a00af917d8b5b88d4b5eb1225b7aef)
+
+diff --git a/support/support_capture_subprocess.c b/support/support_capture_subprocess.c
+index 27bfd19c9374a183..0bacf6dbc23b0732 100644
+--- a/support/support_capture_subprocess.c
++++ b/support/support_capture_subprocess.c
+@@ -170,6 +170,7 @@ copy_and_spawn_sgid (char *child_id, gid_t gid)
+      support_subprogram because we only want the program exit status, not the
+      contents.  */
+   ret = 0;
++  infd = outfd = -1;
+ 
+   char * const args[] = {execname, child_id, NULL};
+ 

@@ -1,0 +1,98 @@
+commit 84a7eb1f87c1d01b58ad887a0ab5d87abbc1c772
+Author: H.J. Lu <hjl.tools@gmail.com>
+Date:   Fri Jul 30 19:07:30 2021 -0700
+
+    Use __executable_start as the lowest address for profiling [BZ #28153]
+    
+    Glibc assumes that ENTRY_POINT is the lowest address for which we need
+    to keep profiling records and BFD linker uses a linker script to place
+    the input sections.
+    
+    Starting from GCC 4.6, the main function is placed in .text.startup
+    section and starting from binutils 2.22, BFD linker with
+    
+    commit add44f8d5c5c05e08b11e033127a744d61c26aee
+    Author: Alan Modra <amodra@gmail.com>
+    Date:   Thu Nov 25 03:03:02 2010 +0000
+    
+                * scripttempl/elf.sc: Group .text.exit, text.startup and .text.hot
+                sections.
+    
+    places .text.startup section before .text section, which leave the main
+    function out of profiling records.
+    
+    Starting from binutils 2.15, linker provides __executable_start to mark
+    the lowest address of the executable.  Use __executable_start as the
+    lowest address to keep the main function in profiling records. This fixes
+    [BZ #28153].
+    
+    Tested on Linux/x86-64, Linux/x32 and Linux/i686 as well as with
+    build-many-glibcs.py.
+
+diff --git a/csu/gmon-start.c b/csu/gmon-start.c
+index b3432885b39071cc..344606a676c188d4 100644
+--- a/csu/gmon-start.c
++++ b/csu/gmon-start.c
+@@ -52,6 +52,11 @@ extern char ENTRY_POINT[];
+ #endif
+ extern char etext[];
+ 
++/* Use __executable_start as the lowest address to keep profiling records
++   if it provided by the linker.  */
++extern const char executable_start[] asm ("__executable_start")
++  __attribute__ ((weak, visibility ("hidden")));
++
+ #ifndef TEXT_START
+ # ifdef ENTRY_POINT_DECL
+ #  define TEXT_START ENTRY_POINT
+@@ -92,7 +97,10 @@ __gmon_start__ (void)
+   called = 1;
+ 
+   /* Start keeping profiling records.  */
+-  __monstartup ((u_long) TEXT_START, (u_long) &etext);
++  if (&executable_start != NULL)
++    __monstartup ((u_long) &executable_start, (u_long) &etext);
++  else
++    __monstartup ((u_long) TEXT_START, (u_long) &etext);
+ 
+   /* Call _mcleanup before exiting; it will write out gmon.out from the
+      collected data.  */
+diff --git a/gmon/tst-gmon-gprof.sh b/gmon/tst-gmon-gprof.sh
+index 9d371582b99677fa..dc0be021104f725d 100644
+--- a/gmon/tst-gmon-gprof.sh
++++ b/gmon/tst-gmon-gprof.sh
+@@ -39,12 +39,14 @@ trap cleanup 0
+ cat > "$expected" <<EOF
+ f1 2000
+ f2 1000
++f3 1
+ EOF
+ 
+ # Special version for powerpc with function descriptors.
+ cat > "$expected_dot" <<EOF
+ .f1 2000
+ .f2 1000
++.f3 1
+ EOF
+ 
+ "$GPROF" -C "$program" "$data" \
+diff --git a/gmon/tst-gmon-static-gprof.sh b/gmon/tst-gmon-static-gprof.sh
+index 79218df967f9387f..4cc99c80d0115271 100644
+--- a/gmon/tst-gmon-static-gprof.sh
++++ b/gmon/tst-gmon-static-gprof.sh
+@@ -39,6 +39,7 @@ trap cleanup 0
+ cat > "$expected" <<EOF
+ f1 2000
+ f2 1000
++f3 1
+ main 1
+ EOF
+ 
+@@ -46,6 +47,7 @@ EOF
+ cat > "$expected_dot" <<EOF
+ .f1 2000
+ .f2 1000
++.f3 1
+ .main 1
+ EOF
+ 

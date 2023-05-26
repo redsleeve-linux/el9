@@ -1,0 +1,57 @@
+From b2d259a82329e37b0f369e9951f19a067cb8bfb4 Mon Sep 17 00:00:00 2001
+From: Sam James <sam@gentoo.org>
+Date: Fri, 18 Nov 2022 07:18:18 +0000
+Subject: [PATCH] nspawn: allow sched_rr_get_interval_time64 through seccomp
+ filter
+
+We only allow a selected subset of syscalls from nspawn containers
+and don't list any time64 variants (needed for 32-bit arches when
+built using TIME_BITS=64, which is relatively new).
+
+We allow sched_rr_get_interval which cpython's test suite makes
+use of, but we don't allow sched_rr_get_interval_time64.
+
+The test failures when run in an arm32 nspawn container on an arm64 host
+were as follows:
+```
+======================================================================
+ERROR: test_sched_rr_get_interval (test.test_posix.PosixTester.test_sched_rr_get_interval)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/var/tmp/portage/dev-lang/python-3.11.0_p1/work/Python-3.11.0/Lib/test/test_posix.py", line 1180, in test_sched_rr_get_interval
+    interval = posix.sched_rr_get_interval(0)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 1] Operation not permitted
+```
+
+Then strace showed:
+```
+sched_rr_get_interval_time64(0, 0xffbbd4a0) = -1 EPERM (Operation not permitted)
+```
+
+This appears to be the only time64 syscall that isn't already included one of
+the sets listed in nspawn-seccomp.c that has a non-time64 variant. Checked
+over each of the time64 syscalls known to systemd and verified that none
+of the others had a non-time64-variant whitelisted in nspawn other than
+sched_rr_get_interval.
+
+Bug: https://bugs.gentoo.org/880131
+(cherry picked from commit b9e7f22c2d80930cad36ae53e66e42a2996dca4a)
+
+Related: #2138081
+---
+ src/nspawn/nspawn-seccomp.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/nspawn/nspawn-seccomp.c b/src/nspawn/nspawn-seccomp.c
+index 77f4c2ac88..27044fadd2 100644
+--- a/src/nspawn/nspawn-seccomp.c
++++ b/src/nspawn/nspawn-seccomp.c
+@@ -88,6 +88,7 @@ static int add_syscall_filters(
+                 { 0,                  "sched_getparam"         },
+                 { 0,                  "sched_getscheduler"     },
+                 { 0,                  "sched_rr_get_interval"  },
++                { 0,                  "sched_rr_get_interval_time64" },
+                 { 0,                  "sched_yield"            },
+                 { 0,                  "seccomp"                },
+                 { 0,                  "sendfile"               },

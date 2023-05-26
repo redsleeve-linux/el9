@@ -1,0 +1,42 @@
+From f04078d864c969c7694a2cd131ca9eff75c15ce8 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 4 Nov 2022 12:53:07 +0900
+Subject: [PATCH] resolve: provide effective supporting levels of mDNS and
+ LLMNR
+
+The per-link settings are ignored if the feature is disabled by the global setting.
+Let's announce the effective level, to make not users confused.
+
+Closes #24863.
+
+(cherry picked from commit dc167037c4e7407bf597a65224c736874abeca11)
+
+Related: #2138081
+---
+ src/resolve/resolved-link-bus.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/resolve/resolved-link-bus.c b/src/resolve/resolved-link-bus.c
+index a817b1b453..1f7d092112 100644
+--- a/src/resolve/resolved-link-bus.c
++++ b/src/resolve/resolved-link-bus.c
+@@ -22,6 +22,8 @@
+ 
+ static BUS_DEFINE_PROPERTY_GET(property_get_dnssec_supported, "b", Link, link_dnssec_supported);
+ static BUS_DEFINE_PROPERTY_GET2(property_get_dnssec_mode, "s", Link, link_get_dnssec_mode, dnssec_mode_to_string);
++static BUS_DEFINE_PROPERTY_GET2(property_get_llmnr_support, "s", Link, link_get_llmnr_support, resolve_support_to_string);
++static BUS_DEFINE_PROPERTY_GET2(property_get_mdns_support, "s", Link, link_get_mdns_support, resolve_support_to_string);
+ 
+ static int property_get_dns_over_tls_mode(
+                 sd_bus *bus,
+@@ -864,8 +866,8 @@ static const sd_bus_vtable link_vtable[] = {
+         SD_BUS_PROPERTY("CurrentDNSServerEx", "(iayqs)", property_get_current_dns_server_ex, offsetof(Link, current_dns_server), 0),
+         SD_BUS_PROPERTY("Domains", "a(sb)", property_get_domains, 0, 0),
+         SD_BUS_PROPERTY("DefaultRoute", "b", property_get_default_route, 0, 0),
+-        SD_BUS_PROPERTY("LLMNR", "s", bus_property_get_resolve_support, offsetof(Link, llmnr_support), 0),
+-        SD_BUS_PROPERTY("MulticastDNS", "s", bus_property_get_resolve_support, offsetof(Link, mdns_support), 0),
++        SD_BUS_PROPERTY("LLMNR", "s", property_get_llmnr_support, 0, 0),
++        SD_BUS_PROPERTY("MulticastDNS", "s", property_get_mdns_support, 0, 0),
+         SD_BUS_PROPERTY("DNSOverTLS", "s", property_get_dns_over_tls_mode, 0, 0),
+         SD_BUS_PROPERTY("DNSSEC", "s", property_get_dnssec_mode, 0, 0),
+         SD_BUS_PROPERTY("DNSSECNegativeTrustAnchors", "as", property_get_ntas, 0, 0),

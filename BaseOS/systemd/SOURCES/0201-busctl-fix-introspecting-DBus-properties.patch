@@ -1,0 +1,64 @@
+From 25e4d71e788ee7467e1d764c631de44d599e2b1c Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 13 Jan 2023 14:12:31 +0900
+Subject: [PATCH] busctl: fix introspecting DBus properties
+
+Follow-up for f2f7785d7a47ffa48ac929648794e1288509ddd8.
+
+Fixes #26033.
+
+(cherry picked from commit 2cbb171d20a07ec0a25296f167b0385de102d74e)
+
+Related: #2138081
+---
+ src/busctl/busctl.c | 21 +++++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/src/busctl/busctl.c b/src/busctl/busctl.c
+index f57a5d605d..cc2d0e3458 100644
+--- a/src/busctl/busctl.c
++++ b/src/busctl/busctl.c
+@@ -1022,10 +1022,11 @@ static int introspect(int argc, char **argv, void *userdata) {
+ 
+                 for (;;) {
+                         Member *z;
+-                        _cleanup_free_ char *buf = NULL;
++                        _cleanup_free_ char *buf = NULL, *signature = NULL;
+                         _cleanup_fclose_ FILE *mf = NULL;
+                         size_t sz = 0;
+-                        const char *name;
++                        const char *name, *contents;
++                        char type;
+ 
+                         r = sd_bus_message_enter_container(reply, 'e', "sv");
+                         if (r < 0)
+@@ -1042,6 +1043,21 @@ static int introspect(int argc, char **argv, void *userdata) {
+                         if (r < 0)
+                                 return bus_log_parse_error(r);
+ 
++                        r = sd_bus_message_peek_type(reply, &type, &contents);
++                        if (r <= 0)
++                                return bus_log_parse_error(r == 0 ? EINVAL : r);
++
++                        if (type == SD_BUS_TYPE_STRUCT_BEGIN)
++                                signature = strjoin(CHAR_TO_STR(SD_BUS_TYPE_STRUCT_BEGIN), contents, CHAR_TO_STR(SD_BUS_TYPE_STRUCT_END));
++                        else if (type == SD_BUS_TYPE_DICT_ENTRY_BEGIN)
++                                signature = strjoin(CHAR_TO_STR(SD_BUS_TYPE_DICT_ENTRY_BEGIN), contents, CHAR_TO_STR(SD_BUS_TYPE_DICT_ENTRY_END));
++                        else if (contents)
++                                signature = strjoin(CHAR_TO_STR(type), contents);
++                        else
++                                signature = strdup(CHAR_TO_STR(type));
++                        if (!signature)
++                                return log_oom();
++
+                         mf = open_memstream_unlocked(&buf, &sz);
+                         if (!mf)
+                                 return log_oom();
+@@ -1055,6 +1071,7 @@ static int introspect(int argc, char **argv, void *userdata) {
+                         z = set_get(members, &((Member) {
+                                                 .type = "property",
+                                                 .interface = m->interface,
++                                                .signature = signature,
+                                                 .name = (char*) name }));
+                         if (z)
+                                 free_and_replace(z->value, buf);

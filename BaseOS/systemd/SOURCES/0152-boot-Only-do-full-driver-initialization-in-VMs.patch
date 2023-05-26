@@ -1,0 +1,51 @@
+From 7dec74695751b70a8a86eb647062e7d5a5157446 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Sun, 27 Nov 2022 13:56:18 +0100
+Subject: [PATCH] boot: Only do full driver initialization in VMs
+
+Doing the reconnect dance on some real firmware creates huge delays on
+boot. This should not be needed anymore as we now ask the firmware to
+make console devices and xbootldr partitions available explicitly in a
+more targeted fashion.
+
+Fixes: #25510
+(cherry picked from commit f6d59e2ebfc1bf50683a2e640aad501c372a50e4)
+
+Related: #2138081
+---
+ src/boot/efi/boot.c | 6 ------
+ src/boot/efi/vmm.c  | 4 ++++
+ 2 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/src/boot/efi/boot.c b/src/boot/efi/boot.c
+index e182ee7840..5944451e6a 100644
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -2662,12 +2662,6 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+         /* Uncomment the next line if you need to wait for debugger. */
+         // debug_break();
+ 
+-        /* The firmware may skip initializing some devices for the sake of a faster boot. This is especially
+-         * true for fastboot enabled firmwares. But this means that things we use like input devices or the
+-         * xbootldr partition may not be available yet. Reconnect all drivers should hopefully make the
+-         * firmware initialize everything we need. */
+-        (void) reconnect_all_drivers();
+-
+         err = BS->OpenProtocol(image,
+                         &LoadedImageProtocol,
+                         (void **)&loaded_image,
+diff --git a/src/boot/efi/vmm.c b/src/boot/efi/vmm.c
+index b1bfd778fc..2260b217b7 100644
+--- a/src/boot/efi/vmm.c
++++ b/src/boot/efi/vmm.c
+@@ -83,6 +83,10 @@ EFI_STATUS vmm_open(EFI_HANDLE *ret_vmm_dev, EFI_FILE **ret_vmm_dir) {
+         assert(ret_vmm_dev);
+         assert(ret_vmm_dir);
+ 
++        /* Make sure all file systems have been initialized. Only do this in VMs as this is slow
++         * on some real firmwares. */
++        (void) reconnect_all_drivers();
++
+         /* find all file system handles */
+         err = BS->LocateHandleBuffer(ByProtocol, &FileSystemProtocol, NULL, &n_handles, &handles);
+         if (err != EFI_SUCCESS)

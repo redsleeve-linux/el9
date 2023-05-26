@@ -1,0 +1,37 @@
+From 23ede492fbea1bd1440d84cef6dd68bb46d2e5fb Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 18 Nov 2022 18:05:53 +0100
+Subject: [PATCH] bootctl: rework how we handle referenced but absent EFI boot
+ entries
+
+Follow-up for #25368.
+
+Let's consider ENOENT an expected error, and just debug log about it
+(though, let's suffix it with `, ignoring.`). All other errors will log
+loudly, as they are unexpected errors.
+
+(cherry picked from commit af1bed8e83c3d380d1eb0b9147684b76d1ee4df0)
+
+Related: #2138081
+---
+ src/boot/bootctl.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/boot/bootctl.c b/src/boot/bootctl.c
+index a5811adf20..7da48b4ca4 100644
+--- a/src/boot/bootctl.c
++++ b/src/boot/bootctl.c
+@@ -585,8 +585,12 @@ static int print_efi_option(uint16_t id, int *n_printed, bool in_order) {
+         assert(n_printed);
+ 
+         r = efi_get_boot_option(id, &title, &partition, &path, &active);
++        if (r == -ENOENT) {
++                log_debug_errno(r, "Boot option 0x%04X referenced but missing, ignoring: %m", id);
++                return 0;
++        }
+         if (r < 0)
+-                return log_debug_errno(r, "Failed to read boot option 0x%04X: %m", id);
++                return log_error_errno(r, "Failed to read boot option 0x%04X: %m", id);
+ 
+         /* print only configured entries with partition information */
+         if (!path || sd_id128_is_null(partition)) {

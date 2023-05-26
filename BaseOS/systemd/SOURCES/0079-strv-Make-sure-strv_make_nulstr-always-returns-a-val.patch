@@ -1,0 +1,44 @@
+From c59555a86d3fcd2b8d644885134e19fe864251e5 Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Fri, 11 Nov 2022 11:26:54 +0100
+Subject: [PATCH] strv: Make sure strv_make_nulstr() always returns a valid
+ nulstr
+
+strv_make_nulstr() is documented to always return a valid nulstr,
+but if the input is `NULL` we return a string terminated with only
+a single NUL terminator, so let's fix that and always terminate the
+resulting string with two NUL bytes.
+
+(cherry picked from commit 5ea173a91b2093664a9ebb9add678edd6f5d1efd)
+
+Related: #2138081
+---
+ src/basic/strv.c | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/src/basic/strv.c b/src/basic/strv.c
+index eea34ca68d..24fc56a1a5 100644
+--- a/src/basic/strv.c
++++ b/src/basic/strv.c
+@@ -721,7 +721,7 @@ int strv_make_nulstr(char * const *l, char **ret, size_t *ret_size) {
+         }
+ 
+         if (!m) {
+-                m = new0(char, 1);
++                m = new0(char, 2);
+                 if (!m)
+                         return -ENOMEM;
+                 n = 1;
+@@ -730,11 +730,9 @@ int strv_make_nulstr(char * const *l, char **ret, size_t *ret_size) {
+                 m[n] = '\0';
+ 
+         assert(n > 0);
+-        *ret = m;
++        *ret = TAKE_PTR(m);
+         *ret_size = n - 1;
+ 
+-        m = NULL;
+-
+         return 0;
+ }
+ 

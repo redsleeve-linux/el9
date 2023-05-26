@@ -1,0 +1,371 @@
+From e0d51a65a8bbe8c86af4bb843a5f9ac7d590fa01 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Thu, 3 Nov 2022 13:13:03 +0100
+Subject: [PATCH] test: introduce sanity coverage for auxiliary utils
+
+(cherry picked from commit d1020334fd15e0cffe68cb4d7e862a36253cc481)
+
+Related #2138081
+---
+ test/TEST-74-AUX-UTILS/Makefile      |   1 +
+ test/TEST-74-AUX-UTILS/test.sh       |  10 ++
+ test/units/testsuite-74.cgls.sh      |  26 +++++
+ test/units/testsuite-74.cgtop.sh     |  32 ++++++
+ test/units/testsuite-74.delta.sh     |  59 +++++++++++
+ test/units/testsuite-74.firstboot.sh | 145 +++++++++++++++++++++++++++
+ test/units/testsuite-74.service      |   8 ++
+ test/units/testsuite-74.sh           |  14 +++
+ 8 files changed, 295 insertions(+)
+ create mode 120000 test/TEST-74-AUX-UTILS/Makefile
+ create mode 100755 test/TEST-74-AUX-UTILS/test.sh
+ create mode 100755 test/units/testsuite-74.cgls.sh
+ create mode 100755 test/units/testsuite-74.cgtop.sh
+ create mode 100755 test/units/testsuite-74.delta.sh
+ create mode 100755 test/units/testsuite-74.firstboot.sh
+ create mode 100644 test/units/testsuite-74.service
+ create mode 100755 test/units/testsuite-74.sh
+
+diff --git a/test/TEST-74-AUX-UTILS/Makefile b/test/TEST-74-AUX-UTILS/Makefile
+new file mode 120000
+index 0000000000..e9f93b1104
+--- /dev/null
++++ b/test/TEST-74-AUX-UTILS/Makefile
+@@ -0,0 +1 @@
++../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-74-AUX-UTILS/test.sh b/test/TEST-74-AUX-UTILS/test.sh
+new file mode 100755
+index 0000000000..f422c89141
+--- /dev/null
++++ b/test/TEST-74-AUX-UTILS/test.sh
+@@ -0,0 +1,10 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -e
++
++TEST_DESCRIPTION="Tests for auxiliary utilities"
++
++# shellcheck source=test/test-functions
++. "${TEST_BASE_DIR:?}/test-functions"
++
++do_test "$@"
+diff --git a/test/units/testsuite-74.cgls.sh b/test/units/testsuite-74.cgls.sh
+new file mode 100755
+index 0000000000..120570c9cc
+--- /dev/null
++++ b/test/units/testsuite-74.cgls.sh
+@@ -0,0 +1,26 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++systemd-cgls
++systemd-cgls --all --full
++systemd-cgls -k
++systemd-cgls --xattr=yes
++systemd-cgls --xattr=no
++systemd-cgls --cgroup-id=yes
++systemd-cgls --cgroup-id=no
++
++systemd-cgls /system.slice/systemd-journald.service
++systemd-cgls /system.slice/systemd-journald.service /init.scope
++systemd-cgls /sys/fs/cgroup/system.slice/systemd-journald.service /init.scope
++(cd /sys/fs/cgroup/init.scope && systemd-cgls)
++systemd-cgls --unit=systemd-journald.service
++# There's most likely no user session running, so we need to create one
++systemd-run --user --wait --pipe -M testuser@.host systemd-cgls --user-unit=app.slice
++
++(! systemd-cgls /foo/bar)
++(! systemd-cgls --unit=hello.world)
++(! systemd-cgls --user-unit=hello.world)
++(! systemd-cgls --xattr=foo)
++(! systemd-cgls --cgroup-id=foo)
+diff --git a/test/units/testsuite-74.cgtop.sh b/test/units/testsuite-74.cgtop.sh
+new file mode 100755
+index 0000000000..8141ec1b1f
+--- /dev/null
++++ b/test/units/testsuite-74.cgtop.sh
+@@ -0,0 +1,32 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++# Without tty attached cgtop should default to --iterations=1
++systemd-cgtop
++systemd-cgtop --iterations=1
++# Same as --iterations=1
++systemd-cgtop -1
++systemd-cgtop --delay=1ms
++systemd-cgtop --raw
++systemd-cgtop --batch
++systemd-cgtop --cpu=percentage
++systemd-cgtop --cpu=time
++systemd-cgtop -P
++systemd-cgtop -k
++# FIXME: https://github.com/systemd/systemd/issues/25248
++#systemd-cgtop --recursive=no
++systemd-cgtop --depth=0
++systemd-cgtop --depth=100
++
++for order in path tasks cpu memory io; do
++    systemd-cgtop --order="$order"
++done
++systemd-cgtop -p -t -c -m -i
++
++(! systemd-cgtop --cpu=foo)
++(! systemd-cgtop --order=foo)
++(! systemd-cgtop --depth=-1)
++(! systemd-cgtop --recursive=foo)
++(! systemd-cgtop --delay=1foo)
+diff --git a/test/units/testsuite-74.delta.sh b/test/units/testsuite-74.delta.sh
+new file mode 100755
+index 0000000000..a0e1cb52dd
+--- /dev/null
++++ b/test/units/testsuite-74.delta.sh
+@@ -0,0 +1,59 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++at_exit() {
++    rm -rfv /{run,etc}/systemd/system/delta-test*
++}
++
++trap at_exit EXIT
++
++# Create a couple of supporting units with overrides
++#
++# Extended unit
++cat >"/run/systemd/system/delta-test-unit-extended.service" <<EOF
++[Service]
++ExecStart=/bin/true
++EOF
++mkdir -p "/run/systemd/system/delta-test-unit-extended.service.d"
++cat >"/run/systemd/system/delta-test-unit-extended.service.d/override.conf" <<EOF
++[Unit]
++Description=Foo Bar
++[Service]
++ExecStartPre=/bin/true
++EOF
++# Masked unit
++cp -fv /run/systemd/system/delta-test-unit-extended.service /run/systemd/system/delta-test-unit-masked.service
++systemctl mask delta-test-unit-masked.service
++# Overridden unit
++cp -fv /run/systemd/system/delta-test-unit-extended.service /run/systemd/system/delta-test-unit-overridden.service
++cp -fv /run/systemd/system/delta-test-unit-overridden.service /etc/systemd/system/delta-test-unit-overridden.service
++echo "ExecStartPost=/bin/true" >>/etc/systemd/system/delta-test-unit-overridden.service
++# Overridden but equivalent unit
++ln -srfv /run/systemd/system/delta-test-unit-extended.service /run/systemd/system/delta-test-unit-equivalent.service
++ln -sfv /run/systemd/system/delta-test-unit-extended.service /etc/systemd/system/delta-test-unit-equivalent.service
++# Redirected unit
++ln -srfv /run/systemd/system/delta-test-unit-extended.service /run/systemd/system/delta-test-unit-redirected.service
++ln -sfv /run/systemd/system/delta-test-unit-overidden.service /etc/systemd/system/delta-test-unit-extended.service
++
++systemctl daemon-reload
++
++systemd-delta
++systemd-delta /run
++systemd-delta systemd/system
++systemd-delta /run systemd/system /run
++systemd-delta /run foo/bar hello/world systemd/system /run
++systemd-delta foo/bar
++systemd-delta --diff=true
++systemd-delta --diff=false
++
++for type in masked equivalent redirected overridden extended unchanged; do
++    systemd-delta --type="$type"
++    systemd-delta --type="$type" /run
++done
++systemd-delta --type=equivalent,redirected
++
++(! systemd-delta --diff=foo)
++(! systemd-delta --type=foo)
++(! systemd-delta --type=equivalent,redirected,foo)
+diff --git a/test/units/testsuite-74.firstboot.sh b/test/units/testsuite-74.firstboot.sh
+new file mode 100755
+index 0000000000..02f9f5cd7a
+--- /dev/null
++++ b/test/units/testsuite-74.firstboot.sh
+@@ -0,0 +1,145 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++if ! command -v systemd-firstboot >/dev/null; then
++    echo "systemd-firstboot not found, skipping the test"
++    exit 0
++fi
++
++at_exit() {
++    if [[ -v ROOT && -n "$ROOT" ]]; then
++        ls -lR "$ROOT"
++        rm -fr "$ROOT"
++    fi
++}
++
++trap at_exit EXIT
++
++# Generated via `mkpasswd -m sha-512 -S foobarsalt password1`
++# shellcheck disable=SC2016
++ROOT_HASHED_PASSWORD1='$6$foobarsalt$YbwdaATX6IsFxvWbY3QcZj2gB31R/LFRFrjlFrJtTTqFtSfn4dfOAg/km2k4Sl.a2g7LOYDo31wMTaEsCo9j41'
++# Generated via `mkpasswd -m sha-512 -S foobarsalt password2`
++# shellcheck disable=SC2016
++ROOT_HASHED_PASSWORD2='$6$foobarsalt$q.P2932zYMLbKnjFwIxPI8y3iuxeuJ2BgE372LcZMMnj3Gcg/9mJg2LPKUl.ha0TG/.fRNNnRQcLfzM0SNot3.'
++
++# Create a minimal root so we don't modify the testbed
++ROOT=test-root
++mkdir -p "$ROOT/bin"
++# Dummy shell for --root-shell=
++touch "$ROOT/bin/fooshell" "$ROOT/bin/barshell"
++
++systemd-firstboot --root="$ROOT" --locale=foo
++grep -q "LANG=foo" "$ROOT/etc/locale.conf"
++rm -fv "$ROOT/etc/locale.conf"
++# FIXME: https://github.com/systemd/systemd/issues/25249
++#systemd-firstboot --root="$ROOT" --locale-messages=foo
++#grep -q "LC_MESSAGES=foo" "$ROOT/etc/locale.conf"
++#rm -fv "$ROOT/etc/locale.conf"
++systemd-firstboot --root="$ROOT" --locale=foo --locale-messages=bar
++grep -q "LANG=foo" "$ROOT/etc/locale.conf"
++grep -q "LC_MESSAGES=bar" "$ROOT/etc/locale.conf"
++
++systemd-firstboot --root="$ROOT" --keymap=foo
++grep -q "KEYMAP=foo" "$ROOT/etc/vconsole.conf"
++
++systemd-firstboot --root="$ROOT" --timezone=Europe/Berlin
++readlink "$ROOT/etc/localtime" | grep -q "Europe/Berlin"
++
++systemd-firstboot --root="$ROOT" --hostname "foobar"
++grep -q "foobar" "$ROOT/etc/hostname"
++
++systemd-firstboot --root="$ROOT" --machine-id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
++grep -q "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$ROOT/etc/machine-id"
++
++rm -fv "$ROOT/etc/passwd" "$ROOT/etc/shadow"
++systemd-firstboot --root="$ROOT" --root-password=foo
++grep -q "^root:x:0:0:" "$ROOT/etc/passwd"
++grep -q "^root:" "$ROOT/etc/shadow"
++rm -fv "$ROOT/etc/passwd" "$ROOT/etc/shadow"
++echo "foo" >root.passwd
++systemd-firstboot --root="$ROOT" --root-password-file=root.passwd
++grep -q "^root:x:0:0:" "$ROOT/etc/passwd"
++grep -q "^root:" "$ROOT/etc/shadow"
++rm -fv "$ROOT/etc/passwd" "$ROOT/etc/shadow" root.passwd
++# Set the shell together with the password, as firstboot won't touch
++# /etc/passwd if it already exists
++systemd-firstboot --root="$ROOT" --root-password-hashed="$ROOT_HASHED_PASSWORD1" --root-shell=/bin/fooshell
++grep -q "^root:x:0:0:.*:/bin/fooshell$" "$ROOT/etc/passwd"
++grep -q "^root:$ROOT_HASHED_PASSWORD1:" "$ROOT/etc/shadow"
++
++systemd-firstboot --root="$ROOT" --kernel-command-line="foo.bar=42"
++grep -q "foo.bar=42" "$ROOT/etc/kernel/cmdline"
++
++# Configs should not get overwritten if they exist unless --force is used
++systemd-firstboot --root="$ROOT" \
++                  --locale=locale-overwrite \
++                  --locale-messages=messages-overwrite \
++                  --keymap=keymap-overwrite \
++                  --timezone=CET \
++                  --hostname=hostname-overwrite \
++                  --machine-id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
++                  --root-password-hashed="$ROOT_HASHED_PASSWORD2" \
++                  --root-shell=/bin/barshell \
++                  --kernel-command-line="hello.world=0"
++grep -q "LANG=foo" "$ROOT/etc/locale.conf"
++grep -q "LC_MESSAGES=bar" "$ROOT/etc/locale.conf"
++grep -q "KEYMAP=foo" "$ROOT/etc/vconsole.conf"
++readlink "$ROOT/etc/localtime" | grep -q "Europe/Berlin$"
++grep -q "foobar" "$ROOT/etc/hostname"
++grep -q "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "$ROOT/etc/machine-id"
++grep -q "^root:x:0:0:.*:/bin/fooshell$" "$ROOT/etc/passwd"
++grep -q "^root:$ROOT_HASHED_PASSWORD1:" "$ROOT/etc/shadow"
++grep -q "foo.bar=42" "$ROOT/etc/kernel/cmdline"
++
++# The same thing, but now with --force
++systemd-firstboot --root="$ROOT" --force \
++                  --locale=locale-overwrite \
++                  --locale-messages=messages-overwrite \
++                  --keymap=keymap-overwrite \
++                  --timezone=CET \
++                  --hostname=hostname-overwrite \
++                  --machine-id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
++                  --root-password-hashed="$ROOT_HASHED_PASSWORD2" \
++                  --root-shell=/bin/barshell \
++                  --kernel-command-line="hello.world=0"
++grep -q "LANG=locale-overwrite" "$ROOT/etc/locale.conf"
++grep -q "LC_MESSAGES=messages-overwrite" "$ROOT/etc/locale.conf"
++grep -q "KEYMAP=keymap-overwrite" "$ROOT/etc/vconsole.conf"
++readlink "$ROOT/etc/localtime" | grep -q "/CET$"
++grep -q "hostname-overwrite" "$ROOT/etc/hostname"
++grep -q "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "$ROOT/etc/machine-id"
++grep -q "^root:x:0:0:.*:/bin/barshell$" "$ROOT/etc/passwd"
++grep -q "^root:$ROOT_HASHED_PASSWORD2:" "$ROOT/etc/shadow"
++grep -q "hello.world=0" "$ROOT/etc/kernel/cmdline"
++
++# --copy-* options
++rm -fr "$ROOT"
++mkdir "$ROOT"
++# Copy everything at once (--copy)
++systemd-firstboot --root="$ROOT" --copy
++diff /etc/locale.conf "$ROOT/etc/locale.conf"
++diff <(awk -F: '/^root/ { print $7; }' /etc/passwd) <(awk -F: '/^root/ { print $7; }' "$ROOT/etc/passwd")
++diff <(awk -F: '/^root/ { print $2; }' /etc/shadow) <(awk -F: '/^root/ { print $2; }' "$ROOT/etc/shadow")
++[[ -e /etc/vconsole.conf ]] && diff /etc/vconsole.conf "$ROOT/etc/vconsole.conf"
++[[ -e /etc/localtime ]] && diff <(readlink /etc/localtime) <(readlink "$ROOT/etc/localtime")
++rm -fr "$ROOT"
++mkdir "$ROOT"
++# Copy everything at once, but now by using separate switches
++systemd-firstboot --root="$ROOT" --copy-locale --copy-keymap --copy-timezone --copy-root-password --copy-root-shell
++diff /etc/locale.conf "$ROOT/etc/locale.conf"
++diff <(awk -F: '/^root/ { print $7; }' /etc/passwd) <(awk -F: '/^root/ { print $7; }' "$ROOT/etc/passwd")
++diff <(awk -F: '/^root/ { print $2; }' /etc/shadow) <(awk -F: '/^root/ { print $2; }' "$ROOT/etc/shadow")
++[[ -e /etc/vconsole.conf ]] && diff /etc/vconsole.conf "$ROOT/etc/vconsole.conf"
++[[ -e /etc/localtime ]] && diff <(readlink /etc/localtime) <(readlink "$ROOT/etc/localtime")
++
++# Assorted tests
++rm -fr "$ROOT"
++mkdir "$ROOT"
++
++systemd-firstboot --root="$ROOT" --setup-machine-id
++grep -E "[a-z0-9]{32}" "$ROOT/etc/machine-id"
++
++systemd-firstboot --root="$ROOT" --delete-root-password
++diff <(echo) <(awk -F: '/^root/ { print $2; }' "$ROOT/etc/shadow")
+diff --git a/test/units/testsuite-74.service b/test/units/testsuite-74.service
+new file mode 100644
+index 0000000000..f782132a92
+--- /dev/null
++++ b/test/units/testsuite-74.service
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Unit]
++Description=TEST-74-AUX-UTILS
++
++[Service]
++ExecStartPre=rm -f /failed /testok
++ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
++Type=oneshot
+diff --git a/test/units/testsuite-74.sh b/test/units/testsuite-74.sh
+new file mode 100755
+index 0000000000..13c767e490
+--- /dev/null
++++ b/test/units/testsuite-74.sh
+@@ -0,0 +1,14 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++: >/failed
++
++for script in "${0%.sh}".*.sh; do
++    echo "Running $script"
++    "./$script"
++done
++
++touch /testok
++rm /failed

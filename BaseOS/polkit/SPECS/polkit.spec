@@ -22,7 +22,7 @@
 Summary: An authorization framework
 Name: polkit
 Version: 0.117
-Release: 10%{?dist}.redsleeve
+Release: 11%{?dist}
 License: LGPLv2+
 URL: http://www.freedesktop.org/wiki/Software/polkit
 Source0: http://www.freedesktop.org/software/polkit/releases/%{name}-%{version}.tar.gz
@@ -32,6 +32,7 @@ Patch1001: mozjs78.patch
 Patch1002: CVE-2021-3560.patch
 Patch1003: CVE-2021-4034.patch
 Patch1004: CVE-2021-4115.patch
+Patch1005: tty-restore-flags-if-changed.patch
 
 %if 0%{?bundled_mozjs}
 Source2: https://ftp.mozilla.org/pub/firefox/releases/%{mozjs_version}esr/source/firefox-%{mozjs_version}esr.source.tar.xz
@@ -179,6 +180,7 @@ Libraries files for polkit.
 %patch1002 -p1
 %patch1003 -p1
 %patch1004 -p1
+%patch1005 -p1
 
 %if 0%{?bundled_mozjs}
 # Extract mozjs archive
@@ -196,7 +198,7 @@ pushd firefox-%{mozjs_version}
 %patch14 -p1
 %patch15 -p1
 
-%ifarch %{arm}
+%ifarch armv7hl
 # Include definitions for user vfp on armv7 as it causes the compilation to fail without them
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1526653
 %patch17 -p1
@@ -385,12 +387,13 @@ exit 0
 %endif
 
 %changelog
-* Thu Jul 21 2022 Jacco Ligthart <jacco@redsleeve.org> - 0.117-10.redsleeve
-- 
+* Fri Dec 02 2022 Jan Rybar <jrybar@redhat.com> - 0.117-11
+- backport: restore tty only if changed
+- Resolves: rhbz#2150310
 
-* Fri Mar 11 2022 Jan Rybar <jrybar@redhat.com> - 0.117-10
-- patch application spec file fix
-- Resolves: CVE-2021-4115
+* Mon Mar 07 2022 Jan Rybar <jrybar@redhat.com> - 0.117-10
+- fixed CVE-2021-4115 patch application
+- Resolves: rhbz#2062644
 
 * Wed Feb 16 2022 Jan Rybar <jrybar@redhat.com> - 0.117-9
 - file descriptor exhaustion (GHSL-2021-077)

@@ -5,14 +5,14 @@
 %global verify_tarball_signature 1
 
 # If there are patches which touch autotools files, set this to 1.
-%global patches_touch_autotools 1
+%global patches_touch_autotools %{nil}
 
 # The source directory.
-%global source_directory 1.12-stable
+%global source_directory 1.14-stable
 
 Name:           libnbd
-Version:        1.12.6
-Release:        1%{?dist}.redsleeve
+Version:        1.14.2
+Release:        1%{?dist}
 Summary:        NBD client library in userspace
 
 License:        LGPLv2+
@@ -29,19 +29,9 @@ Source2:       libguestfs.keyring
 Source3:        copy-patches.sh
 
 # Patches are stored in the upstream repository:
-# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.1/
+# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.2/
 
-# Patches.
-Patch0001:     0001-Add-nbddump-tool.patch
-Patch0002:     0002-dump-Visually-separate-columns-0-7-and-8-15.patch
-Patch0003:     0003-dump-Fix-build-on-i686.patch
-Patch0004:     0004-dump-Fix-tests-on-Debian-10.patch
-Patch0005:     0005-dump-dump-data.sh-Test-requires-nbdkit-1.22.patch
-Patch0006:     0006-copy-Store-the-preferred-block-size-in-the-operation.patch
-Patch0007:     0007-copy-Use-preferred-block-size-for-copying.patch
-Patch0008:     0008-dump-Add-another-example-to-the-manual.patch
-Patch0009:     0009-lib-crypto-Use-GNUTLS_NO_SIGNAL-if-available.patch
-Patch0010:     0010-lib-crypto.c-Ignore-TLS-premature-termination-after-.patch
+# (no patches)
 
 %if 0%{patches_touch_autotools}
 BuildRequires: autoconf, automake, libtool
@@ -90,7 +80,7 @@ BuildRequires:  util-linux
 # nbdkit for i686.  These are only needed for the test suite so make
 # them optional.  This reduces our test exposure on 32 bit platforms,
 # although there is still Fedora/armv7 and some upstream testing.
-%ifnarch %{ix86} %{arm}
+%ifnarch %{ix86}
 BuildRequires:  qemu-img
 BuildRequires:  nbdkit
 BuildRequires:  nbdkit-data-plugin
@@ -269,7 +259,7 @@ make %{?_smp_mflags} check || {
 
 
 %files
-%doc README
+%doc README.md
 %license COPYING.LIB
 %{_bindir}/nbdcopy
 %{_bindir}/nbddump
@@ -338,8 +328,9 @@ make %{?_smp_mflags} check || {
 
 
 %changelog
-* Mon Dec 05 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.12.6-1.redsleeve
-- fixed builddeps for arm
+* Tue Jan 03 2023 Richard W.M. Jones <rjones@redhat.com> - 1.14.2-1
+- Rebase to new stable branch version 1.14.2
+  resolves: rhbz#2135764
 
 * Thu Jul 28 2022 Richard W.M. Jones <rjones@redhat.com> - 1.12.6-1
 - Rebase to new stable branch version 1.12.6

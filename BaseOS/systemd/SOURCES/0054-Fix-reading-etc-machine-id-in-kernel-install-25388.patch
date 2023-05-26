@@ -1,0 +1,46 @@
+From abbfdf2aa3e17a84d0f4075f125e670defaf7296 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Marcus=20Sch=C3=A4fer?= <marcus.schaefer@gmail.com>
+Date: Wed, 16 Nov 2022 00:17:19 +0100
+Subject: [PATCH] Fix reading /etc/machine-id in kernel-install (#25388)
+
+* Fix reading /etc/machine-id in kernel-install
+
+The kernel-install script has code to read the contents of
+/etc/machine-id into the MACHINE_ID variable. Depending
+on the variable content kernel-install either logs the
+value or creates a new machine id via 'systemd-id128 new'.
+In that logic there is one issue. If the file /etc/machine-id
+exists but is empty, the script tries to call read on an
+empty file which return with an exit code != 0. As the
+script code also uses 'set -e', kernel-install will exit at
+this point which is unexpected.
+
+The condition of an empty /etc/machine-id file exists for
+example when building OS images, which should initialize the
+system id on first boot but not staticly inside of the image.
+afaik an empty /etc/machine-id is also a common approach
+to make systemd indicate that it should create a new system
+id. Because of this, the commit makes sure the reading of
+/etc/machine-id does not fail in any case such that the
+handling of the MACHINE_ID variable takes place.
+
+(cherry picked from commit 883e7cbfc0dba6c81338e7924419b5cbb0cba0b2)
+
+Related: #2138081
+---
+ src/kernel-install/kernel-install.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/kernel-install/kernel-install.in b/src/kernel-install/kernel-install.in
+index 22eb4d2be1..bba22f8a20 100755
+--- a/src/kernel-install/kernel-install.in
++++ b/src/kernel-install/kernel-install.in
+@@ -158,7 +158,7 @@ if [ -z "$MACHINE_ID" ] && [ -f /etc/machine-info ]; then
+     [ -n "$MACHINE_ID" ] && \
+         log_verbose "machine-id $MACHINE_ID acquired from /etc/machine-info"
+ fi
+-if [ -z "$MACHINE_ID" ] && [ -f /etc/machine-id ]; then
++if [ -z "$MACHINE_ID" ] && [ -s /etc/machine-id ]; then
+     read -r MACHINE_ID </etc/machine-id
+     [ -n "$MACHINE_ID" ] && \
+         log_verbose "machine-id $MACHINE_ID acquired from /etc/machine-id"

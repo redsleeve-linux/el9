@@ -1,0 +1,64 @@
+From 51a4778726edd7dfad18e7354bda1d77730c8dd8 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 13 Nov 2022 23:59:49 +0900
+Subject: [PATCH] sleep: rename hibernate_delay_sec -> _usec
+
+(cherry picked from commit 3d23df005e06b3616049686be82deff55788d3c4)
+
+Related: #2151612
+---
+ src/shared/sleep-config.c | 6 +++---
+ src/shared/sleep-config.h | 2 +-
+ src/sleep/sleep.c         | 2 +-
+ 3 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/shared/sleep-config.c b/src/shared/sleep-config.c
+index efc066c4f2..359d293fd0 100644
+--- a/src/shared/sleep-config.c
++++ b/src/shared/sleep-config.c
+@@ -82,7 +82,7 @@ int parse_sleep_config(SleepConfig **ret_sleep_config) {
+                 { "Sleep", "HybridSleepMode",           config_parse_strv,     0, sc->modes + SLEEP_HYBRID_SLEEP  },
+                 { "Sleep", "HybridSleepState",          config_parse_strv,     0, sc->states + SLEEP_HYBRID_SLEEP },
+ 
+-                { "Sleep", "HibernateDelaySec",         config_parse_sec,      0, &sc->hibernate_delay_sec        },
++                { "Sleep", "HibernateDelaySec",         config_parse_sec,      0, &sc->hibernate_delay_usec       },
+                 {}
+         };
+ 
+@@ -113,8 +113,8 @@ int parse_sleep_config(SleepConfig **ret_sleep_config) {
+                 sc->modes[SLEEP_HYBRID_SLEEP] = strv_new("suspend", "platform", "shutdown");
+         if (!sc->states[SLEEP_HYBRID_SLEEP])
+                 sc->states[SLEEP_HYBRID_SLEEP] = strv_new("disk");
+-        if (sc->hibernate_delay_sec == 0)
+-                sc->hibernate_delay_sec = 2 * USEC_PER_HOUR;
++        if (sc->hibernate_delay_usec == 0)
++                sc->hibernate_delay_usec = 2 * USEC_PER_HOUR;
+ 
+         /* ensure values set for all required fields */
+         if (!sc->states[SLEEP_SUSPEND] || !sc->modes[SLEEP_HIBERNATE]
+diff --git a/src/shared/sleep-config.h b/src/shared/sleep-config.h
+index 6645c3e596..226fab4b9f 100644
+--- a/src/shared/sleep-config.h
++++ b/src/shared/sleep-config.h
+@@ -19,7 +19,7 @@ typedef struct SleepConfig {
+         bool allow[_SLEEP_OPERATION_MAX];
+         char **modes[_SLEEP_OPERATION_MAX];
+         char **states[_SLEEP_OPERATION_MAX];
+-        usec_t hibernate_delay_sec;
++        usec_t hibernate_delay_usec;
+ } SleepConfig;
+ 
+ SleepConfig* free_sleep_config(SleepConfig *sc);
+diff --git a/src/sleep/sleep.c b/src/sleep/sleep.c
+index 3461d3e45f..7679f2e3be 100644
+--- a/src/sleep/sleep.c
++++ b/src/sleep/sleep.c
+@@ -275,7 +275,7 @@ static int custom_timer_suspend(const SleepConfig *sleep_config) {
+         while (battery_is_low() == 0) {
+                 _cleanup_close_ int tfd = -1;
+                 struct itimerspec ts = {};
+-                usec_t suspend_interval = sleep_config->hibernate_delay_sec, before_timestamp = 0, after_timestamp = 0, total_suspend_interval;
++                usec_t suspend_interval = sleep_config->hibernate_delay_usec, before_timestamp = 0, after_timestamp = 0, total_suspend_interval;
+                 bool woken_by_timer;
+ 
+                 tfd = timerfd_create(CLOCK_BOOTTIME_ALARM, TFD_NONBLOCK|TFD_CLOEXEC);

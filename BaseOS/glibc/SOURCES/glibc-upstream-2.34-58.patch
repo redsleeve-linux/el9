@@ -1,0 +1,35 @@
+commit 03de6917bd11c0591867607ce74ef658f76eabb9
+Author: Aurelien Jarno <aurelien@aurel32.net>
+Date:   Wed Dec 15 23:46:19 2021 +0100
+
+    elf: Fix tst-cpu-features-cpuinfo for KVM guests on some AMD systems [BZ #28704]
+    
+    On KVM guests running on some AMD systems, the IBRS feature is reported
+    as a synthetic feature using the Intel feature, while the cpuinfo entry
+    keeps the same. Handle that by first checking the presence of the Intel
+    feature on AMD systems.
+    
+    Fixes bug 28704.
+    
+    (cherry picked from commit 94058f6cde8b887178885954740ac6c866d25eab)
+
+diff --git a/sysdeps/x86/tst-cpu-features-cpuinfo.c b/sysdeps/x86/tst-cpu-features-cpuinfo.c
+index 2d4927f5e52dc260..830aaca2ecae971b 100644
+--- a/sysdeps/x86/tst-cpu-features-cpuinfo.c
++++ b/sysdeps/x86/tst-cpu-features-cpuinfo.c
+@@ -169,7 +169,14 @@ do_test (int argc, char **argv)
+   else if (cpu_features->basic.kind == arch_kind_amd)
+     {
+       fails += CHECK_PROC (ibpb, AMD_IBPB);
+-      fails += CHECK_PROC (ibrs, AMD_IBRS);
++
++      /* The IBRS feature on AMD processors is reported using the Intel feature
++       * on KVM guests (synthetic bit).  In both cases the cpuinfo entry is the
++       * same.  */
++      if (HAS_CPU_FEATURE (IBRS_IBPB))
++        fails += CHECK_PROC (ibrs, IBRS_IBPB);
++      else
++        fails += CHECK_PROC (ibrs, AMD_IBRS);
+       fails += CHECK_PROC (stibp, AMD_STIBP);
+     }
+   fails += CHECK_PROC (ibt, IBT);

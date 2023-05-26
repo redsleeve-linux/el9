@@ -1,0 +1,85 @@
+From 5075b961a29ff9c418e1fefe78432e95dd0a5fcc Mon Sep 17 00:00:00 2001
+From: Michal Schmidt <mschmidt@redhat.com>
+Date: Wed, 1 Feb 2023 22:41:06 +0100
+Subject: [PATCH 1/3] util: fix overflow in remap_node_name()
+
+The function remap_node_name() assumes the parameter 'nodedesc' is at
+least IB_SMP_DATA_SIZE + 1 (i.e. 65) bytes long, because it passes it to
+clean_nodedesc() that writes a nul-terminator to it at offset
+IB_SMP_DATA_SIZE. Callers in infiniband-diags/saquery.c pass
+a (struct ib_node_desc_t).description as the argument, which is only
+IB_NODE_DESCRIPTION_SIZE (i.e. 64) bytes long. This is an overflow.
+
+An odd thing about remap_node_name() is that it may (but does not
+always) rewrite the nodedesc in-place. Callers do not appear to
+appreciate this behavior. Most of them are various print_* and dump_*
+functions where rewriting the input makes no sense. Some callers make a
+local copy of the nodedesc first, possibly to protect the original.
+One caller (infiniband-diags/saquery.c:print_node_records()) checks if
+either the original description or the remapped one matches a given
+requested_name - so it looks like it prefers the original to be
+not rewritten.
+
+Let's make remap_node_name() a bit safer and more convenient to use.
+Allocate a fixed-sized copy first. Then use strncpy to copy from
+'nodedesc', never reading more than IB_SMP_DATA_SIZE (64) bytes.
+Apply clean_nodedesc() on the correctly-sized copy. This solves the
+overflow bug. Also, the in-place rewrite of 'nodedesc' is gone and it
+can become a (const char*).
+
+The overflow was found by a static checker (covscan).
+
+Fixes: d974c4e398d2 ("Fix max length of node description (ibnetdiscover and smpquery)")
+Signed-off-by: Michal Schmidt <mschmidt@redhat.com>
+---
+ util/node_name_map.c | 12 +++++++++---
+ util/node_name_map.h |  3 +--
+ 2 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/util/node_name_map.c b/util/node_name_map.c
+index 30b73eb1448e..511cb92ef19c 100644
+--- a/util/node_name_map.c
++++ b/util/node_name_map.c
+@@ -95,7 +95,7 @@ void close_node_name_map(nn_map_t * map)
+ 	free(map);
+ }
+ 
+-char *remap_node_name(nn_map_t * map, uint64_t target_guid, char *nodedesc)
++char *remap_node_name(nn_map_t * map, uint64_t target_guid, const char *nodedesc)
+ {
+ 	char *rc = NULL;
+ 	name_map_item_t *item = NULL;
+@@ -108,8 +108,14 @@ char *remap_node_name(nn_map_t * map, uint64_t target_guid, char *nodedesc)
+ 		rc = strdup(item->name);
+ 
+ done:
+-	if (rc == NULL)
+-		rc = strdup(clean_nodedesc(nodedesc));
++	if (rc == NULL) {
++		rc = malloc(IB_SMP_DATA_SIZE + 1);
++		if (rc) {
++			strncpy(rc, nodedesc, IB_SMP_DATA_SIZE);
++			rc[IB_SMP_DATA_SIZE] = '\0';
++			clean_nodedesc(rc);
++		}
++	}
+ 	return (rc);
+ }
+ 
+diff --git a/util/node_name_map.h b/util/node_name_map.h
+index e78d274b116e..d83d672782c4 100644
+--- a/util/node_name_map.h
++++ b/util/node_name_map.h
+@@ -12,8 +12,7 @@ typedef struct nn_map nn_map_t;
+ 
+ nn_map_t *open_node_name_map(const char *node_name_map);
+ void close_node_name_map(nn_map_t *map);
+-/* NOTE: parameter "nodedesc" may be modified here. */
+-char *remap_node_name(nn_map_t *map, uint64_t target_guid, char *nodedesc);
++char *remap_node_name(nn_map_t *map, uint64_t target_guid, const char *nodedesc);
+ char *clean_nodedesc(char *nodedesc);
+ 
+ #endif
+-- 
+2.39.1
+

@@ -1,0 +1,30 @@
+commit f3a99b2216114f89b20329ae7664b764248b4bbd
+Author: H.J. Lu <hjl.tools@gmail.com>
+Date:   Mon Dec 6 07:14:12 2021 -0800
+
+    x86: Don't set Prefer_No_AVX512 for processors with AVX512 and AVX-VNNI
+    
+    Don't set Prefer_No_AVX512 on processors with AVX512 and AVX-VNNI since
+    they won't lower CPU frequency when ZMM load and store instructions are
+    used.
+    
+    (cherry picked from commit ceeffe968c01b1202e482f4855cb6baf5c6cb713)
+
+diff --git a/sysdeps/x86/cpu-features.c b/sysdeps/x86/cpu-features.c
+index f4d4049e391cbabd..09590d8794b1c6fb 100644
+--- a/sysdeps/x86/cpu-features.c
++++ b/sysdeps/x86/cpu-features.c
+@@ -566,8 +566,11 @@ disable_tsx:
+ 	  |= bit_arch_Prefer_No_VZEROUPPER;
+       else
+ 	{
+-	  cpu_features->preferred[index_arch_Prefer_No_AVX512]
+-	    |= bit_arch_Prefer_No_AVX512;
++	  /* Processors with AVX512 and AVX-VNNI won't lower CPU frequency
++	     when ZMM load and store instructions are used.  */
++	  if (!CPU_FEATURES_CPU_P (cpu_features, AVX_VNNI))
++	    cpu_features->preferred[index_arch_Prefer_No_AVX512]
++	      |= bit_arch_Prefer_No_AVX512;
+ 
+ 	  /* Avoid RTM abort triggered by VZEROUPPER inside a
+ 	     transactionally executing RTM region.  */

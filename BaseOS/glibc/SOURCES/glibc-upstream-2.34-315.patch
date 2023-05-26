@@ -1,0 +1,62 @@
+commit f50a6c843a5b5186c0aa73747de033e08ef8246d
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Sep 20 12:12:43 2022 +0200
+
+    gconv: Use 64-bit interfaces in gconv_parseconfdir (bug 29583)
+    
+    It's possible that inode numbers are outside the 32-bit range.
+    The existing code only handles the in-libc case correctly, and
+    still uses the legacy interfaces when building iconv.
+    
+    Suggested-by: Helge Deller <deller@gmx.de>
+    (cherry picked from commit f97905f24631097af325d6a231093071c3077a5f)
+
+diff --git a/iconv/gconv_parseconfdir.h b/iconv/gconv_parseconfdir.h
+index 79398a980cde84e3..741cf7c67e36eccd 100644
+--- a/iconv/gconv_parseconfdir.h
++++ b/iconv/gconv_parseconfdir.h
+@@ -29,14 +29,14 @@
+ # define isspace(__c) __isspace_l ((__c), _nl_C_locobj_ptr)
+ # define asprintf __asprintf
+ # define opendir __opendir
+-# define readdir __readdir
++# define readdir64 __readdir64
+ # define closedir __closedir
+ # define mempcpy __mempcpy
+-# define struct_stat struct __stat64_t64
+-# define lstat __lstat64_time64
++# define struct_stat64 struct __stat64_t64
++# define lstat64 __lstat64_time64
+ # define feof_unlocked __feof_unlocked
+ #else
+-# define struct_stat struct stat
++# define struct_stat64 struct stat64
+ #endif
+ 
+ /* Name of the file containing the module information in the directories
+@@ -148,8 +148,8 @@ gconv_parseconfdir (const char *prefix, const char *dir, size_t dir_len)
+   DIR *confdir = opendir (buf);
+   if (confdir != NULL)
+     {
+-      struct dirent *ent;
+-      while ((ent = readdir (confdir)) != NULL)
++      struct dirent64 *ent;
++      while ((ent = readdir64 (confdir)) != NULL)
+ 	{
+ 	  if (ent->d_type != DT_REG && ent->d_type != DT_UNKNOWN)
+ 	    continue;
+@@ -161,12 +161,12 @@ gconv_parseconfdir (const char *prefix, const char *dir, size_t dir_len)
+ 	      && strcmp (ent->d_name + len - strlen (suffix), suffix) == 0)
+ 	    {
+ 	      char *conf;
+-	      struct_stat st;
++	      struct_stat64 st;
+ 	      if (asprintf (&conf, "%s/%s", buf, ent->d_name) < 0)
+ 		continue;
+ 
+ 	      if (ent->d_type != DT_UNKNOWN
+-		  || (lstat (conf, &st) != -1 && S_ISREG (st.st_mode)))
++		  || (lstat64 (conf, &st) != -1 && S_ISREG (st.st_mode)))
+ 		found |= read_conf_file (conf, dir, dir_len);
+ 
+ 	      free (conf);

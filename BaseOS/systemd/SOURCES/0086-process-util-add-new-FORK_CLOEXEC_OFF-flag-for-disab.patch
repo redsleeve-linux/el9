@@ -1,0 +1,49 @@
+From 4fb6e9eddc7487a965b3e051115f9bb1d0413342 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 4 Nov 2022 18:20:47 +0100
+Subject: [PATCH] process-util: add new FORK_CLOEXEC_OFF flag for disabling
+ O_CLOEXEC on remaining fds
+
+Often the fds that shall stay around in the child shall be passed
+to a process over execve(), hence add an option to explicitly disable
+O_CLOEXEC on them in the child.
+
+(cherry picked from commit 981cfbe046297a18f2cb115ef81202f3bd68d2a3)
+
+Related: #2138081
+---
+ src/basic/process-util.c | 8 ++++++++
+ src/basic/process-util.h | 1 +
+ 2 files changed, 9 insertions(+)
+
+diff --git a/src/basic/process-util.c b/src/basic/process-util.c
+index fb0b38fa49..0213f5913f 100644
+--- a/src/basic/process-util.c
++++ b/src/basic/process-util.c
+@@ -1372,6 +1372,14 @@ int safe_fork_full(
+                 }
+         }
+ 
++        if (flags & FORK_CLOEXEC_OFF) {
++                r = fd_cloexec_many(except_fds, n_except_fds, false);
++                if (r < 0) {
++                        log_full_errno(prio, r, "Failed to turn off O_CLOEXEC on file descriptors: %m");
++                        _exit(EXIT_FAILURE);
++                }
++        }
++
+         /* When we were asked to reopen the logs, do so again now */
+         if (flags & FORK_REOPEN_LOG) {
+                 log_open();
+diff --git a/src/basic/process-util.h b/src/basic/process-util.h
+index f8c374a310..ed2f73673e 100644
+--- a/src/basic/process-util.h
++++ b/src/basic/process-util.h
+@@ -150,6 +150,7 @@ typedef enum ForkFlags {
+         FORK_STDOUT_TO_STDERR   = 1 << 11, /* Make stdout a copy of stderr */
+         FORK_FLUSH_STDIO        = 1 << 12, /* fflush() stdout (and stderr) before forking */
+         FORK_NEW_USERNS         = 1 << 13, /* Run child in its own user namespace */
++        FORK_CLOEXEC_OFF        = 1 << 14, /* In the child: turn off O_CLOEXEC on all fds in except_fds[] */
+ } ForkFlags;
+ 
+ int safe_fork_full(const char *name, const int except_fds[], size_t n_except_fds, ForkFlags flags, pid_t *ret_pid);

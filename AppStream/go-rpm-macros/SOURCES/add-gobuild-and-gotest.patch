@@ -1,0 +1,32 @@
+From 1001f5a99439556c5ad3efe6045923e985a52f82 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Alejandro=20S=C3=A1ez?= <asm@redhat.com>
+Date: Wed, 23 Nov 2022 13:43:23 +0100
+Subject: [PATCH] Add %gobuild and %gotest
+
+Both macros are define in rpm/macros.d/macros.go-compilers-gcc.
+CentOS Stream 9 go-srpm-macros discards that file and only installs rpm/macros.d/macros.go-srpm.
+
+This commit adds %gobuild and %gotest to rpm/macros.d/macros.go-srpm with the same options that RHEL 8 uses.
+---
+ rpm/macros.d/macros.go-srpm | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/rpm/macros.d/macros.go-srpm b/rpm/macros.d/macros.go-srpm
+index a46f81f..05cd6c9 100644
+--- a/rpm/macros.d/macros.go-srpm
++++ b/rpm/macros.d/macros.go-srpm
+@@ -202,3 +202,11 @@ local processall = (rpm.expand("%{-a}") ~= "") and (rpm.expand("%{-z}") == "")
+ local    verbose = (rpm.expand("%{-v}") ~= "")
+ go.files("alt", suffix, processall, verbose)
+ }
++
++# Define commands for building
++# BUILD_ID can be generated for golang build no matter of debuginfo
++%gobuild(o:) \
++CGO_CPPFLAGS="-D_FORTIFY_SOURCE=2 -fstack-protector-all" go build -compiler gc -buildmode pie '-tags=rpm_crashtraceback libtrust_openssl ' -ldflags "-linkmode=external -compressdwarf=false ${LDFLAGS:-} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -extldflags '%__global_ldflags'" -a -v -x %{?**};\
++
++# Define commands for testing
++%gotest() go test -compiler gc -ldflags "${LDFLAGS:-}" %{?**};
+-- 
+2.38.1
+

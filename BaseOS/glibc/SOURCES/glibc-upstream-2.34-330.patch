@@ -1,0 +1,33 @@
+commit a2e259014f8a0e5f3ff938314f3087b74255804d
+Author: H.J. Lu <hjl.tools@gmail.com>
+Date:   Thu Nov 11 06:31:51 2021 -0800
+
+    Avoid extra load with CAS in __pthread_mutex_lock_full [BZ #28537]
+    
+    Replace boolean CAS with value CAS to avoid the extra load.
+    
+    Reviewed-by: Szabolcs Nagy <szabolcs.nagy@arm.com>
+    (cherry picked from commit 0b82747dc48d5bf0871bdc6da8cb6eec1256355f)
+
+diff --git a/nptl/pthread_mutex_lock.c b/nptl/pthread_mutex_lock.c
+index da624f322d06d0ee..a04e0158451c8fff 100644
+--- a/nptl/pthread_mutex_lock.c
++++ b/nptl/pthread_mutex_lock.c
+@@ -298,12 +298,12 @@ __pthread_mutex_lock_full (pthread_mutex_t *mutex)
+ 	     meantime.  */
+ 	  if ((oldval & FUTEX_WAITERS) == 0)
+ 	    {
+-	      if (atomic_compare_and_exchange_bool_acq (&mutex->__data.__lock,
+-							oldval | FUTEX_WAITERS,
+-							oldval)
+-		  != 0)
++	      int val;
++	      if ((val = atomic_compare_and_exchange_val_acq
++		   (&mutex->__data.__lock, oldval | FUTEX_WAITERS,
++		    oldval)) != oldval)
+ 		{
+-		  oldval = mutex->__data.__lock;
++		  oldval = val;
+ 		  continue;
+ 		}
+ 	      oldval |= FUTEX_WAITERS;

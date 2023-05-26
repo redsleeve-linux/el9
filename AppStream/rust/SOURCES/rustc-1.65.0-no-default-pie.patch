@@ -1,0 +1,43 @@
+--- rustc-beta-src/compiler/rustc_codegen_ssa/src/back/link.rs.orig	2022-09-24 10:20:14.000000000 -0700
++++ rustc-beta-src/compiler/rustc_codegen_ssa/src/back/link.rs	2022-10-05 11:24:21.759564185 -0700
+@@ -755,7 +755,7 @@
+             && cmd.get_args().iter().any(|e| e.to_string_lossy() == "-no-pie")
+         {
+             info!("linker output: {:?}", out);
+-            warn!("Linker does not support -no-pie command line option. Retrying without.");
++            info!("Linker does not support -no-pie command line option. Retrying without.");
+             for arg in cmd.take_args() {
+                 if arg.to_string_lossy() != "-no-pie" {
+                     cmd.arg(arg);
+@@ -774,7 +774,7 @@
+             && cmd.get_args().iter().any(|e| e.to_string_lossy() == "-static-pie")
+         {
+             info!("linker output: {:?}", out);
+-            warn!(
++            info!(
+                 "Linker does not support -static-pie command line option. Retrying with -static instead."
+             );
+             // Mirror `add_(pre,post)_link_objects` to replace CRT objects.
+@@ -1520,15 +1520,15 @@
+ }
+ 
+ fn link_output_kind(sess: &Session, crate_type: CrateType) -> LinkOutputKind {
+-    let kind = match (crate_type, sess.crt_static(Some(crate_type)), sess.relocation_model()) {
++    // Only use PIE if explicitly specified.
++    #[allow(rustc::bad_opt_access)]
++    let explicit_pic =
++        matches!(sess.opts.cg.relocation_model, Some(RelocModel::Pic | RelocModel::Pie));
++    let kind = match (crate_type, sess.crt_static(Some(crate_type)), explicit_pic) {
+         (CrateType::Executable, _, _) if sess.is_wasi_reactor() => LinkOutputKind::WasiReactorExe,
+-        (CrateType::Executable, false, RelocModel::Pic | RelocModel::Pie) => {
+-            LinkOutputKind::DynamicPicExe
+-        }
++        (CrateType::Executable, false, true) => LinkOutputKind::DynamicPicExe,
+         (CrateType::Executable, false, _) => LinkOutputKind::DynamicNoPicExe,
+-        (CrateType::Executable, true, RelocModel::Pic | RelocModel::Pie) => {
+-            LinkOutputKind::StaticPicExe
+-        }
++        (CrateType::Executable, true, true) => LinkOutputKind::StaticPicExe,
+         (CrateType::Executable, true, _) => LinkOutputKind::StaticNoPicExe,
+         (_, true, _) => LinkOutputKind::StaticDylib,
+         (_, false, _) => LinkOutputKind::DynamicDylib,

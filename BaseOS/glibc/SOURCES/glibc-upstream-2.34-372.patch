@@ -1,0 +1,28 @@
+commit d0e2ac0c5902bd0e671863cc6cb14024d0365e67
+Author: Alan Modra <amodra@gmail.com>
+Date:   Sat Nov 12 11:20:31 2022 +1030
+
+    elf/tst-tlsopt-powerpc fails when compiled with -mcpu=power10 (BZ# 29776)
+    
+    Supports pcrel addressing of TLS GOT entry.  Also tweak the non-pcrel
+    asm constraint to better reflect how the reg is used.
+    
+    (cherry picked from commit 94628de77888c3292fc103840731ff85f283368e)
+
+diff --git a/sysdeps/powerpc/mod-tlsopt-powerpc.c b/sysdeps/powerpc/mod-tlsopt-powerpc.c
+index ee0db12a737d6ab5..51cc502f2860e969 100644
+--- a/sysdeps/powerpc/mod-tlsopt-powerpc.c
++++ b/sysdeps/powerpc/mod-tlsopt-powerpc.c
+@@ -24,7 +24,11 @@ tls_get_addr_opt_test (void)
+   tls_index *tls_arg;
+ #ifdef __powerpc64__
+   register unsigned long thread_pointer __asm__ ("r13");
+-  asm ("addi %0,2,foo@got@tlsgd" : "=r" (tls_arg));
++# ifdef __PCREL__
++  asm ("paddi %0,0,foo@got@tlsgd@pcrel,1" : "=b" (tls_arg));
++# else
++  asm ("addi %0,2,foo@got@tlsgd" : "=b" (tls_arg));
++# endif
+ #else
+   register unsigned long thread_pointer __asm__ ("r2");
+   asm ("bcl 20,31,1f\n1:\t"

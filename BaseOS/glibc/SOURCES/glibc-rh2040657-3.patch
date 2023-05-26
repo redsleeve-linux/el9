@@ -1,0 +1,171 @@
+commit 0835c0f0bad351117154b815f34f8af19ea7e325
+Author: Matt Whitlock <sourceware@mattwhitlock.name>
+Date:   Wed Jun 16 23:40:47 2021 -0400
+
+    x86: fix Autoconf caching of instruction support checks [BZ #27991]
+    
+    The Autoconf documentation for the AC_CACHE_CHECK macro states:
+    
+      The commands-to-set-it must have no side effects except for setting
+      the variable cache-id, see below.
+    
+    However, the tests for support of -msahf and -mmovbe were embedded in
+    the commands-to-set-it for lib_cv_include_x86_isa_level. This had the
+    consequence that libc_cv_have_x86_lahf_sahf and libc_cv_have_x86_movbe
+    were not defined whenever lib_cv_include_x86_isa_level was read from
+    cache. These variables' being undefined meant that their unquoted use
+    in later test expressions led to the 'test' built-in's misparsing its
+    arguments and emitting errors like "test: =: unexpected operator" or
+    "test: =: unary operator expected", depending on the particular shell.
+    
+    This commit refactors the tests for LAHF/SAHF and MOVBE instruction
+    support into their own AC_CACHE_CHECK macro invocations to obey the
+    rule that the commands-to-set-it must have no side effects other than
+    setting the variable named by cache-id.
+    
+    Signed-off-by: Matt Whitlock <sourceware@mattwhitlock.name>
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff --git a/sysdeps/x86/configure b/sysdeps/x86/configure
+index ead1295c38cf5f4e..62676bb686850938 100644
+--- a/sysdeps/x86/configure
++++ b/sysdeps/x86/configure
+@@ -126,8 +126,6 @@ cat > conftest2.S <<EOF
+ 4:
+ EOF
+ libc_cv_include_x86_isa_level=no
+-libc_cv_have_x86_lahf_sahf=no
+-libc_cv_have_x86_movbe=no
+ if { ac_try='${CC-cc} $CFLAGS $CPPFLAGS -nostartfiles -nostdlib -r -o conftest conftest1.S conftest2.S'
+   { { eval echo "\"\$as_me\":${as_lineno-$LINENO}: \"$ac_try\""; } >&5
+   (eval $ac_try) 2>&5
+@@ -137,9 +135,22 @@ if { ac_try='${CC-cc} $CFLAGS $CPPFLAGS -nostartfiles -nostdlib -r -o conftest c
+   count=`LC_ALL=C $READELF -n conftest | grep NT_GNU_PROPERTY_TYPE_0 | wc -l`
+   if test "$count" = 1; then
+     libc_cv_include_x86_isa_level=yes
+-    cat > conftest.c <<EOF
+-EOF
+-    if { ac_try='${CC-cc} $CFLAGS $CPPFLAGS -fverbose-asm -S -o - conftest.c'
++  fi
++fi
++rm -f conftest*
++fi
++{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $libc_cv_include_x86_isa_level" >&5
++$as_echo "$libc_cv_include_x86_isa_level" >&6; }
++if test $libc_cv_include_x86_isa_level = yes; then
++  $as_echo "#define INCLUDE_X86_ISA_LEVEL 1" >>confdefs.h
++
++  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for LAHF/SAHF instruction support" >&5
++$as_echo_n "checking for LAHF/SAHF instruction support... " >&6; }
++if ${libc_cv_have_x86_lahf_sahf+:} false; then :
++  $as_echo_n "(cached) " >&6
++else
++      libc_cv_have_x86_lahf_sahf=no
++    if { ac_try='${CC-cc} $CFLAGS $CPPFLAGS -fverbose-asm -S -o - -x c /dev/null'
+   { { eval echo "\"\$as_me\":${as_lineno-$LINENO}: \"$ac_try\""; } >&5
+   (eval $ac_try) 2>&5
+   ac_status=$?
+@@ -147,7 +158,20 @@ EOF
+   test $ac_status = 0; }; } | grep -q "\-msahf"; then
+       libc_cv_have_x86_lahf_sahf=yes
+     fi
+-    if { ac_try='${CC-cc} $CFLAGS $CPPFLAGS -fverbose-asm -S -o - conftest.c'
++fi
++{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $libc_cv_have_x86_lahf_sahf" >&5
++$as_echo "$libc_cv_have_x86_lahf_sahf" >&6; }
++  if test $libc_cv_have_x86_lahf_sahf = yes; then
++    $as_echo "#define HAVE_X86_LAHF_SAHF 1" >>confdefs.h
++
++  fi
++  { $as_echo "$as_me:${as_lineno-$LINENO}: checking for MOVBE instruction support" >&5
++$as_echo_n "checking for MOVBE instruction support... " >&6; }
++if ${libc_cv_have_x86_movbe+:} false; then :
++  $as_echo_n "(cached) " >&6
++else
++      libc_cv_have_x86_movbe=no
++    if { ac_try='${CC-cc} $CFLAGS $CPPFLAGS -fverbose-asm -S -o - -x c /dev/null'
+   { { eval echo "\"\$as_me\":${as_lineno-$LINENO}: \"$ac_try\""; } >&5
+   (eval $ac_try) 2>&5
+   ac_status=$?
+@@ -155,23 +179,13 @@ EOF
+   test $ac_status = 0; }; } | grep -q "\-mmovbe"; then
+       libc_cv_have_x86_movbe=yes
+     fi
+-  fi
+-fi
+-rm -f conftest*
+-fi
+-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $libc_cv_include_x86_isa_level" >&5
+-$as_echo "$libc_cv_include_x86_isa_level" >&6; }
+-if test $libc_cv_include_x86_isa_level = yes; then
+-  $as_echo "#define INCLUDE_X86_ISA_LEVEL 1" >>confdefs.h
+-
+ fi
+-if test $libc_cv_have_x86_lahf_sahf = yes; then
+-  $as_echo "#define HAVE_X86_LAHF_SAHF 1" >>confdefs.h
+-
+-fi
+-if test $libc_cv_have_x86_movbe = yes; then
+-  $as_echo "#define HAVE_X86_MOVBE 1" >>confdefs.h
++{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $libc_cv_have_x86_movbe" >&5
++$as_echo "$libc_cv_have_x86_movbe" >&6; }
++  if test $libc_cv_have_x86_movbe = yes; then
++    $as_echo "#define HAVE_X86_MOVBE 1" >>confdefs.h
+ 
++  fi
+ fi
+ config_vars="$config_vars
+ enable-x86-isa-level = $libc_cv_include_x86_isa_level"
+diff --git a/sysdeps/x86/configure.ac b/sysdeps/x86/configure.ac
+index bca97fdc2f1ac1a7..04a12ab68048cd66 100644
+--- a/sysdeps/x86/configure.ac
++++ b/sysdeps/x86/configure.ac
+@@ -98,30 +98,32 @@ cat > conftest2.S <<EOF
+ 4:
+ EOF
+ libc_cv_include_x86_isa_level=no
+-libc_cv_have_x86_lahf_sahf=no
+-libc_cv_have_x86_movbe=no
+ if AC_TRY_COMMAND(${CC-cc} $CFLAGS $CPPFLAGS -nostartfiles -nostdlib -r -o conftest conftest1.S conftest2.S); then
+   count=`LC_ALL=C $READELF -n conftest | grep NT_GNU_PROPERTY_TYPE_0 | wc -l`
+   if test "$count" = 1; then
+     libc_cv_include_x86_isa_level=yes
+-    cat > conftest.c <<EOF
+-EOF
+-    if AC_TRY_COMMAND(${CC-cc} $CFLAGS $CPPFLAGS -fverbose-asm -S -o - conftest.c) | grep -q "\-msahf"; then
+-      libc_cv_have_x86_lahf_sahf=yes
+-    fi
+-    if AC_TRY_COMMAND(${CC-cc} $CFLAGS $CPPFLAGS -fverbose-asm -S -o - conftest.c) | grep -q "\-mmovbe"; then
+-      libc_cv_have_x86_movbe=yes
+-    fi
+   fi
+ fi
+ rm -f conftest*])
+ if test $libc_cv_include_x86_isa_level = yes; then
+   AC_DEFINE(INCLUDE_X86_ISA_LEVEL)
+-fi
+-if test $libc_cv_have_x86_lahf_sahf = yes; then
+-  AC_DEFINE(HAVE_X86_LAHF_SAHF)
+-fi
+-if test $libc_cv_have_x86_movbe = yes; then
+-  AC_DEFINE(HAVE_X86_MOVBE)
++  AC_CACHE_CHECK([for LAHF/SAHF instruction support],
++		 libc_cv_have_x86_lahf_sahf, [dnl
++    libc_cv_have_x86_lahf_sahf=no
++    if AC_TRY_COMMAND(${CC-cc} $CFLAGS $CPPFLAGS -fverbose-asm -S -o - -x c /dev/null) | grep -q "\-msahf"; then
++      libc_cv_have_x86_lahf_sahf=yes
++    fi])
++  if test $libc_cv_have_x86_lahf_sahf = yes; then
++    AC_DEFINE(HAVE_X86_LAHF_SAHF)
++  fi
++  AC_CACHE_CHECK([for MOVBE instruction support],
++		 libc_cv_have_x86_movbe, [dnl
++    libc_cv_have_x86_movbe=no
++    if AC_TRY_COMMAND(${CC-cc} $CFLAGS $CPPFLAGS -fverbose-asm -S -o - -x c /dev/null) | grep -q "\-mmovbe"; then
++      libc_cv_have_x86_movbe=yes
++    fi])
++  if test $libc_cv_have_x86_movbe = yes; then
++    AC_DEFINE(HAVE_X86_MOVBE)
++  fi
+ fi
+ LIBC_CONFIG_VAR([enable-x86-isa-level], [$libc_cv_include_x86_isa_level])

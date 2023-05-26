@@ -1,0 +1,32 @@
+commit 7af07fe795f43e53d31be1c6f9adba7e05f87b0b
+Author: Xi Ruoyao <xry111@mengyan1223.wang>
+Date:   Thu Aug 12 20:31:59 2021 +0000
+
+    mips: align stack in clone [BZ #28223]
+    
+    The MIPS O32 ABI requires 4 byte aligned stack, and the MIPS N64 and N32
+    ABI require 8 byte aligned stack.  Previously if the caller passed an
+    unaligned stack to clone the the child misbehaved.
+    
+    Fixes bug 28223.
+    
+    (cherry picked from commit 1f51cd9a860ee45eee8a56fb2ba925267a2a7bfe)
+
+diff --git a/sysdeps/unix/sysv/linux/mips/clone.S b/sysdeps/unix/sysv/linux/mips/clone.S
+index 71d9dba8bd9e8f9e..43a5ad3a400d9504 100644
+--- a/sysdeps/unix/sysv/linux/mips/clone.S
++++ b/sysdeps/unix/sysv/linux/mips/clone.S
+@@ -55,6 +55,13 @@ NESTED(__clone,4*SZREG,sp)
+ 	.set		at
+ #endif
+ 
++	/* Align stack to 4/8 bytes per the ABI.  */
++#if _MIPS_SIM == _ABIO32
++	li		t0,-4
++#else
++	li		t0,-8
++#endif
++	and		a1,a1,t0
+ 
+ 	/* Sanity check arguments.  */
+ 	li		v0,EINVAL

@@ -1,0 +1,37 @@
+commit f01d482f0355a7029d0715ace0ccf3323e7e94bc
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Jan 14 20:16:05 2022 +0100
+
+    s390x: Use <gcc-macros.h> in early HWCAP check
+    
+    This is required so that the checks still work if $(early-cflags)
+    selects a different ISA level.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+    Tested-by: Carlos O'Donell <carlos@redhat.com>
+
+diff --git a/sysdeps/s390/s390-64/dl-hwcap-check.h b/sysdeps/s390/s390-64/dl-hwcap-check.h
+index 87e18be6bd0c512b..27f7e245b1d1a9e9 100644
+--- a/sysdeps/s390/s390-64/dl-hwcap-check.h
++++ b/sysdeps/s390/s390-64/dl-hwcap-check.h
+@@ -19,17 +19,18 @@
+ #ifndef _DL_HWCAP_CHECK_H
+ #define _DL_HWCAP_CHECK_H
+ 
++#include <gcc-macros.h>
+ #include <ldsodefs.h>
+ 
+ static inline void
+ dl_hwcap_check (void)
+ {
+ #if defined __ARCH__
+-# if __ARCH__ >= 13
++# if GCCMACRO__ARCH__ >= 13
+   if (!(GLRO(dl_hwcap) & HWCAP_S390_VXRS_EXT2))
+     _dl_fatal_printf ("\
+ Fatal glibc error: CPU lacks VXRS_EXT2 support (z15 or later required)\n");
+-# elif __ARCH__ >= 12
++# elif GCCMACRO__ARCH__ >= 12
+   if (!(GLRO(dl_hwcap) & HWCAP_S390_VXE))
+     _dl_fatal_printf ("\
+ Fatal glibc error: CPU lacks VXE support (z14 or later required)\n");

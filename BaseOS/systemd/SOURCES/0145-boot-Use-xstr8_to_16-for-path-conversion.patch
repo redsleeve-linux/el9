@@ -1,0 +1,218 @@
+From 57474bf255aafb683f4bb38e5bcb88cf48f07882 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Tue, 22 Nov 2022 16:30:44 +0100
+Subject: [PATCH] boot: Use xstr8_to_16 for path conversion
+
+(cherry picked from commit 7444e10611671abac35be3ab9fe9697cd4c90d62)
+
+Related: #2138081
+---
+ src/boot/efi/boot.c |   8 ++--
+ src/boot/efi/cpio.c |  19 +--------
+ src/boot/efi/util.c | 102 ++++++++------------------------------------
+ src/boot/efi/util.h |   3 +-
+ 4 files changed, 24 insertions(+), 108 deletions(-)
+
+diff --git a/src/boot/efi/boot.c b/src/boot/efi/boot.c
+index 013df67e49..581043df01 100644
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -1465,7 +1465,7 @@ static void config_entry_add_type1(
+                 if (streq8(key, "linux")) {
+                         free(entry->loader);
+                         entry->type = LOADER_LINUX;
+-                        entry->loader = xstra_to_path(value);
++                        entry->loader = xstr8_to_path(value);
+                         entry->key = 'l';
+                         continue;
+                 }
+@@ -1473,7 +1473,7 @@ static void config_entry_add_type1(
+                 if (streq8(key, "efi")) {
+                         entry->type = LOADER_EFI;
+                         free(entry->loader);
+-                        entry->loader = xstra_to_path(value);
++                        entry->loader = xstr8_to_path(value);
+ 
+                         /* do not add an entry for ourselves */
+                         if (strcaseeq16(entry->loader, loaded_image_path)) {
+@@ -1494,7 +1494,7 @@ static void config_entry_add_type1(
+ 
+                 if (streq8(key, "devicetree")) {
+                         free(entry->devicetree);
+-                        entry->devicetree = xstra_to_path(value);
++                        entry->devicetree = xstr8_to_path(value);
+                         continue;
+                 }
+ 
+@@ -1503,7 +1503,7 @@ static void config_entry_add_type1(
+                                 entry->initrd,
+                                 n_initrd == 0 ? 0 : (n_initrd + 1) * sizeof(uint16_t *),
+                                 (n_initrd + 2) * sizeof(uint16_t *));
+-                        entry->initrd[n_initrd++] = xstra_to_path(value);
++                        entry->initrd[n_initrd++] = xstr8_to_path(value);
+                         entry->initrd[n_initrd] = NULL;
+                         continue;
+                 }
+diff --git a/src/boot/efi/cpio.c b/src/boot/efi/cpio.c
+index 1dbfe5f380..79b5d4327b 100644
+--- a/src/boot/efi/cpio.c
++++ b/src/boot/efi/cpio.c
+@@ -359,24 +359,7 @@ static char16_t *get_dropin_dir(const EFI_DEVICE_PATH *file_path) {
+         if (device_path_to_str(file_path, &file_path_str) != EFI_SUCCESS)
+                 return NULL;
+ 
+-        for (char16_t *i = file_path_str, *fixed = i;; i++) {
+-                if (*i == '\0') {
+-                        *fixed = '\0';
+-                        break;
+-                }
+-
+-                /* Fix device path node separator. */
+-                if (*i == '/')
+-                        *i = '\\';
+-
+-                /* Double '\' is not allowed in EFI file paths. */
+-                if (fixed != file_path_str && fixed[-1] == '\\' && *i == '\\')
+-                        continue;
+-
+-                *fixed = *i;
+-                fixed++;
+-        }
+-
++        convert_efi_path(file_path_str);
+         return xpool_print(u"%s.extra.d", file_path_str);
+ }
+ 
+diff --git a/src/boot/efi/util.c b/src/boot/efi/util.c
+index b727d6de7e..3268c511d0 100644
+--- a/src/boot/efi/util.c
++++ b/src/boot/efi/util.c
+@@ -249,97 +249,29 @@ void efivar_set_time_usec(const EFI_GUID *vendor, const char16_t *name, uint64_t
+         efivar_set(vendor, name, str, 0);
+ }
+ 
+-static int utf8_to_16(const char *stra, char16_t *c) {
+-        char16_t unichar;
+-        UINTN len;
+-
+-        assert(stra);
+-        assert(c);
+-
+-        if (!(stra[0] & 0x80))
+-                len = 1;
+-        else if ((stra[0] & 0xe0) == 0xc0)
+-                len = 2;
+-        else if ((stra[0] & 0xf0) == 0xe0)
+-                len = 3;
+-        else if ((stra[0] & 0xf8) == 0xf0)
+-                len = 4;
+-        else if ((stra[0] & 0xfc) == 0xf8)
+-                len = 5;
+-        else if ((stra[0] & 0xfe) == 0xfc)
+-                len = 6;
+-        else
+-                return -1;
+-
+-        switch (len) {
+-        case 1:
+-                unichar = stra[0];
+-                break;
+-        case 2:
+-                unichar = stra[0] & 0x1f;
+-                break;
+-        case 3:
+-                unichar = stra[0] & 0x0f;
+-                break;
+-        case 4:
+-                unichar = stra[0] & 0x07;
+-                break;
+-        case 5:
+-                unichar = stra[0] & 0x03;
+-                break;
+-        case 6:
+-                unichar = stra[0] & 0x01;
+-                break;
+-        }
+-
+-        for (UINTN i = 1; i < len; i++) {
+-                if ((stra[i] & 0xc0) != 0x80)
+-                        return -1;
+-                unichar <<= 6;
+-                unichar |= stra[i] & 0x3f;
+-        }
+-
+-        *c = unichar;
+-        return len;
+-}
+-
+-char16_t *xstra_to_path(const char *stra) {
+-        char16_t *str;
+-        UINTN strlen;
+-        UINTN len;
+-        UINTN i;
+-
+-        assert(stra);
++void convert_efi_path(char16_t *path) {
++        assert(path);
+ 
+-        len = strlen8(stra);
+-        str = xnew(char16_t, len + 2);
++        for (size_t i = 0, fixed = 0;; i++) {
++                /* Fix device path node separator. */
++                path[fixed] = (path[i] == '/') ? '\\' : path[i];
+ 
+-        str[0] = '\\';
+-        strlen = 1;
+-        i = 0;
+-        while (i < len) {
+-                int utf8len;
+-
+-                utf8len = utf8_to_16(stra + i, str + strlen);
+-                if (utf8len <= 0) {
+-                        /* invalid utf8 sequence, skip the garbage */
+-                        i++;
++                /* Double '\' is not allowed in EFI file paths. */
++                if (fixed > 0 && path[fixed - 1] == '\\' && path[fixed] == '\\')
+                         continue;
+-                }
+ 
+-                if (str[strlen] == '/')
+-                        str[strlen] = '\\';
+-                if (str[strlen] == '\\' && str[strlen-1] == '\\') {
+-                        /* skip double slashes */
+-                        i += utf8len;
+-                        continue;
+-                }
++                if (path[i] == '\0')
++                        break;
+ 
+-                strlen++;
+-                i += utf8len;
++                fixed++;
+         }
+-        str[strlen] = '\0';
+-        return str;
++}
++
++char16_t *xstr8_to_path(const char *str8) {
++        assert(str8);
++        char16_t *path = xstr8_to_16(str8);
++        convert_efi_path(path);
++        return path;
+ }
+ 
+ EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, UINTN off, UINTN size, char **ret, UINTN *ret_size) {
+diff --git a/src/boot/efi/util.h b/src/boot/efi/util.h
+index d78feac39c..e4ab8138c4 100644
+--- a/src/boot/efi/util.h
++++ b/src/boot/efi/util.h
+@@ -112,7 +112,8 @@ EFI_STATUS efivar_get_uint32_le(const EFI_GUID *vendor, const char16_t *name, ui
+ EFI_STATUS efivar_get_uint64_le(const EFI_GUID *vendor, const char16_t *name, uint64_t *ret);
+ EFI_STATUS efivar_get_boolean_u8(const EFI_GUID *vendor, const char16_t *name, bool *ret);
+ 
+-char16_t *xstra_to_path(const char *stra);
++void convert_efi_path(char16_t *path);
++char16_t *xstr8_to_path(const char *stra);
+ 
+ EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, UINTN off, UINTN size, char **content, UINTN *content_size);
+ 

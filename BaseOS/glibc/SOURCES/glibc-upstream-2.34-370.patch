@@ -1,0 +1,38 @@
+commit 01c0a0405c5ea63d9b528e062b935d2ff6a6e2ed
+Author: Adhemerval Zanella Netto <adhemerval.zanella@linaro.org>
+Date:   Wed Oct 26 16:04:24 2022 -0300
+
+    nscd: Use 64 bit time_t on libc nscd routines (BZ# 29402)
+    
+    Although the nscd module is built with 64 bit time_t, the routines
+    linked direct to libc.so need to use the internal symbols.
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+    
+    (cherry picked from commit fa4a19277842fd09a4815a986f70e0fe0903836f)
+
+diff --git a/nscd/nscd.h b/nscd/nscd.h
+index b5da5be98a11d4de..1ce4c1f7fdb215f0 100644
+--- a/nscd/nscd.h
++++ b/nscd/nscd.h
+@@ -66,7 +66,7 @@ typedef enum
+ struct traced_file
+ {
+   /* Tracks the last modified time of the traced file.  */
+-  time_t mtime;
++  __time64_t mtime;
+   /* Support multiple registered files per database.  */
+   struct traced_file *next;
+   int call_res_init;
+diff --git a/nscd/nscd_gethst_r.c b/nscd/nscd_gethst_r.c
+index 81bf324256384de7..b6baa8abf881461c 100644
+--- a/nscd/nscd_gethst_r.c
++++ b/nscd/nscd_gethst_r.c
+@@ -113,7 +113,7 @@ __nscd_get_nl_timestamp (void)
+   if (map == NULL
+       || (map != NO_MAPPING
+ 	  && map->head->nscd_certainly_running == 0
+-	  && map->head->timestamp + MAPPING_TIMEOUT < time_now ()))
++	  && map->head->timestamp + MAPPING_TIMEOUT < time64_now ()))
+     map = __nscd_get_mapping (GETFDHST, "hosts", &__hst_map_handle.mapped);
+ 
+   if (map == NO_MAPPING)

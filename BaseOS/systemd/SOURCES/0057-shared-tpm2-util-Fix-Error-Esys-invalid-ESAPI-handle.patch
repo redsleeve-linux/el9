@@ -1,0 +1,82 @@
+From fda254c954d6a543e1977edc1d283c915ee43adc Mon Sep 17 00:00:00 2001
+From: Vitaly Kuznetsov <vkuznets@redhat.com>
+Date: Tue, 15 Nov 2022 14:57:23 +0100
+Subject: [PATCH] shared/tpm2-util: Fix "Error: Esys invalid ESAPI handle
+ (40000001)" warning
+
+systemd-cryptenroll complains (but succeeds!) upon binding to a signed PCR
+policy:
+
+$ systemd-cryptenroll --unlock-key-file=/tmp/passphrase --tpm2-device=auto
+  --tpm2-public-key=... --tpm2-signature=..." /tmp/tmp.img
+
+ERROR:esys:src/tss2-esys/esys_iutil.c:394:iesys_handle_to_tpm_handle() Error: Esys invalid ESAPI handle (40000001).
+WARNING:esys:src/tss2-esys/esys_iutil.c:415:iesys_is_platform_handle() Convert handle from TPM2_RH to ESYS_TR, got: 0x40000001
+ERROR:esys:src/tss2-esys/esys_iutil.c:394:iesys_handle_to_tpm_handle() Error: Esys invalid ESAPI handle (40000001).
+WARNING:esys:src/tss2-esys/esys_iutil.c:415:iesys_is_platform_handle() Convert handle from TPM2_RH to ESYS_TR, got: 0x4000000
+New TPM2 token enrolled as key slot 1.
+
+The problem seems to be that Esys_LoadExternal() function from tpm2-tss
+expects a 'ESYS_TR_RH*' constant specifying the requested hierarchy and not
+a 'TPM2_RH_*' one (see Esys_LoadExternal() -> Esys_LoadExternal_Async() ->
+iesys_handle_to_tpm_handle() call chain).
+
+It all works because Esys_LoadExternal_Async() falls back to using the
+supplied values when iesys_handle_to_tpm_handle() fails:
+
+    r = iesys_handle_to_tpm_handle(hierarchy, &tpm_hierarchy);
+    if (r != TSS2_RC_SUCCESS) {
+        ...
+        tpm_hierarchy = hierarchy;
+    }
+
+Note, TPM2_RH_OWNER was used on purpose to support older tpm2-tss versions
+(pre https://github.com/tpm2-software/tpm2-tss/pull/1531), use meson magic
+to preserve compatibility.
+
+Signed-off-by: Vitaly Kuznetsov <vkuznets@redhat.com>
+(cherry picked from commit 155c51293d5bf37f54c65fd0a66ea29e6eedd580)
+
+Related: #2138081
+---
+ meson.build            | 3 +++
+ src/shared/tpm2-util.c | 6 ++++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/meson.build b/meson.build
+index 7750534466..015849af49 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1474,11 +1474,14 @@ if want_tpm2 != 'false' and not skip_deps
+         tpm2 = dependency('tss2-esys tss2-rc tss2-mu',
+                           required : want_tpm2 == 'true')
+         have = tpm2.found()
++        have_esys3 = tpm2.version().version_compare('>= 3.0.0')
+ else
+         have = false
++        have_esys3 = false
+         tpm2 = []
+ endif
+ conf.set10('HAVE_TPM2', have)
++conf.set10('HAVE_TSS2_ESYS3', have_esys3)
+ 
+ want_elfutils = get_option('elfutils')
+ if want_elfutils != 'false' and not skip_deps
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 4d0df944a9..8171b3e9e9 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -1117,7 +1117,13 @@ static int tpm2_make_policy_session(
+                                 ESYS_TR_NONE,
+                                 NULL,
+                                 &pubkey_tpm2,
++#if HAVE_TSS2_ESYS3
++                                /* tpm2-tss >= 3.0.0 requires a ESYS_TR_RH_* constant specifying the requested
++                                 * hierarchy, older versions need TPM2_RH_* instead. */
++                                ESYS_TR_RH_OWNER,
++#else
+                                 TPM2_RH_OWNER,
++#endif
+                                 &pubkey_handle);
+                 if (rc != TSS2_RC_SUCCESS) {
+                         r = log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),

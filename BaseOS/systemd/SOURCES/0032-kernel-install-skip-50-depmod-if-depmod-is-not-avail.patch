@@ -1,0 +1,28 @@
+From d1abf107c5b4c661886001de996bf03587bb35c1 Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Mon, 7 Nov 2022 16:28:33 +0000
+Subject: [PATCH] kernel-install: skip 50-depmod if depmod is not available
+
+Images might be built without any kernel module, and without
+installing depmod as it is not needed. Skip it.
+
+https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1023607
+(cherry picked from commit cda4d00dfcbcd075cef95341f8a466f0c4ee8e1d)
+
+Related #2138081
+---
+ src/kernel-install/50-depmod.install | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/kernel-install/50-depmod.install b/src/kernel-install/50-depmod.install
+index d4b991cfd6..43bd87c7ed 100755
+--- a/src/kernel-install/50-depmod.install
++++ b/src/kernel-install/50-depmod.install
+@@ -26,6 +26,7 @@ KERNEL_VERSION="${2:?}"
+ case "$COMMAND" in
+     add)
+         [ -d "/lib/modules/$KERNEL_VERSION/kernel" ] || exit 0
++        command -v depmod >/dev/null || exit 0
+         [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && echo "+depmod -a $KERNEL_VERSION"
+         exec depmod -a "$KERNEL_VERSION"
+         ;;

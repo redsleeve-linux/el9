@@ -1,0 +1,50 @@
+From 49d626105a5739bf7fa725f578d02b8873c282c7 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 14 Nov 2022 02:54:50 +0900
+Subject: [PATCH] sleep: enumerate only existing and non-device batteries
+
+The enumerator is now mostly consistent with on_ac_power() in
+udev-util.c.
+
+(cherry picked from commit fe8e0f8e7989fe5cead5ad0e225dc0888ff10140)
+
+Related: #2151612
+---
+ src/shared/sleep-config.c | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/src/shared/sleep-config.c b/src/shared/sleep-config.c
+index 4c08e97c8a..2d55e7c860 100644
+--- a/src/shared/sleep-config.c
++++ b/src/shared/sleep-config.c
+@@ -143,16 +143,27 @@ static int battery_enumerator_new(sd_device_enumerator **ret) {
+         if (r < 0)
+                 return r;
+ 
+-        r = sd_device_enumerator_add_match_subsystem(e, "power_supply", /* match= */ true);
++        r = sd_device_enumerator_add_match_subsystem(e, "power_supply", /* match = */ true);
+         if (r < 0)
+                 return r;
+ 
+-        r = sd_device_enumerator_add_match_property(e, "POWER_SUPPLY_TYPE", "Battery");
++        r = sd_device_enumerator_allow_uninitialized(e);
+         if (r < 0)
+                 return r;
+ 
+-        *ret = TAKE_PTR(e);
++        r = sd_device_enumerator_add_match_sysattr(e, "type", "Battery", /* match = */ true);
++        if (r < 0)
++                return r;
++
++        r = sd_device_enumerator_add_match_sysattr(e, "present", "1", /* match = */ true);
++        if (r < 0)
++                return r;
+ 
++        r = sd_device_enumerator_add_match_sysattr(e, "scope", "Device", /* match = */ false);
++        if (r < 0)
++                return r;
++
++        *ret = TAKE_PTR(e);
+         return 0;
+ }
+ 

@@ -1,0 +1,37 @@
+commit a996d13b8a2e101bedbb1bdaa7ffcfea3b959bb2
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Sep 30 18:44:06 2021 +0200
+
+    Add missing braces to bsearch inline implementation [BZ #28400]
+    
+    GCC treats the pragma as a statement, so that the else branch only
+    consists of the pragma, not the return statement.
+    
+    Fixes commit a725ff1de965f4cc4f36a7e8ae795d40ca0350d7 ("Suppress
+    -Wcast-qual warnings in bsearch").
+    
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+    (cherry picked from commit 32b96d0dec0294465d2221a8f049703599d9d8e4)
+
+diff --git a/bits/stdlib-bsearch.h b/bits/stdlib-bsearch.h
+index d688ed2e15678e9c..e2fcea6e172af72c 100644
+--- a/bits/stdlib-bsearch.h
++++ b/bits/stdlib-bsearch.h
+@@ -36,14 +36,16 @@ bsearch (const void *__key, const void *__base, size_t __nmemb, size_t __size,
+       else if (__comparison > 0)
+ 	__l = __idx + 1;
+       else
++	{
+ #if __GNUC_PREREQ(4, 6)
+ # pragma GCC diagnostic push
+ # pragma GCC diagnostic ignored "-Wcast-qual"
+ #endif
+-	return (void *) __p;
++	  return (void *) __p;
+ #if __GNUC_PREREQ(4, 6)
+ # pragma GCC diagnostic pop
+ #endif
++	}
+     }
+ 
+   return NULL;

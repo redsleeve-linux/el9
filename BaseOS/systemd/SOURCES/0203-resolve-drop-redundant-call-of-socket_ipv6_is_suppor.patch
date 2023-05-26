@@ -1,0 +1,29 @@
+From fb589eae3231c6d968b116774097c90a64755f19 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 4 Nov 2022 12:53:07 +0900
+Subject: [PATCH] resolve: drop redundant call of socket_ipv6_is_supported()
+
+As link_relevant() is called with AF_INET6, which returns true only when
+the link has at least one relevant IPv6 address.
+
+(cherry picked from commit f6e4aa7b0370c8b39739e9d5dda780932489507a)
+
+Related: #2138081
+---
+ src/resolve/resolved-link.c | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/resolve/resolved-link.c b/src/resolve/resolved-link.c
+index 9ab55eb82e..409d725686 100644
+--- a/src/resolve/resolved-link.c
++++ b/src/resolve/resolved-link.c
+@@ -152,8 +152,7 @@ void link_allocate_scopes(Link *l) {
+ 
+         if (link_relevant(l, AF_INET6, true) &&
+             l->llmnr_support != RESOLVE_SUPPORT_NO &&
+-            l->manager->llmnr_support != RESOLVE_SUPPORT_NO &&
+-            socket_ipv6_is_supported()) {
++            l->manager->llmnr_support != RESOLVE_SUPPORT_NO) {
+                 if (!l->llmnr_ipv6_scope) {
+                         r = dns_scope_new(l->manager, &l->llmnr_ipv6_scope, l, DNS_PROTOCOL_LLMNR, AF_INET6);
+                         if (r < 0)

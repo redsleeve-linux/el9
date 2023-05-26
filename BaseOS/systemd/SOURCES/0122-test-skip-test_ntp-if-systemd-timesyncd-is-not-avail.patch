@@ -1,0 +1,29 @@
+From 5488431dcbea41bec11f0b1ad0a3769489f68c39 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <fsumsal@redhat.com>
+Date: Wed, 23 Nov 2022 15:16:41 +0100
+Subject: [PATCH] test: skip test_ntp if systemd-timesyncd is not available
+
+We don't ship timesyncd on RHEL, so let's skip the test there.
+
+rhel-only
+Related: #2138081
+---
+ test/units/testsuite-45.sh | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/test/units/testsuite-45.sh b/test/units/testsuite-45.sh
+index 24e888c587..7e757e4b00 100755
+--- a/test/units/testsuite-45.sh
++++ b/test/units/testsuite-45.sh
+@@ -201,6 +201,11 @@ wait_mon() {
+ }
+ 
+ test_ntp() {
++    if ! systemctl list-unit-files -q systemd-timesyncd.service; then
++        echo "systemd-timesyncd is not available, skipping the test..."
++        return 0
++    fi
++
+     # timesyncd has ConditionVirtualization=!container by default; drop/mock that for testing
+     if systemd-detect-virt --container --quiet; then
+         systemctl disable --quiet --now systemd-timesyncd

@@ -1,0 +1,33 @@
+From a1ab44a859080aebd79355f58e57739ce4225e97 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 20 Jan 2023 14:54:44 +0900
+Subject: [PATCH] test-unit-name: fix fd leak
+
+Fixes an issue reported at https://github.com/systemd/systemd/issues/22576#issuecomment-1396774385.
+
+(cherry picked from commit 36f73b6c67afd9c826e612b751ea8f9249da7985)
+
+Related: #2138081
+---
+ src/test/test-unit-name.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/test/test-unit-name.c b/src/test/test-unit-name.c
+index 43fdb15d1c..eec4831b4e 100644
+--- a/src/test/test-unit-name.c
++++ b/src/test/test-unit-name.c
+@@ -241,11 +241,13 @@ TEST_RET(unit_printf, .sd_booted = true) {
+                 *user, *group, *uid, *gid, *home, *shell,
+                 *tmp_dir, *var_tmp_dir;
+         _cleanup_(manager_freep) Manager *m = NULL;
++        _cleanup_close_ int fd = -EBADF;
+         Unit *u;
+         int r;
+ 
+         _cleanup_(unlink_tempfilep) char filename[] = "/tmp/test-unit_printf.XXXXXX";
+-        assert_se(mkostemp_safe(filename) >= 0);
++        fd = mkostemp_safe(filename);
++        assert_se(fd >= 0);
+ 
+         /* Using the specifier functions is admittedly a bit circular, but we don't want to reimplement the
+          * logic a second time. We're at least testing that the hookup works. */

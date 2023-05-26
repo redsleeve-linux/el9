@@ -1,0 +1,214 @@
+From 2ccf2637e7b3caa147962976178bb347fa227946 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Tue, 22 Nov 2022 16:03:03 +0100
+Subject: [PATCH] boot: Use xstr8_to_16
+
+(cherry picked from commit aee515bbb58496272a6d975858aa26a355c4fb90)
+
+Related: #2138081
+---
+ src/boot/efi/boot.c    | 30 +++++++++++++++---------------
+ src/boot/efi/linux.c   |  2 +-
+ src/boot/efi/measure.c |  2 +-
+ src/boot/efi/util.c    | 30 ------------------------------
+ src/boot/efi/util.h    |  1 -
+ 5 files changed, 17 insertions(+), 48 deletions(-)
+
+diff --git a/src/boot/efi/boot.c b/src/boot/efi/boot.c
+index db6ca97df4..013df67e49 100644
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -1205,7 +1205,7 @@ static void config_defaults_load_from_file(Config *config, char *content) {
+                                 continue;
+                         }
+                         free(config->entry_default_config);
+-                        config->entry_default_config = xstra_to_str(value);
++                        config->entry_default_config = xstr8_to_16(value);
+                         continue;
+                 }
+ 
+@@ -1440,25 +1440,25 @@ static void config_entry_add_type1(
+         while ((line = line_get_key_value(content, " \t", &pos, &key, &value))) {
+                 if (streq8(key, "title")) {
+                         free(entry->title);
+-                        entry->title = xstra_to_str(value);
++                        entry->title = xstr8_to_16(value);
+                         continue;
+                 }
+ 
+                 if (streq8(key, "sort-key")) {
+                         free(entry->sort_key);
+-                        entry->sort_key = xstra_to_str(value);
++                        entry->sort_key = xstr8_to_16(value);
+                         continue;
+                 }
+ 
+                 if (streq8(key, "version")) {
+                         free(entry->version);
+-                        entry->version = xstra_to_str(value);
++                        entry->version = xstr8_to_16(value);
+                         continue;
+                 }
+ 
+                 if (streq8(key, "machine-id")) {
+                         free(entry->machine_id);
+-                        entry->machine_id = xstra_to_str(value);
++                        entry->machine_id = xstr8_to_16(value);
+                         continue;
+                 }
+ 
+@@ -1511,7 +1511,7 @@ static void config_entry_add_type1(
+                 if (streq8(key, "options")) {
+                         _cleanup_free_ char16_t *new = NULL;
+ 
+-                        new = xstra_to_str(value);
++                        new = xstr8_to_16(value);
+                         if (entry->options) {
+                                 char16_t *s = xpool_print(L"%s %s", entry->options, new);
+                                 free(entry->options);
+@@ -2157,49 +2157,49 @@ static void config_entry_add_unified(
+                 while ((line = line_get_key_value(content, "=", &pos, &key, &value))) {
+                         if (streq8(key, "PRETTY_NAME")) {
+                                 free(os_pretty_name);
+-                                os_pretty_name = xstra_to_str(value);
++                                os_pretty_name = xstr8_to_16(value);
+                                 continue;
+                         }
+ 
+                         if (streq8(key, "IMAGE_ID")) {
+                                 free(os_image_id);
+-                                os_image_id = xstra_to_str(value);
++                                os_image_id = xstr8_to_16(value);
+                                 continue;
+                         }
+ 
+                         if (streq8(key, "NAME")) {
+                                 free(os_name);
+-                                os_name = xstra_to_str(value);
++                                os_name = xstr8_to_16(value);
+                                 continue;
+                         }
+ 
+                         if (streq8(key, "ID")) {
+                                 free(os_id);
+-                                os_id = xstra_to_str(value);
++                                os_id = xstr8_to_16(value);
+                                 continue;
+                         }
+ 
+                         if (streq8(key, "IMAGE_VERSION")) {
+                                 free(os_image_version);
+-                                os_image_version = xstra_to_str(value);
++                                os_image_version = xstr8_to_16(value);
+                                 continue;
+                         }
+ 
+                         if (streq8(key, "VERSION")) {
+                                 free(os_version);
+-                                os_version = xstra_to_str(value);
++                                os_version = xstr8_to_16(value);
+                                 continue;
+                         }
+ 
+                         if (streq8(key, "VERSION_ID")) {
+                                 free(os_version_id);
+-                                os_version_id = xstra_to_str(value);
++                                os_version_id = xstr8_to_16(value);
+                                 continue;
+                         }
+ 
+                         if (streq8(key, "BUILD_ID")) {
+                                 free(os_build_id);
+-                                os_build_id = xstra_to_str(value);
++                                os_build_id = xstr8_to_16(value);
+                                 continue;
+                         }
+                 }
+@@ -2248,7 +2248,7 @@ static void config_entry_add_unified(
+                         if (content[szs[SECTION_CMDLINE] - 1] == '\n')
+                                 content[szs[SECTION_CMDLINE] - 1] = '\0';
+ 
+-                        entry->options = xstra_to_str(content);
++                        entry->options = xstr8_to_16(content);
+                 }
+         }
+ }
+diff --git a/src/boot/efi/linux.c b/src/boot/efi/linux.c
+index dd7eb48c8c..668510fca3 100644
+--- a/src/boot/efi/linux.c
++++ b/src/boot/efi/linux.c
+@@ -133,7 +133,7 @@ EFI_STATUS linux_exec(
+                 return log_error_status_stall(err, u"Error getting kernel loaded image protocol: %r", err);
+ 
+         if (cmdline) {
+-                loaded_image->LoadOptions = xstra_to_str(cmdline);
++                loaded_image->LoadOptions = xstrn8_to_16(cmdline, cmdline_len);
+                 loaded_image->LoadOptionsSize = strsize16(loaded_image->LoadOptions);
+         }
+ 
+diff --git a/src/boot/efi/measure.c b/src/boot/efi/measure.c
+index 9a16920787..6da07d917e 100644
+--- a/src/boot/efi/measure.c
++++ b/src/boot/efi/measure.c
+@@ -187,7 +187,7 @@ EFI_STATUS tpm_log_event_ascii(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, U
+         _cleanup_free_ char16_t *c = NULL;
+ 
+         if (description)
+-                c = xstra_to_str(description);
++                c = xstr8_to_16(description);
+ 
+         return tpm_log_event(pcrindex, buffer, buffer_size, c, ret_measured);
+ }
+diff --git a/src/boot/efi/util.c b/src/boot/efi/util.c
+index 3eba2ade07..b727d6de7e 100644
+--- a/src/boot/efi/util.c
++++ b/src/boot/efi/util.c
+@@ -303,36 +303,6 @@ static int utf8_to_16(const char *stra, char16_t *c) {
+         return len;
+ }
+ 
+-char16_t *xstra_to_str(const char *stra) {
+-        UINTN strlen;
+-        UINTN len;
+-        UINTN i;
+-        char16_t *str;
+-
+-        assert(stra);
+-
+-        len = strlen8(stra);
+-        str = xnew(char16_t, len + 1);
+-
+-        strlen = 0;
+-        i = 0;
+-        while (i < len) {
+-                int utf8len;
+-
+-                utf8len = utf8_to_16(stra + i, str + strlen);
+-                if (utf8len <= 0) {
+-                        /* invalid utf8 sequence, skip the garbage */
+-                        i++;
+-                        continue;
+-                }
+-
+-                strlen++;
+-                i += utf8len;
+-        }
+-        str[strlen] = '\0';
+-        return str;
+-}
+-
+ char16_t *xstra_to_path(const char *stra) {
+         char16_t *str;
+         UINTN strlen;
+diff --git a/src/boot/efi/util.h b/src/boot/efi/util.h
+index 994cf52ad6..d78feac39c 100644
+--- a/src/boot/efi/util.h
++++ b/src/boot/efi/util.h
+@@ -113,7 +113,6 @@ EFI_STATUS efivar_get_uint64_le(const EFI_GUID *vendor, const char16_t *name, ui
+ EFI_STATUS efivar_get_boolean_u8(const EFI_GUID *vendor, const char16_t *name, bool *ret);
+ 
+ char16_t *xstra_to_path(const char *stra);
+-char16_t *xstra_to_str(const char *stra);
+ 
+ EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, UINTN off, UINTN size, char **content, UINTN *content_size);
+ 

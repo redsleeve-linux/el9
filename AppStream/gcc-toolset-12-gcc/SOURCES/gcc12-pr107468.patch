@@ -1,0 +1,124 @@
+libstdc++: Update from latest fast_float [PR107468]
+
+The following patch is a cherry-pick from
+https://github.com/fastfloat/fast_float/pull/153
+to restrict fast_float Clinger's fast path to when rounding mode
+is FE_TONEAREST.
+Using std::fegetround showed in benchmarks too slow, so instead
+it uses a check with 2 float additions and comparison to verify
+if rounding is FE_TONEAREST.
+
+2022-11-20  Jakub Jelinek  <jakub@redhat.com>
+
+	PR libstdc++/107468
+	* src/c++17/fast_float/fast_float.h (detail::rounds_to_nearest): New
+	function, taken from https://github.com/fastfloat/fast_float/pull/153.
+	(from_chars_advanced): Only use Clinger's fast path if
+	detail::rounds_to_nearest().
+	* testsuite/20_util/from_chars/pr107468.cc: New test.
+
+--- libstdc++-v3/src/c++17/fast_float/fast_float.h.jj	2022-04-28 15:56:18.315632888 +0200
++++ libstdc++-v3/src/c++17/fast_float/fast_float.h	2022-11-20 18:53:49.570830249 +0100
+@@ -2842,6 +2842,48 @@ from_chars_result parse_infnan(const cha
+   return answer;
+ }
+ 
++/**
++ * Returns true if the floating-pointing rounding mode is to 'nearest'.
++ * It is the default on most system. This function is meant to be inexpensive.
++ * Credit : @mwalcott3
++ */
++fastfloat_really_inline bool rounds_to_nearest() noexcept {
++  // See
++  // A fast function to check your floating-point rounding mode
++  // https://lemire.me/blog/2022/11/16/a-fast-function-to-check-your-floating-point-rounding-mode/
++  //
++  // This function is meant to be equivalent to :
++  // prior: #include <cfenv>
++  //  return fegetround() == FE_TONEAREST;
++  // However, it is expected to be much faster than the fegetround()
++  // function call.
++  //
++  // The volatile keywoard prevents the compiler from computing the function
++  // at compile-time.
++  // There might be other ways to prevent compile-time optimizations (e.g., asm).
++  // The value does not need to be std::numeric_limits<float>::min(), any small
++  // value so that 1 + x should round to 1 would do (after accounting for excess
++  // precision, as in 387 instructions).
++  static volatile float fmin = std::numeric_limits<float>::min();
++  float fmini = fmin; // we copy it so that it gets loaded at most once.
++  //
++  // Explanation:
++  // Only when fegetround() == FE_TONEAREST do we have that
++  // fmin + 1.0f == 1.0f - fmin.
++  //
++  // FE_UPWARD:
++  //  fmin + 1.0f > 1
++  //  1.0f - fmin == 1
++  //
++  // FE_DOWNWARD or  FE_TOWARDZERO:
++  //  fmin + 1.0f == 1
++  //  1.0f - fmin < 1
++  //
++  // Note: This may fail to be accurate if fast-math has been
++  // enabled, as rounding conventions may not apply.
++  return (fmini + 1.0f == 1.0f - fmini);
++}
++
+ } // namespace detail
+ 
+ template<typename T>
+@@ -2870,7 +2912,7 @@ from_chars_result from_chars_advanced(co
+   answer.ec = std::errc(); // be optimistic
+   answer.ptr = pns.lastmatch;
+   // Next is Clinger's fast path.
+-  if (binary_format<T>::min_exponent_fast_path() <= pns.exponent && pns.exponent <= binary_format<T>::max_exponent_fast_path() && pns.mantissa <=binary_format<T>::max_mantissa_fast_path() && !pns.too_many_digits) {
++  if (binary_format<T>::min_exponent_fast_path() <= pns.exponent && pns.exponent <= binary_format<T>::max_exponent_fast_path() && pns.mantissa <=binary_format<T>::max_mantissa_fast_path() && !pns.too_many_digits && detail::rounds_to_nearest()) {
+     value = T(pns.mantissa);
+     if (pns.exponent < 0) { value = value / binary_format<T>::exact_power_of_ten(-pns.exponent); }
+     else { value = value * binary_format<T>::exact_power_of_ten(pns.exponent); }
+--- libstdc++-v3/testsuite/20_util/from_chars/pr107468.cc.jj
++++ libstdc++-v3/testsuite/20_util/from_chars/pr107468.cc
+@@ -0,0 +1,42 @@
++// Copyright (C) 2022 Free Software Foundation, Inc.
++//
++// This file is part of the GNU ISO C++ Library.  This library is free
++// software; you can redistribute it and/or modify it under the
++// terms of the GNU General Public License as published by the
++// Free Software Foundation; either version 3, or (at your option)
++// any later version.
++
++// This library is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++// GNU General Public License for more details.
++
++// You should have received a copy of the GNU General Public License along
++// with this library; see the file COPYING3.  If not see
++// <http://www.gnu.org/licenses/>.
++
++// { dg-do run { target c++17 } }
++// { dg-add-options ieee }
++
++#include <charconv>
++#include <string>
++#include <cfenv>
++#include <testsuite_hooks.h>
++
++int
++main()
++{
++  // FP from_char not available otherwise.
++#if __cpp_lib_to_chars >= 201611L \
++    && _GLIBCXX_USE_C99_FENV_TR1 \
++    && defined(FE_DOWNWARD) \
++    && defined(_GLIBCXX_FLOAT_IS_IEEE_BINARY32)
++  // PR libstdc++/107468
++  float f;
++  char buf[] = "3.355447e+07";
++  std::fesetround(FE_DOWNWARD);
++  auto [ptr, ec] = std::from_chars(buf, buf + sizeof(buf) - 1, f, std::chars_format::scientific);
++  VERIFY( ec == std::errc() && ptr == buf + sizeof(buf) - 1 );
++  VERIFY( f == 33554472.0f );
++#endif
++}

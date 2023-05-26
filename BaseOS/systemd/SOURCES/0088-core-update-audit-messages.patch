@@ -1,0 +1,31 @@
+From 0a191f8306b4439049fcac8eea206835c144215e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Christian=20G=C3=B6ttsche?= <cgzones@googlemail.com>
+Date: Fri, 4 Nov 2022 16:30:57 +0100
+Subject: [PATCH] core: update audit messages
+
+Pass getuid() instead of literal `0` as auid, since user session
+managers also issue audit messages on SELinux denials.
+
+(cherry picked from commit c826b7ef3272157167a5c9d493e9672f00d84b98)
+
+Related: #2138081
+---
+ src/core/selinux-access.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/selinux-access.c b/src/core/selinux-access.c
+index c69baa8a1a..c1744cff92 100644
+--- a/src/core/selinux-access.c
++++ b/src/core/selinux-access.c
+@@ -113,9 +113,9 @@ _printf_(2, 3) static int log_callback(int type, const char *fmt, ...) {
+ 
+                 if (r >= 0) {
+                         if (type == SELINUX_AVC)
+-                                audit_log_user_avc_message(get_audit_fd(), AUDIT_USER_AVC, buf, NULL, NULL, NULL, 0);
++                                audit_log_user_avc_message(get_audit_fd(), AUDIT_USER_AVC, buf, NULL, NULL, NULL, getuid());
+                         else if (type == SELINUX_ERROR)
+-                                audit_log_user_avc_message(get_audit_fd(), AUDIT_USER_SELINUX_ERR, buf, NULL, NULL, NULL, 0);
++                                audit_log_user_avc_message(get_audit_fd(), AUDIT_USER_SELINUX_ERR, buf, NULL, NULL, NULL, getuid());
+ 
+                         return 0;
+                 }

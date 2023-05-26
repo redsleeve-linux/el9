@@ -1,0 +1,51 @@
+From cc318cd6ccfe9833ab9c1cde4041ac5dd9f97a3b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 21 Feb 2023 09:16:29 +0100
+Subject: [PATCH] efi: drop executable-stack bit from .elf file
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+An rpminspect test in Fedora/RHEL is flagging our stub files as having an
+executable stack. The check is correct:
+
+$ readelf --wide --program-headers build/src/boot/efi/linuxx64.elf.stub | rg -i stack
+  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RWE 0x10
+
+It seems to be just an omission in the linker script… None of the objects that
+are linked into the stub are marked as requiring an executable stack:
+
+$ readelf --wide --sections build/src/boot/efi/*.c.o \
+  /usr/lib/gnuefi/x64/libgnuefi.a \
+  /usr/lib/gnuefi/x64/libefi.a \
+  /usr/lib/gcc/x86_64-redhat-linux/12/libgcc.a \
+  | rg '.note.GNU-stack.*X'
+(nothing)
+
+On aarch64 we end up with a nonexecutable stack, but on ia32 and x64 we get one,
+so this might be just a matter of defaults in the linker. It doesn't matter
+greatly, but let's mark the stack as non-executable to avoid the warning.
+
+Note: '-Wl,-z' is not needed, things work with just '-z'.
+
+RHEL-only
+for now, as the patch is not yet in upstream
+https://github.com/systemd/systemd/pull/26511
+
+Related: #2140646
+---
+ src/boot/efi/meson.build | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index 0de43993a4..00f3361d66 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -266,6 +266,7 @@ efi_ldflags = [
+         '-Wl,--warn-common',
+         '-Wl,-Bsymbolic',
+         '-z', 'nocombreloc',
++        '-z', 'noexecstack',
+         efi_crt0,
+ ]
+ 

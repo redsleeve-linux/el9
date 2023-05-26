@@ -1,0 +1,303 @@
+From 4d081a18d324e2010b6c46d468f693b1186c4275 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 30 Nov 2022 17:17:20 +0100
+Subject: [PATCH] dissect: rework DISSECT_IMAGE_ADD_PARTITION_DEVICES +
+ DISSECT_IMAGE_OPEN_PARTITION_DEVICES
+
+Curently, these two flags were implied by dissect_loop_device(), but
+that's not right, because this means systemd-gpt-auto-generator will
+dissect the root block device with these flags set and that's not
+desirable: the generator should not cause the partition devices to be
+created (we don't intend to use them right-away after all, but expect
+udev to find/probe them first, and then mount them though .mount units).
+And there's no point in opening the partition devices, since we do not
+intend to mount them via fds either.
+
+Hence, rework this: instead of implying the flags, specify them
+explicitly.
+
+While we are at it, let's also rename the flags to make them more
+descriptive:
+
+DISSECT_IMAGE_MANAGE_PARTITION_DEVICES becomes
+DISSECT_IMAGE_ADD_PARTITION_DEVICES, since that's really all this does:
+add the partition devices via BLKPG.
+
+DISSECT_IMAGE_OPEN_PARTITION_DEVICES becomes
+DISSECT_IMAGE_PIN_PARTITION_DEVICES, since we not only open the devices,
+but keep the devices open continously (i.e. we "pin" them).
+
+Also, drop the DISSECT_IMAGE_BLOCK_DEVICE combination flag, since it is
+misleading, i.e. it suggests it was appropriate to specify on all
+dissected blocking devices, but that's precisely not the case, see the
+systemd-gpt-auto-generator case. My guess is that the confusion around
+this was actually the cause for this bug we are addressing here.
+
+Fixes: #25528
+(cherry picked from commit 73d88b806b92efa0738bb6bcccbf105441f6d8cb)
+
+Related: #2138081
+---
+ src/core/namespace.c                        |  4 +++-
+ src/dissect/dissect.c                       |  4 +++-
+ src/gpt-auto-generator/gpt-auto-generator.c |  5 +++++
+ src/nspawn/nspawn.c                         |  4 +++-
+ src/portable/portable.c                     |  4 +++-
+ src/shared/discover-image.c                 |  4 +++-
+ src/shared/dissect-image.c                  | 23 +++++++++++++--------
+ src/shared/dissect-image.h                  |  6 ++----
+ src/sysext/sysext.c                         |  4 +++-
+ src/test/test-loop-block.c                  |  6 +++---
+ 10 files changed, 42 insertions(+), 22 deletions(-)
+
+diff --git a/src/core/namespace.c b/src/core/namespace.c
+index 852be3bdde..96b05303eb 100644
+--- a/src/core/namespace.c
++++ b/src/core/namespace.c
+@@ -2051,7 +2051,9 @@ int setup_namespace(
+                 DISSECT_IMAGE_RELAX_VAR_CHECK |
+                 DISSECT_IMAGE_FSCK |
+                 DISSECT_IMAGE_USR_NO_ROOT |
+-                DISSECT_IMAGE_GROWFS;
++                DISSECT_IMAGE_GROWFS |
++                DISSECT_IMAGE_ADD_PARTITION_DEVICES |
++                DISSECT_IMAGE_PIN_PARTITION_DEVICES;
+         size_t n_mounts;
+         int r;
+ 
+diff --git a/src/dissect/dissect.c b/src/dissect/dissect.c
+index c465115fc7..c1d731dc82 100644
+--- a/src/dissect/dissect.c
++++ b/src/dissect/dissect.c
+@@ -60,7 +60,9 @@ static DissectImageFlags arg_flags =
+         DISSECT_IMAGE_RELAX_VAR_CHECK |
+         DISSECT_IMAGE_FSCK |
+         DISSECT_IMAGE_USR_NO_ROOT |
+-        DISSECT_IMAGE_GROWFS;
++        DISSECT_IMAGE_GROWFS |
++        DISSECT_IMAGE_PIN_PARTITION_DEVICES |
++        DISSECT_IMAGE_ADD_PARTITION_DEVICES;
+ static VeritySettings arg_verity_settings = VERITY_SETTINGS_DEFAULT;
+ static JsonFormatFlags arg_json_format_flags = JSON_FORMAT_OFF;
+ static PagerFlags arg_pager_flags = 0;
+diff --git a/src/gpt-auto-generator/gpt-auto-generator.c b/src/gpt-auto-generator/gpt-auto-generator.c
+index 0fb53bb9ea..143faa0c39 100644
+--- a/src/gpt-auto-generator/gpt-auto-generator.c
++++ b/src/gpt-auto-generator/gpt-auto-generator.c
+@@ -665,6 +665,11 @@ static int enumerate_partitions(dev_t devnum) {
+                         NULL, NULL,
+                         DISSECT_IMAGE_GPT_ONLY|
+                         DISSECT_IMAGE_USR_NO_ROOT,
++                        /* NB! Unlike most other places where we dissect block devices we do not use
++                         * DISSECT_IMAGE_ADD_PARTITION_DEVICES here: we want that the kernel finds the
++                         * devices, and udev probes them before we mount them via .mount units much later
++                         * on. And thus we also don't set DISSECT_IMAGE_PIN_PARTITION_DEVICES here, because
++                         * we don't actually mount anything immediately. */
+                         &m);
+         if (r == -ENOPKG) {
+                 log_debug_errno(r, "No suitable partition table found, ignoring.");
+diff --git a/src/nspawn/nspawn.c b/src/nspawn/nspawn.c
+index 93d646ed56..57723aa3cf 100644
+--- a/src/nspawn/nspawn.c
++++ b/src/nspawn/nspawn.c
+@@ -5657,7 +5657,9 @@ static int run(int argc, char *argv[]) {
+                         DISSECT_IMAGE_GENERIC_ROOT |
+                         DISSECT_IMAGE_REQUIRE_ROOT |
+                         DISSECT_IMAGE_RELAX_VAR_CHECK |
+-                        DISSECT_IMAGE_USR_NO_ROOT;
++                        DISSECT_IMAGE_USR_NO_ROOT |
++                        DISSECT_IMAGE_ADD_PARTITION_DEVICES |
++                        DISSECT_IMAGE_PIN_PARTITION_DEVICES;
+                 assert(arg_image);
+                 assert(!arg_template);
+ 
+diff --git a/src/portable/portable.c b/src/portable/portable.c
+index fbc4497014..570751f05b 100644
+--- a/src/portable/portable.c
++++ b/src/portable/portable.c
+@@ -375,7 +375,9 @@ static int portable_extract_by_path(
+                                 DISSECT_IMAGE_REQUIRE_ROOT |
+                                 DISSECT_IMAGE_DISCARD_ON_LOOP |
+                                 DISSECT_IMAGE_RELAX_VAR_CHECK |
+-                                DISSECT_IMAGE_USR_NO_ROOT,
++                                DISSECT_IMAGE_USR_NO_ROOT |
++                                DISSECT_IMAGE_ADD_PARTITION_DEVICES |
++                                DISSECT_IMAGE_PIN_PARTITION_DEVICES,
+                                 &m);
+                 if (r == -ENOPKG)
+                         sd_bus_error_setf(error, SD_BUS_ERROR_INVALID_ARGS, "Couldn't identify a suitable partition table or file system in '%s'.", path);
+diff --git a/src/shared/discover-image.c b/src/shared/discover-image.c
+index fad95f7f43..5d740de266 100644
+--- a/src/shared/discover-image.c
++++ b/src/shared/discover-image.c
+@@ -1203,7 +1203,9 @@ int image_read_metadata(Image *i) {
+                                 DISSECT_IMAGE_REQUIRE_ROOT |
+                                 DISSECT_IMAGE_RELAX_VAR_CHECK |
+                                 DISSECT_IMAGE_READ_ONLY |
+-                                DISSECT_IMAGE_USR_NO_ROOT,
++                                DISSECT_IMAGE_USR_NO_ROOT |
++                                DISSECT_IMAGE_ADD_PARTITION_DEVICES |
++                                DISSECT_IMAGE_PIN_PARTITION_DEVICES,
+                                 &m);
+                 if (r < 0)
+                         return r;
+diff --git a/src/shared/dissect-image.c b/src/shared/dissect-image.c
+index 7676636723..462ee4b3e8 100644
+--- a/src/shared/dissect-image.c
++++ b/src/shared/dissect-image.c
+@@ -436,7 +436,7 @@ static int dissect_image(
+                         const char *fstype = NULL, *options = NULL;
+                         _cleanup_close_ int mount_node_fd = -1;
+ 
+-                        if (FLAGS_SET(flags, DISSECT_IMAGE_OPEN_PARTITION_DEVICES)) {
++                        if (FLAGS_SET(flags, DISSECT_IMAGE_PIN_PARTITION_DEVICES)) {
+                                 mount_node_fd = open_partition(devname, /* is_partition = */ false, m->loop);
+                                 if (mount_node_fd < 0)
+                                         return mount_node_fd;
+@@ -505,7 +505,7 @@ static int dissect_image(
+         if (verity && verity->data_path)
+                 return -EBADR;
+ 
+-        if (FLAGS_SET(flags, DISSECT_IMAGE_MANAGE_PARTITION_DEVICES)) {
++        if (FLAGS_SET(flags, DISSECT_IMAGE_ADD_PARTITION_DEVICES)) {
+                 /* Safety check: refuse block devices that carry a partition table but for which the kernel doesn't
+                  * do partition scanning. */
+                 r = blockdev_partscan_enabled(fd);
+@@ -574,7 +574,7 @@ static int dissect_image(
+                  * Kernel returns EBUSY if there's already a partition by that number or an overlapping
+                  * partition already existent. */
+ 
+-                if (FLAGS_SET(flags, DISSECT_IMAGE_MANAGE_PARTITION_DEVICES)) {
++                if (FLAGS_SET(flags, DISSECT_IMAGE_ADD_PARTITION_DEVICES)) {
+                         r = block_device_add_partition(fd, node, nr, (uint64_t) start * 512, (uint64_t) size * 512);
+                         if (r < 0) {
+                                 if (r != -EBUSY)
+@@ -871,7 +871,7 @@ static int dissect_image(
+                                         dissected_partition_done(m->partitions + designator);
+                                 }
+ 
+-                                if (FLAGS_SET(flags, DISSECT_IMAGE_OPEN_PARTITION_DEVICES)) {
++                                if (FLAGS_SET(flags, DISSECT_IMAGE_PIN_PARTITION_DEVICES)) {
+                                         mount_node_fd = open_partition(node, /* is_partition = */ true, m->loop);
+                                         if (mount_node_fd < 0)
+                                                 return mount_node_fd;
+@@ -945,7 +945,7 @@ static int dissect_image(
+                                 if (m->partitions[PARTITION_XBOOTLDR].found)
+                                         continue;
+ 
+-                                if (FLAGS_SET(flags, DISSECT_IMAGE_OPEN_PARTITION_DEVICES)) {
++                                if (FLAGS_SET(flags, DISSECT_IMAGE_PIN_PARTITION_DEVICES)) {
+                                         mount_node_fd = open_partition(node, /* is_partition = */ true, m->loop);
+                                         if (mount_node_fd < 0)
+                                                 return mount_node_fd;
+@@ -1127,7 +1127,7 @@ static int dissect_image(
+                         _cleanup_free_ char *o = NULL;
+                         const char *options;
+ 
+-                        if (FLAGS_SET(flags, DISSECT_IMAGE_OPEN_PARTITION_DEVICES)) {
++                        if (FLAGS_SET(flags, DISSECT_IMAGE_PIN_PARTITION_DEVICES)) {
+                                 mount_node_fd = open_partition(generic_node, /* is_partition = */ true, m->loop);
+                                 if (mount_node_fd < 0)
+                                         return mount_node_fd;
+@@ -1232,7 +1232,6 @@ int dissect_image_file(
+         int r;
+ 
+         assert(path);
+-        assert((flags & DISSECT_IMAGE_BLOCK_DEVICE) == 0);
+         assert(ret);
+ 
+         fd = open(path, O_RDONLY|O_CLOEXEC|O_NONBLOCK|O_NOCTTY);
+@@ -3036,7 +3035,7 @@ int dissect_loop_device(
+ 
+         m->loop = loop_device_ref(loop);
+ 
+-        r = dissect_image(m, loop->fd, loop->node, verity, mount_options, flags | DISSECT_IMAGE_BLOCK_DEVICE);
++        r = dissect_image(m, loop->fd, loop->node, verity, mount_options, flags);
+         if (r < 0)
+                 return r;
+ 
+@@ -3199,6 +3198,10 @@ int mount_image_privately_interactively(
+         assert(ret_directory);
+         assert(ret_loop_device);
+ 
++        /* We intend to mount this right-away, hence add the partitions if needed and pin them*/
++        flags |= DISSECT_IMAGE_ADD_PARTITION_DEVICES |
++                DISSECT_IMAGE_PIN_PARTITION_DEVICES;
++
+         r = verity_settings_load(&verity, image, NULL, NULL);
+         if (r < 0)
+                 return log_error_errno(r, "Failed to load root hash data: %m");
+@@ -3321,7 +3324,9 @@ int verity_dissect_and_mount(
+                 return log_debug_errno(r, "Failed to load root hash: %m");
+ 
+         dissect_image_flags = (verity.data_path ? DISSECT_IMAGE_NO_PARTITION_TABLE : 0) |
+-                (relax_extension_release_check ? DISSECT_IMAGE_RELAX_SYSEXT_CHECK : 0);
++                (relax_extension_release_check ? DISSECT_IMAGE_RELAX_SYSEXT_CHECK : 0) |
++                DISSECT_IMAGE_ADD_PARTITION_DEVICES |
++                DISSECT_IMAGE_PIN_PARTITION_DEVICES;
+ 
+         /* Note that we don't use loop_device_make here, as the FD is most likely O_PATH which would not be
+          * accepted by LOOP_CONFIGURE, so just let loop_device_make_by_path reopen it as a regular FD. */
+diff --git a/src/shared/dissect-image.h b/src/shared/dissect-image.h
+index f2278c4dfa..631d4c7a04 100644
+--- a/src/shared/dissect-image.h
++++ b/src/shared/dissect-image.h
+@@ -214,10 +214,8 @@ typedef enum DissectImageFlags {
+                                                  DISSECT_IMAGE_MOUNT_READ_ONLY,
+         DISSECT_IMAGE_GROWFS                   = 1 << 18, /* Grow file systems in partitions marked for that to the size of the partitions after mount */
+         DISSECT_IMAGE_MOUNT_IDMAPPED           = 1 << 19, /* Mount mounts with kernel 5.12-style userns ID mapping, if file system type doesn't support uid=/gid= */
+-        DISSECT_IMAGE_MANAGE_PARTITION_DEVICES = 1 << 20, /* Manage partition devices, e.g. probe each partition in more detail */
+-        DISSECT_IMAGE_OPEN_PARTITION_DEVICES   = 1 << 21, /* Open dissected partitions and decrypted partitions */
+-        DISSECT_IMAGE_BLOCK_DEVICE             = DISSECT_IMAGE_MANAGE_PARTITION_DEVICES |
+-                                                 DISSECT_IMAGE_OPEN_PARTITION_DEVICES,
++        DISSECT_IMAGE_ADD_PARTITION_DEVICES    = 1 << 20, /* Create partition devices via BLKPG_ADD_PARTITION */
++        DISSECT_IMAGE_PIN_PARTITION_DEVICES    = 1 << 21, /* Open dissected partitions and decrypted partitions and pin them by fd */
+         DISSECT_IMAGE_RELAX_SYSEXT_CHECK       = 1 << 22, /* Don't insist that the extension-release file name matches the image name */
+ } DissectImageFlags;
+ 
+diff --git a/src/sysext/sysext.c b/src/sysext/sysext.c
+index 0875099d5f..c57293b0e5 100644
+--- a/src/sysext/sysext.c
++++ b/src/sysext/sysext.c
+@@ -520,7 +520,9 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
+                                 DISSECT_IMAGE_GENERIC_ROOT |
+                                 DISSECT_IMAGE_REQUIRE_ROOT |
+                                 DISSECT_IMAGE_MOUNT_ROOT_ONLY |
+-                                DISSECT_IMAGE_USR_NO_ROOT;
++                                DISSECT_IMAGE_USR_NO_ROOT |
++                                DISSECT_IMAGE_ADD_PARTITION_DEVICES |
++                                DISSECT_IMAGE_PIN_PARTITION_DEVICES;
+ 
+                         r = verity_settings_load(&verity_settings, img->path, NULL, NULL);
+                         if (r < 0)
+diff --git a/src/test/test-loop-block.c b/src/test/test-loop-block.c
+index e2b97dd56f..af2a9683a4 100644
+--- a/src/test/test-loop-block.c
++++ b/src/test/test-loop-block.c
+@@ -71,7 +71,7 @@ static void* thread_func(void *ptr) {
+ 
+                 log_notice("Acquired loop device %s, will mount on %s", loop->node, mounted);
+ 
+-                r = dissect_loop_device(loop, NULL, NULL, DISSECT_IMAGE_READ_ONLY, &dissected);
++                r = dissect_loop_device(loop, NULL, NULL, DISSECT_IMAGE_READ_ONLY|DISSECT_IMAGE_ADD_PARTITION_DEVICES|DISSECT_IMAGE_PIN_PARTITION_DEVICES, &dissected);
+                 if (r < 0)
+                         log_error_errno(r, "Failed dissect loopback device %s: %m", loop->node);
+                 assert_se(r >= 0);
+@@ -220,7 +220,7 @@ static int run(int argc, char *argv[]) {
+         assert_se(loop_device_make(fd, O_RDWR, 0, UINT64_MAX, 0, LO_FLAGS_PARTSCAN, LOCK_EX, &loop) >= 0);
+ 
+ #if HAVE_BLKID
+-        assert_se(dissect_loop_device(loop, NULL, NULL, 0, &dissected) >= 0);
++        assert_se(dissect_loop_device(loop, NULL, NULL, DISSECT_IMAGE_ADD_PARTITION_DEVICES|DISSECT_IMAGE_PIN_PARTITION_DEVICES, &dissected) >= 0);
+         verify_dissected_image(dissected);
+ 
+         FOREACH_STRING(fs, "vfat", "ext4") {
+@@ -246,7 +246,7 @@ static int run(int argc, char *argv[]) {
+         assert_se(make_filesystem(dissected->partitions[PARTITION_HOME].node, "ext4", "home", NULL, id, true) >= 0);
+ 
+         dissected = dissected_image_unref(dissected);
+-        assert_se(dissect_loop_device(loop, NULL, NULL, 0, &dissected) >= 0);
++        assert_se(dissect_loop_device(loop, NULL, NULL, DISSECT_IMAGE_ADD_PARTITION_DEVICES|DISSECT_IMAGE_PIN_PARTITION_DEVICES, &dissected) >= 0);
+         verify_dissected_image(dissected);
+ 
+         assert_se(mkdtemp_malloc(NULL, &mounted) >= 0);

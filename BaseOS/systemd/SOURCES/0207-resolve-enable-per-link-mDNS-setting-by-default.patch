@@ -1,0 +1,71 @@
+From 11132a6c20b64eb14a3386ff480086b5bae72146 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 4 Nov 2022 12:06:21 +0900
+Subject: [PATCH] resolve: enable per-link mDNS setting by default
+
+Otherwise, if the link is not managed by systemd-networkd, mDNS cannot
+be enabled without calling `resolvectl` explicitly.
+
+Fixes #25252.
+
+(cherry picked from commit e31540196b8fb136a8f197c7a26d851bd0b93329)
+
+Related: #2138081
+---
+ src/resolve/resolved-link-bus.c | 2 +-
+ src/resolve/resolved-link.c     | 8 ++++----
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/resolve/resolved-link-bus.c b/src/resolve/resolved-link-bus.c
+index 1f7d092112..9b6d14f20c 100644
+--- a/src/resolve/resolved-link-bus.c
++++ b/src/resolve/resolved-link-bus.c
+@@ -562,7 +562,7 @@ int bus_link_method_set_mdns(sd_bus_message *message, void *userdata, sd_bus_err
+                 return r;
+ 
+         if (isempty(mdns))
+-                mode = RESOLVE_SUPPORT_NO;
++                mode = RESOLVE_SUPPORT_YES;
+         else {
+                 mode = resolve_support_from_string(mdns);
+                 if (mode < 0)
+diff --git a/src/resolve/resolved-link.c b/src/resolve/resolved-link.c
+index 86112f3a3b..d41f6f3e54 100644
+--- a/src/resolve/resolved-link.c
++++ b/src/resolve/resolved-link.c
+@@ -37,7 +37,7 @@ int link_new(Manager *m, Link **ret, int ifindex) {
+                 .ifindex = ifindex,
+                 .default_route = -1,
+                 .llmnr_support = RESOLVE_SUPPORT_YES,
+-                .mdns_support = RESOLVE_SUPPORT_NO,
++                .mdns_support = RESOLVE_SUPPORT_YES,
+                 .dnssec_mode = _DNSSEC_MODE_INVALID,
+                 .dns_over_tls_mode = _DNS_OVER_TLS_MODE_INVALID,
+                 .operstate = IF_OPER_UNKNOWN,
+@@ -64,7 +64,7 @@ void link_flush_settings(Link *l) {
+ 
+         l->default_route = -1;
+         l->llmnr_support = RESOLVE_SUPPORT_YES;
+-        l->mdns_support = RESOLVE_SUPPORT_NO;
++        l->mdns_support = RESOLVE_SUPPORT_YES;
+         l->dnssec_mode = _DNSSEC_MODE_INVALID;
+         l->dns_over_tls_mode = _DNS_OVER_TLS_MODE_INVALID;
+ 
+@@ -354,7 +354,7 @@ static int link_update_mdns_support(Link *l) {
+ 
+         assert(l);
+ 
+-        l->mdns_support = RESOLVE_SUPPORT_NO;
++        l->mdns_support = RESOLVE_SUPPORT_YES;
+ 
+         r = sd_network_link_get_mdns(l->ifindex, &b);
+         if (r == -ENODATA)
+@@ -1156,7 +1156,7 @@ static bool link_needs_save(Link *l) {
+                 return false;
+ 
+         if (l->llmnr_support != RESOLVE_SUPPORT_YES ||
+-            l->mdns_support != RESOLVE_SUPPORT_NO ||
++            l->mdns_support != RESOLVE_SUPPORT_YES ||
+             l->dnssec_mode != _DNSSEC_MODE_INVALID ||
+             l->dns_over_tls_mode != _DNS_OVER_TLS_MODE_INVALID)
+                 return true;

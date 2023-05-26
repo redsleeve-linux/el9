@@ -1,8 +1,8 @@
 %bcond_with     test
 
 Name:           libstoragemgmt
-Version:        1.9.3
-Release:        1%{?dist}.redsleeve
+Version:        1.9.5
+Release:        1%{?dist}
 Summary:        Storage array management library
 License:        LGPLv2+
 URL:            https://github.com/libstorage/libstoragemgmt
@@ -32,7 +32,7 @@ BuildRequires:  python3-devel
 BuildRequires:  systemd systemd-devel
 
 BuildRequires:  chrpath
-#BuildRequires:  valgrind
+BuildRequires:  valgrind
 
 %description
 The libStorageMgmt library will provide a vendor agnostic open source storage
@@ -167,7 +167,7 @@ plugin selection for locally managed storage.
 %build
 ./autogen.sh
 
-%configure --with-python3 --disable-static --without-mem-leak-test
+%configure --with-python3 --disable-static
 %make_build
 
 %install
@@ -195,10 +195,8 @@ fi
 %endif
 
 %pre
-getent group libstoragemgmt >/dev/null || groupadd -r libstoragemgmt
-getent passwd libstoragemgmt >/dev/null || \
-    useradd -r -g libstoragemgmt -d /var/run/lsm -s /sbin/nologin \
-    -c "daemon account for libstoragemgmt" libstoragemgmt
+echo 'u libstoragemgmt - "daemon account for libstoragemgmt"' | \
+	systemd-sysusers --replace=/usr/lib/sysusers.d/libstoragemgmt.conf -
 
 %post
 /sbin/ldconfig
@@ -446,8 +444,9 @@ fi
 %{_mandir}/man1/local_lsmplugin.1*
 
 %changelog
-* Tue Aug 30 2022 Jacco Ligthart <jacco@redsleeve.org> - 1.9.3-1.redsleeve
-- removed valgrind dependency
+* Thu Oct 27 2022 Tony Asleson <tasleson@redhat.com> - 1.9.5-1
+- Upgrade to 1.9.5
+- Use systemd-sysusers
 
 * Wed Nov 17 2021 Tony Asleson <tasleson@redhat.com> - 1.9.3-1
 - Upgrade to 1.9.3

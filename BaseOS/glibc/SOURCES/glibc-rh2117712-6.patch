@@ -1,0 +1,35 @@
+commit 7187efd0aa270c83c428ea6cd0e1cffc34b41a74
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Mon Aug 1 15:49:07 2022 +0200
+
+    malloc: Use __getrandom_nocancel during tcache initiailization
+    
+    Cancellation currently cannot happen at this point because dlopen
+    as used by the unwind link always performs additional allocations
+    for libgcc_s.so.1, even if it has been loaded already as a dependency
+    of the main executable.  But it seems prudent not to rely on this
+    quirk.
+    
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff --git a/malloc/malloc.c b/malloc/malloc.c
+index 2edb469d5dbf1203..375f50f5db13e234 100644
+--- a/malloc/malloc.c
++++ b/malloc/malloc.c
+@@ -256,6 +256,7 @@
+ /* For tcache double-free check.  */
+ #include <random-bits.h>
+ #include <sys/random.h>
++#include <not-cancel.h>
+ 
+ /*
+   Debugging:
+@@ -3025,7 +3026,7 @@ static uintptr_t tcache_key;
+ static void
+ tcache_key_initialize (void)
+ {
+-  if (__getrandom (&tcache_key, sizeof(tcache_key), GRND_NONBLOCK)
++  if (__getrandom_nocancel (&tcache_key, sizeof(tcache_key), GRND_NONBLOCK)
+       != sizeof (tcache_key))
+     {
+       tcache_key = random_bits ();

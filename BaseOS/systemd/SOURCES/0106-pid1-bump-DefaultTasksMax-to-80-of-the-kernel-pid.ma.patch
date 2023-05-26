@@ -1,0 +1,59 @@
+From 6e6aaec20c62887fa5c5c4bf47a9c2238f8f027f Mon Sep 17 00:00:00 2001
+From: rpm-build <rpm-build>
+Date: Wed, 1 Aug 2018 13:19:39 +0200
+Subject: [PATCH] pid1: bump DefaultTasksMax to 80% of the kernel pid.max value
+
+This should be hopefully high enough even for the very big deployments.
+
+RHEL-only
+
+Related: #2138081
+---
+ man/systemd-system.conf.xml | 4 ++--
+ src/core/main.c             | 2 +-
+ src/core/system.conf.in     | 2 +-
+ 3 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/man/systemd-system.conf.xml b/man/systemd-system.conf.xml
+index ac21c31d9a..00de04d426 100644
+--- a/man/systemd-system.conf.xml
++++ b/man/systemd-system.conf.xml
+@@ -461,10 +461,10 @@
+         <listitem><para>Configure the default value for the per-unit <varname>TasksMax=</varname> setting. See
+         <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+         for details. This setting applies to all unit types that support resource control settings, with the exception
+-        of slice units. Defaults to 15% of the minimum of <varname>kernel.pid_max=</varname>, <varname>kernel.threads-max=</varname>
++        of slice units. Defaults to 80% of the minimum of <varname>kernel.pid_max=</varname>, <varname>kernel.threads-max=</varname>
+         and root cgroup <varname>pids.max</varname>.
+         Kernel has a default value for <varname>kernel.pid_max=</varname> and an algorithm of counting in case of more than 32 cores.
+-        For example with the default <varname>kernel.pid_max=</varname>, <varname>DefaultTasksMax=</varname> defaults to 4915,
++        For example with the default <varname>kernel.pid_max=</varname>, <varname>DefaultTasksMax=</varname> defaults to 26214,
+         but might be greater in other systems or smaller in OS containers.</para></listitem>
+       </varlistentry>
+ 
+diff --git a/src/core/main.c b/src/core/main.c
+index 14a4f81452..d3ec526e7e 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -100,7 +100,7 @@
+ #include <sanitizer/lsan_interface.h>
+ #endif
+ 
+-#define DEFAULT_TASKS_MAX ((TasksMax) { 15U, 100U }) /* 15% */
++#define DEFAULT_TASKS_MAX ((TasksMax) { 80U, 100U }) /* 80% */
+ 
+ static enum {
+         ACTION_RUN,
+diff --git a/src/core/system.conf.in b/src/core/system.conf.in
+index 71a5869ec0..5d1f6d24f0 100644
+--- a/src/core/system.conf.in
++++ b/src/core/system.conf.in
+@@ -56,7 +56,7 @@
+ #DefaultIPAccounting=no
+ #DefaultMemoryAccounting={{ 'yes' if MEMORY_ACCOUNTING_DEFAULT else 'no' }}
+ #DefaultTasksAccounting=yes
+-#DefaultTasksMax=15%
++#DefaultTasksMax=80%
+ #DefaultLimitCPU=
+ #DefaultLimitFSIZE=
+ #DefaultLimitDATA=

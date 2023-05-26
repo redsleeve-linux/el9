@@ -1,0 +1,79 @@
+From 471b70bca8f1a77b1d5402e190b00a61aa0d58b0 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 22 Nov 2022 12:28:19 +0100
+Subject: [PATCH] resolved: handle -EINTR returned from fd_wait_for_event()
+ better
+
+We might get signals for various reasons (for example, somebody asking
+us to reload caches via a signal), hence let's handle this gracefully.
+
+(cherry picked from commit 6d66a221685c15798e796d9738f73fdb1fdccdb2)
+
+Related: #2137584
+---
+ src/resolve/resolved-manager.c | 20 ++++++++++++++++----
+ 1 file changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/src/resolve/resolved-manager.c b/src/resolve/resolved-manager.c
+index f62efa87aa..1c9048670b 100644
+--- a/src/resolve/resolved-manager.c
++++ b/src/resolve/resolved-manager.c
+@@ -868,11 +868,14 @@ int manager_recv(Manager *m, int fd, DnsProtocol protocol, DnsPacket **ret) {
+ }
+ 
+ static int sendmsg_loop(int fd, struct msghdr *mh, int flags) {
++        usec_t end;
+         int r;
+ 
+         assert(fd >= 0);
+         assert(mh);
+ 
++        end = usec_add(now(CLOCK_MONOTONIC), SEND_TIMEOUT_USEC);
++
+         for (;;) {
+                 if (sendmsg(fd, mh, flags) >= 0)
+                         return 0;
+@@ -881,20 +884,26 @@ static int sendmsg_loop(int fd, struct msghdr *mh, int flags) {
+                 if (errno != EAGAIN)
+                         return -errno;
+ 
+-                r = fd_wait_for_event(fd, POLLOUT, SEND_TIMEOUT_USEC);
+-                if (r < 0)
++                r = fd_wait_for_event(fd, POLLOUT, LESS_BY(end, now(CLOCK_MONOTONIC)));
++                if (r < 0) {
++                        if (ERRNO_IS_TRANSIENT(r))
++                                continue;
+                         return r;
++                }
+                 if (r == 0)
+                         return -ETIMEDOUT;
+         }
+ }
+ 
+ static int write_loop(int fd, void *message, size_t length) {
++        usec_t end;
+         int r;
+ 
+         assert(fd >= 0);
+         assert(message);
+ 
++        end = usec_add(now(CLOCK_MONOTONIC), SEND_TIMEOUT_USEC);
++
+         for (;;) {
+                 if (write(fd, message, length) >= 0)
+                         return 0;
+@@ -903,9 +912,12 @@ static int write_loop(int fd, void *message, size_t length) {
+                 if (errno != EAGAIN)
+                         return -errno;
+ 
+-                r = fd_wait_for_event(fd, POLLOUT, SEND_TIMEOUT_USEC);
+-                if (r < 0)
++                r = fd_wait_for_event(fd, POLLOUT, LESS_BY(end, now(CLOCK_MONOTONIC)));
++                if (r < 0) {
++                        if (ERRNO_IS_TRANSIENT(r))
++                                continue;
+                         return r;
++                }
+                 if (r == 0)
+                         return -ETIMEDOUT;
+         }

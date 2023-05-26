@@ -1,0 +1,67 @@
+From 1672b8dd340c4d4aa6398a08b15b36368ba442ec Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20Koutn=C3=BD?= <mkoutny@suse.com>
+Date: Fri, 25 Nov 2022 17:50:27 +0100
+Subject: [PATCH] cgtop: Do not rewrite -P or -k options
+
+--recursive=no will overwrite possible -P or -k option hence making the
+recursive disabling impossible.
+
+Check what counting types the system supports (encoded in the ordering
+of our enum) of and pick whatever user requests but is also supported.
+
+Fixes: #25248
+(cherry picked from commit 48600b3524afe05d0faa8a5c88b5aaa53b801199)
+
+Related: #2138081
+---
+ src/cgtop/cgtop.c | 16 ++++++++++------
+ 1 file changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/src/cgtop/cgtop.c b/src/cgtop/cgtop.c
+index 95c3987525..8a51a9371b 100644
+--- a/src/cgtop/cgtop.c
++++ b/src/cgtop/cgtop.c
+@@ -55,6 +55,12 @@ typedef struct Group {
+         uint64_t io_input_bps, io_output_bps;
+ } Group;
+ 
++typedef enum PidsCount {
++        COUNT_USERSPACE_PROCESSES,
++        COUNT_ALL_PROCESSES,
++        COUNT_PIDS,
++} PidsCount;
++
+ static unsigned arg_depth = 3;
+ static unsigned arg_iterations = UINT_MAX;
+ static bool arg_batch = false;
+@@ -65,11 +71,7 @@ static char* arg_root = NULL;
+ static bool arg_recursive = true;
+ static bool arg_recursive_unset = false;
+ 
+-static enum {
+-        COUNT_PIDS,
+-        COUNT_USERSPACE_PROCESSES,
+-        COUNT_ALL_PROCESSES,
+-} arg_count = COUNT_PIDS;
++static PidsCount arg_count = COUNT_PIDS;
+ 
+ static enum {
+         ORDER_PATH,
+@@ -915,6 +917,7 @@ static int run(int argc, char *argv[]) {
+         usec_t last_refresh = 0;
+         bool quit = false, immediate_refresh = false;
+         _cleanup_free_ char *root = NULL;
++        PidsCount possible_count;
+         CGroupMask mask;
+         int r;
+ 
+@@ -928,7 +931,8 @@ static int run(int argc, char *argv[]) {
+         if (r < 0)
+                 return log_error_errno(r, "Failed to determine supported controllers: %m");
+ 
+-        arg_count = (mask & CGROUP_MASK_PIDS) ? COUNT_PIDS : COUNT_USERSPACE_PROCESSES;
++        possible_count = (mask & CGROUP_MASK_PIDS) ? COUNT_PIDS : COUNT_ALL_PROCESSES;
++        arg_count = MIN(possible_count, arg_count);
+ 
+         if (arg_recursive_unset && arg_count == COUNT_PIDS)
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),

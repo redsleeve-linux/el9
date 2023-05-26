@@ -1,0 +1,69 @@
+From 17cc25a2d7c2ebe75e18cf813d539e5997610e25 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 2 Dec 2022 12:48:26 +0100
+Subject: [PATCH] test: check if we can use SHA1 MD for signing before using it
+
+Some distributions have started phasing out SHA1, which breaks
+the systemd-measure test case in its current form. Let's make sure we
+can use SHA1 for signing beforehand to mitigate this.
+
+Spotted on RHEL 9, where SHA1 signatures are disallowed by [0]:
+```
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "/tmp/pcrsign-private.pem"
+...
+openssl rsa -pubout -in "/tmp/pcrsign-private.pem" -out "/tmp/pcrsign-public.pem"
+writing RSA key
+/usr/lib/systemd/systemd-measure sign --current --bank=sha1 --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem"
+Failed to initialize signature context.
+```
+
+[0] https://gitlab.com/redhat/centos-stream/rpms/openssl/-/blob/c9s/0049-Selectively-disallow-SHA1-signatures.patch
+
+(cherry picked from commit d19e5540f20c78caa949ff33050b4a530cae1982)
+
+Related: #2141979
+---
+ test/units/testsuite-70.sh | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/test/units/testsuite-70.sh b/test/units/testsuite-70.sh
+index b1cf7e83c4..89cd2a3f82 100755
+--- a/test/units/testsuite-70.sh
++++ b/test/units/testsuite-70.sh
+@@ -102,8 +102,17 @@ if [ -e /usr/lib/systemd/systemd-measure ] && \
+     openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "/tmp/pcrsign-private.pem"
+     openssl rsa -pubout -in "/tmp/pcrsign-private.pem" -out "/tmp/pcrsign-public.pem"
+ 
++    MEASURE_BANKS=("--bank=sha256")
++    # Check if SHA1 signatures are supported
++    #
++    # Some distros have started phasing out SHA1, so make sure the SHA1
++    # signatures are supported before trying to use them.
++    if echo hello | openssl dgst -sign /tmp/pcrsign-private.pem -sha1 >/dev/null; then
++        MEASURE_BANKS+=("--bank=sha1")
++    fi
++
+     # Sign current PCR state with it
+-    /usr/lib/systemd/systemd-measure sign --current --bank=sha1 --bank=sha256 --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem" --phase=: | tee "/tmp/pcrsign.sig"
++    /usr/lib/systemd/systemd-measure sign --current "${MEASURE_BANKS[@]}" --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem" --phase=: | tee "/tmp/pcrsign.sig"
+     dd if=/dev/urandom of=/tmp/pcrtestdata bs=1024 count=64
+     systemd-creds encrypt /tmp/pcrtestdata /tmp/pcrtestdata.encrypted --with-key=host+tpm2-with-public-key --tpm2-public-key="/tmp/pcrsign-public.pem"
+     systemd-creds decrypt /tmp/pcrtestdata.encrypted - --tpm2-signature="/tmp/pcrsign.sig" | cmp - /tmp/pcrtestdata
+@@ -113,7 +122,7 @@ if [ -e /usr/lib/systemd/systemd-measure ] && \
+     systemd-creds decrypt /tmp/pcrtestdata.encrypted - --tpm2-signature="/tmp/pcrsign.sig" > /dev/null && { echo 'unexpected success'; exit 1; }
+ 
+     # Sign new PCR state, decrypting should work now.
+-    /usr/lib/systemd/systemd-measure sign --current --bank=sha1 --bank=sha256 --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem" --phase=: > "/tmp/pcrsign.sig2"
++    /usr/lib/systemd/systemd-measure sign --current "${MEASURE_BANKS[@]}" --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem" --phase=: > "/tmp/pcrsign.sig2"
+     systemd-creds decrypt /tmp/pcrtestdata.encrypted - --tpm2-signature="/tmp/pcrsign.sig2" | cmp - /tmp/pcrtestdata
+ 
+     # Now, do the same, but with a cryptsetup binding
+@@ -135,7 +144,7 @@ if [ -e /usr/lib/systemd/systemd-measure ] && \
+     SYSTEMD_CRYPTSETUP_USE_TOKEN_MODULE=1 /usr/lib/systemd/systemd-cryptsetup attach test-volume2 $img - tpm2-device=auto,tpm2-signature="/tmp/pcrsign.sig2",headless=1 && { echo 'unexpected success'; exit 1; }
+ 
+     # But once we sign the current PCRs, we should be able to unlock again
+-    /usr/lib/systemd/systemd-measure sign --current --bank=sha1 --bank=sha256 --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem" --phase=: > "/tmp/pcrsign.sig3"
++    /usr/lib/systemd/systemd-measure sign --current "${MEASURE_BANKS[@]}" --private-key="/tmp/pcrsign-private.pem" --public-key="/tmp/pcrsign-public.pem" --phase=: > "/tmp/pcrsign.sig3"
+     SYSTEMD_CRYPTSETUP_USE_TOKEN_MODULE=0 /usr/lib/systemd/systemd-cryptsetup attach test-volume2 $img - tpm2-device=auto,tpm2-signature="/tmp/pcrsign.sig3",headless=1
+     /usr/lib/systemd/systemd-cryptsetup detach test-volume2
+     SYSTEMD_CRYPTSETUP_USE_TOKEN_MODULE=1 /usr/lib/systemd/systemd-cryptsetup attach test-volume2 $img - tpm2-device=auto,tpm2-signature="/tmp/pcrsign.sig3",headless=1

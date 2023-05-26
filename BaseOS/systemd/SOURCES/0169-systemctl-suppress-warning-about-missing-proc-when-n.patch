@@ -1,0 +1,80 @@
+From 02fbe7d4c9bd34134c12978726b036ec1ceea839 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 7 Dec 2022 13:59:01 +0900
+Subject: [PATCH] systemctl: suppress warning about missing /proc/ when
+ --no-warn
+
+Follow-up for 0f958c8d4fc13ed1c1af928b2a7d91d31c7576eb.
+
+systemctl is called many times by dnf or so, and missing /proc/ is not
+a user's fault, but package manager's issue.
+With this commit, we can suppress the warning by updating rpm macros if
+necessary.
+
+(cherry picked from commit 91dfb74ef5e38625dada2c2a6ae30152e64c3f5b)
+
+Related: #2141979
+---
+ man/systemctl.xml         | 16 ++++++++++++----
+ src/systemctl/systemctl.c | 14 +++++++-------
+ 2 files changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/man/systemctl.xml b/man/systemctl.xml
+index d909dc4db4..b73d4ac048 100644
+--- a/man/systemctl.xml
++++ b/man/systemctl.xml
+@@ -2004,10 +2004,18 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
+         <term><option>--no-warn</option></term>
+ 
+         <listitem>
+-          <para>Don't generate the warning shown by default when using
+-          <command>enable</command> or <command>disable</command> on units
+-          without install information (i.e. don't have or have an empty
+-          [Install] section).</para>
++          <para>Don't generate the warnings shown by default in the following cases:
++          <itemizedlist>
++            <listitem>
++              <para>when <command>systemctl</command> is invoked without procfs mounted on
++              <filename>/proc/</filename>,</para>
++            </listitem>
++            <listitem>
++              <para>when using <command>enable</command> or <command>disable</command> on units without
++              install information (i.e. don't have or have an empty [Install] section).</para>
++            </listitem>
++          </itemizedlist>
++          </para>
+         </listitem>
+       </varlistentry>
+ 
+diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
+index 57e9966d3c..3f2b0029ca 100644
+--- a/src/systemctl/systemctl.c
++++ b/src/systemctl/systemctl.c
+@@ -277,8 +277,7 @@ static int systemctl_help(void) {
+                "                             kexec, suspend, hibernate, suspend-then-hibernate,\n"
+                "                             hybrid-sleep, default, rescue, emergency, and exit.\n"
+                "  -q --quiet             Suppress output\n"
+-               "     --no-warn           Don't generate warning when trying to enable/disable\n"
+-               "                         units without install information\n"
++               "     --no-warn           Suppress several warnings shown by default\n"
+                "     --wait              For (re)start, wait until service stopped again\n"
+                "                         For is-system-running, wait until startup is completed\n"
+                "     --no-block          Do not wait until operation finished\n"
+@@ -1157,11 +1156,12 @@ static int run(int argc, char *argv[]) {
+                 goto finish;
+ 
+         if (proc_mounted() == 0)
+-                log_warning("%s%s/proc/ is not mounted. This is not a supported mode of operation. Please fix\n"
+-                            "your invocation environment to mount /proc/ and /sys/ properly. Proceeding anyway.\n"
+-                            "Your mileage may vary.",
+-                            emoji_enabled() ? special_glyph(SPECIAL_GLYPH_WARNING_SIGN) : "",
+-                            emoji_enabled() ? " " : "");
++                log_full(arg_no_warn ? LOG_DEBUG : LOG_WARNING,
++                         "%s%s/proc/ is not mounted. This is not a supported mode of operation. Please fix\n"
++                         "your invocation environment to mount /proc/ and /sys/ properly. Proceeding anyway.\n"
++                         "Your mileage may vary.",
++                         emoji_enabled() ? special_glyph(SPECIAL_GLYPH_WARNING_SIGN) : "",
++                         emoji_enabled() ? " " : "");
+ 
+         if (arg_action != ACTION_SYSTEMCTL && running_in_chroot() > 0) {
+                 if (!arg_quiet)

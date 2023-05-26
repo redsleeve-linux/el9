@@ -1,0 +1,36 @@
+From 7706a5f2d35c6192a557fe7a72f76ea4e2591daf Mon Sep 17 00:00:00 2001
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Tue, 22 Nov 2022 11:30:03 -0500
+Subject: [PATCH] oomd: fix unreachable test case in test-oomd-util
+
+This conditional with !empty_or_root(ctx->path) always returns false
+because the most recent oomd_cgroup_context_acquire() call was with the
+root cgroup. Make sure this test case can be reached by checking cgroup
+instead of ctx->path.
+
+While here, use an unused uid (61183) instead of the nobody uid so the
+test case does not fail in unprivileged LXD containers.
+
+(cherry picked from commit f05bcc18941eef5c2f93cfa06660eb06e0dc4c55)
+
+Related: #2138081
+---
+ src/oom/test-oomd-util.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/oom/test-oomd-util.c b/src/oom/test-oomd-util.c
+index 176e3a8d69..faa75c5578 100644
+--- a/src/oom/test-oomd-util.c
++++ b/src/oom/test-oomd-util.c
+@@ -475,9 +475,9 @@ static void test_oomd_fetch_cgroup_oom_preference(void) {
+ 
+         /* Assert that avoid/omit are not set if the cgroup and prefix are not
+          * owned by the same user.*/
+-        if (test_xattrs && !empty_or_root(ctx->path)) {
++        if (test_xattrs && !empty_or_root(cgroup)) {
+                 ctx = oomd_cgroup_context_free(ctx);
+-                assert_se(cg_set_access(SYSTEMD_CGROUP_CONTROLLER, cgroup, 65534, 0) >= 0);
++                assert_se(cg_set_access(SYSTEMD_CGROUP_CONTROLLER, cgroup, 61183, 0) >= 0);
+                 assert_se(oomd_cgroup_context_acquire(cgroup, &ctx) == 0);
+ 
+                 assert_se(oomd_fetch_cgroup_oom_preference(ctx, NULL) == 0);

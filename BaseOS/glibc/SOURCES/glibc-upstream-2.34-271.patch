@@ -1,0 +1,84 @@
+commit bb4148283fa7c52fbc7efe19e81cd129adc7fd61
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Thu May 26 13:12:21 2022 -0300
+
+    nios2: Remove _dl_skip_args usage (BZ# 29187)
+    
+    Since ad43cac44a the generic code already shuffles the argv/envp/auxv
+    on the stack to remove the ld.so own arguments and thus _dl_skip_args
+    is always 0.   So there is no need to adjust the argc or argv.
+    
+    Checked with qemu-user that arguments are correctly passed on both
+    constructors and main program.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+    (cherry picked from commit 4868ba5d257a7fb415674e79c4ae5a3af2827f55)
+
+diff --git a/sysdeps/nios2/dl-machine.h b/sysdeps/nios2/dl-machine.h
+index 430ca5d7ae1e0372..47b3f6acd7624bcb 100644
+--- a/sysdeps/nios2/dl-machine.h
++++ b/sysdeps/nios2/dl-machine.h
+@@ -128,53 +128,23 @@ _start:\n\
+         ldw r8, %call(_dl_nios2_get_gp_value)(r22)\n\
+         callr r8\n\
+         mov gp, r2\n\
+-\n\
+-        /* Find the number of arguments to skip.  */\n\
+-        ldw r8, %got(_dl_skip_args)(r22)\n\
+-        ldw r8, 0(r8)\n\
+ \n\
+         /* Find the main_map from the GOT.  */\n\
+         ldw r4, %got(_rtld_local)(r22)\n\
+         ldw r4, 0(r4)\n\
+ \n\
+-        /* Find argc.  */\n\
+-        ldw r5, 0(sp)\n\
+-        sub r5, r5, r8\n\
+-        stw r5, 0(sp)\n\
+-\n\
+-        /* Find the first unskipped argument.  */\n\
+-        slli r8, r8, 2\n\
+-        addi r6, sp, 4\n\
+-        add r9, r6, r8\n\
+-        mov r10, r6\n\
+-\n\
+-        /* Shuffle argv down.  */\n\
+-3:      ldw r11, 0(r9)\n\
+-        stw r11, 0(r10)\n\
+-        addi r9, r9, 4\n\
+-        addi r10, r10, 4\n\
+-        bne r11, zero, 3b\n\
++        /* Load adjusted argc.  */\n\
++        ldw r2, %got(_dl_argc)(r22)\n\
++	ldw r5, 0(r2)\n\
+ \n\
+-        /* Shuffle envp down.  */\n\
+-        mov r7, r10\n\
+-4:      ldw r11, 0(r9)\n\
+-        stw r11, 0(r10)\n\
+-        addi r9, r9, 4\n\
+-        addi r10, r10, 4\n\
+-        bne r11, zero, 4b\n\
+-\n\
+-        /* Shuffle auxv down.  */\n\
+-5:      ldw r11, 4(r9)\n\
+-        stw r11, 4(r10)\n\
+-        ldw r11, 0(r9)\n\
+-        stw r11, 0(r10)\n\
+-        addi r9, r9, 8\n\
+-        addi r10, r10, 8\n\
+-        bne r11, zero, 5b\n\
+-\n\
+-        /* Update _dl_argv.  */\n\
++        /* Load adjsuted argv.  */\n\
+         ldw r2, %got(_dl_argv)(r22)\n\
+-        stw r6, 0(r2)\n\
++	ldw r6, 0(r2)\n\
++\n\
++	/* envp = argv + argc + 1  */\n\
++        addi r7, r5, 1\n\
++        slli r7, r7, 2\n\
++        add  r7, r7, r6\n\
+ \n\
+         /* Call _dl_init through the PLT.  */\n\
+         ldw r8, %call(_dl_init)(r22)\n\

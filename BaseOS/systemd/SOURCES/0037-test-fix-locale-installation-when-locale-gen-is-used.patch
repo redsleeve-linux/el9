@@ -1,0 +1,46 @@
+From ea8b80cdc0dfd0ad92301a0e421df4d3110fe09c Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Mon, 7 Nov 2022 11:57:59 +0100
+Subject: [PATCH] test: fix locale installation when locale-gen is used
+
+locale-gen might merge all compiled locales into a simple archive, so we
+need to install it as well if necessary.
+
+(cherry picked from commit 0c416ea01bc14adff10f4fc5415a36bd2d48f604)
+
+Related #2138081
+---
+ test/test-functions | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index 80ce383e64..45ca472916 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -1988,14 +1988,19 @@ install_locales() {
+         inst /usr/share/i18n/SUPPORTED || :
+         inst_recursive /usr/share/i18n/charmaps
+         inst_recursive /usr/share/i18n/locales
+-        inst_recursive /usr/share/locale/en
+-        inst_recursive /usr/share/locale/en_*
++        inst_recursive /usr/share/locale/en*
++        inst_recursive /usr/share/locale/de*
++        image_install /usr/share/locale/locale.alias
++        # locale-gen might either generate each locale separately or merge them
++        # into a single archive
++        if ! (inst_recursive /usr/lib/locale/C.*8 /usr/lib/locale/en_*8 ||
++              image_install /usr/lib/locale/locale-archive); then
++            dfatal "Failed to install required locales"
++            exit 1
++        fi
++    else
++        inst_recursive /usr/lib/locale/C.*8 /usr/lib/locale/en_*8
+     fi
+-
+-    inst_recursive /usr/lib/locale/C.utf8
+-    inst_recursive /usr/lib/locale/C.UTF-8
+-    inst_recursive /usr/lib/locale/en_*.utf8
+-    inst_recursive /usr/lib/locale/en_*.UTF-8
+ }
+ 
+ # shellcheck disable=SC2120

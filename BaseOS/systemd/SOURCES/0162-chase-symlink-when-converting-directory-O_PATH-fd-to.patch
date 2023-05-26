@@ -1,0 +1,27 @@
+From 2bd9f97275480842c99117123daab69cbb8f45f4 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 2 Dec 2022 23:50:57 +0100
+Subject: [PATCH] chase-symlink: when converting directory O_PATH fd to real
+ fd, don't bother with /proc/
+
+Replaces: #25581
+(cherry picked from commit 2075b6dd394e09a0f203b9cc7e3253908397f933)
+
+Related: #2138081
+---
+ src/basic/chase-symlinks.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/basic/chase-symlinks.c b/src/basic/chase-symlinks.c
+index afab54f067..ac55311f4d 100644
+--- a/src/basic/chase-symlinks.c
++++ b/src/basic/chase-symlinks.c
+@@ -471,7 +471,7 @@ int chase_symlinks_and_opendir(
+                 return r;
+         assert(path_fd >= 0);
+ 
+-        d = opendir(FORMAT_PROC_FD_PATH(path_fd));
++        d = xopendirat(path_fd, ".", O_NOFOLLOW);
+         if (!d)
+                 return -errno;
+ 

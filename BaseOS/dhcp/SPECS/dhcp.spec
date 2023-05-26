@@ -15,7 +15,7 @@
 Summary:  Dynamic host configuration protocol software
 Name:     dhcp
 Version:  4.4.2
-Release:  17.b1%{?dist}.redsleeve
+Release:  18.b1%{?dist}
 
 # NEVER CHANGE THE EPOCH on this package.  The previous maintainer (prior to
 # dcantrell maintaining the package) made incorrect use of the epoch and
@@ -32,6 +32,7 @@ Source5:  56dhclient
 Source6:  dhcpd.service
 Source7:  dhcpd6.service
 Source8:  dhcrelay.service
+Source9:  dhcp.sysusers
 
 Patch1: 0001-change-bug-url.patch
 Patch2: 0002-additional-dhclient-options.patch
@@ -64,6 +65,8 @@ Patch28: 0028-Fix-for-CVE-2021-25217.patch
 Patch29: 0029-Use-system-getaddrinfo-for-dhcp.patch
 Patch30: CVE-2021-25220.patch
 Patch31: omshell-hmac-sha512-support.patch
+Patch32: CVE-2022-2928.patch
+Patch33: CVE-2022-2929.patch
 
 
 BuildRequires: autoconf
@@ -85,6 +88,7 @@ BuildRequires: doxygen
 BuildRequires: systemtap-sdt-devel
 %global tapsetdir    /usr/share/systemtap/tapset
 %endif
+BuildRequires: systemd-rpm-macros
 
 # In _docdir we ship some perl scripts and module from contrib subdirectory.
 # Because nothing under _docdir is allowed to "require" anything,
@@ -98,11 +102,9 @@ DHCP (Dynamic Host Configuration Protocol)
 %package server
 Summary: Provides the ISC DHCP server
 Requires: %{name}-common = %{epoch}:%{version}-%{release}
-Requires(pre): shadow-utils
 Requires(post): coreutils grep sed
-Requires(post): systemd
-Requires(preun): systemd
-Requires(postun): systemd
+%{?sysusers_requires_compat}
+%{?systemd_requires}
 
 %description server
 DHCP (Dynamic Host Configuration Protocol) is a protocol which allows
@@ -117,9 +119,7 @@ This package provides the ISC DHCP server.
 Summary: Provides the ISC DHCP relay agent
 Requires: %{name}-common = %{epoch}:%{version}-%{release}
 Requires(post): grep sed
-Requires(post): systemd
-Requires(preun): systemd
-Requires(postun): systemd
+%{?systemd_requires}
 
 %description relay
 DHCP (Dynamic Host Configuration Protocol) is a protocol which allows
@@ -200,7 +200,7 @@ This package contains doxygen-generated documentation.
 %prep
 %setup -n dhcp-%{DHCPVERSION}
 pushd bind
-tar -xvf bind.tar.gz
+tar -xf bind.tar.gz
 ln -s bind-9* bind
 popd
 %autopatch -p1 
@@ -228,10 +228,6 @@ sed -i -e 's|/var/db/|%{_localstatedir}/lib/dhcpd/|g' contrib/dhcp-lease-list.pl
 %build
 #libtoolize --copy --force
 autoreconf --verbose --force --install
-
-%ifarch %{arm}
-export LIBS=-latomic
-%endif
 
 CFLAGS="%{optflags} -fno-strict-aliasing -fcommon" \
 %configure \
@@ -291,6 +287,9 @@ mkdir -p %{buildroot}%{_unitdir}
 install -m 644 %{SOURCE6} %{buildroot}%{_unitdir}
 install -m 644 %{SOURCE7} %{buildroot}%{_unitdir}
 install -m 644 %{SOURCE8} %{buildroot}%{_unitdir}
+
+# systemd-sysusers
+install -p -D -m 0644 %{SOURCE9} %{buildroot}%{_sysusersdir}/dhcp.conf
 
 # Start empty lease databases
 mkdir -p %{buildroot}%{_localstatedir}/lib/dhcpd/
@@ -368,17 +367,7 @@ install -D -p -m 0644 contrib/ldap/dhcp.schema %{buildroot}%{_sysconfdir}/openld
 find %{buildroot} -type f -name "*.la" -delete -print
 
 %pre server
-# /usr/share/doc/setup/uidgid
-%global gid_uid 177
-getent group dhcpd >/dev/null || groupadd --force --gid %{gid_uid} --system dhcpd
-if ! getent passwd dhcpd >/dev/null ; then
-    if ! getent passwd %{gid_uid} >/dev/null ; then
-      useradd --system --uid %{gid_uid} --gid dhcpd --home / --shell /sbin/nologin --comment "DHCP server" dhcpd
-    else
-      useradd --system --gid dhcpd --home / --shell /sbin/nologin --comment "DHCP server" dhcpd
-    fi
-fi
-exit 0
+%sysusers_create_compat %{SOURCE9}
 
 %post server
 # Initial installation
@@ -462,6 +451,7 @@ done
 %config(noreplace) %{_sysconfdir}/openldap/schema/dhcp.schema
 %attr(0644,root,root)   %{_unitdir}/dhcpd.service
 %attr(0644,root,root)   %{_unitdir}/dhcpd6.service
+%{_sysusersdir}/dhcp.conf
 %{_sbindir}/dhcpd
 %{_bindir}/omshell
 %attr(0644,root,root) %{_mandir}/man1/omshell.1.gz
@@ -518,11 +508,13 @@ done
 %endif
 
 %changelog
-* Mon Dec 05 2022 Jacco Ligthart <jacco@redsleeve.org> 4.4.2-17.b1.el9.redsleeve
-- added atomic libs for arm
-
-* Tue Nov 15 2022 CentOS Sources <bugs@centos.org> - 4.4.2-17.b1.el9.centos
+* Tue May 09 2023 CentOS Sources <bugs@centos.org> - 4.4.2-18.b1.el9.centos
 - Apply debranding changes
+
+* Mon Oct 10 2022 Martin Osvald <mosvald@redhat.com> - 12:4.4.2-18.b1
+- Fix for CVE-2022-2928
+- Fix for CVE-2022-2929
+- Use systemd-sysusers for dhcp user and group (#2095396)
 
 * Tue May 10 2022 Martin Osvald <mosvald@redhat.com> - 12:4.4.2-17.b1
 - omshell: add support for hmac-sha512 algorithm (#2083553)

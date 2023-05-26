@@ -1,0 +1,120 @@
+From 1b7dfe48d6d66cad5d0368b8e8b387a4d9586ccd Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Thu, 27 Oct 2022 11:12:10 +0200
+Subject: [PATCH] condition: Check that subsystem is enabled in
+ ConditionSecurity=tpm2
+
+Instead of succeeding when either the firmware reports a TPM device
+or we find a TPM device, let's check that the firmware reports a TPM
+device and the TPM subsystem is enabled in the kernel.
+
+To check whether the subsystem enabled, we check if the relevant
+subdirectory in /sys exists at all.
+
+(cherry picked from commit 300bba79c22e4be1effe2faad0e59ac725d396a1)
+
+Related #2138081
+---
+ man/systemd-creds.xml  |  4 ++--
+ src/creds/creds.c      |  6 ++++--
+ src/shared/condition.c |  9 ++++-----
+ src/shared/tpm2-util.c |  6 +++++-
+ src/shared/tpm2-util.h | 11 ++++++-----
+ 5 files changed, 21 insertions(+), 15 deletions(-)
+
+diff --git a/man/systemd-creds.xml b/man/systemd-creds.xml
+index 1e5632e63d..003fbcd463 100644
+--- a/man/systemd-creds.xml
++++ b/man/systemd-creds.xml
+@@ -175,8 +175,8 @@
+         by the OS kernel drivers and by userspace (i.e. systemd) this prints <literal>yes</literal> and exits
+         with exit status zero. If no such device is discovered/supported/used, prints
+         <literal>no</literal>. Otherwise prints <literal>partial</literal>. In either of these two cases
+-        exits with non-zero exit status. It also shows three lines indicating separately whether drivers,
+-        firmware and the system discovered/support/use TPM2.</para>
++        exits with non-zero exit status. It also shows four lines indicating separately whether firmware,
++        drivers, the system and the kernel discovered/support/use TPM2.</para>
+ 
+         <para>Combine with <option>--quiet</option> to suppress the output.</para></listitem>
+       </varlistentry>
+diff --git a/src/creds/creds.c b/src/creds/creds.c
+index 5586fd776a..a755a52c34 100644
+--- a/src/creds/creds.c
++++ b/src/creds/creds.c
+@@ -637,10 +637,12 @@ static int verb_has_tpm2(int argc, char **argv, void *userdata) {
+ 
+                 printf("%sfirmware\n"
+                        "%sdriver\n"
+-                       "%ssystem\n",
++                       "%ssystem\n"
++                       "%ssubsystem\n",
+                        plus_minus(s & TPM2_SUPPORT_FIRMWARE),
+                        plus_minus(s & TPM2_SUPPORT_DRIVER),
+-                       plus_minus(s & TPM2_SUPPORT_SYSTEM));
++                       plus_minus(s & TPM2_SUPPORT_SYSTEM),
++                       plus_minus(s & TPM2_SUPPORT_SUBSYSTEM));
+         }
+ 
+         /* Return inverted bit flags. So that TPM2_SUPPORT_FULL becomes EXIT_SUCCESS and the other values
+diff --git a/src/shared/condition.c b/src/shared/condition.c
+index 310ffcbdc6..a23d6a3e45 100644
+--- a/src/shared/condition.c
++++ b/src/shared/condition.c
+@@ -664,14 +664,13 @@ static int condition_test_ac_power(Condition *c, char **env) {
+ }
+ 
+ static int has_tpm2(void) {
+-        /* Checks whether the system has at least one TPM2 resource manager device, i.e. at least one "tpmrm"
+-         * class device. Alternatively, we are also happy if the firmware reports support (this is to cover
+-         * for cases where we simply haven't loaded the driver for it yet, i.e. during early boot where we
+-         * very likely want to use this condition check).
++        /* Checks whether the kernel has the TPM subsystem enabled and the firmware reports support. Note
++         * we don't check for actual TPM devices, since we might not have loaded the driver for it yet, i.e.
++         * during early boot where we very likely want to use this condition check).
+          *
+          * Note that we don't check if we ourselves are built with TPM2 support here! */
+ 
+-        return (tpm2_support() & (TPM2_SUPPORT_DRIVER|TPM2_SUPPORT_FIRMWARE)) != 0;
++        return FLAGS_SET(tpm2_support(), TPM2_SUPPORT_SUBSYSTEM|TPM2_SUPPORT_FIRMWARE);
+ }
+ 
+ static int condition_test_security(Condition *c, char **env) {
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 13e92c4144..65e8d48347 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -2189,7 +2189,11 @@ Tpm2Support tpm2_support(void) {
+                         if (r != -ENOENT)
+                                 log_debug_errno(r, "Unable to test whether /sys/class/tpmrm/ exists and is populated, assuming it is not: %m");
+                 } else if (r == 0) /* populated! */
+-                        support |= TPM2_SUPPORT_DRIVER;
++                        support |= TPM2_SUPPORT_SUBSYSTEM|TPM2_SUPPORT_DRIVER;
++                else
++                        /* If the directory exists but is empty, we know the subsystem is enabled but no
++                         * driver has been loaded yet. */
++                        support |= TPM2_SUPPORT_SUBSYSTEM;
+         }
+ 
+         if (efi_has_tpm2())
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 048c28d6ca..c240335ae6 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -137,11 +137,12 @@ typedef struct {
+ typedef enum Tpm2Support {
+         /* NOTE! The systemd-creds tool returns these flags 1:1 as exit status. Hence these flags are pretty
+          * much ABI! Hence, be extra careful when changing/extending these definitions. */
+-        TPM2_SUPPORT_NONE     = 0,       /* no support */
+-        TPM2_SUPPORT_FIRMWARE = 1 << 0,  /* firmware reports TPM2 was used */
+-        TPM2_SUPPORT_DRIVER   = 1 << 1,  /* the kernel has a driver loaded for it */
+-        TPM2_SUPPORT_SYSTEM   = 1 << 2,  /* we support it ourselves */
+-        TPM2_SUPPORT_FULL     = TPM2_SUPPORT_FIRMWARE|TPM2_SUPPORT_DRIVER|TPM2_SUPPORT_SYSTEM,
++        TPM2_SUPPORT_NONE      = 0,       /* no support */
++        TPM2_SUPPORT_FIRMWARE  = 1 << 0,  /* firmware reports TPM2 was used */
++        TPM2_SUPPORT_DRIVER    = 1 << 1,  /* the kernel has a driver loaded for it */
++        TPM2_SUPPORT_SYSTEM    = 1 << 2,  /* we support it ourselves */
++        TPM2_SUPPORT_SUBSYSTEM = 1 << 3,  /* the kernel has the tpm subsystem enabled */
++        TPM2_SUPPORT_FULL      = TPM2_SUPPORT_FIRMWARE|TPM2_SUPPORT_DRIVER|TPM2_SUPPORT_SYSTEM|TPM2_SUPPORT_SUBSYSTEM,
+ } Tpm2Support;
+ 
+ Tpm2Support tpm2_support(void);

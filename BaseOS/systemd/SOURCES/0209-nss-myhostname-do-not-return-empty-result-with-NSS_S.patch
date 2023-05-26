@@ -1,0 +1,34 @@
+From 86bbeff62982404dc76e79d3dad8a8c59308d017 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 9 Feb 2023 06:07:13 +0900
+Subject: [PATCH] nss-myhostname: do not return empty result with
+ NSS_STATUS_SUCCESS
+
+Fixes a bug introduced by db50d326a46beca3cc24b6354b6e1b3591902d45.
+
+Fixes RHBZ#2167468 (https://bugzilla.redhat.com/show_bug.cgi?id=2167468).
+
+(cherry picked from commit 1c3762937e9184c9abbc8d5541b4228841ccc24f)
+
+Resolves: #2167468
+---
+ src/nss-myhostname/nss-myhostname.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/nss-myhostname/nss-myhostname.c b/src/nss-myhostname/nss-myhostname.c
+index 93db9d16e7..d574e98a71 100644
+--- a/src/nss-myhostname/nss-myhostname.c
++++ b/src/nss-myhostname/nss-myhostname.c
+@@ -345,9 +345,10 @@ enum nss_status _nss_myhostname_gethostbyname3_r(
+                 return NSS_STATUS_UNAVAIL;
+         }
+ 
++        if (af == AF_INET6 && !socket_ipv6_is_enabled())
++                goto not_found;
++
+         if (is_localhost(name)) {
+-                if (af == AF_INET6 && !socket_ipv6_is_enabled())
+-                        goto not_found;
+ 
+                 canonical = "localhost";
+                 local_address_ipv4 = htobe32(INADDR_LOOPBACK);

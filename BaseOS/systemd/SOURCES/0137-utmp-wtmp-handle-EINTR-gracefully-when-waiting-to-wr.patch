@@ -1,0 +1,59 @@
+From 62686ccc4631b6a5f73722fd7f1dcaca8782431c Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 22 Nov 2022 12:56:55 +0100
+Subject: [PATCH] utmp-wtmp: handle EINTR gracefully when waiting to write to
+ tty
+
+(cherry picked from commit 22ecfa83123dbfa2322346ac4e25ad2193a3b10c)
+
+Related: #2137584
+---
+ src/shared/utmp-wtmp.c | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/src/shared/utmp-wtmp.c b/src/shared/utmp-wtmp.c
+index 20add0e81b..37a5bf7990 100644
+--- a/src/shared/utmp-wtmp.c
++++ b/src/shared/utmp-wtmp.c
+@@ -12,6 +12,7 @@
+ #include <utmpx.h>
+ 
+ #include "alloc-util.h"
++#include "errno-util.h"
+ #include "fd-util.h"
+ #include "hostname-util.h"
+ #include "io-util.h"
+@@ -300,7 +301,7 @@ static int write_to_terminal(const char *tty, const char *message) {
+         p = message;
+         left = strlen(message);
+ 
+-        end = now(CLOCK_MONOTONIC) + TIMEOUT_USEC;
++        end = usec_add(now(CLOCK_MONOTONIC), TIMEOUT_USEC);
+ 
+         while (left > 0) {
+                 ssize_t n;
+@@ -308,19 +309,21 @@ static int write_to_terminal(const char *tty, const char *message) {
+                 int k;
+ 
+                 t = now(CLOCK_MONOTONIC);
+-
+                 if (t >= end)
+                         return -ETIME;
+ 
+                 k = fd_wait_for_event(fd, POLLOUT, end - t);
+-                if (k < 0)
++                if (k < 0) {
++                        if (ERRNO_IS_TRANSIENT(k))
++                                continue;
+                         return k;
++                }
+                 if (k == 0)
+                         return -ETIME;
+ 
+                 n = write(fd, p, left);
+                 if (n < 0) {
+-                        if (errno == EAGAIN)
++                        if (ERRNO_IS_TRANSIENT(errno))
+                                 continue;
+ 
+                         return -errno;

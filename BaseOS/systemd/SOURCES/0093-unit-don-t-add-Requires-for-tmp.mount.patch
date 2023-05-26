@@ -1,0 +1,38 @@
+From c5f1cc8f23dfe545c0d03eae88bbd91e8a1db226 Mon Sep 17 00:00:00 2001
+From: Lukas Nykryn <lnykryn@redhat.com>
+Date: Mon, 5 Sep 2016 12:47:09 +0200
+Subject: [PATCH] unit: don't add Requires for tmp.mount
+
+rhel-only
+Related: #2138081
+---
+ src/core/mount.c | 2 +-
+ src/core/unit.c  | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/mount.c b/src/core/mount.c
+index 5e8a6ead61..ba55f7dd86 100644
+--- a/src/core/mount.c
++++ b/src/core/mount.c
+@@ -336,7 +336,7 @@ static int mount_add_mount_dependencies(Mount *m) {
+                 if (r < 0)
+                         return r;
+ 
+-                if (UNIT(m)->fragment_path) {
++                if (UNIT(m)->fragment_path && !streq(UNIT(m)->id, "tmp.mount")) {
+                         /* If we have fragment configuration, then make this dependency required */
+                         r = unit_add_dependency(other, UNIT_REQUIRES, UNIT(m), true, UNIT_DEPENDENCY_PATH);
+                         if (r < 0)
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 1fad0b0ac8..5af44aaf4a 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -1541,7 +1541,7 @@ static int unit_add_mount_dependencies(Unit *u) {
+                                 return r;
+                         changed = changed || r > 0;
+ 
+-                        if (m->fragment_path) {
++                        if (m->fragment_path && !streq(m->id, "tmp.mount")) {
+                                 r = unit_add_dependency(u, UNIT_REQUIRES, m, true, di.origin_mask);
+                                 if (r < 0)
+                                         return r;

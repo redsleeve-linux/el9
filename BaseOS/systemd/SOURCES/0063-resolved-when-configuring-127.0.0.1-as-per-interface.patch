@@ -1,0 +1,34 @@
+From d8d96bce62e8597b8d35bed1d9e9cb103336fd6b Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 18 Nov 2022 16:52:06 +0100
+Subject: [PATCH] resolved: when configuring 127.0.0.1 as per-interface DNS
+ server, contact it via "lo" always
+
+ussually if you specify a DNS server on some interface then we'll use
+that interface to talk to it. Let's override this for localhost
+addresses, as they only really make sense on "lo".
+
+Fixes: #25397
+(cherry picked from commit 6e32414a66ff8dbcef233981a7066684d903ee9f)
+
+Related: #2138081
+---
+ src/resolve/resolved-dns-server.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/resolve/resolved-dns-server.c b/src/resolve/resolved-dns-server.c
+index 04a4f53ed0..8ff513fa33 100644
+--- a/src/resolve/resolved-dns-server.c
++++ b/src/resolve/resolved-dns-server.c
+@@ -648,6 +648,11 @@ int dns_server_adjust_opt(DnsServer *server, DnsPacket *packet, DnsServerFeature
+ int dns_server_ifindex(const DnsServer *s) {
+         assert(s);
+ 
++        /* For loopback addresses, go via the loopback interface, regardless which interface this is linked
++         * to. */
++        if (in_addr_is_localhost(s->family, &s->address))
++                return LOOPBACK_IFINDEX;
++
+         /* The link ifindex always takes precedence */
+         if (s->link)
+                 return s->link->ifindex;

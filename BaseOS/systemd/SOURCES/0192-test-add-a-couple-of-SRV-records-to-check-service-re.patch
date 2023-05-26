@@ -1,0 +1,77 @@
+From 87d5bd17be4893556652225ae44889ff7093a0aa Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 8 Jul 2022 18:12:47 +0200
+Subject: [PATCH] test: add a couple of SRV records to check service resolution
+
+(cherry picked from commit 3095bd2ccaf55f7c20567b990844dc2d9b451376)
+
+Related: #2138081
+---
+ test/knot-data/zones/signed.test.zone    |  8 ++++++++
+ test/knot-data/zones/untrusted.test.zone |  4 ++++
+ test/units/testsuite-75.sh               | 17 +++++++++++++++++
+ 3 files changed, 29 insertions(+)
+
+diff --git a/test/knot-data/zones/signed.test.zone b/test/knot-data/zones/signed.test.zone
+index fa6706205a..6ddeb0048e 100644
+--- a/test/knot-data/zones/signed.test.zone
++++ b/test/knot-data/zones/signed.test.zone
+@@ -49,3 +49,11 @@ follow11.yet.so.far   CNAME follow12.getting.hot.signed.test.
+ follow12.getting.hot  CNAME follow13.almost.final.signed.test.
+ follow13.almost.final CNAME follow14.final.signed.test.
+ follow14.final        A     10.0.0.14
++
++myservice             A     10.0.0.20
++myservice             AAAA  fd00:dead:beef:cafe::17
++_mysvc._tcp           SRV   10 5 1234 myservice
++
++_invalidsvc._udp      SRV   5 5 1111 invalidservice
++
++_untrustedsvc._udp    SRV   5 5 1111 myservice.untrusted.test.
+diff --git a/test/knot-data/zones/untrusted.test.zone b/test/knot-data/zones/untrusted.test.zone
+index cf0dec5296..a0dca62ca8 100644
+--- a/test/knot-data/zones/untrusted.test.zone
++++ b/test/knot-data/zones/untrusted.test.zone
+@@ -20,3 +20,7 @@ $ORIGIN untrusted.test.
+                       A    10.0.0.121
+                       AAAA fd00:dead:beef:cafe::121
+ mail                  A    10.0.0.122
++
++myservice             A    10.0.0.123
++                      AAAA fd00:dead:beef:cafe::123
++_mysvc._tcp           SRV  10 5 1234 myservice
+diff --git a/test/units/testsuite-75.sh b/test/units/testsuite-75.sh
+index 76b8f5b3c7..66cc6c9d66 100755
+--- a/test/units/testsuite-75.sh
++++ b/test/units/testsuite-75.sh
+@@ -367,6 +367,19 @@ grep -qF "status: NXDOMAIN" "$RUN_OUT"
+ run resolvectl query -t TXT this.should.be.authenticated.wild.signed.test
+ grep -qF 'this.should.be.authenticated.wild.signed.test IN TXT "this is a wildcard"' "$RUN_OUT"
+ grep -qF "authenticated: yes" "$RUN_OUT"
++# Check SRV support
++run resolvectl service _mysvc._tcp signed.test
++grep -qF "myservice.signed.test:1234" "$RUN_OUT"
++grep -qF "10.0.0.20" "$RUN_OUT"
++grep -qF "fd00:dead:beef:cafe::17" "$RUN_OUT"
++grep -qF "authenticated: yes" "$RUN_OUT"
++(! run resolvectl service _invalidsvc._udp signed.test)
++grep -qE "invalidservice\.signed\.test' not found" "$RUN_OUT"
++run resolvectl service _untrustedsvc._udp signed.test
++grep -qF "myservice.untrusted.test:1111" "$RUN_OUT"
++grep -qF "10.0.0.123" "$RUN_OUT"
++grep -qF "fd00:dead:beef:cafe::123" "$RUN_OUT"
++grep -qF "authenticated: yes" "$RUN_OUT"
+ 
+ # DNSSEC validation with multiple records of the same type for the same name
+ # Issue: https://github.com/systemd/systemd/issues/22002
+@@ -479,6 +492,10 @@ grep -qF "untrusted.test:" "$RUN_OUT"
+ grep -qF "10.0.0.121" "$RUN_OUT"
+ grep -qF "fd00:dead:beef:cafe::121" "$RUN_OUT"
+ grep -qF "authenticated: no" "$RUN_OUT"
++run resolvectl service _mysvc._tcp untrusted.test
++grep -qF "myservice.untrusted.test:1234" "$RUN_OUT"
++grep -qF "10.0.0.123" "$RUN_OUT"
++grep -qF "fd00:dead:beef:cafe::123" "$RUN_OUT"
+ 
+ # Issue: https://github.com/systemd/systemd/issues/19472
+ # 1) Query for a non-existing RR should return NOERROR + NSEC (?), not NXDOMAIN

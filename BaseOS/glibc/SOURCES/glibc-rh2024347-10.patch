@@ -1,0 +1,74 @@
+Downstream adjustment: Change return type of
+rseq_register_current_thread to bool.  Upstream, this was part of the
+commit that introduced the ABI symbols.
+
+commit a41c8e92350e744a4bc639df5025153d05263e7f
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Dec 9 09:49:32 2021 +0100
+
+    nptl: rseq failure after registration on main thread is fatal
+
+    This simplifies the application programming model.
+
+    Browser sandboxes have already been fixed:
+
+      Sandbox is incompatible with rseq registration
+      <https://bugzilla.mozilla.org/show_bug.cgi?id=1651701>
+
+      Allow rseq in the Linux sandboxes. r=gcp
+      <https://hg.mozilla.org/mozilla-central/rev/042425712eb1>
+
+      Sandbox needs to support rseq system call
+      <https://bugs.chromium.org/p/chromium/issues/detail?id=1104160>
+
+      Linux sandbox: Allow rseq(2)
+      <https://chromium.googlesource.com/chromium/src.git/+/230675d9ac8f1>
+
+    Reviewed-by: Szabolcs Nagy <szabolcs.nagy@arm.com>
+
+diff --git a/nptl/pthread_create.c b/nptl/pthread_create.c
+index f405fa356c2955ce..109c5e3dc78c9aa2 100644
+--- a/nptl/pthread_create.c
++++ b/nptl/pthread_create.c
+@@ -371,7 +371,8 @@ start_thread (void *arg)
+   /* Register rseq TLS to the kernel.  */
+   {
+     bool do_rseq = THREAD_GETMEM (pd, flags) & ATTR_FLAG_DO_RSEQ;
+-    rseq_register_current_thread (pd, do_rseq);
++    if (!rseq_register_current_thread (pd, do_rseq) && do_rseq)
++      __libc_fatal ("Fatal glibc error: rseq registration failed\n");
+   }
+ 
+ #ifndef __ASSUME_SET_ROBUST_LIST
+diff --git a/sysdeps/unix/sysv/linux/rseq-internal.h b/sysdeps/unix/sysv/linux/rseq-internal.h
+index 15bc7ffd6eda632d..6a3441f2cc49e7c4 100644
+--- a/sysdeps/unix/sysv/linux/rseq-internal.h
++++ b/sysdeps/unix/sysv/linux/rseq-internal.h
+@@ -26,7 +26,7 @@
+ #include <sys/rseq.h>
+ 
+ #ifdef RSEQ_SIG
+-static inline void
++static inline bool
+ rseq_register_current_thread (struct pthread *self, bool do_rseq)
+ {
+   if (do_rseq)
+@@ -35,15 +35,17 @@ rseq_register_current_thread (struct pthread *self, bool do_rseq)
+                                        sizeof (self->rseq_area),
+                                        0, RSEQ_SIG);
+       if (!INTERNAL_SYSCALL_ERROR_P (ret))
+-        return;
++        return true;
+     }
+   THREAD_SETMEM (self, rseq_area.cpu_id, RSEQ_CPU_ID_REGISTRATION_FAILED);
++  return false;
+ }
+ #else /* RSEQ_SIG */
+ static inline void
+ rseq_register_current_thread (struct pthread *self, bool do_rseq)
+ {
+   THREAD_SETMEM (self, rseq_area.cpu_id, RSEQ_CPU_ID_REGISTRATION_FAILED);
++  return false;
+ }
+ #endif /* RSEQ_SIG */
+ 

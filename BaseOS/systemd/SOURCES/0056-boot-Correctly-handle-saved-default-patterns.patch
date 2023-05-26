@@ -1,0 +1,29 @@
+From f740d67fd0ed36bc3318d724ccb1fdfca2f04125 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Sun, 4 Sep 2022 00:22:23 +0200
+Subject: [PATCH] boot: Correctly handle @saved default patterns
+
+(cherry picked from commit 7941f11acb67c4f8ec857a791a51f3148af67b32)
+
+Related: #2138081
+---
+ src/shared/bootspec.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/shared/bootspec.c b/src/shared/bootspec.c
+index 6a34b10c04..d3cfb41a12 100644
+--- a/src/shared/bootspec.c
++++ b/src/shared/bootspec.c
+@@ -994,6 +994,12 @@ static int boot_config_find(const BootConfig *config, const char *id) {
+         if (!id)
+                 return -1;
+ 
++        if (id[0] == '@') {
++                if (!strcaseeq(id, "@saved"))
++                        return -1;
++                id = config->entry_selected;
++        }
++
+         for (size_t i = 0; i < config->n_entries; i++)
+                 if (fnmatch(id, config->entries[i].id, FNM_CASEFOLD) == 0)
+                         return i;

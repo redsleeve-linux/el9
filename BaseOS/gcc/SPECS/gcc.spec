@@ -1,10 +1,10 @@
-%global DATE 20220421
-%global gitrev 1d3172725999deb0dca93ac70393ed9a0ad0da3f
+%global DATE 20221121
+%global gitrev 643e61c61b308f9c572da4ccd5f730fb
 %global gcc_version 11.3.1
 %global gcc_major 11
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 2
+%global gcc_release 4
 %global nvptx_tools_gitrev 5f6f343a302d620b0868edab376c00b15741e39e
 %global newlib_cygwin_gitrev 50e2a63b04bdd018484605fbb954fd1bd5147fa0
 %global _unpackaged_files_terminate_build 0
@@ -42,7 +42,7 @@
 %else
 %global build_go 0
 %endif
-%ifarch %{ix86} x86_64 %{arm} %{mips} s390 s390x riscv64
+%ifarch %{ix86} x86_64 %{arm} aarch64 %{mips} s390 s390x riscv64
 %global build_d 1
 %else
 %global build_d 0
@@ -113,10 +113,22 @@
 %ifarch x86_64
 %global multilib_32_arch i686
 %endif
+%if 0%{?rhel} == 9
+%ifarch x86_64
+%global build_cross 1
+%else
+%global build_cross 0
+%endif
+%else
+%dnl rhel != 9
+%global build_cross 0
+%endif
+# TODO: Add ppc64le-redhat-linux s390x-redhat-linux later.
+%global cross_targets aarch64-redhat-linux
 Summary: Various compilers (C, C++, Objective-C, ...)
 Name: gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.1%{?dist}.redsleeve
+Release: %{gcc_release}.3%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -273,9 +285,8 @@ Patch20: gcc11-relocatable-pch.patch
 Patch21: gcc11-dejagnu-multiline.patch
 Patch23: gcc11-pie.patch
 Patch24: gcc11-bind-now.patch
-Patch25: gcc11-pr105331.patch
-# This can go once we rebase from GCC 11.
-Patch26: gcc11-rh2106262.patch
+Patch25: gcc11-detect-sapphirerapids.patch
+Patch26: gcc11-Wmismatched-dealloc-doc.patch
 
 Patch100: gcc11-fortran-fdec-duplicates.patch
 Patch101: gcc11-fortran-flogical-as-integer.patch
@@ -797,6 +808,45 @@ This package adds a version of the annobin plugin for gcc.  This version
 of the plugin is explicitly built by the same version of gcc that is installed
 so that there cannot be any synchronization problems.
 
+%package -n cross-gcc-aarch64
+Summary: Cross targeted AArch64 gcc for developer use.  Not intended for production.
+Provides: cross-gcc-aarch64 = %{version}-%{release}
+%if %{build_cross}
+Requires: cross-binutils-aarch64 >= 2.35
+BuildRequires: sysroot-aarch64-el9-glibc >= 2.34
+BuildRequires: cross-binutils-aarch64 >= 2.35
+%endif
+# Don't provide e.g. liblto_plugin.so()(64bit).
+AutoReqProv: no
+
+%description -n cross-gcc-aarch64
+This package contains a version of gcc that can compile code for AArch64
+(cross compiler).  This cross compiler is intended for developers to use
+during application development.  This cross compiler is not intended for
+production use, and output binary artifacts should not be used in
+production.  Generated binary artifacts contain binary annotations that
+mark them as cross compiled.
+
+%package -n cross-gcc-c++-aarch64
+Summary: Cross targeted AArch64 gcc-c++ for developer use.  Not intended for production.
+Provides: cross-gcc-c++-aarch64 = %{version}-%{release}
+%if %{build_cross}
+Requires: cross-gcc-aarch64 = %{version}-%{release}
+BuildRequires: sysroot-aarch64-el9-glibc >= 2.34
+BuildRequires: cross-binutils-aarch64 >= 2.35
+%endif
+# ??? Otherwise this subpackage couldn't be installed, depends on libm.so
+# and libgcc_s.so
+AutoReqProv: no
+
+%description -n cross-gcc-c++-aarch64
+This package contains a version of g++ that can compile code for AArch64
+(cross compiler).  This cross compiler is intended for developers to use
+during application development.  This cross compiler is not intended for
+production use, and output binary artifacts should not be used in
+production.  Generated binary artifacts contain binary annotations that
+mark them as cross compiled.
+
 %prep
 %setup -q -n gcc-%{version}-%{DATE} -a 1 -a 2 -a 3
 %patch0 -p0 -b .hack~
@@ -827,8 +877,8 @@ so that there cannot be any synchronization problems.
 %patch21 -p1 -b .dejagnu-multiline~
 %patch23 -p1 -b .pie~
 %patch24 -p1 -b .now~
-%patch25 -p0 -b .pr105331~
-%patch26 -p1 -b .rh2106262~
+%patch25 -p1 -b .detect-spr~
+%patch26 -p1 -b .Wmismatched-dealloc-doc~
 
 %if 0%{?rhel} >= 9
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -847,7 +897,9 @@ so that there cannot be any synchronization problems.
 rm -f gcc/testsuite/go.test/test/fixedbugs/issue19182.go
 %endif
 
-echo 'Red Hat %{version}-%{gcc_release}' > gcc/DEV-PHASE
+echo 'Red Hat %{version}-%{gcc_release}' > gcc/DEV-PHASE.native
+echo 'Red Hat %{version}-%{gcc_release} cross from %{_arch}' > gcc/DEV-PHASE.cross
+cp -p gcc/DEV-PHASE{.native,}
 
 cp -a libstdc++-v3/config/cpu/i{4,3}86/atomicity.h
 
@@ -986,10 +1038,36 @@ enablelgo=,go
 %if %{build_d}
 enableld=,d
 %endif
-CONFIGURE_OPTS="\
+# CONFIGURE_OPTS_BASE are the configure options common to the native and cross
+# builds.  E.g., --prefix.  This cannot include arch-specific configure options.
+# CONFIGURE_OPTS_NATIVE are the configure options used for the native build
+# (that is, the regular non-cross build) and libgccjit.  This includes arch-specific
+# configure options (default -march and such).
+# CONFIGURE_OPTS = CONFIGURE_OPTS_BASE + CONFIGURE_OPTS_NATIVE
+# CONFIGURE_OPTS_CROSS are the configure options common to all the cross
+# builds.  E.g., only build C/C++.  This shall not be used for the native build.
+# Each cross compiler's configure options will be:
+# CONFIGURE_OPTS_BASE + CONFIGURE_OPTS_CROSS + --target= + --with-sysroot= + <arch-specific-opts>
+# It it very important that the arch-specific configure options used in
+# CONFIGURE_OPTS_NATIVE are in lockstep with the <arch-specific-opts>
+# used in the cross builds.
+CONFIGURE_OPTS_BASE="\
 	--prefix=%{_prefix} --mandir=%{_mandir} --infodir=%{_infodir} \
 	--with-bugurl=http://bugzilla.redhat.com/bugzilla \
 	--enable-shared --enable-threads=posix --enable-checking=release \
+	--with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions \
+	--enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only \
+	--enable-plugin --enable-initfini-array \
+%if %{build_isl}
+	--with-isl=`pwd`/isl-install \
+%else
+	--without-isl \
+%endif
+	"
+
+# NB: When updating CONFIGURE_OPTS_NATIVE, make sure to update the cross
+# compiler options as well (look for CONFIGURE_OPTS_FOR_ARCH).
+CONFIGURE_OPTS_NATIVE="\
 %ifarch ppc64le
 	--enable-targets=powerpcle-linux \
 %endif
@@ -1006,16 +1084,8 @@ CONFIGURE_OPTS="\
 %else
 	--enable-multilib \
 %endif
-	--with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions \
-	--enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only \
 %ifnarch %{mips}
 	--with-linker-hash-style=gnu \
-%endif
-	--enable-plugin --enable-initfini-array \
-%if %{build_isl}
-	--with-isl=`pwd`/isl-install \
-%else
-	--without-isl \
 %endif
 %if %{build_offload_nvptx}
 	--enable-offload-targets=nvptx-none \
@@ -1112,9 +1182,6 @@ CONFIGURE_OPTS="\
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
 %endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
-%endif
 %ifarch mips mipsel
 	--with-arch=mips32r2 --with-fp-32=xx \
 %endif
@@ -1132,6 +1199,14 @@ CONFIGURE_OPTS="\
 	--with-build-config=bootstrap-lto --enable-link-serialization=1 \
 %endif
 %endif
+	"
+CONFIGURE_OPTS="$CONFIGURE_OPTS_BASE $CONFIGURE_OPTS_NATIVE"
+
+CONFIGURE_OPTS_CROSS="\
+	--enable-languages=c,c++ --disable-bootstrap --disable-libsanitizer \
+	--host=%{gcc_target_platform} --build=%{gcc_target_platform} \
+	--disable-multilib --disable-libstdcxx-pch --disable-libcc1 \
+	--enable-host-pie --enable-host-bind-now \
 	"
 
 CC="$CC" CXX="$CXX" CFLAGS="$OPT_FLAGS" \
@@ -1172,6 +1247,55 @@ rm Makefile.orig
 make jit.sphinx.html
 make jit.sphinx.install-html jit_htmldir=`pwd`/../../rpm.doc/libgccjit-devel/html
 cd ..
+
+# Build cross compilers here.
+%if %{build_cross}
+echo ==================== BUILD CROSS =========================
+# Get out of obj-%{gcc_target_platform}.
+pushd ..
+for crossarch in %{cross_targets}; do
+  mkdir obj-$crossarch
+  cd obj-$crossarch
+
+  case $crossarch in
+    aarch64*)
+      CONFIGURE_OPTS_FOR_ARCH=""
+      ;;
+    s390x*)
+      CONFIGURE_OPTS_FOR_ARCH=""
+      ;;
+    ppc64le*)
+      CONFIGURE_OPTS_FOR_ARCH=""
+      ;;
+    *)
+      echo >&2 "ERROR: unknown cross arch $crossarch"
+      exit 1
+      ;;
+  esac
+
+  # Temporarily replace DEV-PHASE.
+  cp -p ../gcc/DEV-PHASE{.cross,}
+
+  CC="$CC" CXX="$CXX" CFLAGS="$OPT_FLAGS" \
+	  CXXFLAGS="`echo " $OPT_FLAGS " | sed 's/ -Wall / /g;s/ -fexceptions / /g' \
+		    | sed 's/ -Wformat-security / -Wformat -Wformat-security /'`" \
+	  XCFLAGS="$OPT_FLAGS" TCFLAGS="$OPT_FLAGS" \
+	  ../configure $CONFIGURE_OPTS_BASE $CONFIGURE_OPTS_CROSS \
+	  --with-sysroot=/usr/$crossarch/sys-root/el9/ \
+	  --with-gxx-include-dir="/usr/$crossarch/sys-root/el9/%{_prefix}/include/c++/%{gcc_major}" \
+	  --target=$crossarch \
+	  $CONFIGURE_OPTS_FOR_ARCH
+  make %{?_smp_mflags} LDFLAGS_FOR_TARGET=-Wl,-z,relro,-z,now
+
+  # Restore DEV-PHASE.
+  cp -p ../gcc/DEV-PHASE{.native,}
+  # Out of obj-$crossarch.
+  cd ..
+done
+# Go back to obj-%{gcc_target_platform}.
+popd
+echo ==================== BUILD CROSS END =========================
+%endif
 
 %if %{build_isl}
 cp -a isl-install/lib/libisl.so.15 gcc/
@@ -1371,6 +1495,126 @@ make prefix=%{buildroot}%{_prefix} mandir=%{buildroot}%{_mandir} \
   infodir=%{buildroot}%{_infodir} install
 %if %{build_ada}
 chmod 644 %{buildroot}%{_infodir}/gnat*
+%endif
+
+%if %{build_cross}
+echo ==================== INSTALL CROSS =========================
+# Our of obj-%{gcc_target_platform}.
+pushd ..
+for crossarch in %{cross_targets}; do
+  cd obj-$crossarch
+
+  CROSS_LIBPATH=%{buildroot}%{_prefix}/lib/gcc/$crossarch/%{gcc_major}/
+
+  # Temporarily replace DEV-PHASE.
+  cp -p ../gcc/DEV-PHASE{.cross,}
+
+  # --with-gxx-include-dir= doesn't prefix its argument with $(DESTDIR)
+  # and you can't install things into /usr unless you're root.
+  mkdir scratch
+  scratchdir=`pwd`/scratch
+  pushd $crossarch/libstdc++-v3
+  for i in `find . -name Makefile`; do
+    cp -a $i $i.save
+    sed -i -e 's?^gxx_include_dir = .*$?gxx_include_dir = '$scratchdir'?' $i
+    touch -r $i.save $i
+  done
+  popd
+
+  # Use -j1, because build-many-glibcs says:
+  # Parallel "make install" for GCC has race conditions that can
+  # cause it to fail; see
+  # <https://gcc.gnu.org/bugzilla/show_bug.cgi?id=42980>.  Such
+  # problems are not known for binutils, but doing the
+  # installation in parallel within a particular toolchain build
+  # (as opposed to installation of one toolchain from
+  # build-many-glibcs.py running in parallel to the installation
+  # of other toolchains being built) is not known to be
+  # significantly beneficial, so it is simplest just to disable
+  # parallel install for cross tools here.
+  make -j1 prefix=%{buildroot}%{_prefix} mandir=%{buildroot}%{_mandir} \
+    infodir=%{buildroot}%{_infodir} install
+
+  # Restore DEV-PHASE.
+  cp -p ../gcc/DEV-PHASE{.native,}
+
+  # Restore Makefiles with the old gxx_include_dir.
+  pushd $crossarch/libstdc++-v3
+  for i in `find . -name Makefile`; do
+    mv -f $i.save $i
+  done
+  popd
+  # We're not shipping C++ headers; nuke 'em.
+  rm -rf $scratchdir
+
+  # Move libgomp.spec to where it belongs for %files.
+  mv $crossarch/libgomp/libgomp.spec $CROSS_LIBPATH
+  # Likewise for libitm.spec
+  %if %{build_libitm}
+  mv $crossarch/libitm/libitm.spec $CROSS_LIBPATH
+  %endif
+
+  cd ..
+
+  pushd $CROSS_LIBPATH
+  mv include-fixed/syslimits.h include/syslimits.h
+  mv include-fixed/limits.h include/limits.h
+  popd
+
+  echo '/* GNU ld script
+   Use the shared library, but some functions are only in
+   the static library.  */
+OUTPUT_FORMAT(elf64-littleaarch64)
+GROUP ( =/lib64/libgcc_s.so.1 libgcc.a )' > $CROSS_LIBPATH/libgcc_s.so
+
+  echo '/* GNU ld script
+   Use the shared library from sysroot.  */
+OUTPUT_FORMAT(elf64-littleaarch64)
+INPUT ( =%{_prefix}/lib64/libgomp.so.1 )' > $CROSS_LIBPATH/libgomp.so
+
+  echo '/* GNU ld script
+   Use the shared library from sysroot.  */
+OUTPUT_FORMAT(elf64-littleaarch64)
+INPUT ( =/%{_prefix}/lib64/libstdc++.so.6 )' > $CROSS_LIBPATH/libstdc++.so
+
+  echo "/* GNU ld script
+   Use the static library from sysroot.  */
+INPUT( =%{_prefix}/lib/gcc/$crossarch/%{gcc_major}/libstdc++.a )" > $CROSS_LIBPATH/libstdc++.a
+
+  echo "/* GNU ld script
+   Use the static library from sysroot.  */
+INPUT( =%{_prefix}/lib/gcc/$crossarch/%{gcc_major}/libsupc++.a )" > $CROSS_LIBPATH/libsupc++.a
+
+  echo '/* GNU ld script
+   Use the shared library from sysroot.  */
+OUTPUT_FORMAT(elf64-littleaarch64)
+INPUT ( =%{_prefix}/lib64/libatomic.so.1 )' > $CROSS_LIBPATH/libatomic.so
+
+  echo "/* GNU ld script
+   Use the static library from sysroot.  */
+INPUT( =%{_prefix}/lib/gcc/$crossarch/%{gcc_major}/libatomic.a )" > $CROSS_LIBPATH/libatomic.a
+
+  echo '/* GNU ld script
+   Use the shared library from sysroot.  */
+OUTPUT_FORMAT(elf64-littleaarch64)
+INPUT ( =%{_prefix}/lib64/libitm.so.1 )' > $CROSS_LIBPATH/libitm.so
+
+  echo "/* GNU ld script
+   Use the static library from sysroot.  */
+INPUT( =%{_prefix}/lib/gcc/$crossarch/%{gcc_major}/libitm.a )" > $CROSS_LIBPATH/libitm.a
+
+  # Help plugins find out nvra.
+  echo gcc-%{version}-%{release}.%{_arch} > $CROSS_LIBPATH/rpmver
+
+  # TODO
+  # Add symlink to lto plugin in the binutils plugin directory.
+  #%{__mkdir_p} %{buildroot}%{_libdir}/bfd-plugins/
+  #ln -s ../../libexec/gcc/$crossarch/%{gcc_major}/liblto_plugin.so \
+  #   %{buildroot}%{_libdir}/$crossarch/bfd-plugins/
+done
+# Back to obj-%{gcc_target_platform}.
+popd
+echo ==================== INSTALL CROSS END =========================
 %endif
 
 FULLPATH=%{buildroot}%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}
@@ -3276,9 +3520,123 @@ end
 %{ANNOBIN_GCC_PLUGIN_DIR}/gcc-annobin.so.0
 %{ANNOBIN_GCC_PLUGIN_DIR}/gcc-annobin.so.0.0.0
 
+%if %{build_cross}
+%files -n cross-gcc-aarch64
+%{_prefix}/bin/aarch64-redhat-linux-cpp
+%{_prefix}/bin/aarch64-redhat-linux-gcc
+%{_prefix}/bin/aarch64-redhat-linux-gcc-%{gcc_major}
+%{_prefix}/bin/aarch64-redhat-linux-gcc-ar
+%{_prefix}/bin/aarch64-redhat-linux-gcc-nm
+%{_prefix}/bin/aarch64-redhat-linux-gcc-ranlib
+%{_prefix}/bin/aarch64-redhat-linux-gcov*
+%{_prefix}/bin/aarch64-redhat-linux-lto-dump
+%{_prefix}/libexec/gcc/aarch64-redhat-linux/%{gcc_major}/cc1
+%{_prefix}/libexec/gcc/aarch64-redhat-linux/%{gcc_major}/collect2
+%{_prefix}/libexec/gcc/aarch64-redhat-linux/%{gcc_major}/lto1
+%{_prefix}/libexec/gcc/aarch64-redhat-linux/%{gcc_major}/lto-wrapper
+%{_prefix}/libexec/gcc/aarch64-redhat-linux/%{gcc_major}/liblto_plugin.so
+%dir %{_prefix}/lib/gcc
+%dir %{_prefix}/lib/gcc/aarch64-redhat-linux
+%dir %{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}
+%dir %{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/include
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/crt*.o
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libgcc.a
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libgcc_eh.a
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libgcov.a
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/include/*.h
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/rpmver
+# These are here for ld(1) purposes only.
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libgcc_s.so
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libgomp.so
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libgomp.spec
+%if %{build_libatomic}
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libatomic.so
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libatomic.a
+%endif
+%if %{build_libitm}
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libitm.so
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libitm.a
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libitm.spec
+%endif
+
+%files -n cross-gcc-c++-aarch64
+%{_prefix}/bin/aarch64-redhat-linux-c++
+%{_prefix}/bin/aarch64-redhat-linux-g++
+%{_prefix}/libexec/gcc/aarch64-redhat-linux/%{gcc_major}/cc1plus
+%{_prefix}/libexec/gcc/aarch64-redhat-linux/%{gcc_major}/g++-mapper-server
+# For ld(1) purposes only.
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libstdc++.so
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libstdc++.a
+%{_prefix}/lib/gcc/aarch64-redhat-linux/%{gcc_major}/libsupc++.a
+%dnl build_cross
+%endif
+
 %changelog
-* Mon Nov 28 2022 Jacco Ligthart <jacco@redsleeve.org> 11.3.1-2.1.redsleeve
-- added config options for armv6hl
+* Wed Dec 21 2022 Marek Polacek <polacek@redhat.com> 11.3.1-4.3
+- compile the cross binaries as PIE/-z now (#2155452)
+
+* Mon Dec 19 2022 Marek Polacek <polacek@redhat.com> 11.3.1-4.2
+- ship libitm.spec in cross-gcc (#2154462)
+
+* Tue Dec 13 2022 Marek Polacek <polacek@redhat.com> 11.3.1-4.1
+- add cross compiler functionality for non-production uses (#2149650)
+
+* Tue Nov 22 2022 Marek Polacek <polacek@redhat.com> 11.3.1-4
+- update from releases/gcc-11-branch (#2117632)
+  - PRs analyzer/105252, analyzer/105365, analyzer/105366, c++/65211,
+	c++/82980, c++/86193, c++/90107, c++/97296, c++/101442, c++/101698,
+	c++/102071, c++/102177, c++/102300, c++/102307, c++/102479,
+	c++/102629, c++/104066, c++/104142, c++/104646, c++/104669,
+	c++/105245, c++/105265, c++/105289, c++/105304, c++/105321,
+	c++/105386, c++/105398, c++/105725, c++/105761, c++/105774,
+	c++/105795, c++/105852, c++/105925, c++/106024, c++/106361,
+	c++/107358, c/41041, c/106016, c/106981, c/107001, d/106139,
+	d/106638, debug/106261, fortran/82868, fortran/100029, fortran/100040,
+	fortran/100097, fortran/100098, fortran/100132, fortran/100136,
+	fortran/100245, fortran/103413, fortran/103504, fortran/103693,
+	fortran/103694, fortran/104313, fortran/104849, fortran/105012,
+	fortran/105230, fortran/105243, fortran/105310, fortran/105633,
+	fortran/105691, fortran/105813, fortran/105954, fortran/106121,
+	fortran/106817, fortran/106857, fortran/106985, fortran/106986,
+	fortran/107054, ipa/100413, ipa/105600, ipa/105739, libgomp/106045,
+	libstdc++/65018, libstdc++/84110, libstdc++/93602, libstdc++/96592,
+	libstdc++/99290, libstdc++/100823, libstdc++/101709, libstdc++/102447,
+	libstdc++/103664, libstdc++/103848, libstdc++/103853,
+	libstdc++/103911, libstdc++/103992, libstdc++/104217,
+	libstdc++/104443, libstdc++/104602, libstdc++/104731,
+	libstdc++/105128, libstdc++/105284, libstdc++/105375,
+	libstdc++/105502, libstdc++/105671, libstdc++/105915,
+	libstdc++/106162, libstdc++/106248, libstdc++/106320,
+	libstdc++/106607, libstdc++/106695, lto/106334, lto/106540,
+	middle-end/103193, middle-end/104869, middle-end/104966,
+	middle-end/105140, middle-end/105998, middle-end/106027,
+	middle-end/106030, middle-end/106144, middle-end/106331,
+	middle-end/106492, preprocessor/97498, preprocessor/105732,
+	rtl-optimization/104637, rtl-optimization/105041,
+	rtl-optimization/105333, rtl-optimization/105559,
+	rtl-optimization/106032, rtl-optimization/106187, sanitizer/105396,
+	sanitizer/105729, target/96072, target/99184, target/99685,
+	target/101322, target/101891, target/102059, target/102146,
+	target/103197, target/103353, target/104257, target/104829,
+	target/105147, target/105162, target/105209, target/105292,
+	target/105339, target/105349, target/105463, target/105472,
+	target/105854, target/105879, target/105970, target/105981,
+	target/106017, target/106091, target/106355, target/106491,
+	target/106721, target/107061, target/107064, target/107183,
+	target/107248, target/107304, target/107364, target/107748,
+	testsuite/105095, testsuite/105266, testsuite/105433,
+	testsuite/106345, tree-optimization/103116, tree-optimization/105148,
+	tree-optimization/105163, tree-optimization/105173,
+	tree-optimization/105250, tree-optimization/105263,
+	tree-optimization/105312, tree-optimization/105368,
+	tree-optimization/105431, tree-optimization/105437,
+	tree-optimization/105528, tree-optimization/105618,
+	tree-optimization/105726, tree-optimization/105860,
+	tree-optimization/106112, tree-optimization/106131,
+	tree-optimization/106189, tree-optimization/106513,
+	tree-optimization/106892, tree-optimization/106934
+- fix the detection of Sapphire Rapids in host_detect_local_cpu
+- fix -Wmismatched-dealloc documentation (#2116635)
 
 * Tue Jul 12 2022 Marek Polacek <polacek@redhat.com> 11.3.1-2.1
 - fix handling of invalid ranges in std::regex (#2106262)

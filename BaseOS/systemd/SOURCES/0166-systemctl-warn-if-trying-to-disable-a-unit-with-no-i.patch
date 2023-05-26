@@ -1,0 +1,227 @@
+From 201c651eaaf886064987272cc88b03995fd2715d Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Fri, 18 Nov 2022 15:43:34 +0800
+Subject: [PATCH] systemctl: warn if trying to disable a unit with no install
+ info
+
+Trying to disable a unit with no install info is mostly useless, so
+adding a warning like we do for enable (with the new dbus method
+'DisableUnitFilesWithFlagsAndInstallInfo()'). Note that it would
+still find and remove symlinks to the unit in /etc, regardless of
+whether it has install info or not, just like before. And if there are
+actually files to remove, we suppress the warning.
+
+Fixes #17689
+
+(cherry picked from commit bf1bea43f15b04152a3948702ba1695a0835c2bf)
+
+Related: #2141979
+---
+ man/org.freedesktop.systemd1.xml | 13 ++++++++++++-
+ src/core/dbus-manager.c          | 21 ++++++++++++++++-----
+ src/shared/install.c             | 21 +++++++++++++++++----
+ src/systemctl/systemctl-enable.c | 15 ++++++++++-----
+ 4 files changed, 55 insertions(+), 15 deletions(-)
+
+diff --git a/man/org.freedesktop.systemd1.xml b/man/org.freedesktop.systemd1.xml
+index 5e08b35234..c2f70870c7 100644
+--- a/man/org.freedesktop.systemd1.xml
++++ b/man/org.freedesktop.systemd1.xml
+@@ -209,6 +209,10 @@ node /org/freedesktop/systemd1 {
+       DisableUnitFilesWithFlags(in  as files,
+                                 in  t flags,
+                                 out a(sss) changes);
++      DisableUnitFilesWithFlagsAndInstallInfo(in  as files,
++                                              in  t flags,
++                                              out b carries_install_info,
++                                              out a(sss) changes);
+       ReenableUnitFiles(in  as files,
+                         in  b runtime,
+                         in  b force,
+@@ -916,6 +920,8 @@ node /org/freedesktop/systemd1 {
+ 
+     <variablelist class="dbus-method" generated="True" extra-ref="DisableUnitFilesWithFlags()"/>
+ 
++    <variablelist class="dbus-method" generated="True" extra-ref="DisableUnitFilesWithFlagsAndInstallInfo()"/>
++
+     <variablelist class="dbus-method" generated="True" extra-ref="ReenableUnitFiles()"/>
+ 
+     <variablelist class="dbus-method" generated="True" extra-ref="LinkUnitFiles()"/>
+@@ -1417,7 +1423,7 @@ node /org/freedesktop/systemd1 {
+       enabled for runtime only (true, <filename>/run/</filename>), or persistently (false,
+       <filename>/etc/</filename>). The second one controls whether symlinks pointing to other units shall be
+       replaced if necessary. This method returns one boolean and an array of the changes made. The boolean
+-      signals whether the unit files contained any enablement information (i.e. an [Install]) section. The
++      signals whether the unit files contained any enablement information (i.e. an [Install] section). The
+       changes array consists of structures with three strings: the type of the change (one of
+       <literal>symlink</literal> or <literal>unlink</literal>), the file name of the symlink and the
+       destination of the symlink. Note that most of the following calls return a changes list in the same
+@@ -1440,6 +1446,11 @@ node /org/freedesktop/systemd1 {
+       replaced if necessary. <varname>SD_SYSTEMD_UNIT_PORTABLE</varname> will add or remove the symlinks in
+       <filename>/etc/systemd/system.attached</filename> and <filename>/run/systemd/system.attached</filename>.</para>
+ 
++      <para><function>DisableUnitFilesWithFlagsAndInstallInfo()</function> is similar to
++      <function>DisableUnitFilesWithFlags()</function> and takes the same arguments, but returns
++      a boolean to indicate whether the unit files contain any enablement information, like
++      <function>EnableUnitFiles()</function>. The changes made are still returned in an array.</para>
++
+       <para>Similarly, <function>ReenableUnitFiles()</function> applies the changes to one or more units that
+       would result from disabling and enabling the unit quickly one after the other in an atomic
+       fashion. This is useful to apply updated [Install] information contained in unit files.</para>
+diff --git a/src/core/dbus-manager.c b/src/core/dbus-manager.c
+index 88f098ec86..2db12721a1 100644
+--- a/src/core/dbus-manager.c
++++ b/src/core/dbus-manager.c
+@@ -2425,6 +2425,7 @@ static int method_disable_unit_files_generic(
+                 sd_bus_message *message,
+                 Manager *m,
+                 int (*call)(LookupScope scope, UnitFileFlags flags, const char *root_dir, char *files[], InstallChange **changes, size_t *n_changes),
++                bool carries_install_info,
+                 sd_bus_error *error) {
+ 
+         _cleanup_strv_free_ char **l = NULL;
+@@ -2440,7 +2441,8 @@ static int method_disable_unit_files_generic(
+         if (r < 0)
+                 return r;
+ 
+-        if (sd_bus_message_is_method_call(message, NULL, "DisableUnitFilesWithFlags")) {
++        if (sd_bus_message_is_method_call(message, NULL, "DisableUnitFilesWithFlags") ||
++            sd_bus_message_is_method_call(message, NULL, "DisableUnitFilesWithFlagsAndInstallInfo")) {
+                 uint64_t raw_flags;
+ 
+                 r = sd_bus_message_read(message, "t", &raw_flags);
+@@ -2469,19 +2471,23 @@ static int method_disable_unit_files_generic(
+         if (r < 0)
+                 return install_error(error, r, changes, n_changes);
+ 
+-        return reply_install_changes_and_free(m, message, -1, changes, n_changes, error);
++        return reply_install_changes_and_free(m, message, carries_install_info ? r : -1, changes, n_changes, error);
+ }
+ 
+ static int method_disable_unit_files_with_flags(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+-        return method_disable_unit_files_generic(message, userdata, unit_file_disable, error);
++        return method_disable_unit_files_generic(message, userdata, unit_file_disable, /* carries_install_info = */ false, error);
++}
++
++static int method_disable_unit_files_with_flags_and_install_info(sd_bus_message *message, void *userdata, sd_bus_error *error) {
++        return method_disable_unit_files_generic(message, userdata, unit_file_disable, /* carries_install_info = */ true, error);
+ }
+ 
+ static int method_disable_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+-        return method_disable_unit_files_generic(message, userdata, unit_file_disable, error);
++        return method_disable_unit_files_generic(message, userdata, unit_file_disable, /* carries_install_info = */ false, error);
+ }
+ 
+ static int method_unmask_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+-        return method_disable_unit_files_generic(message, userdata, unit_file_unmask, error);
++        return method_disable_unit_files_generic(message, userdata, unit_file_unmask, /* carries_install_info = */ false, error);
+ }
+ 
+ static int method_revert_unit_files(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+@@ -3194,6 +3200,11 @@ const sd_bus_vtable bus_manager_vtable[] = {
+                                 SD_BUS_RESULT("a(sss)", changes),
+                                 method_disable_unit_files_with_flags,
+                                 SD_BUS_VTABLE_UNPRIVILEGED),
++        SD_BUS_METHOD_WITH_ARGS("DisableUnitFilesWithFlagsAndInstallInfo",
++                                SD_BUS_ARGS("as", files, "t", flags),
++                                SD_BUS_RESULT("b", carries_install_info, "a(sss)", changes),
++                                method_disable_unit_files_with_flags_and_install_info,
++                                SD_BUS_VTABLE_UNPRIVILEGED),
+         SD_BUS_METHOD_WITH_ARGS("ReenableUnitFiles",
+                                 SD_BUS_ARGS("as", files, "b", runtime, "b", force),
+                                 SD_BUS_RESULT("b", carries_install_info, "a(sss)", changes),
+diff --git a/src/shared/install.c b/src/shared/install.c
+index 834a1c59e3..4b610b20a5 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -2790,25 +2790,38 @@ static int do_unit_file_disable(
+ 
+         _cleanup_(install_context_done) InstallContext ctx = { .scope = scope };
+         _cleanup_set_free_free_ Set *remove_symlinks_to = NULL;
++        InstallInfo *info;
++        bool has_install_info = false;
+         int r;
+ 
+         STRV_FOREACH(name, names) {
+                 if (!unit_name_is_valid(*name, UNIT_NAME_ANY))
+                         return install_changes_add(changes, n_changes, -EUCLEAN, *name, NULL);
+ 
+-                r = install_info_add(&ctx, *name, NULL, lp->root_dir, /* auxiliary= */ false, NULL);
++                r = install_info_add(&ctx, *name, NULL, lp->root_dir, /* auxiliary= */ false, &info);
++                if (r >= 0)
++                        r = install_info_traverse(&ctx, lp, info, SEARCH_LOAD|SEARCH_FOLLOW_CONFIG_SYMLINKS, NULL);
++
+                 if (r < 0)
+-                        return r;
++                        return install_changes_add(changes, n_changes, r, *name, NULL);
++
++                /* If we enable multiple units, some with install info and others without,
++                 * the "empty [Install] section" warning is not shown. Let's make the behavior
++                 * of disable align with that. */
++                has_install_info = has_install_info || install_info_has_rules(info) || install_info_has_also(info);
+         }
+ 
+         r = install_context_mark_for_removal(&ctx, lp, &remove_symlinks_to, config_path, changes, n_changes);
++        if (r >= 0)
++                r = remove_marked_symlinks(remove_symlinks_to, config_path, lp, flags & UNIT_FILE_DRY_RUN, changes, n_changes);
++
+         if (r < 0)
+                 return r;
+ 
+-        return remove_marked_symlinks(remove_symlinks_to, config_path, lp, flags & UNIT_FILE_DRY_RUN, changes, n_changes);
++        /* The warning is shown only if it's a no-op */
++        return install_changes_have_modification(*changes, *n_changes) || has_install_info;
+ }
+ 
+-
+ int unit_file_disable(
+                 LookupScope scope,
+                 UnitFileFlags flags,
+diff --git a/src/systemctl/systemctl-enable.c b/src/systemctl/systemctl-enable.c
+index 5be4c0c725..aea66872de 100644
+--- a/src/systemctl/systemctl-enable.c
++++ b/src/systemctl/systemctl-enable.c
+@@ -109,9 +109,10 @@ int verb_enable(int argc, char *argv[], void *userdata) {
+                 if (streq(verb, "enable")) {
+                         r = unit_file_enable(arg_scope, flags, arg_root, names, &changes, &n_changes);
+                         carries_install_info = r;
+-                } else if (streq(verb, "disable"))
++                } else if (streq(verb, "disable")) {
+                         r = unit_file_disable(arg_scope, flags, arg_root, names, &changes, &n_changes);
+-                else if (streq(verb, "reenable")) {
++                        carries_install_info = r;
++                } else if (streq(verb, "reenable")) {
+                         r = unit_file_reenable(arg_scope, flags, arg_root, names, &changes, &n_changes);
+                         carries_install_info = r;
+                 } else if (streq(verb, "link"))
+@@ -165,7 +166,8 @@ int verb_enable(int argc, char *argv[], void *userdata) {
+                         method = "EnableUnitFiles";
+                         expect_carries_install_info = true;
+                 } else if (streq(verb, "disable")) {
+-                        method = "DisableUnitFiles";
++                        method = "DisableUnitFilesWithFlagsAndInstallInfo";
++                        expect_carries_install_info = true;
+                         send_force = false;
+                 } else if (streq(verb, "reenable")) {
+                         method = "ReenableUnitFiles";
+@@ -208,7 +210,10 @@ int verb_enable(int argc, char *argv[], void *userdata) {
+                 }
+ 
+                 if (send_runtime) {
+-                        r = sd_bus_message_append(m, "b", arg_runtime);
++                        if (streq(method, "DisableUnitFilesWithFlagsAndInstallInfo"))
++                                r = sd_bus_message_append(m, "t", arg_runtime ? UNIT_FILE_RUNTIME : 0);
++                        else
++                                r = sd_bus_message_append(m, "b", arg_runtime);
+                         if (r < 0)
+                                 return bus_log_create_error(r);
+                 }
+@@ -245,7 +250,7 @@ int verb_enable(int argc, char *argv[], void *userdata) {
+         if (carries_install_info == 0 && !ignore_carries_install_info)
+                 log_notice("The unit files have no installation config (WantedBy=, RequiredBy=, Also=,\n"
+                            "Alias= settings in the [Install] section, and DefaultInstance= for template\n"
+-                           "units). This means they are not meant to be enabled using systemctl.\n"
++                           "units). This means they are not meant to be enabled or disabled using systemctl.\n"
+                            " \n" /* trick: the space is needed so that the line does not get stripped from output */
+                            "Possible reasons for having this kind of units are:\n"
+                            "%1$s A unit may be statically enabled by being symlinked from another unit's\n"

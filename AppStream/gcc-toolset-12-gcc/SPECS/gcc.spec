@@ -2,17 +2,17 @@
 %{?scl:%global __strip %%{_scl_root}/usr/bin/strip}
 %{?scl:%global __objdump %%{_scl_root}/usr/bin/objdump}
 %{?scl:%scl_package gcc}
-%global DATE 20220628
-%global gitrev 874cb9452c56f1c3b3a7b5bfed93a262504b9856
-%global gcc_version 12.1.1
+%global DATE 20221121
+%global gitrev b3f5a0d53b84ed27cf00cfa2b9c3e2c78935c07d
+%global gcc_version 12.2.1
 %global gcc_major 12
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 3
-%global nvptx_tools_gitrev 5f6f343a302d620b0868edab376c00b15741e39e
-%global newlib_cygwin_gitrev 50e2a63b04bdd018484605fbb954fd1bd5147fa0
+%global gcc_release 7
+%global nvptx_tools_gitrev 472b6e78b3ba918d727698f79911360b7c808247
+%global newlib_cygwin_gitrev a8526cb52bedabd4d6ba4b227a5185627f871aa1
 %global mpc_version 1.0.3
-%global isl_version 0.18
+%global isl_version 0.24
 %global mpfr_version 3.1.4
 %global gmp_version 6.1.0
 %global doxygen_version 1.8.0
@@ -51,7 +51,7 @@
 %else
 %global build_go 0
 %endif
-%ifarch %{ix86} x86_64 %{arm} %{mips} s390 s390x riscv64
+%ifarch %{ix86} x86_64 %{arm} aarch64 %{mips} s390 s390x riscv64
 %global build_d 1
 %else
 %global build_d 0
@@ -139,7 +139,7 @@
 %ifarch x86_64
 %global multilib_32_arch i686
 %endif
-%if 0%{?fedora} >= 36 || 0%{?rhel} >= 10
+%if 0%{?fedora} >= 36 || 0%{?rhel} >= 8
 %global build_annobin_plugin 1
 %else
 %global build_annobin_plugin 0
@@ -147,7 +147,7 @@
 Summary: GCC version 12
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.5%{?dist}.redsleeve
+Release: %{gcc_release}.4%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -348,12 +348,9 @@ Patch8: gcc12-no-add-needed.patch
 Patch9: gcc12-Wno-format-security.patch
 Patch10: gcc12-rh1574936.patch
 Patch11: gcc12-d-shared-libphobos.patch
-Patch12: gcc12-pr105551.patch
-Patch13: gcc12-libtsan-s390x.patch
-# This has been backported to GCC 12, so eventually we can drop it.
-Patch14: gcc12-pr105991.patch
-# For DTS 12.0.z.
-Patch15: gcc12-detect-sapphirerapids.patch
+Patch12: gcc12-pr107468.patch
+Patch15: gcc12-static-libquadmath.patch
+Patch16: gcc12-FMA-chains.patch
 
 Patch100: gcc12-fortran-fdec-duplicates.patch
 Patch101: gcc12-fortran-flogical-as-integer.patch
@@ -367,6 +364,7 @@ Patch1002: gcc12-libgfortran-compat.patch
 Patch2001: doxygen-1.7.1-config.patch
 Patch2002: doxygen-1.7.5-timestamp.patch
 Patch2003: doxygen-1.8.0-rh856725.patch
+Patch2004: isl-rh2155127.patch
 
 Patch3000: 0001-basic_string-reserve-n-semantics-are-not-available-i.patch
 Patch3001: 0004-operator-istream-char-N-eofbit-fixes-are-not-availab.patch
@@ -388,8 +386,7 @@ Patch3016: 0019-xfails.patch
 Patch3017: 0020-more-fixes.patch
 Patch3018: 0021-libstdc++-disable-tests.patch
 Patch3019: 0022-libstdc++-revert-behavior.patch
-
-Patch10000: gcc6-decimal-rtti-arm.patch
+Patch3020: gcc12-testsuite-typo.patch
 
 %if 0%{?rhel} == 9
 %global nonsharedver 110
@@ -407,9 +404,6 @@ Patch10000: gcc6-decimal-rtti-arm.patch
 %if 0%{?scl:1}
 %global _gnu %{nil}
 %else
-%global _gnu -gnueabi
-%endif
-%ifarch %{arm}
 %global _gnu -gnueabi
 %endif
 %ifarch sparcv9
@@ -699,17 +693,17 @@ NVidia PTX.  OpenMP and OpenACC programs linked with -fopenmp will
 by default add PTX code into the binaries, which can be offloaded
 to NVidia PTX capable devices if available.
 
-%package plugin-annobin
-Summary: The annobin plugin for gcc, built by the installed version of gcc
-Requires: gcc = %{version}-%{release}
 %if %{build_annobin_plugin}
-BuildRequires: annobin >= 10.62, annobin-plugin-gcc, rpm-devel, binutils-devel, xz
-%endif
+%package -n %{?scl_prefix}gcc-plugin-annobin
+Summary: The annobin plugin for gcc, built by the installed version of gcc
+Requires: %{?scl_prefix}gcc = %{version}-%{release}
+BuildRequires: rpm-devel, binutils-devel, xz
 
-%description plugin-annobin
+%description -n %{?scl_prefix}gcc-plugin-annobin
 This package adds a version of the annobin plugin for gcc.  This version
 of the plugin is explicitly built by the same version of gcc that is installed
 so that there cannot be any synchronization problems.
+%endif
 
 %prep
 %if 0%{?rhel} >= 7
@@ -734,10 +728,9 @@ so that there cannot be any synchronization problems.
 %patch10 -p0 -b .rh1574936~
 %endif
 %patch11 -p0 -b .d-shared-libphobos~
-%patch12 -p0 -b .pr105551~
-%patch13 -p0 -b .libtsan-s390x~
-%patch14 -p1 -b .pr105991~
-%patch15 -p1 -b .detect-spr~
+%patch12 -p0 -b .pr107468~
+%patch15 -p0 -b .static-libquadmath~
+%patch16 -p1 -b .fma~
 
 %if 0%{?rhel} >= 6
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -775,6 +768,9 @@ cd doxygen-%{doxygen_version}
 cd ..
 %endif
 %endif
+%if %{build_isl}
+%patch2004 -p0 -b .isl-rh2155127~
+%endif
 
 # Apply DTS-specific testsuite patches.
 %patch3000 -p1 -b .dts-test-0~
@@ -799,10 +795,7 @@ cd ..
 %if 0%{?rhel} <= 7
 %patch3019 -p1 -b .dts-test-19~
 %endif
-
-%ifarch %{arm}
-%patch10000 -p1
-%endif
+%patch3020 -p1 -b .typo
 
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
@@ -992,17 +985,24 @@ ISL_FLAG_PIC=-fPIC
 ISL_FLAG_PIC=-fpic
 %endif
 cd isl-build
-sed -i 's|libisl|libgcc12privateisl|g' \
+sed -i 's|libisl\([^-]\)|libgcc12privateisl\1|g' \
   ../../isl-%{isl_version}/Makefile.{am,in}
+# Prevent regenerating aclocal.m4 and other configure files, because we don't
+# want to require aclocal-1.16 and similar.  isl-rh2155127.patch modifies
+# 'configure' so the Makefile would attempt to regenerate various files.
+# See <https://bugzilla.redhat.com/show_bug.cgi?id=2155127#c11>.
+touch ../../isl-%{isl_version}/{m4/*,aclocal.m4,Makefile.in,configure,isl_config.h.in}
 ../../isl-%{isl_version}/configure \
   CC=/usr/bin/gcc CXX=/usr/bin/g++ \
   CFLAGS="${CFLAGS:-%optflags} $ISL_FLAG_PIC" --prefix=`cd ..; pwd`/isl-install
+# Make sure we build with -g (#2155127).
+sed -i -e 's/CFLAGS =.*/& -g/' Makefile
 make %{?_smp_mflags}
 make install
 cd ../isl-install/lib
-rm libgcc12privateisl.so{,.15}
-mv libgcc12privateisl.so.15.3.0 libisl.so.15
-ln -sf libisl.so.15 libisl.so
+rm libgcc12privateisl.so{,.23}
+mv libgcc12privateisl.so.23.1.0 libisl.so.23
+ln -sf libisl.so.23 libisl.so
 cd ../..
 %endif
 
@@ -1149,9 +1149,6 @@ CONFIGURE_OPTS="\
 %endif
 	--enable-decimal-float \
 %endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
-%endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
@@ -1227,7 +1224,7 @@ make jit.sphinx.install-html jit_htmldir=`pwd`/../../rpm.doc/libgccjit-devel/htm
 cd ..
 
 %if %{build_isl}
-cp -a isl-install/lib/libisl.so.15 gcc/
+cp -a isl-install/lib/libisl.so.23 gcc/
 %endif
 
 # Make generated man pages even if Pod::Man is not new enough
@@ -1409,7 +1406,7 @@ ln -sf ../../../../bin/strip $FULLEPATH/strip
 %endif
 
 %if %{build_isl}
-cp -a isl-install/lib/libisl.so.15 $FULLPATH/
+cp -a isl-install/lib/libisl.so.23 $FULLPATH/
 %endif
 
 # fix some things
@@ -2111,7 +2108,19 @@ echo gcc-%{version}-%{release}.%{arch} > $FULLPATH/rpmver
 ln -s ../../libexec/gcc/%{gcc_target_platform}/%{gcc_major}/liblto_plugin.so \
   %{buildroot}%{_libdir}/bfd-plugins/
 
+%if %{build_annobin_plugin}
+mkdir -p $FULLPATH/plugin
+rm -f $FULLPATH/plugin/gts-gcc-annobin*
+cp -a %{_builddir}/gcc-%{version}-%{DATE}/annobin-plugin/annobin*/gcc-plugin/.libs/annobin.so.0.0.0 \
+  $FULLPATH/plugin/gts-gcc-annobin.so.0.0.0
+pushd $FULLPATH/plugin/
+ln -sf gts-gcc-annobin.so.0.0.0 gts-gcc-annobin.so.0
+ln -sf gts-gcc-annobin.so.0.0.0 gts-gcc-annobin.so
+popd
+%endif
+
 %check
+
 cd obj-%{gcc_target_platform}
 
 %{?scl:PATH=%{_bindir}${PATH:+:${PATH}}}
@@ -2477,7 +2486,6 @@ fi
 %{_prefix}/libexec/gcc/%{gcc_target_platform}/%{gcc_major}/cc1
 %{_prefix}/libexec/gcc/%{gcc_target_platform}/%{gcc_major}/collect2
 %if 0%{?scl:1}
-%if 0%{?rhel} <= 7
 %{_prefix}/libexec/gcc/%{gcc_target_platform}/%{gcc_major}/ar
 %{_prefix}/libexec/gcc/%{gcc_target_platform}/%{gcc_major}/as
 %{_prefix}/libexec/gcc/%{gcc_target_platform}/%{gcc_major}/ld
@@ -2487,7 +2495,6 @@ fi
 %{_prefix}/libexec/gcc/%{gcc_target_platform}/%{gcc_major}/objcopy
 %{_prefix}/libexec/gcc/%{gcc_target_platform}/%{gcc_major}/ranlib
 %{_prefix}/libexec/gcc/%{gcc_target_platform}/%{gcc_major}/strip
-%endif
 %endif
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/crt*.o
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/libgcc.a
@@ -2627,6 +2634,17 @@ fi
 %endif
 %endif
 %doc gcc/README* rpm.doc/changelogs/gcc/ChangeLog* gcc/COPYING* COPYING.RUNTIME
+
+%if %{build_annobin_plugin}
+%files -n %{?scl_prefix}gcc-plugin-annobin
+%dir %{_prefix}/lib/gcc
+%dir %{_prefix}/lib/gcc/%{gcc_target_platform}
+%dir %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}
+%dir %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin/gts-gcc-annobin.so
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin/gts-gcc-annobin.so.0
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin/gts-gcc-annobin.so.0.0.0
+%endif
 
 %files c++
 %{_prefix}/bin/%{gcc_target_platform}-g++%{!?scl:12}
@@ -2972,14 +2990,34 @@ fi
 %endif
 
 %changelog
-* Wed Feb 09 2023 Jacco Ligthart <jacco@redsleeve.org> 12.1.1-3.5.redsleeve
-- patched for armv6
+* Fri Feb 10 2023 Marek Polacek <polacek@redhat.com> 12.2.1-7.4
+- avoid fma_chain for -march=alderlake and sapphirerapids (#2168919)
 
-* Tue Dec 13 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.5
-- bump NVR (#2150126)
+* Wed Jan 25 2023 Marek Polacek <polacek@redhat.com> 12.2.1-7.3
+- provide libexec/ symlinks on all RHELs (#2164262)
 
-* Mon Dec  5 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.4
-- fix Sapphire Rapids detection in host_detect_local_cpu (#2150126)
+* Wed Jan 11 2023 Marek Polacek <polacek@redhat.com> 12.2.1-7.2
+- build libisl.so with -g (#2154936)
+
+* Tue Dec 20 2022 Marek Polacek <polacek@redhat.com> 12.2.1-6.1
+- apply an ISL patch (#2154936)
+
+* Wed Dec 14 2022 Nick Clifton <nickc@redhat.com> 12.2.1-6
+- Fixed run-time requirement for annobin plugin.  (#2151927)
+
+* Tue Dec 13 2022 Nick Clifton <nickc@redhat.com> 12.2.1-5
+- Build the annobin plugin.  Call it gts-gcc-annobin.so.  (#2151927)
+
+* Wed Nov 30 2022 Marek Polacek <polacek@redhat.com> 12.2.1-4
+- update from releases/gcc-12 branch (#2110583)
+- fix up std::from_chars behavior in rounding modes other than FE_TONEAREST
+  (PR libstdc++/107468)
+
+* Wed Nov 30 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.4
+- fix pr86731-fwrapv-longlong.c (#2134379)
+
+* Wed Nov 30 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.3
+- add -static-libquadmath (#2131082)
 
 * Fri Jul  8 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.2
 - recognize PLUS and XOR forms of rldimi (PR target/105991, #2095789)

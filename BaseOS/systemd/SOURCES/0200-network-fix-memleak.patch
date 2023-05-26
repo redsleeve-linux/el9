@@ -1,0 +1,55 @@
+From 44d34632660f8456b7ca09510ed1b469541fac65 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 16 Jan 2023 22:07:06 +0900
+Subject: [PATCH] network: fix memleak
+
+Fixes a bug introduced by af2aea8bb64b0dc42ecbe5549216eb567681a803.
+
+Fixes #25883 and #25891.
+
+(cherry picked from commit 303dfa73b389e8f6dc58954e867c21724c1446f7)
+
+Related: #2138081
+---
+ src/network/networkd-address.c | 6 +++++-
+ src/network/networkd-route.c   | 6 +++++-
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/src/network/networkd-address.c b/src/network/networkd-address.c
+index 259cd312c9..4f8f95cba6 100644
+--- a/src/network/networkd-address.c
++++ b/src/network/networkd-address.c
+@@ -1189,9 +1189,13 @@ int link_request_address(
+ 
+         (void) address_get(link, address, &existing);
+ 
+-        if (address->lifetime_valid_usec == 0)
++        if (address->lifetime_valid_usec == 0) {
++                if (consume_object)
++                        address_free(address);
++
+                 /* The requested address is outdated. Let's remove it. */
+                 return address_remove_and_drop(existing);
++        }
+ 
+         if (!existing) {
+                 _cleanup_(address_freep) Address *tmp = NULL;
+diff --git a/src/network/networkd-route.c b/src/network/networkd-route.c
+index d1f3bab092..5214a8ad2c 100644
+--- a/src/network/networkd-route.c
++++ b/src/network/networkd-route.c
+@@ -1437,9 +1437,13 @@ int link_request_route(
+ 
+         (void) route_get(link->manager, link, route, &existing);
+ 
+-        if (route->lifetime_usec == 0)
++        if (route->lifetime_usec == 0) {
++                if (consume_object)
++                        route_free(route);
++
+                 /* The requested route is outdated. Let's remove it. */
+                 return route_remove_and_drop(existing);
++        }
+ 
+         if (!existing) {
+                 _cleanup_(route_freep) Route *tmp = NULL;

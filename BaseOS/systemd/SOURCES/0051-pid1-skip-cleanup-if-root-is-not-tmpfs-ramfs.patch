@@ -1,0 +1,124 @@
+From 7b6a09c47f1fee035c4b42840fabf65edce12aa8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 7 Nov 2022 12:40:20 +0100
+Subject: [PATCH] pid1: skip cleanup if root is not tmpfs/ramfs
+
+in_initrd() was really doing two things: checking if we're in the initrd, and
+also verifying that the initrd is set up correctly. But this second check is
+complicated, in particular it would return false for overlayfs, even with an
+upper tmpfs layer. It also doesn't support the use case of having an initial
+initrd with tmpfs, and then transitioning into an intermediate initrd that is
+e.g. a DDI, i.e. a filesystem possibly with verity arranged as a disk image.
+
+We don't need to check if we're in initrd in every program. Instead, concerns
+are separated:
+- in_initrd() just does a simple check for /etc/initrd-release.
+- When doing cleanup, pid1 checks if it's on a tmpfs before starting to wipe
+  the old root. The only case where we want to remove the old root is when
+  we're on a plain tempory filesystem. With an overlay, we'd be creating
+  whiteout files, which is not very useful. (*)
+
+This should resolve https://bugzilla.redhat.com/show_bug.cgi?id=2137631
+which is caused by systemd refusing to treat the system as an initrd because
+overlayfs is used.
+
+(*) I think the idea of keeping the initrd fs around for shutdown is outdated.
+We should just have a completely separate exitrd that is unpacked when we want
+to shut down. This way, we don't waste memory at runtime, and we also don't
+transition to a potentially older version of systemd. But we don't have support
+for this yet.
+
+This replaces 0fef5b0f0bd9ded1ae7bcb3e4e4b2893e36c51a6.
+
+(cherry picked from commit a940f507fbe1c81d6787dc0b7ce232c39818eec9)
+
+Related: #2138081
+---
+ src/basic/util.c         | 19 ++++++++-----------
+ src/shared/switch-root.c | 22 ++++++++++++----------
+ 2 files changed, 20 insertions(+), 21 deletions(-)
+
+diff --git a/src/basic/util.c b/src/basic/util.c
+index 981f917fab..e6aaa2dc9b 100644
+--- a/src/basic/util.c
++++ b/src/basic/util.c
+@@ -56,14 +56,8 @@ bool in_initrd(void) {
+         if (saved_in_initrd >= 0)
+                 return saved_in_initrd;
+ 
+-        /* We make two checks here:
+-         *
+-         * 1. the flag file /etc/initrd-release must exist
+-         * 2. the root file system must be a memory file system
+-         *
+-         * The second check is extra paranoia, since misdetecting an
+-         * initrd can have bad consequences due the initrd
+-         * emptying when transititioning to the main systemd.
++        /* If /etc/initrd-release exists, we're in an initrd.
++         * This can be overridden by setting SYSTEMD_IN_INITRD=0|1.
+          */
+ 
+         r = getenv_bool_secure("SYSTEMD_IN_INITRD");
+@@ -72,9 +66,12 @@ bool in_initrd(void) {
+ 
+         if (r >= 0)
+                 saved_in_initrd = r > 0;
+-        else
+-                saved_in_initrd = access("/etc/initrd-release", F_OK) >= 0 &&
+-                                  path_is_temporary_fs("/") > 0;
++        else {
++                r = access("/etc/initrd-release", F_OK);
++                if (r < 0 && errno != ENOENT)
++                        log_debug_errno(r, "Failed to check if /etc/initrd-release exists, assuming it does not: %m");
++                saved_in_initrd = r >= 0;
++        }
+ 
+         return saved_in_initrd;
+ }
+diff --git a/src/shared/switch-root.c b/src/shared/switch-root.c
+index 1a444841fa..4cad3551a6 100644
+--- a/src/shared/switch-root.c
++++ b/src/shared/switch-root.c
+@@ -32,7 +32,6 @@ int switch_root(const char *new_root,
+ 
+         _cleanup_free_ char *resolved_old_root_after = NULL;
+         _cleanup_close_ int old_root_fd = -1;
+-        bool old_root_remove;
+         int r;
+ 
+         assert(new_root);
+@@ -42,12 +41,16 @@ int switch_root(const char *new_root,
+                 return 0;
+ 
+         /* Check if we shall remove the contents of the old root */
+-        old_root_remove = in_initrd();
+-        if (old_root_remove) {
+-                old_root_fd = open("/", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_NOCTTY|O_DIRECTORY);
+-                if (old_root_fd < 0)
+-                        return log_error_errno(errno, "Failed to open root directory: %m");
+-        }
++        old_root_fd = open("/", O_RDONLY | O_CLOEXEC | O_DIRECTORY);
++        if (old_root_fd < 0)
++                return log_error_errno(errno, "Failed to open root directory: %m");
++        r = fd_is_temporary_fs(old_root_fd);
++        if (r < 0)
++                return log_error_errno(r, "Failed to stat root directory: %m");
++        if (r > 0)
++                log_debug("Root directory is on tmpfs, will do cleanup later.");
++        else
++                old_root_fd = safe_close(old_root_fd);
+ 
+         /* Determine where we shall place the old root after the transition */
+         r = chase_symlinks(old_root_after, new_root, CHASE_PREFIX_ROOT|CHASE_NONEXISTENT, &resolved_old_root_after, NULL);
+@@ -117,9 +120,8 @@ int switch_root(const char *new_root,
+                 struct stat rb;
+ 
+                 if (fstat(old_root_fd, &rb) < 0)
+-                        log_warning_errno(errno, "Failed to stat old root directory, leaving: %m");
+-                else
+-                        (void) rm_rf_children(TAKE_FD(old_root_fd), 0, &rb); /* takes possession of the dir fd, even on failure */
++                        return log_error_errno(errno, "Failed to stat old root directory: %m");
++                (void) rm_rf_children(TAKE_FD(old_root_fd), 0, &rb); /* takes possession of the dir fd, even on failure */
+         }
+ 
+         return 0;

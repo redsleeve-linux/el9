@@ -1,0 +1,78 @@
+From 87bf366c97be1c811c4bfdf80b48d6c3e35da76a Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Tue, 25 Oct 2022 19:55:08 +0200
+Subject: [PATCH] macro: Simply case macros for IN_SET
+
+The CASE param would normally provide the operation for the compiler to
+do in this macro magic. But in this case CASE_F_1 was hardcoding the
+operation, making the parameter moot.
+This just removes the somewhat pointless parameter instead of fixing
+the one case. These macros are used for IN_SET case labels only and
+not named generically anyways.
+
+(cherry picked from commit 790f4dda74d7ecdb4e57101a37cc9f2f9236bef6)
+
+Related #2138081
+---
+ src/fundamental/macro-fundamental.h | 43 ++++++++++++++---------------
+ 1 file changed, 21 insertions(+), 22 deletions(-)
+
+diff --git a/src/fundamental/macro-fundamental.h b/src/fundamental/macro-fundamental.h
+index 2536c741c6..63f4c49e78 100644
+--- a/src/fundamental/macro-fundamental.h
++++ b/src/fundamental/macro-fundamental.h
+@@ -251,33 +251,32 @@
+                 (UNIQ_T(X, xq) / UNIQ_T(Y, yq) + !!(UNIQ_T(X, xq) % UNIQ_T(Y, yq))); \
+         })
+ 
+-#define CASE_F(X) case X:
+-#define CASE_F_1(CASE, X) CASE_F(X)
+-#define CASE_F_2(CASE, X, ...)  CASE(X) CASE_F_1(CASE, __VA_ARGS__)
+-#define CASE_F_3(CASE, X, ...)  CASE(X) CASE_F_2(CASE, __VA_ARGS__)
+-#define CASE_F_4(CASE, X, ...)  CASE(X) CASE_F_3(CASE, __VA_ARGS__)
+-#define CASE_F_5(CASE, X, ...)  CASE(X) CASE_F_4(CASE, __VA_ARGS__)
+-#define CASE_F_6(CASE, X, ...)  CASE(X) CASE_F_5(CASE, __VA_ARGS__)
+-#define CASE_F_7(CASE, X, ...)  CASE(X) CASE_F_6(CASE, __VA_ARGS__)
+-#define CASE_F_8(CASE, X, ...)  CASE(X) CASE_F_7(CASE, __VA_ARGS__)
+-#define CASE_F_9(CASE, X, ...)  CASE(X) CASE_F_8(CASE, __VA_ARGS__)
+-#define CASE_F_10(CASE, X, ...) CASE(X) CASE_F_9(CASE, __VA_ARGS__)
+-#define CASE_F_11(CASE, X, ...) CASE(X) CASE_F_10(CASE, __VA_ARGS__)
+-#define CASE_F_12(CASE, X, ...) CASE(X) CASE_F_11(CASE, __VA_ARGS__)
+-#define CASE_F_13(CASE, X, ...) CASE(X) CASE_F_12(CASE, __VA_ARGS__)
+-#define CASE_F_14(CASE, X, ...) CASE(X) CASE_F_13(CASE, __VA_ARGS__)
+-#define CASE_F_15(CASE, X, ...) CASE(X) CASE_F_14(CASE, __VA_ARGS__)
+-#define CASE_F_16(CASE, X, ...) CASE(X) CASE_F_15(CASE, __VA_ARGS__)
+-#define CASE_F_17(CASE, X, ...) CASE(X) CASE_F_16(CASE, __VA_ARGS__)
+-#define CASE_F_18(CASE, X, ...) CASE(X) CASE_F_17(CASE, __VA_ARGS__)
+-#define CASE_F_19(CASE, X, ...) CASE(X) CASE_F_18(CASE, __VA_ARGS__)
+-#define CASE_F_20(CASE, X, ...) CASE(X) CASE_F_19(CASE, __VA_ARGS__)
++#define  CASE_F_1(X)      case X:
++#define  CASE_F_2(X, ...) case X:  CASE_F_1( __VA_ARGS__)
++#define  CASE_F_3(X, ...) case X:  CASE_F_2( __VA_ARGS__)
++#define  CASE_F_4(X, ...) case X:  CASE_F_3( __VA_ARGS__)
++#define  CASE_F_5(X, ...) case X:  CASE_F_4( __VA_ARGS__)
++#define  CASE_F_6(X, ...) case X:  CASE_F_5( __VA_ARGS__)
++#define  CASE_F_7(X, ...) case X:  CASE_F_6( __VA_ARGS__)
++#define  CASE_F_8(X, ...) case X:  CASE_F_7( __VA_ARGS__)
++#define  CASE_F_9(X, ...) case X:  CASE_F_8( __VA_ARGS__)
++#define CASE_F_10(X, ...) case X:  CASE_F_9( __VA_ARGS__)
++#define CASE_F_11(X, ...) case X: CASE_F_10( __VA_ARGS__)
++#define CASE_F_12(X, ...) case X: CASE_F_11( __VA_ARGS__)
++#define CASE_F_13(X, ...) case X: CASE_F_12( __VA_ARGS__)
++#define CASE_F_14(X, ...) case X: CASE_F_13( __VA_ARGS__)
++#define CASE_F_15(X, ...) case X: CASE_F_14( __VA_ARGS__)
++#define CASE_F_16(X, ...) case X: CASE_F_15( __VA_ARGS__)
++#define CASE_F_17(X, ...) case X: CASE_F_16( __VA_ARGS__)
++#define CASE_F_18(X, ...) case X: CASE_F_17( __VA_ARGS__)
++#define CASE_F_19(X, ...) case X: CASE_F_18( __VA_ARGS__)
++#define CASE_F_20(X, ...) case X: CASE_F_19( __VA_ARGS__)
+ 
+ #define GET_CASE_F(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16,_17,_18,_19,_20,NAME,...) NAME
+ #define FOR_EACH_MAKE_CASE(...) \
+         GET_CASE_F(__VA_ARGS__,CASE_F_20,CASE_F_19,CASE_F_18,CASE_F_17,CASE_F_16,CASE_F_15,CASE_F_14,CASE_F_13,CASE_F_12,CASE_F_11, \
+                                CASE_F_10,CASE_F_9,CASE_F_8,CASE_F_7,CASE_F_6,CASE_F_5,CASE_F_4,CASE_F_3,CASE_F_2,CASE_F_1) \
+-                   (CASE_F,__VA_ARGS__)
++                   (__VA_ARGS__)
+ 
+ #define IN_SET(x, ...)                                                  \
+         ({                                                              \

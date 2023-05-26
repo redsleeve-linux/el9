@@ -29,7 +29,7 @@
 # Define GOROOT macros
 %global goroot          %{_prefix}/lib/%{name}
 %global gopath          %{_datadir}/gocode
-%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
+%global golang_arches   x86_64 aarch64 ppc64le s390x
 %global golibdir        %{_libdir}/%{name}
 
 # Golang build options.
@@ -56,7 +56,7 @@
 %endif
 
 # Controls what ever we fail on failed tests
-%ifarch x86_64 %{arm} aarch64 ppc64le
+%ifarch x86_64 %{arm} aarch64 ppc64le s390x
 %global fail_on_tests 1
 %else
 %global fail_on_tests 0
@@ -95,20 +95,28 @@
 %global gohostarch  s390x
 %endif
 
-%global go_api 1.18
-%global go_version 1.18.9
-%global pkg_release 1
+%global go_api 1.19
+%global go_version 1.19.9
+%global version %{go_version}
+%global pkg_release 2
 
 Name:           golang
-Version:        %{go_version}
-Release:        1%{?dist}.redsleeve
+Version:        %{version}
+Release:        2%{?dist}
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD and Public Domain
 URL:            http://golang.org/
-Source0:        https://github.com/golang-fips/go/archive/refs/tags/go%{go_version}-%{pkg_release}-openssl-fips.tar.gz
+Source0:        https://github.com/golang/go/archive/refs/tags/go%{version}.tar.gz
+# Go's FIPS mode bindings are now provided as a standalone
+# module instead of in tree.  This makes it easier to see
+# the actual changes vs upstream Go.  The module source is
+# located at https://github.com/golang-fips/openssl-fips,
+# And pre-genetated patches to set up the module for a given
+# Go release are located at https://github.com/golang-fips/go.
+Source1:	https://github.com/golang-fips/go/archive/refs/tags/go%{version}-%{pkg_release}-openssl-fips.tar.gz
 # make possible to override default traceback level at build time by setting build tag rpm_crashtraceback
-Source1:        fedora.go
+Source2:        fedora.go
 
 # The compiler is written in Go. Needs go(1.4+) compiler for build.
 # Actual Go based bootstrap compiler provided by above source.
@@ -124,10 +132,6 @@ BuildRequires:  net-tools
 %endif
 # For OpenSSL FIPS
 BuildRequires:  openssl-devel
-
-# For openssl-fipsinstall
-BuildRequires:  openssl
-
 # for tests
 BuildRequires:  pcre-devel, glibc-static, perl
 
@@ -137,20 +141,18 @@ Requires:       %{name}-src = %{version}-%{release}
 Requires:       openssl-devel
 Requires:       diffutils
 
-# we had been just removing the zoneinfo.zip, but that caused tests to fail for users that
-# later run `go test -a std`. This makes it only use the zoneinfo.zip where needed in tests.
-Patch215:       go1.5-zoneinfo_testing_only.patch
 
 # Proposed patch by jcajka https://golang.org/cl/86541
 Patch221:       fix_TestScript_list_std.patch
 
-Patch223: remove_ed25519vectors_test.patch
+Patch1939923:   skip_test_rhbz1939923.patch
 
-Patch224: openssl_deprecated_algorithm_tests.patch
+# Disables libc static linking tests which
+# are incompatible with dlopen in golang-fips
+Patch2: 	disable_static_tests_part1.patch
+Patch3: 	disable_static_tests_part2.patch
 
-Patch225: enable-big-endian-fips.patch
-
-Patch226: ppc64le-internal-linker-fix.patch
+Patch4:		fix-memory-leak-evp-sign-verify.patch
 
 # Having documentation separate was broken
 Obsoletes:      %{name}-docs < 1.1-4
@@ -239,16 +241,29 @@ Requires:       %{name} = %{version}-%{release}
 %endif
 
 %prep
-%setup -q -n go-go%{go_version}-%{pkg_release}-openssl-fips
+%setup -q -n go-go%{version}
 
-%patch215 -p1
+pushd ..
+tar -xf %{SOURCE1}
+popd
+patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/000-initial-setup.patch
+patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/001-initial-openssl-for-fips.patch
+
+# Configure crypto tests
+pushd ../go-go%{version}-%{pkg_release}-openssl-fips
+ln -s ../go-go%{version} go
+./scripts/configure-crypto-tests.sh
+popd
+
+%patch2 -p1
+%patch3 -p1
+%patch4 -p1
+
 %patch221 -p1
-%patch223 -p1
-%patch224 -p1
-%patch225 -p1
-%patch226 -p1
 
-cp %{SOURCE1} ./src/runtime/
+%patch1939923 -p1
+
+cp %{SOURCE2} ./src/runtime/
 
 %build
 set -xe
@@ -404,6 +419,8 @@ cp -av %{SOURCE100} $RPM_BUILD_ROOT%{_sysconfdir}/gdbinit.d/golang.gdb
 # prelink blacklist
 mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/prelink.conf.d
 cp -av %{SOURCE101} $RPM_BUILD_ROOT%{_sysconfdir}/prelink.conf.d/golang.conf
+
+# Quick fix for the rhbz#2014704
 sed -i 's/const defaultGO_LDSO = `.*`/const defaultGO_LDSO = ``/' $RPM_BUILD_ROOT%{goroot}/src/internal/buildcfg/zbootstrap.go
 
 %check
@@ -442,23 +459,19 @@ export GO_TEST_RUN=""
 
 ./run.bash --no-rebuild -v -v -v -k $GO_TEST_RUN
 
-# tests timeout on ppc64le due to
-# https://bugzilla.redhat.com/show_bug.cgi?id=2118776
-%ifnarch ppc64le
-export OPENSSL_FORCE_FIPS_MODE=1
 # Run tests with FIPS enabled.
+export GOLANG_FIPS=1
+export OPENSSL_FORCE_FIPS_MODE=1
 pushd crypto
   # Run all crypto tests but skip TLS, we will run FIPS specific TLS tests later
-  GOLANG_FIPS=1 go test $(go list ./... | grep -v tls) -v
+  go test $(go list ./... | grep -v tls) -v
   # Check that signature functions have parity between boring and notboring
   CGO_ENABLED=0 go test $(go list ./... | grep -v tls) -v
 popd
 # Run all FIPS specific TLS tests
 pushd crypto/tls
-  GOLANG_FIPS=1 go test -v -run "Boring"
+  go test -v -run "Boring"
 popd
-%endif
-
 %else
 ./run.bash --no-rebuild -v -v -v -k || :
 %endif
@@ -466,7 +479,7 @@ cd ..
 
 %files
 
-%doc AUTHORS CONTRIBUTORS LICENSE PATENTS
+%doc LICENSE PATENTS
 # VERSION has to be present in the GOROOT, for `go install std` to work
 %doc %{goroot}/VERSION
 %dir %{goroot}/doc
@@ -520,19 +533,45 @@ cd ..
 %endif
 
 %changelog
-* Wed Feb 09 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.18.9-1.redsleeve
-- added arm to golang_arches
+* Tue May 23 2023 Alejandro Sáez <asm@redhat.com> - 1.19.9-2
+- Fix TestEncryptOAEP and TLS failures in FIPS mode
+- Resolves: rhbz#2204476
 
-* Tue Dec 20 2022 David Benoit <dbenoit@redhat.com> - 1.18.9-1
-- Rebase to Go 1.18.9
-- Enable big endian support for fips mode 
+* Wed May 17 2023 Alejandro Sáez <asm@redhat.com> - 1.19.9-1
+- Rebase to Go 1.19.9
+- Resolves: rhbz#2204476
+
+* Wed Mar 29 2023 David Benoit <dbenoit@redhat.com> - 1.19.6-2
+- Rebuild without changes
+- Related: rhbz#2175174
+
+* Wed Mar 01 2023 David Benoit <dbenoit@redhat.com> - 1.19.6-1
+- Rebase to Go 1.19.6
+- Resolves: rhbz#2174429
+- Fix memory leak
+- Resolves: rhbz#2157602
+- Enable tests in check phase
+
+* Wed Dec 21 2022 David Benoit <dbenoit@redhat.com> - 1.19.4-1
+- Rebase to Go 1.19.4
 - Fix ppc64le linker issue
-- Resolves: rhbz#2144547
-- Resolves: rhbz#2149311
+- Remove defunct patches
+- Remove downstream generated FIPS mode patches
+- Add golang-fips/go as the source for FIPS mode patches
+- Resolves: rhbz#2144539
 
-* Tue Aug 16 2022 David Benoit <dbenoit@redhat.com> - 1.18.4-3
-- Temporarily disable crypto tests on ppc64le
-- Related: rhbz#2109180
+* Wed Nov 30 2022 David Benoit <dbenoit@redhat.com> - 1.19.2-2
+- Fix endian issue in FIPS mode
+- Resolves: rhbz#1966992
+
+* Fri Oct 21 2022 David Benoit <dbenoit@redhat.com> - 1.19.2-1
+- Update go to version 1.19.2
+- Resolves: rhbz#2134407
+
+* Wed Sep 14 2022 David Benoit <dbenoit@redhat.com> - 1.19.1-2
+- Rebase to Go 1.19.1
+- Temporarily disable crypto tests
+- Resolves: rhbz#2131028
 
 * Wed Aug 10 2022 Alejandro Sáez <asm@redhat.com> - 1.18.4-2
 - Update to Go 1.18.4
