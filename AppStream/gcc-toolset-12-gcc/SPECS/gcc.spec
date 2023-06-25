@@ -147,7 +147,7 @@
 Summary: GCC version 12
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.4%{?dist}
+Release: %{gcc_release}.4%{?dist}.redsleeve
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -388,6 +388,8 @@ Patch3018: 0021-libstdc++-disable-tests.patch
 Patch3019: 0022-libstdc++-revert-behavior.patch
 Patch3020: gcc12-testsuite-typo.patch
 
+Patch10000: gcc6-decimal-rtti-arm.patch
+
 %if 0%{?rhel} == 9
 %global nonsharedver 110
 %endif
@@ -404,6 +406,9 @@ Patch3020: gcc12-testsuite-typo.patch
 %if 0%{?scl:1}
 %global _gnu %{nil}
 %else
+%global _gnu -gnueabi
+%endif
+%ifarch %{arm}
 %global _gnu -gnueabi
 %endif
 %ifarch sparcv9
@@ -797,6 +802,10 @@ cd ..
 %endif
 %patch3020 -p1 -b .typo
 
+%ifarch %{arm}
+%patch10000 -p1
+%endif
+
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
 echo 'Red Hat %{version}-%{gcc_release}' > gcc/DEV-PHASE
@@ -1148,6 +1157,9 @@ CONFIGURE_OPTS="\
 %endif
 %endif
 	--enable-decimal-float \
+%endif
+%ifarch armv6hl
+	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
@@ -2990,6 +3002,9 @@ fi
 %endif
 
 %changelog
+* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> 12.2.1-7.4.redsleeve
+- patched for armv6
+
 * Fri Feb 10 2023 Marek Polacek <polacek@redhat.com> 12.2.1-7.4
 - avoid fma_chain for -march=alderlake and sapphirerapids (#2168919)
 

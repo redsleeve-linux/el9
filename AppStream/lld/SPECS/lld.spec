@@ -13,7 +13,7 @@
 
 Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}
-Release:	4%{?dist}
+Release:	4%{?dist}.redsleeve
 Summary:	The LLVM Linker
 
 License:	NCSA
@@ -25,6 +25,8 @@ Source2:	release-keys.asc
 ExcludeArch:	s390x
 
 Patch0:		0001-PATCH-lld-CMake-Check-for-gtest-headers-even-if-lit..patch
+
+Patch1000:	1000_patch_atomic_arm.patch
 
 # Bundle libunwind header need during build for MachO support
 Patch1:		0002-PATCH-lld-Import-compact_unwind_encoding.h-from-libu.patch
@@ -151,6 +153,9 @@ fi
 
 
 %changelog
+* Fri May 26 2023 Jacco Ligthart < jacco@redsleeve.org> - 15.0.7-4.redsleeve
+- link COFF with atomic
+
 * Tue Jan 31 2023 Konrad Kleine <kkleine@redhat.com> - 15.0.7-4
 - Fixup for obsoleting lld-test < 15.0.7
 

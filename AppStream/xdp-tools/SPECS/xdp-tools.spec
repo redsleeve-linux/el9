@@ -1,6 +1,6 @@
 Name:             xdp-tools
 Version:          1.3.1
-Release:          1%{?dist}
+Release:          1%{?dist}.redsleeve
 Summary:          Utilities and example programs for use with XDP
 %global _soversion 1.3.0
 
@@ -22,7 +22,7 @@ BuildRequires:    m4
 BuildRequires:    emacs-nox
 BuildRequires:    wireshark-cli
 
-%ifnarch i686
+%ifnarch i686 %{arm}
 BuildRequires:    bpftool
 %endif
 
@@ -94,7 +94,7 @@ make install V=1
 %{_sbindir}/xdp-filter
 %{_sbindir}/xdp-loader
 %{_sbindir}/xdpdump
-%ifnarch i686
+%ifnarch i686 %{arm}
 %{_sbindir}/xdp-bench
 %{_sbindir}/xdp-monitor
 %{_sbindir}/xdp-trafficgen
@@ -122,6 +122,9 @@ make install V=1
 %{_libdir}/pkgconfig/libxdp.pc
 
 %changelog
+* Sun Jun 25 2023 Jacco Ligthart <jacco@redsleeve.org> 1.3.1-1.redsleeve
+- do not require bpftool for arm
+`
 * Thu Feb 23 2023 Toke Høiland-Jørgensen <toke@redhat.com> 1.3.1-1
 - Upstream version bump
 

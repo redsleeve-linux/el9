@@ -1,0 +1,89 @@
+From 4d0a04e00e0472bd9e4cf97c86ecd414b82ef276 Mon Sep 17 00:00:00 2001
+From: Jacco Ligthart <jacco@redsleeve.org>
+Date: Sat, 24 Jun 2023 14:06:26 +0200
+Subject: [PATCH] patched for sha1 build-ids on arm when using clang
+
+---
+ SOURCES/macros-arm.patch     | 27 +++++++++++++++++++++++++++
+ SPECS/redhat-rpm-config.spec | 10 +++++++++-
+ 2 files changed, 36 insertions(+), 1 deletion(-)
+ create mode 100644 SOURCES/macros-arm.patch
+
+diff --git a/SOURCES/macros-arm.patch b/SOURCES/macros-arm.patch
+new file mode 100644
+index 0000000..067f786
+--- /dev/null
++++ b/SOURCES/macros-arm.patch
+@@ -0,0 +1,27 @@
++diff --git a/macros b/macros
++index 8749e3b..062fece 100644
++--- a/macros
+++++ b/macros
++@@ -72,7 +72,7 @@
++ # When clang is used as a linker driver, it does not auto-detect the LTO
++ # bytecode and neither does bfd, so we need to explicitly pass the -flto
++ # flag when linking.
++-%build_ldflags -Wl,-z,relro %{_ld_as_needed_flags} %{_ld_symbols_flags} %{_hardened_ldflags} %{_annotation_ldflags} %[ "%{toolchain}" == "clang" ? "%{?_lto_cflags}" : "" ]
+++%build_ldflags -Wl,-z,relro %{_ld_as_needed_flags} %{_ld_symbols_flags} %{_hardened_ldflags} %{_annotation_ldflags} %[ "%{toolchain}" == "clang" ? "%{?_lto_cflags}" : "" ] %{_build_id_flags}
++ 
++ # Expands to shell code to set the compiler/linker environment
++ # variables CFLAGS, CXXFLAGS, FFLAGS, FCFLAGS, LDFLAGS if they have
++@@ -325,6 +325,13 @@ print(result)
++ %_clang_lto_cflags	-flto
++ %_lto_cflags		%{expand:%%{_%{toolchain}_lto_cflags}}
++ 
+++# Some linkers default to a build-id algoritim that is not supported by rpmbuild,
+++# so we need to specify the right algorithm to use.
+++%_gcc_build_id_flags	%{nil}
+++# Clang defaults to lld on arm, which defaults to an build-id that is too short.
+++%_clang_build_id_flags %[ "%{_target_cpu}" == "armv6hl" ? "-Wl,--build-id=sha1" : "%{nil}" ]
+++%_build_id_flags	%{expand:%%{_%{toolchain}_build_id_flags}}
+++
++ %_general_options       -O2 %{?_lto_cflags} -fexceptions -g -grecord-gcc-switches -pipe
++ %_warning_options       -Wall -Werror=format-security
++ %_preprocessor_defines  -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS
+diff --git a/SPECS/redhat-rpm-config.spec b/SPECS/redhat-rpm-config.spec
+index a13cf4f..a3b13c4 100644
+--- a/SPECS/redhat-rpm-config.spec
++++ b/SPECS/redhat-rpm-config.spec
+@@ -7,7 +7,7 @@
+ Summary: Red Hat specific rpm configuration files
+ Name: redhat-rpm-config
+ Version: 199
+-Release: 1%{?dist}
++Release: 1%{?dist}.redsleeve
+ # No version specified.
+ License: GPL+
+ URL: https://src.fedoraproject.org/rpms/redhat-rpm-config
+@@ -88,6 +88,8 @@ Source801: forge.lua
+ # Documentation
+ Source900: buildflags.md
+ 
++Patch1: macros-arm.patch 
++
+ BuildArch: noarch
+ BuildRequires: perl-generators
+ Requires: coreutils
+@@ -168,6 +170,8 @@ mkdir -p %{buildroot}%{_rpmluadir}/fedora/{rpm,srpm}
+ install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora common.lua
+ install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
+ 
++patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
++
+ # This trigger is used to decide which version of the annobin plugin for gcc
+ # should be used.  See comments in the script for full details.
+ #
+@@ -250,6 +254,10 @@ install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
+ %doc buildflags.md
+ 
+ %changelog
++* Fri Jun 24 2023 Jacco Ligthart <jaco@redsleeve.org> 199-1.el9.redsleeve
++- patched for sha1 build-ids on arm when using clang
++- cherry picked from https://src.fedoraproject.org/rpms/redhat-rpm-config/pull-request/155
++
+ * Tue May 09 2023 CentOS Sources <bugs@centos.org> - 199-1.el9.centos
+ - Apply debranding changes
+ 
+-- 
+2.31.1
+

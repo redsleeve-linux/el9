@@ -7,7 +7,7 @@
 Summary: Red Hat specific rpm configuration files
 Name: redhat-rpm-config
 Version: 199
-Release: 1%{?dist}
+Release: 1%{?dist}.redsleeve
 # No version specified.
 License: GPL+
 URL: https://src.fedoraproject.org/rpms/redhat-rpm-config
@@ -88,6 +88,8 @@ Source801: forge.lua
 # Documentation
 Source900: buildflags.md
 
+Patch1: macros-arm.patch 
+
 BuildArch: noarch
 BuildRequires: perl-generators
 Requires: coreutils
@@ -167,6 +169,8 @@ install -p -m 644 -t %{buildroot}%{_fileattrsdir} *.attr
 mkdir -p %{buildroot}%{_rpmluadir}/fedora/{rpm,srpm}
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora common.lua
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
+
+patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
 
 # This trigger is used to decide which version of the annobin plugin for gcc
 # should be used.  See comments in the script for full details.
@@ -250,6 +254,10 @@ install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
 %doc buildflags.md
 
 %changelog
+* Fri Jun 24 2023 Jacco Ligthart <jaco@redsleeve.org> 199-1.el9.redsleeve
+- patched for sha1 build-ids on arm when using clang
+- cherry picked from https://src.fedoraproject.org/rpms/redhat-rpm-config/pull-request/155
+
 * Tue May 09 2023 CentOS Sources <bugs@centos.org> - 199-1.el9.centos
 - Apply debranding changes
 

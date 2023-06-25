@@ -29,7 +29,7 @@
 # Define GOROOT macros
 %global goroot          %{_prefix}/lib/%{name}
 %global gopath          %{_datadir}/gocode
-%global golang_arches   x86_64 aarch64 ppc64le s390x
+%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
 %global golibdir        %{_libdir}/%{name}
 
 # Golang build options.
@@ -102,7 +102,7 @@
 
 Name:           golang
 Version:        %{version}
-Release:        2%{?dist}
+Release:        2%{?dist}.redsleeve
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD and Public Domain
@@ -533,6 +533,9 @@ cd ..
 %endif
 
 %changelog
+* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.19.9-2.redsleeve
+- added arm to golang_arches
+
 * Tue May 23 2023 Alejandro Sáez <asm@redhat.com> - 1.19.9-2
 - Fix TestEncryptOAEP and TLS failures in FIPS mode
 - Resolves: rhbz#2204476
