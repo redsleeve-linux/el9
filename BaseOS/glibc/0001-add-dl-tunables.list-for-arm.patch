@@ -1,0 +1,90 @@
+From 1949a26bc1cde4ae1f2230574f5d38326ef7df20 Mon Sep 17 00:00:00 2001
+From: Jacco Ligthart <jacco@redsleeve.org>
+Date: Sat, 24 Jun 2023 00:36:48 +0200
+Subject: [PATCH] add dl-tunables.list for arm
+
+---
+ SOURCES/glibc-arm-dl-tunables.list | 27 +++++++++++++++++++++++++++
+ SPECS/glibc.spec                   | 11 ++++++++++-
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+ create mode 100644 SOURCES/glibc-arm-dl-tunables.list
+
+diff --git a/SOURCES/glibc-arm-dl-tunables.list b/SOURCES/glibc-arm-dl-tunables.list
+new file mode 100644
+index 0000000..c3bc83f
+--- /dev/null
++++ b/SOURCES/glibc-arm-dl-tunables.list
+@@ -0,0 +1,27 @@
++# Order of tunables in RHEL 9.1.z.
++@order glibc.rtld.nns
++@order glibc.elision.skip_lock_after_retries
++@order glibc.malloc.trim_threshold
++@order glibc.malloc.perturb
++@order glibc.pthread.rseq
++@order glibc.mem.tagging
++@order glibc.elision.tries
++@order glibc.elision.enable
++@order glibc.malloc.mxfast
++@order glibc.rtld.dynamic_sort
++@order glibc.elision.skip_lock_busy
++@order glibc.malloc.top_pad
++@order glibc.pthread.stack_cache_size
++@order glibc.cpu.hwcap_mask
++@order glibc.malloc.mmap_max
++@order glibc.elision.skip_trylock_internal_abort
++@order glibc.malloc.tcache_unsorted_limit
++@order glibc.elision.skip_lock_internal_abort
++@order glibc.malloc.arena_max
++@order glibc.malloc.mmap_threshold
++@order glibc.malloc.tcache_count
++@order glibc.malloc.arena_test
++@order glibc.pthread.mutex_spin_count
++@order glibc.rtld.optional_static_tls
++@order glibc.malloc.tcache_max
++@order glibc.malloc.check
+diff --git a/SPECS/glibc.spec b/SPECS/glibc.spec
+index ddb8035..3bde8ce 100644
+--- a/SPECS/glibc.spec
++++ b/SPECS/glibc.spec
+@@ -155,7 +155,7 @@ end \
+ Summary: The GNU libc libraries
+ Name: glibc
+ Version: %{glibcversion}
+-Release: 60%{?dist}
++Release: 60%{?dist}.redsleeve
+ 
+ # In general, GPLv2+ is used by programs, LGPLv2+ is used for
+ # libraries.
+@@ -196,6 +196,8 @@ Source11: parse-SUPPORTED.py
+ # Include in the source RPM for reference.
+ Source12: ChangeLog.old
+ 
++Source1000: glibc-arm-dl-tunables.list
++
+ ######################################################################
+ # Activate the wrapper script for debuginfo generation, by rewriting
+ # the definition of __debug_install_post.
+@@ -1522,6 +1524,10 @@ that can be installed across architectures.
+ %prep
+ %autosetup -n %{glibcsrcdir} -p1
+ 
++%ifarch %{arm}
++cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
++%endif
++
+ ##############################################################################
+ # %%prep - Additional prep required...
+ ##############################################################################
+@@ -2859,6 +2865,9 @@ fi
+ %endif
+ 
+ %changelog
++* Sun May 28 2023 Jacco Ligthart <jacco@redsleeve.org> - 2.34-60.redsleeve
++- add dl-tunables.list for arm 
++
+ * Wed Feb  8 2023 Florian Weimer <fweimer@redhat.com> - 2.34-60
+ - Upstream test for ldconfig -p (#2167811)
+ 
+-- 
+2.31.1
+

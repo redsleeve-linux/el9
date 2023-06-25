@@ -15,7 +15,7 @@
 Summary:  Dynamic host configuration protocol software
 Name:     dhcp
 Version:  4.4.2
-Release:  18.b1%{?dist}
+Release:  18.b1%{?dist}.redsleeve
 
 # NEVER CHANGE THE EPOCH on this package.  The previous maintainer (prior to
 # dcantrell maintaining the package) made incorrect use of the epoch and
@@ -228,6 +228,10 @@ sed -i -e 's|/var/db/|%{_localstatedir}/lib/dhcpd/|g' contrib/dhcp-lease-list.pl
 %build
 #libtoolize --copy --force
 autoreconf --verbose --force --install
+
+%ifarch %{arm}
+export LIBS=-latomic
+%endif
 
 CFLAGS="%{optflags} -fno-strict-aliasing -fcommon" \
 %configure \
@@ -508,6 +512,9 @@ done
 %endif
 
 %changelog
+* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> 4.4.2-18.b1.el9.redsleeve
+- added atomic libs for arm
+
 * Tue May 09 2023 CentOS Sources <bugs@centos.org> - 4.4.2-18.b1.el9.centos
 - Apply debranding changes
 

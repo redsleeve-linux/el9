@@ -22,7 +22,7 @@
 Summary: An authorization framework
 Name: polkit
 Version: 0.117
-Release: 11%{?dist}
+Release: 11%{?dist}.redsleeve
 License: LGPLv2+
 URL: http://www.freedesktop.org/wiki/Software/polkit
 Source0: http://www.freedesktop.org/software/polkit/releases/%{name}-%{version}.tar.gz
@@ -198,7 +198,7 @@ pushd firefox-%{mozjs_version}
 %patch14 -p1
 %patch15 -p1
 
-%ifarch armv7hl
+%ifarch %{arm}
 # Include definitions for user vfp on armv7 as it causes the compilation to fail without them
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1526653
 %patch17 -p1
@@ -387,6 +387,9 @@ exit 0
 %endif
 
 %changelog
+* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> - 0.117-11.redsleeve
+- apply definitions_for_user_vfp also for armv6
+
 * Fri Dec 02 2022 Jan Rybar <jrybar@redhat.com> - 0.117-11
 - backport: restore tty only if changed
 - Resolves: rhbz#2150310

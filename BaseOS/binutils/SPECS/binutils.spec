@@ -2,7 +2,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 37%{?dist}
+Release: 37%{?dist}.redsleeve
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -489,6 +489,7 @@ Requires(post): coreutils
 BuildRequires: elfutils-debuginfod-client-devel
 %endif
 
+Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 %description
@@ -1264,6 +1265,9 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
+* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-37.redsleeve
+- minor adjustments for armv6
+
 * Fri Jan 20 2023 Nick Clifton  <nickc@redhat.com> - 2.35.2-37
 - Stop the cross binaries from leaking into the native packages.
 

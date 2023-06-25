@@ -1,6 +1,6 @@
 Name: rdma-core
 Version: 44.0
-Release: 2%{?dist}
+Release: 2%{?dist}.redsleeve
 Summary: RDMA core userspace libraries and daemons
 
 # Almost everything is licensed under the OFA dual GPLv2, 2 Clause BSD license
@@ -21,7 +21,7 @@ Patch9999: 9999-udev-keep-NAME_KERNEL-as-default-interface-naming-co.patch
 %define with_static %{?_with_static: 1} %{?!_with_static: 0}
 
 # 32-bit arm is missing required arch-specific memory barriers,
-ExcludeArch: %{arm}
+#ExcludeArch: %{arm}
 
 BuildRequires: binutils
 BuildRequires: cmake >= 2.8.11
@@ -31,7 +31,7 @@ BuildRequires: pkgconfig
 BuildRequires: pkgconfig(libnl-3.0)
 BuildRequires: pkgconfig(libnl-route-3.0)
 BuildRequires: /usr/bin/rst2man
-BuildRequires: valgrind-devel
+#BuildRequires: valgrind-devel
 BuildRequires: systemd
 BuildRequires: systemd-devel
 %if 0%{?fedora} >= 32 || 0%{?rhel} >= 8
@@ -400,8 +400,10 @@ fi
 %config(noreplace) %{_sysconfdir}/rdma/modules/opa.conf
 %config(noreplace) %{_sysconfdir}/rdma/modules/rdma.conf
 %config(noreplace) %{_sysconfdir}/rdma/modules/roce.conf
+%ifnarch %{arm}
 %dir %{_sysconfdir}/modprobe.d
 %config(noreplace) %{_sysconfdir}/modprobe.d/mlx4.conf
+%endif
 %{_unitdir}/rdma-hw.target
 %{_unitdir}/rdma-load-modules@.service
 %dir %{dracutlibdir}
@@ -436,17 +438,19 @@ fi
 %endif
 %{_libdir}/lib*.so
 %{_libdir}/pkgconfig/*.pc
-%{_mandir}/man3/efadv*
 %{_mandir}/man3/ibv_*
 %{_mandir}/man3/rdma*
 %{_mandir}/man3/umad*
 %{_mandir}/man3/*_to_ibv_rate.*
 %{_mandir}/man7/rdma_cm.*
+%ifnarch %{arm}
+%{_mandir}/man3/efadv*
 %{_mandir}/man3/mlx5dv*
 %{_mandir}/man3/mlx4dv*
 %{_mandir}/man7/efadv*
 %{_mandir}/man7/mlx5dv*
 %{_mandir}/man7/mlx4dv*
+%endif
 %{_mandir}/man3/ibnd_*
 
 %files -n infiniband-diags
@@ -520,11 +524,13 @@ fi
 %files -n libibverbs
 %dir %{_sysconfdir}/libibverbs.d
 %dir %{_libdir}/libibverbs
-%{_libdir}/libefa.so.*
 %{_libdir}/libibverbs*.so.*
 %{_libdir}/libibverbs/*.so
+%ifnarch %{arm}
+%{_libdir}/libefa.so.*
 %{_libdir}/libmlx5.so.*
 %{_libdir}/libmlx4.so.*
+%endif
 %config(noreplace) %{_sysconfdir}/libibverbs.d/*.driver
 %doc %{_docdir}/%{name}/libibverbs.md
 
@@ -616,6 +622,9 @@ fi
 %endif
 
 %changelog
+* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org > - 44.0-2.redsleeve
+- patched for armv6
+
 * Wed Feb 01 2023 Michal Schmidt <mschmidt@redhat.com> - 44.0-2
 - Fix covscan-found issues.
 - Resolves: rhbz#2112984, rhbz#2142687
