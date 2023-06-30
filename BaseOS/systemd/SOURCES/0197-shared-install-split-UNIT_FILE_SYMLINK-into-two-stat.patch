@@ -1,0 +1,109 @@
+From e2d699c92944c6251f9de161c9e3ae93d915c4e0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 17 Mar 2022 15:50:16 +0100
+Subject: [PATCH] shared/install: split UNIT_FILE_SYMLINK into two states
+
+The two states are distinguished, but are treated everywhere identically,
+so there is no difference in behaviour except for slighlty different log
+output.
+
+(cherry picked from commit 48ed75adabef3427767038fa155e55b3b0d48f35)
+
+Related: #2082131
+---
+ src/basic/unit-file.c |  6 ++++--
+ src/shared/install.c  | 14 +++++++++-----
+ src/shared/install.h  |  3 ++-
+ 3 files changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/src/basic/unit-file.c b/src/basic/unit-file.c
+index 2474648ceb..7c1ae515e1 100644
+--- a/src/basic/unit-file.c
++++ b/src/basic/unit-file.c
+@@ -282,7 +282,9 @@ int unit_file_resolve_symlink(
+          *
+          * If resolve_destination_target is true, an absolute path will be returned.
+          * If not, an absolute path is returned for linked unit files, and a relative
+-         * path otherwise. */
++         * path otherwise.
++         *
++         * Returns an error, false if this is an alias, true if it's a linked unit file. */
+ 
+         assert(filename);
+         assert(ret_destination);
+@@ -364,7 +366,7 @@ int unit_file_resolve_symlink(
+         }
+ 
+         *ret_destination = TAKE_PTR(dst);
+-        return 0;
++        return !tail;  /* true if linked unit file */
+ }
+ 
+ int unit_file_build_name_map(
+diff --git a/src/shared/install.c b/src/shared/install.c
+index f911d527df..b33f7d4bc1 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -93,8 +93,9 @@ void unit_file_presets_freep(UnitFilePresets *p) {
+ 
+ static const char *const unit_file_type_table[_UNIT_FILE_TYPE_MAX] = {
+         [UNIT_FILE_TYPE_REGULAR] = "regular",
+-        [UNIT_FILE_TYPE_SYMLINK] = "symlink",
+-        [UNIT_FILE_TYPE_MASKED] = "masked",
++        [UNIT_FILE_TYPE_LINKED]  = "linked",
++        [UNIT_FILE_TYPE_ALIAS]   = "alias",
++        [UNIT_FILE_TYPE_MASKED]  = "masked",
+ };
+ 
+ DEFINE_PRIVATE_STRING_TABLE_LOOKUP_TO_STRING(unit_file_type, UnitFileType);
+@@ -1404,14 +1405,17 @@ static int unit_file_load_or_readlink(
+                                       true, &info->symlink_target);
+         if (r < 0)
+                 return r;
++        bool outside_search_path = r > 0;
+ 
+         r = null_or_empty_path_with_root(info->symlink_target, lp->root_dir);
+         if (r < 0 && r != -ENOENT)
+                 return log_debug_errno(r, "Failed to stat %s: %m", info->symlink_target);
+         if (r > 0)
+                 info->type = UNIT_FILE_TYPE_MASKED;
++        else if (outside_search_path)
++                info->type = UNIT_FILE_TYPE_LINKED;
+         else
+-                info->type = UNIT_FILE_TYPE_SYMLINK;
++                info->type = UNIT_FILE_TYPE_ALIAS;
+ 
+         return 0;
+ }
+@@ -1550,7 +1554,7 @@ static int install_info_follow(
+         assert(ctx);
+         assert(info);
+ 
+-        if (info->type != UNIT_FILE_TYPE_SYMLINK)
++        if (!IN_SET(info->type, UNIT_FILE_TYPE_ALIAS, UNIT_FILE_TYPE_LINKED))
+                 return -EINVAL;
+         if (!info->symlink_target)
+                 return -EINVAL;
+@@ -1591,7 +1595,7 @@ static int install_info_traverse(
+                 return r;
+ 
+         i = start;
+-        while (i->type == UNIT_FILE_TYPE_SYMLINK) {
++        while (IN_SET(i->type, UNIT_FILE_TYPE_ALIAS, UNIT_FILE_TYPE_LINKED)) {
+                 /* Follow the symlink */
+ 
+                 if (++k > UNIT_FILE_FOLLOW_SYMLINK_MAX)
+diff --git a/src/shared/install.h b/src/shared/install.h
+index dba6987406..95427537f2 100644
+--- a/src/shared/install.h
++++ b/src/shared/install.h
+@@ -70,7 +70,8 @@ struct UnitFileList {
+ 
+ enum UnitFileType {
+         UNIT_FILE_TYPE_REGULAR,
+-        UNIT_FILE_TYPE_SYMLINK,
++        UNIT_FILE_TYPE_LINKED,
++        UNIT_FILE_TYPE_ALIAS,
+         UNIT_FILE_TYPE_MASKED,
+         _UNIT_FILE_TYPE_MAX,
+         _UNIT_FILE_TYPE_INVALID = -EINVAL,

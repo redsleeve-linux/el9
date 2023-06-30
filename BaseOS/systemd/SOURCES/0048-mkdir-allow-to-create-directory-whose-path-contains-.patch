@@ -1,0 +1,36 @@
+From 77cde7d38bf8cd3438a867a6330c314f4580e43b Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 2 Feb 2022 14:20:48 +0900
+Subject: [PATCH] mkdir: allow to create directory whose path contains symlink
+
+Fixes a regression caused by 3008a6f21c1c42efe852d69798a2fdd63fe657ec.
+
+Before the commit, when `mkdir_parents_internal()` is called from `mkdir_p()`,
+it uses `_mkdir()` as `flag` is zero. But after the commit, `mkdir_safe_internal()`
+is always used. Hence, if the path contains a symlink, it fails with -ENOTDIR.
+
+To fix the issue, this makes `mkdir_p()` calls `mkdir_parents_internal()` with
+MKDIR_FOLLOW_SYMLINK flag.
+
+Fixes #22334.
+
+(cherry picked from commit 5117059ee9f84ed2fd37801ec0b90473db475422)
+
+Related: #2017035
+---
+ src/basic/mkdir.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/basic/mkdir.c b/src/basic/mkdir.c
+index 6e2b94d024..88782ab0d4 100644
+--- a/src/basic/mkdir.c
++++ b/src/basic/mkdir.c
+@@ -162,7 +162,7 @@ int mkdir_p_internal(const char *prefix, const char *path, mode_t mode, uid_t ui
+ 
+         assert(_mkdirat != mkdirat);
+ 
+-        r = mkdir_parents_internal(prefix, path, mode, uid, gid, flags, _mkdirat);
++        r = mkdir_parents_internal(prefix, path, mode, uid, gid, flags | MKDIR_FOLLOW_SYMLINK, _mkdirat);
+         if (r < 0)
+                 return r;
+ 

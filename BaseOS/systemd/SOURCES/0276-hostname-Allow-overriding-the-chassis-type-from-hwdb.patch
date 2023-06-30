@@ -1,0 +1,41 @@
+From ea54689eebe58d1bbb908762731f179e50ac1c9a Mon Sep 17 00:00:00 2001
+From: Bastien Nocera <hadess@hadess.net>
+Date: Fri, 21 Jan 2022 18:56:42 +0100
+Subject: [PATCH] hostname: Allow overriding the chassis type from hwdb
+
+Closes: #7390
+(cherry picked from commit 4b35eb2579b226785f0d94129a7652450f9723fd)
+
+Related: #2087778
+---
+ src/hostname/hostnamed.c | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
+index b20a93ad81..559326b9f5 100644
+--- a/src/hostname/hostnamed.c
++++ b/src/hostname/hostnamed.c
+@@ -725,16 +725,18 @@ static int property_get_chassis(
+                 sd_bus_error *error) {
+ 
+         Context *c = userdata;
+-        const char *name;
++        _cleanup_free_ char *dmi_chassis = NULL;
++        const char *name = NULL;
+ 
+         context_read_machine_info(c);
+ 
+-        if (isempty(c->data[PROP_CHASSIS]))
+-                name = fallback_chassis();
+-        else
++        if (isempty(c->data[PROP_CHASSIS])) {
++                if (get_dmi_data("ID_CHASSIS", NULL, &dmi_chassis) <= 0)
++                        name = fallback_chassis();
++        } else
+                 name = c->data[PROP_CHASSIS];
+ 
+-        return sd_bus_message_append(reply, "s", name);
++        return sd_bus_message_append(reply, "s", name ?: dmi_chassis);
+ }
+ 
+ static int property_get_uname_field(

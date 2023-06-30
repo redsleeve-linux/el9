@@ -1,0 +1,107 @@
+From e7b657694adbd03403f2ebbe089a6d5baa58d7d5 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 14 Jun 2022 09:00:00 +0900
+Subject: [PATCH] test: introduce assert_not_in() helper function
+
+This also silence assertions, and replace grep with bash's regular
+expression match.
+
+(cherry picked from commit d170b47535e2acc8abd1af85ff8685107fdd490f)
+
+Related: #2087652
+---
+ test/units/assert.sh       | 48 ++++++++++++++++++++++++--------------
+ test/units/testsuite-45.sh |  2 +-
+ 2 files changed, 32 insertions(+), 18 deletions(-)
+
+diff --git a/test/units/assert.sh b/test/units/assert.sh
+index db67dad268..66357ab688 100644
+--- a/test/units/assert.sh
++++ b/test/units/assert.sh
+@@ -3,42 +3,56 @@
+ 
+ # utility functions for shell tests
+ 
+-assert_true() {
++assert_true() {(
+     local rc
+ 
+-    set +e
++    set +ex
++
+     "$@"
+     rc=$?
+-    set -e
+-    if [[ "$rc" != "0" ]]; then
++    if [[ $rc -ne 0 ]]; then
+         echo "FAIL: command '$*' failed with exit code $rc" >&2
+         exit 1
+     fi
+-}
++)}
++
+ 
++assert_eq() {(
++    set +ex
+ 
+-assert_eq() {
+-    if [[ "$1" != "$2" ]]; then
++    if [[ "${1?}" != "${2?}" ]]; then
+         echo "FAIL: expected: '$2' actual: '$1'" >&2
+         exit 1
+     fi
+-}
++)}
++
++assert_in() {(
++    set +ex
+ 
+-assert_in() {
+-    if ! echo "$2" | grep -q "$1"; then
++    if ! [[ "${2?}" =~ ${1?} ]]; then
+         echo "FAIL: '$1' not found in:" >&2
+         echo "$2" >&2
+         exit 1
+     fi
+-}
++)}
++
++assert_not_in() {(
++    set +ex
++
++    if [[ "${2?}" =~ ${1?} ]]; then
++        echo "FAIL: '$1' found in:" >&2
++        echo "$2" >&2
++        exit 1
++    fi
++)}
++
++assert_rc() {(
++    local rc exp="${1?}"
++
++    set +ex
+ 
+-assert_rc() {
+-    local exp=$1
+-    local rc
+     shift
+-    set +e
+     "$@"
+     rc=$?
+-    set -e
+     assert_eq "$rc" "$exp"
+-}
++)}
+diff --git a/test/units/testsuite-45.sh b/test/units/testsuite-45.sh
+index ac7860dccd..d0d1ef2eb4 100755
+--- a/test/units/testsuite-45.sh
++++ b/test/units/testsuite-45.sh
+@@ -21,7 +21,7 @@ test_timezone() {
+     echo 'change timezone'
+     assert_eq "$(timedatectl --no-pager set-timezone Europe/Kiev 2>&1)" ""
+     assert_eq "$(readlink /etc/localtime | sed 's#^.*zoneinfo/##')" "Europe/Kiev"
+-    assert_in "Time.*zone: Europe/Kiev (EEST, +" "$(timedatectl --no-pager)"
++    assert_in "Time zone: Europe/Kiev \(EEST, \+0[0-9]00\)" "$(timedatectl)"
+ 
+     if [[ -n "$ORIG_TZ" ]]; then
+         echo 'reset timezone to original'

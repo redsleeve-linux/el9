@@ -1,0 +1,32 @@
+From c10efc8164dcdf8596315ce98f60405f8c2e17c0 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 14 Jun 2022 09:05:00 +0900
+Subject: [PATCH] locale-util: check if enumerated locales are valid
+
+(cherry picked from commit a2f7937747f12634d93049f645cdae88f89ff233)
+
+Related: #2087652
+---
+ src/basic/locale-util.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/basic/locale-util.c b/src/basic/locale-util.c
+index abbebc7666..bd36cdd1cd 100644
+--- a/src/basic/locale-util.c
++++ b/src/basic/locale-util.c
+@@ -199,6 +199,15 @@ int get_locales(char ***ret) {
+         if (r < 0)
+                 return r;
+ 
++        char *locale;
++        SET_FOREACH(locale, locales) {
++                r = locale_is_installed(locale);
++                if (r < 0)
++                        return r;
++                if (r == 0)
++                        free(set_remove(locales, locale));
++        }
++
+         l = set_get_strv(locales);
+         if (!l)
+                 return -ENOMEM;

@@ -1,0 +1,73 @@
+From 72d3b0c995403293f65ee9a47043ebd2fdafc1cd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 29 Mar 2022 12:17:51 +0200
+Subject: [PATCH] hwdb: fix parser to work with newer pyparsing
+
+The handling of whitespace in pyparsing is a bother. There's some
+global state, and per-element state, and it's hard to get a handle on
+things. With python3-pyparsing-2.4.7-10.fc36.noarch the grammar would
+not match. After handling of tabs was fixed to not accept duplicate tabs,
+the grammar passes.
+
+It seems that the entry for usb:v8087p8087*
+was generated incorrectly because we treated the interface line
+(with two TABs) as a device line (with one TAB).
+
+(cherry picked from commit f73d6895872cb9caffc523e1eddc53c9b98cfdec)
+
+Related: #2087778
+---
+ hwdb.d/20-usb-vendor-model.hwdb |  3 ---
+ hwdb.d/ids_parser.py            | 10 ++++++++--
+ 2 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/hwdb.d/20-usb-vendor-model.hwdb b/hwdb.d/20-usb-vendor-model.hwdb
+index f40a3947c7..9f457d9f65 100644
+--- a/hwdb.d/20-usb-vendor-model.hwdb
++++ b/hwdb.d/20-usb-vendor-model.hwdb
+@@ -69815,9 +69815,6 @@ usb:v8087p8008*
+ usb:v8087p800A*
+  ID_MODEL_FROM_DATABASE=Hub
+ 
+-usb:v8087p8087*
+- ID_MODEL_FROM_DATABASE=07da  Centrino Advanced-N 6235
+-
+ usb:v80EE*
+  ID_VENDOR_FROM_DATABASE=VirtualBox
+ 
+diff --git a/hwdb.d/ids_parser.py b/hwdb.d/ids_parser.py
+index 0ce79cd97e..811c12559b 100755
+--- a/hwdb.d/ids_parser.py
++++ b/hwdb.d/ids_parser.py
+@@ -6,7 +6,7 @@ import sys
+ from pyparsing import (Word, White, Literal, Regex,
+                        LineEnd, SkipTo,
+                        ZeroOrMore, OneOrMore, Combine, Optional, Suppress,
+-                       Group,
++                       Group, ParserElement,
+                        stringEnd, pythonStyleComment)
+ 
+ EOL = LineEnd().suppress()
+@@ -20,6 +20,8 @@ COMMENTLINE = pythonStyleComment + EOL
+ EMPTYLINE = LineEnd()
+ text_eol = lambda name: Regex(r'[^\n]+')(name) + EOL
+ 
++ParserElement.set_default_whitespace_chars(' \n')
++
+ def klass_grammar():
+     klass_line = Literal('C ').suppress() + NUM2('klass') + text_eol('text')
+     subclass_line = TAB + NUM2('subclass') + text_eol('text')
+@@ -35,8 +37,12 @@ def klass_grammar():
+ def usb_ids_grammar():
+     vendor_line = NUM4('vendor') + text_eol('text')
+     device_line = TAB + NUM4('device') + text_eol('text')
++    interface_line = TAB + TAB + NUM4('interface') + NUM4('interface2') + text_eol('text')
++    device = (device_line +
++              ZeroOrMore(Group(interface_line)
++                         ^ COMMENTLINE.suppress()))
+     vendor = (vendor_line('VENDOR') +
+-              ZeroOrMore(Group(device_line)('VENDOR_DEV*') ^ COMMENTLINE.suppress()))
++              ZeroOrMore(Group(device)('VENDOR_DEV*') ^ COMMENTLINE.suppress()))
+ 
+     klass = klass_grammar()
+ 

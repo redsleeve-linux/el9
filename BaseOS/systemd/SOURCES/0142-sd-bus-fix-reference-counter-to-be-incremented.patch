@@ -1,0 +1,34 @@
+From 4dcd6089addae3ef6b6c82e36b30b178a4261249 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 17 Apr 2022 07:05:07 +0900
+Subject: [PATCH] sd-bus: fix reference counter to be incremented
+
+Fixes #23097.
+
+(cherry picked from commit b21f237d996c8c18991a68e1204f060d07dc4745)
+
+Related: #2087652
+---
+ src/libsystemd/sd-bus/bus-track.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/libsystemd/sd-bus/bus-track.c b/src/libsystemd/sd-bus/bus-track.c
+index bc36673b83..891fd0c899 100644
+--- a/src/libsystemd/sd-bus/bus-track.c
++++ b/src/libsystemd/sd-bus/bus-track.c
+@@ -191,12 +191,12 @@ _public_ int sd_bus_track_add_name(sd_bus_track *track, const char *name) {
+         i = hashmap_get(track->names, name);
+         if (i) {
+                 if (track->recursive) {
+-                        unsigned k = track->n_ref + 1;
++                        unsigned k = i->n_ref + 1;
+ 
+-                        if (k < track->n_ref) /* Check for overflow */
++                        if (k < i->n_ref) /* Check for overflow */
+                                 return -EOVERFLOW;
+ 
+-                        track->n_ref = k;
++                        i->n_ref = k;
+                 }
+ 
+                 bus_track_remove_from_queue(track);

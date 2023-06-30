@@ -1,0 +1,187 @@
+From 0235f9ea3d221aba513f4b6215418bf554e02791 Mon Sep 17 00:00:00 2001
+From: Evgeny Vereshchagin <evvers@ya.ru>
+Date: Mon, 3 Jan 2022 12:31:07 +0000
+Subject: [PATCH] fuzz: no longer skip empty files
+
+Empty files and empty strings seem to have triggered various
+issues in the past so it seems they shouldn't be ignore by the
+fuzzers just because fmemopen can't handle them.
+
+Prompted by https://github.com/systemd/systemd/pull/21939#issuecomment-1003113669
+
+(cherry picked from commit 5df66d7d68006615abb4c4d3b1ebad545af4dd72)
+Related: #2087652
+---
+ src/core/fuzz-unit-file.c         | 6 +-----
+ src/fuzz/fuzz-env-file.c          | 5 ++---
+ src/fuzz/fuzz-hostname-setup.c    | 6 +-----
+ src/fuzz/fuzz-json.c              | 6 +-----
+ src/fuzz/fuzz.h                   | 9 +++++++++
+ src/nspawn/fuzz-nspawn-oci.c      | 6 +-----
+ src/nspawn/fuzz-nspawn-settings.c | 6 +-----
+ 7 files changed, 16 insertions(+), 28 deletions(-)
+
+diff --git a/src/core/fuzz-unit-file.c b/src/core/fuzz-unit-file.c
+index aef29f4cf7..780dd3988d 100644
+--- a/src/core/fuzz-unit-file.c
++++ b/src/core/fuzz-unit-file.c
+@@ -2,7 +2,6 @@
+ 
+ #include "conf-parser.h"
+ #include "fd-util.h"
+-#include "fileio.h"
+ #include "fuzz.h"
+ #include "install.h"
+ #include "load-fragment.h"
+@@ -22,10 +21,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+         const char *name;
+         long offset;
+ 
+-        if (size == 0)
+-                return 0;
+-
+-        f = fmemopen_unlocked((char*) data, size, "re");
++        f = data_to_file(data, size);
+         assert_se(f);
+ 
+         if (read_line(f, LINE_MAX, &p) < 0)
+diff --git a/src/fuzz/fuzz-env-file.c b/src/fuzz/fuzz-env-file.c
+index e0dac260b0..3b3e625608 100644
+--- a/src/fuzz/fuzz-env-file.c
++++ b/src/fuzz/fuzz-env-file.c
+@@ -4,7 +4,6 @@
+ 
+ #include "alloc-util.h"
+ #include "env-file.h"
+-#include "fileio.h"
+ #include "fd-util.h"
+ #include "fuzz.h"
+ #include "strv.h"
+@@ -13,10 +12,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+         _cleanup_fclose_ FILE *f = NULL;
+         _cleanup_strv_free_ char **rl = NULL, **rlp =  NULL;
+ 
+-        if (size == 0 || size > 65535)
++        if (size > 65535)
+                 return 0;
+ 
+-        f = fmemopen_unlocked((char*) data, size, "re");
++        f = data_to_file(data, size);
+         assert_se(f);
+ 
+         /* We don't want to fill the logs with messages about parse errors.
+diff --git a/src/fuzz/fuzz-hostname-setup.c b/src/fuzz/fuzz-hostname-setup.c
+index b8d36da54a..d7c23eef12 100644
+--- a/src/fuzz/fuzz-hostname-setup.c
++++ b/src/fuzz/fuzz-hostname-setup.c
+@@ -2,7 +2,6 @@
+ 
+ #include "alloc-util.h"
+ #include "fd-util.h"
+-#include "fileio.h"
+ #include "fuzz.h"
+ #include "hostname-setup.h"
+ 
+@@ -10,10 +9,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+         _cleanup_fclose_ FILE *f = NULL;
+         _cleanup_free_ char *ret = NULL;
+ 
+-        if (size == 0)
+-                return 0;
+-
+-        f = fmemopen_unlocked((char*) data, size, "re");
++        f = data_to_file(data, size);
+         assert_se(f);
+ 
+         /* We don't want to fill the logs with messages about parse errors.
+diff --git a/src/fuzz/fuzz-json.c b/src/fuzz/fuzz-json.c
+index f9a0e818c4..ad7460c6fd 100644
+--- a/src/fuzz/fuzz-json.c
++++ b/src/fuzz/fuzz-json.c
+@@ -1,7 +1,6 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
+ #include "alloc-util.h"
+-#include "fileio.h"
+ #include "fd-util.h"
+ #include "fuzz.h"
+ #include "json.h"
+@@ -12,10 +11,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+         _cleanup_fclose_ FILE *f = NULL, *g = NULL;
+         _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
+ 
+-        if (size == 0)
+-                return 0;
+-
+-        f = fmemopen_unlocked((char*) data, size, "re");
++        f = data_to_file(data, size);
+         assert_se(f);
+ 
+         if (json_parse_file(f, NULL, 0, &v, NULL, NULL) < 0)
+diff --git a/src/fuzz/fuzz.h b/src/fuzz/fuzz.h
+index 579b0eed73..d7cbb0bb16 100644
+--- a/src/fuzz/fuzz.h
++++ b/src/fuzz/fuzz.h
+@@ -4,5 +4,14 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ 
++#include "fileio.h"
++
+ /* The entry point into the fuzzer */
+ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
++
++static inline FILE* data_to_file(const uint8_t *data, size_t size) {
++        if (size == 0)
++                return fopen("/dev/null", "re");
++        else
++                return fmemopen_unlocked((char*) data, size, "re");
++}
+diff --git a/src/nspawn/fuzz-nspawn-oci.c b/src/nspawn/fuzz-nspawn-oci.c
+index cfebf65c00..91f2a81dfc 100644
+--- a/src/nspawn/fuzz-nspawn-oci.c
++++ b/src/nspawn/fuzz-nspawn-oci.c
+@@ -2,7 +2,6 @@
+ 
+ #include "alloc-util.h"
+ #include "fd-util.h"
+-#include "fileio.h"
+ #include "fuzz.h"
+ #include "nspawn-oci.h"
+ 
+@@ -10,10 +9,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+         _cleanup_fclose_ FILE *f = NULL;
+         _cleanup_(settings_freep) Settings *s = NULL;
+ 
+-        if (size == 0)
+-                return 0;
+-
+-        f = fmemopen_unlocked((char*) data, size, "re");
++        f = data_to_file(data, size);
+         assert_se(f);
+ 
+         /* We don't want to fill the logs with messages about parse errors.
+diff --git a/src/nspawn/fuzz-nspawn-settings.c b/src/nspawn/fuzz-nspawn-settings.c
+index bd98ed26e8..6b91e1506e 100644
+--- a/src/nspawn/fuzz-nspawn-settings.c
++++ b/src/nspawn/fuzz-nspawn-settings.c
+@@ -2,7 +2,6 @@
+ 
+ #include "alloc-util.h"
+ #include "fd-util.h"
+-#include "fileio.h"
+ #include "fuzz.h"
+ #include "nspawn-settings.h"
+ 
+@@ -10,10 +9,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+         _cleanup_fclose_ FILE *f = NULL;
+         _cleanup_(settings_freep) Settings *s = NULL;
+ 
+-        if (size == 0)
+-                return 0;
+-
+-        f = fmemopen_unlocked((char*) data, size, "re");
++        f = data_to_file(data, size);
+         assert_se(f);
+ 
+         /* We don't want to fill the logs with messages about parse errors.

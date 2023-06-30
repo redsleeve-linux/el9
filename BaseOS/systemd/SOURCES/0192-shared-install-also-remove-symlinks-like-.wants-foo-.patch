@@ -1,0 +1,116 @@
+From 5aa2be25e7de16f4d3ff3b322cf8c35574e712c5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 16 Mar 2022 09:51:24 +0100
+Subject: [PATCH] =?UTF-8?q?shared/install:=20also=20remove=20symlinks=20li?=
+ =?UTF-8?q?ke=20.wants/foo@one.service=20=E2=86=92=20../foo@one.service?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+So far 'systemctl enable' would create absolute links to the target template
+name. And we would remove such symlinks just fine. But the user may create
+symlinks manually in a different form. In particular, symlinks for instanced
+units *must* have the instance in the source name, and then it is natural to
+also include it in the target name (.wants/foo@one.service → ../foo@one.service
+rather than .wants/foo@one.service → ../foo@.service). We would choke on such
+links, or not remove them at all. A test is added:
+
+before:
+
++ build-rawhide/systemctl --root=/tmp/systemctl-test.001xda disable templ1@.service
+Removed "/tmp/systemctl-test.001xda/etc/systemd/system/services.target.wants/templ1@seven.service".
+Removed "/tmp/systemctl-test.001xda/etc/systemd/system/services.target.wants/templ1@six.service".
+Removed "/tmp/systemctl-test.001xda/etc/systemd/system/services.target.wants/templ1@five.service".
+Removed "/tmp/systemctl-test.001xda/etc/systemd/system/services.target.wants/templ1@four.service".
+Removed "/tmp/systemctl-test.001xda/etc/systemd/system/services.target.wants/templ1@three.service".
+Failed to disable unit, refusing to operate on linked unit file /tmp/systemctl-test.001xda/etc/systemd/system/services.target.wants/templ1@two.service.
+Failed to disable unit, refusing to operate on linked unit file /tmp/systemctl-test.001xda/etc/systemd/system/services.target.wants/templ1@two.service.
+
+after:
+
++ build-rawhide/systemctl --root=/tmp/systemctl-test.QVP0ev disable templ1@.service
+Removed "/tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@seven.service".
+Removed "/tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@six.service".
+Removed "/tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@five.service".
+Removed "/tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@four.service".
+Removed "/tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@three.service".
+Removed "/tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@two.service".
+Removed "/tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@one.service".
++ test '!' -h /tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@one.service
++ test '!' -h /tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@two.service
++ test '!' -h /tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@three.service
++ test '!' -h /tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@four.service
++ test '!' -h /tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@five.service
++ test '!' -h /tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@six.service
++ test '!' -h /tmp/systemctl-test.QVP0ev/etc/systemd/system/services.target.wants/templ1@seven.service
+
+(cherry picked from commit 9f61c9f79e0f77044b71ef2ba5edde20e15c6ad2)
+
+Related: #2082131
+---
+ src/shared/install.c          | 16 +++++++++++++---
+ test/test-systemctl-enable.sh | 20 ++++++++++++++++++++
+ 2 files changed, 33 insertions(+), 3 deletions(-)
+
+diff --git a/src/shared/install.c b/src/shared/install.c
+index 08a9892260..43955519ae 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -612,13 +612,23 @@ static int remove_marked_symlinks_fd(
+                         path_simplify(p);
+ 
+                         /* We remove all links pointing to a file or path that is marked, as well as all
+-                         * files sharing the same name as a file that is marked. Do path chasing only if
+-                         * we don't already know that we want to remove the symlink. */
++                         * files sharing the same name as a file that is marked, and files sharing the same
++                         * name after the instance has been removed. Do path chasing only if we don't already
++                         * know that we want to remove the symlink. */
+                         found = set_contains(remove_symlinks_to, de->d_name);
+ 
+                         if (!found) {
+-                                _cleanup_free_ char *dest = NULL;
++                                _cleanup_free_ char *template = NULL;
++
++                                q = unit_name_template(de->d_name, &template);
++                                if (q < 0 && q != -EINVAL)
++                                        return q;
++                                if (q >= 0)
++                                        found = set_contains(remove_symlinks_to, template);
++                        }
+ 
++                        if (!found) {
++                                _cleanup_free_ char *dest = NULL;
+ 
+                                 q = chase_symlinks(p, lp->root_dir, CHASE_NONEXISTENT, &dest, NULL);
+                                 if (q == -ENOENT)
+diff --git a/test/test-systemctl-enable.sh b/test/test-systemctl-enable.sh
+index 220ebfdab7..4462fb386e 100644
+--- a/test/test-systemctl-enable.sh
++++ b/test/test-systemctl-enable.sh
+@@ -333,6 +333,26 @@ test ! -h "$root/etc/systemd/system/other@templ1.target.requires/templ1@one.serv
+ test ! -h "$root/etc/systemd/system/services.target.wants/templ1@two.service"
+ test ! -h "$root/etc/systemd/system/other@templ1.target.requires/templ1@two.service"
+ 
++: -------removal of relative enablement symlinks--------------
++test ! -h "$root/etc/systemd/system/services.target.wants/templ1@.service"
++ln -s '../templ1@one.service' "$root/etc/systemd/system/services.target.wants/templ1@one.service"
++ln -s 'templ1@two.service' "$root/etc/systemd/system/services.target.wants/templ1@two.service"
++ln -s '../templ1@.service' "$root/etc/systemd/system/services.target.wants/templ1@three.service"
++ln -s 'templ1@.service' "$root/etc/systemd/system/services.target.wants/templ1@four.service"
++ln -s '/usr/lib/systemd/system/templ1@.service' "$root/etc/systemd/system/services.target.wants/templ1@five.service"
++ln -s '/etc/systemd/system/templ1@.service' "$root/etc/systemd/system/services.target.wants/templ1@six.service"
++ln -s '/run/system/templ1@.service' "$root/etc/systemd/system/services.target.wants/templ1@seven.service"
++
++# this should remove all links
++"$systemctl" --root="$root" disable 'templ1@.service'
++test ! -h "$root/etc/systemd/system/services.target.wants/templ1@one.service"
++test ! -h "$root/etc/systemd/system/services.target.wants/templ1@two.service"
++test ! -h "$root/etc/systemd/system/services.target.wants/templ1@three.service"
++test ! -h "$root/etc/systemd/system/services.target.wants/templ1@four.service"
++test ! -h "$root/etc/systemd/system/services.target.wants/templ1@five.service"
++test ! -h "$root/etc/systemd/system/services.target.wants/templ1@six.service"
++test ! -h "$root/etc/systemd/system/services.target.wants/templ1@seven.service"
++
+ : -------template enablement for another template-------------
+ cat >"$root/etc/systemd/system/templ2@.service" <<EOF
+ [Install]

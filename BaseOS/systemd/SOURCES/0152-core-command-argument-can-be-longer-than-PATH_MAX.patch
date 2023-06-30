@@ -1,0 +1,64 @@
+From fdc436432f1ca2dd9df2f24728916ab1201015c1 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 5 Apr 2022 21:47:46 +0900
+Subject: [PATCH] core: command argument can be longer than PATH_MAX
+
+Fixes a bug introduced by 065364920281e1cf59cab989e17aff21790505c4.
+
+Fixes #22957.
+
+(cherry picked from commit 58dd4999dcc81a0ed92fbd78bce3592c3e3afe9e)
+
+Resolves: #2073994
+---
+ src/core/load-fragment.c      |  2 +-
+ src/test/test-load-fragment.c | 16 ++++++++++++++++
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/load-fragment.c b/src/core/load-fragment.c
+index ad5a0912fc..461e073269 100644
+--- a/src/core/load-fragment.c
++++ b/src/core/load-fragment.c
+@@ -1000,7 +1000,7 @@ int config_parse_exec(
+                         if (r < 0)
+                                 return ignore ? 0 : -ENOEXEC;
+ 
+-                        r = unit_path_printf(u, word, &resolved);
++                        r = unit_full_printf(u, word, &resolved);
+                         if (r < 0) {
+                                 log_syntax(unit, ignore ? LOG_WARNING : LOG_ERR, filename, line, r,
+                                            "Failed to resolve unit specifiers in %s%s: %m",
+diff --git a/src/test/test-load-fragment.c b/src/test/test-load-fragment.c
+index fbe4744333..c579be4150 100644
+--- a/src/test/test-load-fragment.c
++++ b/src/test/test-load-fragment.c
+@@ -10,6 +10,7 @@
+ #include "capability-util.h"
+ #include "conf-parser.h"
+ #include "fd-util.h"
++#include "fileio.h"
+ #include "format-util.h"
+ #include "fs-util.h"
+ #include "hashmap.h"
+@@ -416,6 +417,21 @@ TEST(config_parse_exec) {
+         assert_se(r == 0);
+         assert_se(c1->command_next == NULL);
+ 
++        log_info("/* long arg */"); /* See issue #22957. */
++
++        char x[LONG_LINE_MAX-100], *y;
++        y = mempcpy(x, "/bin/echo ", STRLEN("/bin/echo "));
++        memset(y, 'x', sizeof(x) - STRLEN("/bin/echo ") - 1);
++        x[sizeof(x) - 1] = '\0';
++
++        r = config_parse_exec(NULL, "fake", 5, "section", 1,
++                              "LValue", 0, x,
++                              &c, u);
++        assert_se(r >= 0);
++        c1 = c1->command_next;
++        check_execcommand(c1,
++                          "/bin/echo", NULL, y, NULL, false);
++
+         log_info("/* empty argument, reset */");
+         r = config_parse_exec(NULL, "fake", 4, "section", 1,
+                               "LValue", 0, "",

@@ -1,0 +1,152 @@
+From 842c3bade0b593e5c4eabbe1c18dfab503683cc6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 10 Mar 2022 21:33:25 +0100
+Subject: [PATCH] man: fix invalid description of template handling in
+ WantedBy=
+
+We don't need to talk about Alias=. The approach of using Alias= to enable
+units is still supported, but hasn't been advertised as the way to do thing
+for many years. Using it as an explanation is just confusing.
+
+Also, the description of templated units did not take DefaultInstance=
+into account. It is updated and extended.
+
+(cherry picked from commit 17a2679e9925c9ec3c5764d01def92c5627973e4)
+
+Related: #2082131
+---
+ man/systemd.unit.xml          | 53 +++++++++++++++++------------------
+ test/test-systemctl-enable.sh | 49 ++++++++++++++++++++++++++++++++
+ 2 files changed, 74 insertions(+), 28 deletions(-)
+
+diff --git a/man/systemd.unit.xml b/man/systemd.unit.xml
+index 2e6261c1ed..caebaecfdc 100644
+--- a/man/systemd.unit.xml
++++ b/man/systemd.unit.xml
+@@ -1906,34 +1906,31 @@
+         <term><varname>WantedBy=</varname></term>
+         <term><varname>RequiredBy=</varname></term>
+ 
+-        <listitem><para>This option may be used more than once, or a
+-        space-separated list of unit names may be given. A symbolic
+-        link is created in the <filename>.wants/</filename> or
+-        <filename>.requires/</filename> directory of each of the
+-        listed units when this unit is installed by <command>systemctl
+-        enable</command>. This has the effect that a dependency of
+-        type <varname>Wants=</varname> or <varname>Requires=</varname>
+-        is added from the listed unit to the current unit. The primary
+-        result is that the current unit will be started when the
+-        listed unit is started. See the description of
+-        <varname>Wants=</varname> and <varname>Requires=</varname> in
+-        the [Unit] section for details.</para>
+-
+-        <para><command>WantedBy=foo.service</command> in a service
+-        <filename>bar.service</filename> is mostly equivalent to
+-        <command>Alias=foo.service.wants/bar.service</command> in the
+-        same file. In case of template units listing non template units,
+-        <command>systemctl enable</command> must be called with an
+-        instance name, and this instance will be added to the
+-        <filename>.wants/</filename> or
+-        <filename>.requires/</filename> list of the listed unit. E.g.
+-        <command>WantedBy=getty.target</command> in a service
+-        <filename>getty@.service</filename> will result in
+-        <command>systemctl enable getty@tty2.service</command>
+-        creating a
+-        <filename>getty.target.wants/getty@tty2.service</filename>
+-        link to <filename>getty@.service</filename>.
+-        </para></listitem>
++        <listitem><para>This option may be used more than once, or a space-separated list of unit names may
++        be given. A symbolic link is created in the <filename>.wants/</filename> or
++        <filename>.requires/</filename> directory of each of the listed units when this unit is installed by
++        <command>systemctl enable</command>. This has the effect of a dependency of type
++        <varname>Wants=</varname> or <varname>Requires=</varname> being added from the listed unit to the
++        current unit. The primary result is that the current unit will be started when the listed unit is
++        started, see the description of <varname>Wants=</varname> and <varname>Requires=</varname> in the
++        [Unit] section for details.</para>
++
++        <para>In case of template units listing non template units, the listing unit must have
++        <varname>DefaultInstance=</varname> set, or <command>systemctl enable</command> must be called with
++        an instance name. The instance (default or specified) will be added to the
++        <filename>.wants/</filename> or <filename>.requires/</filename> list of the listed unit. For example,
++        <command>WantedBy=getty.target</command> in a service <filename>getty@.service</filename> will result
++        in <command>systemctl enable getty@tty2.service</command> creating a
++        <filename>getty.target.wants/getty@tty2.service</filename> link to
++        <filename>getty@.service</filename>. This also applies to listing specific instances of templated
++        units: this specific instance will gain the dependency. A template unit may also list a template
++        unit, in which case a generic dependency will be added where each instance of the listing unit will
++        have a dependency on an instance of the listed template with the same instance value. For example,
++        <command>WantedBy=container@.target</command> in a service <filename>monitor@.service</filename> will
++        result in <command>systemctl enable monitor@.service</command> creating a
++        <filename>container@.target.wants/monitor@.service</filename> link to
++        <filename>monitor@.service</filename>, which applies to all instances of
++        <filename>container@.target</filename>.</para></listitem>
+       </varlistentry>
+ 
+       <varlistentry>
+diff --git a/test/test-systemctl-enable.sh b/test/test-systemctl-enable.sh
+index 4117436462..3aa61222a8 100644
+--- a/test/test-systemctl-enable.sh
++++ b/test/test-systemctl-enable.sh
+@@ -324,6 +324,31 @@ test ! -h "$root/etc/systemd/system/services.target.wants/templ1@333.service"
+ test ! -h "$root/etc/systemd/system/services.target.wants/templ1@one.service"
+ test ! -h "$root/etc/systemd/system/services.target.wants/templ1@two.service"
+ 
++: -------template enablement for another template-------------
++cat >"$root/etc/systemd/system/templ2@.service" <<EOF
++[Install]
++RequiredBy=another-template@.target
++EOF
++
++"$systemctl" --root="$root" enable 'templ2@.service'
++islink "$root/etc/systemd/system/another-template@.target.requires/templ2@.service" "/etc/systemd/system/templ2@.service"
++
++"$systemctl" --root="$root" enable 'templ2@two.service'
++islink "$root/etc/systemd/system/another-template@.target.requires/templ2@.service" "/etc/systemd/system/templ2@.service"
++islink "$root/etc/systemd/system/another-template@.target.requires/templ2@two.service" "/etc/systemd/system/templ2@.service"
++
++"$systemctl" --root="$root" disable 'templ2@other.service'
++islink "$root/etc/systemd/system/another-template@.target.requires/templ2@.service" "/etc/systemd/system/templ2@.service"
++islink "$root/etc/systemd/system/another-template@.target.requires/templ2@two.service" "/etc/systemd/system/templ2@.service"
++
++"$systemctl" --root="$root" disable 'templ2@two.service'
++islink "$root/etc/systemd/system/another-template@.target.requires/templ2@.service" "/etc/systemd/system/templ2@.service"
++test ! -h "$root/etc/systemd/system/another-template@.target.requires/templ2@two.service"
++
++"$systemctl" --root="$root" disable 'templ2@.service'
++test ! -h "$root/etc/systemd/system/another-template@.target.requires/templ2@.service"
++test ! -h "$root/etc/systemd/system/another-template@.target.requires/templ2@two.service"
++
+ : -------aliases w/ and w/o instance--------------------------
+ test ! -e "$root/etc/systemd/system/link4.service"
+ cat >"$root/etc/systemd/system/link4.service" <<EOF
+@@ -529,6 +554,30 @@ check_alias % '%' && { echo "Expected failure because % is not legal in unit nam
+ 
+ check_alias z 'z' && { echo "Expected failure because %z is not known" >&2; exit 1; }
+ 
++: -------specifiers in WantedBy-------------------------------
++# We don't need to repeat all the tests. Let's do a basic check that specifier
++# expansion is performed.
++
++cat >"$root/etc/systemd/system/some-some-link7.socket" <<EOF
++[Install]
++WantedBy=target@%p.target
++WantedBy=another-target@.target
++RequiredBy=target2@%p.target
++RequiredBy=another-target2@.target
++EOF
++
++"$systemctl" --root="$root" enable 'some-some-link7.socket'
++islink "$root/etc/systemd/system/target@some-some-link7.target.wants/some-some-link7.socket" "/etc/systemd/system/some-some-link7.socket"
++islink "$root/etc/systemd/system/another-target@.target.wants/some-some-link7.socket" "/etc/systemd/system/some-some-link7.socket"
++islink "$root/etc/systemd/system/target2@some-some-link7.target.requires/some-some-link7.socket" "/etc/systemd/system/some-some-link7.socket"
++islink "$root/etc/systemd/system/another-target2@.target.requires/some-some-link7.socket" "/etc/systemd/system/some-some-link7.socket"
++
++"$systemctl" --root="$root" disable 'some-some-link7.socket'
++test ! -h "$root/etc/systemd/system/target@some-some-link7.target.wants/some-some-link7.socket"
++test ! -h "$root/etc/systemd/system/another-target@.target.wants/some-some-link7.socket"
++test ! -h "$root/etc/systemd/system/target2@some-some-link7.target.requires/some-some-link7.socket"
++test ! -h "$root/etc/systemd/system/another-target2@.target.requires/some-some-link7.socket"
++
+ # TODO: repeat the tests above for presets
+ 
+ : -------SYSTEMD_OS_RELEASE relative to root------------------

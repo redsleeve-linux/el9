@@ -1,0 +1,37 @@
+From 87e45d9c58c74ae7ba46f99a3f0e2db39cf345ff Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekleta@redhat.com>
+Date: Thu, 24 Mar 2022 19:24:16 +0100
+Subject: [PATCH] tests: reflect that we can now handle devices with very long
+ sysfs paths
+
+(cherry picked from commit b26f4f0028e27b6ad46ef9af56aac7571caa3a25)
+
+Related: #2083493
+---
+ test/units/testsuite-64.sh | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/test/units/testsuite-64.sh b/test/units/testsuite-64.sh
+index dc8b263b10..218b2ee8d1 100755
+--- a/test/units/testsuite-64.sh
++++ b/test/units/testsuite-64.sh
+@@ -674,6 +674,7 @@ testcase_long_sysfs_path() {
+     echo "UUID=deadbeef-dead-dead-beef-222222222222 $mpoint ext4 defaults 0 0" >>/etc/fstab
+     systemctl daemon-reload
+     mount "$mpoint"
++    systemctl status "$mpoint"
+     test -e "$mpoint/test"
+     umount "$mpoint"
+ 
+@@ -684,9 +685,9 @@ testcase_long_sysfs_path() {
+     udevadm settle
+ 
+     logfile="$(mktemp)"
+-    journalctl -b -q --no-pager -o short-monotonic -p info --grep "Device path.*vda.?' too long to fit into unit name"
++    [[ "$(journalctl -b -q --no-pager -o short-monotonic -p info --grep "Device path.*vda.?' too long to fit into unit name" | wc -l)" -eq 0 ]]
+     # Make sure we don't unnecessarily spam the log
+-    journalctl -b -q --no-pager -o short-monotonic -p info --grep "/sys/devices/.+/vda[0-9]?" _PID=1 + UNIT=systemd-udevd.service | tee "$logfile"
++    { journalctl -b -q --no-pager -o short-monotonic -p info --grep "/sys/devices/.+/vda[0-9]?" _PID=1 + UNIT=systemd-udevd.service || :;} | tee "$logfile"
+     [[ "$(wc -l <"$logfile")" -lt 10 ]]
+ 
+     : >/etc/fstab

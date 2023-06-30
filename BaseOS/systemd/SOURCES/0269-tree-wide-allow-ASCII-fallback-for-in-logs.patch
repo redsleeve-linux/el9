@@ -1,0 +1,387 @@
+From 72fb11cd3191e7546ff0bae802f5bd6e5e815647 Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Fri, 24 Jun 2022 09:59:44 +0200
+Subject: [PATCH] =?UTF-8?q?tree-wide:=20allow=20ASCII=20fallback=20for=20?=
+ =?UTF-8?q?=E2=80=A6=20in=20logs?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+(cherry picked from commit 28e5e1e97f47067bce190ea6b3404907d63e4320)
+
+Related: #2118297
+---
+ src/basic/os-util.c                           |  6 +++--
+ src/binfmt/binfmt.c                           |  2 +-
+ src/boot/bootctl.c                            |  2 +-
+ src/core/dbus-manager.c                       |  2 +-
+ src/core/manager.c                            |  4 ++--
+ .../environment-d-generator.c                 |  3 ++-
+ src/home/homectl.c                            | 12 ++++++----
+ src/libsystemd/sd-event/sd-event.c            |  4 +++-
+ src/nss-resolve/nss-resolve.c                 |  5 ++++-
+ src/resolve/resolved-varlink.c                |  5 ++++-
+ src/shared/user-record.c                      | 22 ++++++++++++++-----
+ src/sysusers/sysusers.c                       | 12 +++++-----
+ src/tmpfiles/tmpfiles.c                       |  6 ++---
+ 13 files changed, 56 insertions(+), 29 deletions(-)
+
+diff --git a/src/basic/os-util.c b/src/basic/os-util.c
+index acfff24319..880fb7e6bb 100644
+--- a/src/basic/os-util.c
++++ b/src/basic/os-util.c
+@@ -8,6 +8,7 @@
+ #include "fd-util.h"
+ #include "fileio.h"
+ #include "fs-util.h"
++#include "glyph-util.h"
+ #include "macro.h"
+ #include "os-util.h"
+ #include "parse-util.h"
+@@ -146,8 +147,9 @@ int open_extension_release(const char *root, const char *extension, char **ret_p
+                                 if (k != 0)
+                                         continue;
+ 
+-                                log_debug("%s/%s: 'user.extension-release.strict' attribute is false…",
+-                                          extension_release_dir_path, de->d_name);
++                                log_debug("%s/%s: 'user.extension-release.strict' attribute is false%s",
++                                          extension_release_dir_path, de->d_name,
++                                          special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+                                 /* We already found what we were looking for, but there's another candidate?
+                                  * We treat this as an error, as we want to enforce that there are no ambiguities
+diff --git a/src/binfmt/binfmt.c b/src/binfmt/binfmt.c
+index 817ee387ff..71cb56aa4a 100644
+--- a/src/binfmt/binfmt.c
++++ b/src/binfmt/binfmt.c
+@@ -83,7 +83,7 @@ static int apply_file(const char *filename, bool ignore_enoent) {
+                 return log_error_errno(r, "Failed to open file '%s': %m", filename);
+         }
+ 
+-        log_debug("Applying %s…", pp);
++        log_debug("Applying %s%s", pp, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+         for (unsigned line = 1;; line++) {
+                 _cleanup_free_ char *text = NULL;
+                 char *p;
+diff --git a/src/boot/bootctl.c b/src/boot/bootctl.c
+index c1adae4962..292907eb4a 100644
+--- a/src/boot/bootctl.c
++++ b/src/boot/bootctl.c
+@@ -1404,7 +1404,7 @@ static int are_we_installed(void) {
+         if (!p)
+                 return log_oom();
+ 
+-        log_debug("Checking whether %s contains any files…", p);
++        log_debug("Checking whether %s contains any files%s", p, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+         r = dir_is_empty(p);
+         if (r < 0 && r != -ENOENT)
+                 return log_error_errno(r, "Failed to check whether %s contains any files: %m", p);
+diff --git a/src/core/dbus-manager.c b/src/core/dbus-manager.c
+index efba6331b9..0ce2d73857 100644
+--- a/src/core/dbus-manager.c
++++ b/src/core/dbus-manager.c
+@@ -1886,7 +1886,7 @@ static int method_enqueue_marked_jobs(sd_bus_message *message, void *userdata, s
+         if (r == 0)
+                 return 1; /* No authorization for now, but the async polkit stuff will call us again when it has it */
+ 
+-        log_info("Queuing reload/restart jobs for marked units…");
++        log_info("Queuing reload/restart jobs for marked units%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+         r = sd_bus_message_new_method_return(message, &reply);
+diff --git a/src/core/manager.c b/src/core/manager.c
+index c01128adb4..5b7f5f55aa 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -1593,7 +1593,7 @@ static void manager_coldplug(Manager *m) {
+ 
+         assert(m);
+ 
+-        log_debug("Invoking unit coldplug() handlers…");
++        log_debug("Invoking unit coldplug() handlers%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+         /* Let's place the units back into their deserialized state */
+         HASHMAP_FOREACH_KEY(u, k, m->units) {
+@@ -1614,7 +1614,7 @@ static void manager_catchup(Manager *m) {
+ 
+         assert(m);
+ 
+-        log_debug("Invoking unit catchup() handlers…");
++        log_debug("Invoking unit catchup() handlers%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+         /* Let's catch up on any state changes that happened while we were reloading/reexecing */
+         HASHMAP_FOREACH_KEY(u, k, m->units) {
+diff --git a/src/environment-d-generator/environment-d-generator.c b/src/environment-d-generator/environment-d-generator.c
+index 39c46c7c2b..12aafbc7d9 100644
+--- a/src/environment-d-generator/environment-d-generator.c
++++ b/src/environment-d-generator/environment-d-generator.c
+@@ -6,6 +6,7 @@
+ #include "def.h"
+ #include "env-file.h"
+ #include "escape.h"
++#include "glyph-util.h"
+ #include "log.h"
+ #include "path-lookup.h"
+ #include "strv.h"
+@@ -55,7 +56,7 @@ static int load_and_print(void) {
+          * that in case of failure, a partial update is better than none. */
+ 
+         STRV_FOREACH(i, files) {
+-                log_debug("Reading %s…", *i);
++                log_debug("Reading %s%s", *i, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+                 r = merge_env_file(&env, NULL, *i);
+                 if (r == -ENOMEM)
+diff --git a/src/home/homectl.c b/src/home/homectl.c
+index f0d1dac6ab..23bf17f5cf 100644
+--- a/src/home/homectl.c
++++ b/src/home/homectl.c
+@@ -1683,9 +1683,13 @@ static int passwd_home(int argc, char *argv[], void *userdata) {
+         int r;
+ 
+         if (arg_pkcs11_token_uri)
+-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "To change the PKCS#11 security token use 'homectl update --pkcs11-token-uri=…'.");
++                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
++                                       "To change the PKCS#11 security token use 'homectl update --pkcs11-token-uri=%s'.",
++                                       special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+         if (arg_fido2_device)
+-                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "To change the FIDO2 security token use 'homectl update --fido2-device=…'.");
++                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
++                                       "To change the FIDO2 security token use 'homectl update --fido2-device=%s'.",
++                                       special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+         if (identity_properties_specified())
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "The 'passwd' verb does not permit changing other record properties at the same time.");
+ 
+@@ -3600,8 +3604,8 @@ static int parse_argv(int argc, char *argv[]) {
+                                         return log_error_errno(r, "Failed to parse --rebalance-weight= argument: %s", optarg);
+ 
+                                 if (u < REBALANCE_WEIGHT_MIN || u > REBALANCE_WEIGHT_MAX)
+-                                        return log_error_errno(SYNTHETIC_ERRNO(ERANGE), "Rebalancing weight out of valid range %" PRIu64 "…%" PRIu64 ": %s",
+-                                                               REBALANCE_WEIGHT_MIN, REBALANCE_WEIGHT_MAX, optarg);
++                                        return log_error_errno(SYNTHETIC_ERRNO(ERANGE), "Rebalancing weight out of valid range %" PRIu64 "%s%" PRIu64 ": %s",
++                                                               REBALANCE_WEIGHT_MIN, special_glyph(SPECIAL_GLYPH_ELLIPSIS), REBALANCE_WEIGHT_MAX, optarg);
+                         }
+ 
+                         /* Drop from per machine stuff and everywhere */
+diff --git a/src/libsystemd/sd-event/sd-event.c b/src/libsystemd/sd-event/sd-event.c
+index dd257eadfe..b491033ca7 100644
+--- a/src/libsystemd/sd-event/sd-event.c
++++ b/src/libsystemd/sd-event/sd-event.c
+@@ -13,6 +13,7 @@
+ #include "event-source.h"
+ #include "fd-util.h"
+ #include "fs-util.h"
++#include "glyph-util.h"
+ #include "hashmap.h"
+ #include "list.h"
+ #include "macro.h"
+@@ -405,7 +406,8 @@ _public_ int sd_event_new(sd_event** ret) {
+         e->epoll_fd = fd_move_above_stdio(e->epoll_fd);
+ 
+         if (secure_getenv("SD_EVENT_PROFILE_DELAYS")) {
+-                log_debug("Event loop profiling enabled. Logarithmic histogram of event loop iterations in the range 2^0 … 2^63 us will be logged every 5s.");
++                log_debug("Event loop profiling enabled. Logarithmic histogram of event loop iterations in the range 2^0 %s 2^63 us will be logged every 5s.",
++                          special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                 e->profile_delays = true;
+         }
+ 
+diff --git a/src/nss-resolve/nss-resolve.c b/src/nss-resolve/nss-resolve.c
+index e857d42db6..9ed2945a1e 100644
+--- a/src/nss-resolve/nss-resolve.c
++++ b/src/nss-resolve/nss-resolve.c
+@@ -10,6 +10,7 @@
+ 
+ #include "env-util.h"
+ #include "errno-util.h"
++#include "glyph-util.h"
+ #include "in-addr-util.h"
+ #include "macro.h"
+ #include "nss-util.h"
+@@ -180,7 +181,9 @@ static int json_dispatch_address(const char *name, JsonVariant *variant, JsonDis
+ 
+                 b = json_variant_integer(i);
+                 if (b < 0 || b > 0xff)
+-                        return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "Element %zu of JSON field '%s' is out of range 0…255.", k, strna(name));
++                        return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL),
++                                        "Element %zu of JSON field '%s' is out of range 0%s255.",
++                                        k, strna(name), special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+                 buf.bytes[k++] = (uint8_t) b;
+         }
+diff --git a/src/resolve/resolved-varlink.c b/src/resolve/resolved-varlink.c
+index cc684608a6..a00dfee5dd 100644
+--- a/src/resolve/resolved-varlink.c
++++ b/src/resolve/resolved-varlink.c
+@@ -1,5 +1,6 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
++#include "glyph-util.h"
+ #include "in-addr-util.h"
+ #include "resolved-dns-synthesize.h"
+ #include "resolved-varlink.h"
+@@ -371,7 +372,9 @@ static int json_dispatch_address(const char *name, JsonVariant *variant, JsonDis
+ 
+                 b = json_variant_integer(i);
+                 if (b < 0 || b > 0xff)
+-                        return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "Element %zu of JSON field '%s' is out of range 0…255.", k, strna(name));
++                        return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL),
++                                        "Element %zu of JSON field '%s' is out of range 0%s255.",
++                                        k, strna(name), special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+                 buf.bytes[k++] = (uint8_t) b;
+         }
+diff --git a/src/shared/user-record.c b/src/shared/user-record.c
+index 5b406d1f42..eae0915fc7 100644
+--- a/src/shared/user-record.c
++++ b/src/shared/user-record.c
+@@ -6,6 +6,7 @@
+ #include "dns-domain.h"
+ #include "env-util.h"
+ #include "fs-util.h"
++#include "glyph-util.h"
+ #include "hexdecoct.h"
+ #include "hostname-util.h"
+ #include "memory-util.h"
+@@ -467,7 +468,9 @@ static int json_dispatch_umask(const char *name, JsonVariant *variant, JsonDispa
+ 
+         k = json_variant_unsigned(variant);
+         if (k > 0777)
+-                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' outside of valid range 0…0777.", strna(name));
++                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL),
++                                "JSON field '%s' outside of valid range 0%s0777.",
++                                strna(name), special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+         *m = (mode_t) k;
+         return 0;
+@@ -487,7 +490,9 @@ static int json_dispatch_access_mode(const char *name, JsonVariant *variant, Jso
+ 
+         k = json_variant_unsigned(variant);
+         if (k > 07777)
+-                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL), "JSON field '%s' outside of valid range 0…07777.", strna(name));
++                return json_log(variant, flags, SYNTHETIC_ERRNO(EINVAL),
++                                "JSON field '%s' outside of valid range 0%s07777.",
++                                strna(name), special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+         *m = (mode_t) k;
+         return 0;
+@@ -578,7 +583,9 @@ static int json_dispatch_tasks_or_memory_max(const char *name, JsonVariant *vari
+ 
+         k = json_variant_unsigned(variant);
+         if (k <= 0 || k >= UINT64_MAX)
+-                return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE), "JSON field '%s' is not in valid range %" PRIu64 "…%" PRIu64 ".", strna(name), (uint64_t) 1, UINT64_MAX-1);
++                return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE),
++                                "JSON field '%s' is not in valid range %" PRIu64 "%s%" PRIu64 ".",
++                                strna(name), (uint64_t) 1, special_glyph(SPECIAL_GLYPH_ELLIPSIS), UINT64_MAX-1);
+ 
+         *limit = k;
+         return 0;
+@@ -597,7 +604,10 @@ static int json_dispatch_weight(const char *name, JsonVariant *variant, JsonDisp
+ 
+         k = json_variant_unsigned(variant);
+         if (k <= CGROUP_WEIGHT_MIN || k >= CGROUP_WEIGHT_MAX)
+-                return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE), "JSON field '%s' is not in valid range %" PRIu64 "…%" PRIu64 ".", strna(name), (uint64_t) CGROUP_WEIGHT_MIN, (uint64_t) CGROUP_WEIGHT_MAX);
++                return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE),
++                                "JSON field '%s' is not in valid range %" PRIu64 "%s%" PRIu64 ".",
++                                strna(name), (uint64_t) CGROUP_WEIGHT_MIN,
++                                special_glyph(SPECIAL_GLYPH_ELLIPSIS), (uint64_t) CGROUP_WEIGHT_MAX);
+ 
+         *weight = k;
+         return 0;
+@@ -1010,7 +1020,9 @@ static int dispatch_rebalance_weight(const char *name, JsonVariant *variant, Jso
+         else if (u == 0)
+                 *rebalance_weight = REBALANCE_WEIGHT_OFF;
+         else
+-                return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE), "Rebalance weight is out of valid range %" PRIu64 "…%" PRIu64 ".", REBALANCE_WEIGHT_MIN, REBALANCE_WEIGHT_MAX);
++                return json_log(variant, flags, SYNTHETIC_ERRNO(ERANGE),
++                                "Rebalance weight is out of valid range %" PRIu64 "%s%" PRIu64 ".",
++                                REBALANCE_WEIGHT_MIN, special_glyph(SPECIAL_GLYPH_ELLIPSIS), REBALANCE_WEIGHT_MAX);
+ 
+         return 0;
+ }
+diff --git a/src/sysusers/sysusers.c b/src/sysusers/sysusers.c
+index 6a2ca1afbb..05e2591b6a 100644
+--- a/src/sysusers/sysusers.c
++++ b/src/sysusers/sysusers.c
+@@ -405,7 +405,7 @@ static int write_temporary_passwd(const char *passwd_path, FILE **tmpfile, char
+                 return 0;
+ 
+         if (arg_dry_run) {
+-                log_info("Would write /etc/passwd…");
++                log_info("Would write /etc/passwd%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                 return 0;
+         }
+ 
+@@ -529,7 +529,7 @@ static int write_temporary_shadow(const char *shadow_path, FILE **tmpfile, char
+                 return 0;
+ 
+         if (arg_dry_run) {
+-                log_info("Would write /etc/shadow…");
++                log_info("Would write /etc/shadow%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                 return 0;
+         }
+ 
+@@ -667,7 +667,7 @@ static int write_temporary_group(const char *group_path, FILE **tmpfile, char **
+                 return 0;
+ 
+         if (arg_dry_run) {
+-                log_info("Would write /etc/group…");
++                log_info("Would write /etc/group%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                 return 0;
+         }
+ 
+@@ -773,7 +773,7 @@ static int write_temporary_gshadow(const char * gshadow_path, FILE **tmpfile, ch
+                 return 0;
+ 
+         if (arg_dry_run) {
+-                log_info("Would write /etc/gshadow…");
++                log_info("Would write /etc/gshadow%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                 return 0;
+         }
+ 
+@@ -2002,13 +2002,13 @@ static int read_config_files(char **args) {
+ 
+         STRV_FOREACH(f, files)
+                 if (p && path_equal(*f, p)) {
+-                        log_debug("Parsing arguments at position \"%s\"…", *f);
++                        log_debug("Parsing arguments at position \"%s\"%s", *f, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+                         r = parse_arguments(args);
+                         if (r < 0)
+                                 return r;
+                 } else {
+-                        log_debug("Reading config file \"%s\"…", *f);
++                        log_debug("Reading config file \"%s\"%s", *f, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+                         /* Just warn, ignore result otherwise */
+                         (void) read_config_file(*f, true);
+diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
+index 023207bc60..c6019ae2c8 100644
+--- a/src/tmpfiles/tmpfiles.c
++++ b/src/tmpfiles/tmpfiles.c
+@@ -3509,7 +3509,7 @@ static int read_config_file(char **config_dirs, const char *fn, bool ignore_enoe
+         assert(fn);
+ 
+         if (streq(fn, "-")) {
+-                log_debug("Reading config from stdin…");
++                log_debug("Reading config from stdin%s", special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                 fn = "<stdin>";
+                 f = stdin;
+         } else {
+@@ -3523,7 +3523,7 @@ static int read_config_file(char **config_dirs, const char *fn, bool ignore_enoe
+                         return log_error_errno(r, "Failed to open '%s': %m", fn);
+                 }
+ 
+-                log_debug("Reading config file \"%s\"…", pp);
++                log_debug("Reading config file \"%s\"%s", pp, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+                 fn = pp;
+                 f = _f;
+         }
+@@ -3626,7 +3626,7 @@ static int read_config_files(char **config_dirs, char **args, bool *invalid_conf
+ 
+         STRV_FOREACH(f, files)
+                 if (p && path_equal(*f, p)) {
+-                        log_debug("Parsing arguments at position \"%s\"…", *f);
++                        log_debug("Parsing arguments at position \"%s\"%s", *f, special_glyph(SPECIAL_GLYPH_ELLIPSIS));
+ 
+                         r = parse_arguments(config_dirs, args, invalid_config);
+                         if (r < 0)

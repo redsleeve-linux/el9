@@ -1,0 +1,300 @@
+From 0be677fb6663ab6bfd02eae6ad32e7f031cfde0f Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 2 Feb 2022 11:06:41 +0900
+Subject: [PATCH] test: allow to set NULL to intro or outro
+
+Addresses https://github.com/systemd/systemd/pull/22338#discussion_r796741033.
+
+(cherry picked from commit e85fdacc8ad7d91f140a135aaa3fd5372d3fa47c)
+
+Related: #2017035
+---
+ src/shared/tests.h              | 45 +++++++++++++++++----------------
+ src/test/test-barrier.c         |  2 +-
+ src/test/test-cgroup-setup.c    |  2 +-
+ src/test/test-chown-rec.c       |  2 +-
+ src/test/test-format-table.c    |  2 +-
+ src/test/test-fs-util.c         |  2 +-
+ src/test/test-hashmap.c         |  2 +-
+ src/test/test-install-root.c    |  2 +-
+ src/test/test-load-fragment.c   |  2 +-
+ src/test/test-mountpoint-util.c |  2 +-
+ src/test/test-namespace.c       |  2 +-
+ src/test/test-proc-cmdline.c    |  2 +-
+ src/test/test-process-util.c    |  2 +-
+ src/test/test-sd-hwdb.c         |  2 +-
+ src/test/test-serialize.c       |  2 +-
+ src/test/test-sleep.c           |  2 +-
+ src/test/test-stat-util.c       |  2 +-
+ src/test/test-time-util.c       |  2 +-
+ src/test/test-unit-file.c       |  2 +-
+ src/test/test-unit-name.c       |  2 +-
+ src/test/test-unit-serialize.c  |  2 +-
+ src/test/test-utf8.c            |  2 +-
+ 22 files changed, 44 insertions(+), 43 deletions(-)
+
+diff --git a/src/shared/tests.h b/src/shared/tests.h
+index 59448f38f6..ef6acd368e 100644
+--- a/src/shared/tests.h
++++ b/src/shared/tests.h
+@@ -110,27 +110,28 @@ static inline int run_test_table(void) {
+         return r;
+ }
+ 
+-static inline int test_nop(void) {
+-        return EXIT_SUCCESS;
+-}
+-
+-#define DEFINE_CUSTOM_TEST_MAIN(log_level, intro, outro) \
+-        int main(int argc, char *argv[]) {               \
+-                int _r, _q;                              \
+-                test_setup_logging(log_level);           \
+-                save_argc_argv(argc, argv);              \
+-                _r = intro();                            \
+-                if (_r == EXIT_SUCCESS)                  \
+-                        _r = run_test_table();           \
+-                _q = outro();                            \
+-                static_destruct();                       \
+-                if (_r < 0)                              \
+-                        return EXIT_FAILURE;             \
+-                if (_r != EXIT_SUCCESS)                  \
+-                        return _r;                       \
+-                if (_q < 0)                              \
+-                        return EXIT_FAILURE;             \
+-                return _q;                               \
++#define DEFINE_TEST_MAIN_FULL(log_level, intro, outro)    \
++        int main(int argc, char *argv[]) {                \
++                int (*_intro)(void) = intro;              \
++                int (*_outro)(void) = outro;              \
++                int _r, _q;                               \
++                test_setup_logging(log_level);            \
++                save_argc_argv(argc, argv);               \
++                _r = _intro ? _intro() : EXIT_SUCCESS;    \
++                if (_r == EXIT_SUCCESS)                   \
++                        _r = run_test_table();            \
++                _q = _outro ? _outro() : EXIT_SUCCESS;    \
++                static_destruct();                        \
++                if (_r < 0)                               \
++                        return EXIT_FAILURE;              \
++                if (_r != EXIT_SUCCESS)                   \
++                        return _r;                        \
++                if (_q < 0)                               \
++                        return EXIT_FAILURE;              \
++                return _q;                                \
+         }
+ 
+-#define DEFINE_TEST_MAIN(log_level) DEFINE_CUSTOM_TEST_MAIN(log_level, test_nop, test_nop)
++#define DEFINE_TEST_MAIN_WITH_INTRO(log_level, intro)   \
++        DEFINE_TEST_MAIN_FULL(log_level, intro, NULL)
++#define DEFINE_TEST_MAIN(log_level)                     \
++        DEFINE_TEST_MAIN_FULL(log_level, NULL, NULL)
+diff --git a/src/test/test-barrier.c b/src/test/test-barrier.c
+index b87538806a..bbd7e2bddb 100644
+--- a/src/test/test-barrier.c
++++ b/src/test/test-barrier.c
+@@ -444,4 +444,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+  }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-cgroup-setup.c b/src/test/test-cgroup-setup.c
+index 6f93647685..c377ff0a00 100644
+--- a/src/test/test-cgroup-setup.c
++++ b/src/test/test-cgroup-setup.c
+@@ -71,4 +71,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_DEBUG, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_DEBUG, intro);
+diff --git a/src/test/test-chown-rec.c b/src/test/test-chown-rec.c
+index 691cfe767f..97711f58b0 100644
+--- a/src/test/test-chown-rec.c
++++ b/src/test/test-chown-rec.c
+@@ -156,4 +156,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_DEBUG, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_DEBUG, intro);
+diff --git a/src/test/test-format-table.c b/src/test/test-format-table.c
+index 7515a74c12..1b4963d928 100644
+--- a/src/test/test-format-table.c
++++ b/src/test/test-format-table.c
+@@ -535,4 +535,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
+index da5a16b4bc..602ce75f98 100644
+--- a/src/test/test-fs-util.c
++++ b/src/test/test-fs-util.c
+@@ -973,4 +973,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-hashmap.c b/src/test/test-hashmap.c
+index 4dc155d818..dbf762cc0b 100644
+--- a/src/test/test-hashmap.c
++++ b/src/test/test-hashmap.c
+@@ -169,4 +169,4 @@ static int outro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, outro);
++DEFINE_TEST_MAIN_FULL(LOG_INFO, intro, outro);
+diff --git a/src/test/test-install-root.c b/src/test/test-install-root.c
+index f540a832bd..f718689c3a 100644
+--- a/src/test/test-install-root.c
++++ b/src/test/test-install-root.c
+@@ -1272,4 +1272,4 @@ static int intro(void) {
+ }
+ 
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-load-fragment.c b/src/test/test-load-fragment.c
+index 2e105df56a..1bd68c7e0a 100644
+--- a/src/test/test-load-fragment.c
++++ b/src/test/test-load-fragment.c
+@@ -906,4 +906,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-mountpoint-util.c b/src/test/test-mountpoint-util.c
+index 102d2850bf..4d140c42b6 100644
+--- a/src/test/test-mountpoint-util.c
++++ b/src/test/test-mountpoint-util.c
+@@ -313,4 +313,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_DEBUG, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_DEBUG, intro);
+diff --git a/src/test/test-namespace.c b/src/test/test-namespace.c
+index f9e34f3bfa..7a634adca9 100644
+--- a/src/test/test-namespace.c
++++ b/src/test/test-namespace.c
+@@ -227,4 +227,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-proc-cmdline.c b/src/test/test-proc-cmdline.c
+index 064b4d838f..1f43bb3eb0 100644
+--- a/src/test/test-proc-cmdline.c
++++ b/src/test/test-proc-cmdline.c
+@@ -254,4 +254,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-process-util.c b/src/test/test-process-util.c
+index 8661934929..7a8adad50c 100644
+--- a/src/test/test-process-util.c
++++ b/src/test/test-process-util.c
+@@ -900,4 +900,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-sd-hwdb.c b/src/test/test-sd-hwdb.c
+index 88992a6c2b..4251e2a809 100644
+--- a/src/test/test-sd-hwdb.c
++++ b/src/test/test-sd-hwdb.c
+@@ -63,4 +63,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_DEBUG, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_DEBUG, intro);
+diff --git a/src/test/test-serialize.c b/src/test/test-serialize.c
+index 9aeb6c5920..bcf2e843b0 100644
+--- a/src/test/test-serialize.c
++++ b/src/test/test-serialize.c
+@@ -195,4 +195,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-sleep.c b/src/test/test-sleep.c
+index f56e7e0167..5aebcdd935 100644
+--- a/src/test/test-sleep.c
++++ b/src/test/test-sleep.c
+@@ -125,4 +125,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_DEBUG, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_DEBUG, intro);
+diff --git a/src/test/test-stat-util.c b/src/test/test-stat-util.c
+index 2965ee679f..7f633ab259 100644
+--- a/src/test/test-stat-util.c
++++ b/src/test/test-stat-util.c
+@@ -241,4 +241,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-time-util.c b/src/test/test-time-util.c
+index f21d8b7794..554693834b 100644
+--- a/src/test/test-time-util.c
++++ b/src/test/test-time-util.c
+@@ -607,4 +607,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-unit-file.c b/src/test/test-unit-file.c
+index 6c9f245c7e..cc08a4ae4b 100644
+--- a/src/test/test-unit-file.c
++++ b/src/test/test-unit-file.c
+@@ -107,4 +107,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_DEBUG, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_DEBUG, intro);
+diff --git a/src/test/test-unit-name.c b/src/test/test-unit-name.c
+index 1f65407e5f..8cd0e0b4a1 100644
+--- a/src/test/test-unit-name.c
++++ b/src/test/test-unit-name.c
+@@ -856,4 +856,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/test/test-unit-serialize.c b/src/test/test-unit-serialize.c
+index 5d39176db2..3ef15f3b1e 100644
+--- a/src/test/test-unit-serialize.c
++++ b/src/test/test-unit-serialize.c
+@@ -60,4 +60,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_DEBUG, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_DEBUG, intro);
+diff --git a/src/test/test-utf8.c b/src/test/test-utf8.c
+index 1b31d1f852..7337b81227 100644
+--- a/src/test/test-utf8.c
++++ b/src/test/test-utf8.c
+@@ -236,4 +236,4 @@ static int intro(void) {
+         return EXIT_SUCCESS;
+ }
+ 
+-DEFINE_CUSTOM_TEST_MAIN(LOG_INFO, intro, test_nop);
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);

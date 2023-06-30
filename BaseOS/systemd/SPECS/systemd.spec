@@ -21,7 +21,7 @@
 Name:           systemd
 Url:            https://systemd.io
 Version:        252
-Release:        13%{?dist}.redsleeve
+Release:        14%{?dist}.1
 # For a breakdown of the licensing, see README
 License:        LGPLv2+ and MIT and GPLv2+
 Summary:        System and Service Manager
@@ -313,6 +313,16 @@ Patch0232: 0232-meson-Store-fuzz-tests-in-structured-way.patch
 Patch0233: 0233-meson-Generate-fuzzer-inputs-with-directives.patch
 Patch0234: 0234-oss-fuzz-include-generated-corpora-in-the-final-zip-.patch
 Patch0235: 0235-unit-In-cgroupv1-gracefully-terminate-delegated-scop.patch
+Patch0236: 0236-journal-def-fix-type-of-signature-to-match-the-actua.patch
+Patch0237: 0237-journal-use-compound-initialization-for-journal-file.patch
+Patch0238: 0238-journald-fix-log-message.patch
+Patch0239: 0239-sd-journal-cache-results-of-parsing-environment-vari.patch
+Patch0240: 0240-compress-introduce-compression_supported-helper-func.patch
+Patch0241: 0241-sd-journal-always-use-the-compression-algorithm-spec.patch
+Patch0242: 0242-sd-journal-allow-to-specify-compression-algorithm-th.patch
+Patch0243: 0243-test-add-test-case-that-journal-file-is-created-with.patch
+Patch0244: 0244-ci-workflow-for-gathering-metadata-for-source-git-au.patch
+Patch0245: 0245-ci-first-part-of-the-source-git-automation-commit-li.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -368,7 +378,7 @@ BuildRequires:  libseccomp-devel
 BuildRequires:  meson >= 0.43
 BuildRequires:  gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires:  valgrind-devel
+BuildRequires:  valgrind-devel
 BuildRequires:  pkgconfig(bash-completion)
 BuildRequires:  pkgconfig(tss2-esys)
 BuildRequires:  pkgconfig(tss2-rc)
@@ -1134,8 +1144,20 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 %files standalone-sysusers -f .file-list-standalone-sysusers
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> - 250-13.redsleeve
-- removed valgrind
+* Wed May 24 2023 systemd maintenance team <systemd-maint@redhat.com> - 252-14.1
+- Bump version to 252-14.1 to make sure that NEVRA is higher than systemd-252-14.el9.rhaos4.13 (#2184929)
+
+* Thu May 18 2023 systemd maintenance team <systemd-maint@redhat.com> - 252-13.1
+- journal-def: fix type of signature to match the actual field in the Header structure (#2184929)
+- journal: use compound initialization for journal file Header structure (#2184929)
+- journald: fix log message (#2184929)
+- sd-journal: cache results of parsing environment variables (#2184929)
+- compress: introduce compression_supported() helper function (#2184929)
+- sd-journal: always use the compression algorithm specified in the header (#2184929)
+- sd-journal: allow to specify compression algorithm through env (#2184929)
+- test: add test case that journal file is created with the requested compression algorithm (#2184929)
+- ci: workflow for gathering metadata for source-git automation (#2184929)
+- ci: first part of the source-git automation - commit linter (#2184929)
 
 * Mon Mar 20 2023 systemd maintenance team <systemd-maint@redhat.com> - 252-13
 - spec: release bump (#2179165)

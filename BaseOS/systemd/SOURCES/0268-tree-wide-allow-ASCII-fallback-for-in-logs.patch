@@ -1,0 +1,677 @@
+From 73cbf82d726a7b50c9b7dec9a0a0c285b0de9993 Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Fri, 24 Jun 2022 09:13:42 +0200
+Subject: [PATCH] =?UTF-8?q?tree-wide:=20allow=20ASCII=20fallback=20for=20?=
+ =?UTF-8?q?=E2=86=92=20in=20logs?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+(cherry picked from commit e2341b6bc325932b3f9f10874956952cbdbd6361)
+
+Resolves: #2118297
+---
+ src/basic/unit-file.c                  | 13 +++++-----
+ src/core/dbus-service.c                |  3 ++-
+ src/core/manager-serialize.c           |  6 +++--
+ src/core/namespace.c                   |  7 +++--
+ src/core/socket.c                      |  3 ++-
+ src/home/homed-home.c                  |  4 ++-
+ src/home/homed-manager.c               |  7 +++--
+ src/home/homework-luks.c               |  6 ++++-
+ src/home/homework-mount.c              |  4 ++-
+ src/libsystemd/sd-bus/sd-bus.c         |  4 ++-
+ src/network/networkd-link.c            | 15 +++++++----
+ src/partition/repart.c                 |  7 ++---
+ src/resolve/resolved-dns-query.c       | 11 ++++++--
+ src/resolve/resolved-dns-transaction.c | 14 +++++-----
+ src/run-generator/run-generator.c      |  4 ++-
+ src/shared/devnode-acl.c               |  5 ++--
+ src/shared/dns-domain.c                |  8 +++---
+ src/shared/install.c                   |  3 ++-
+ src/shared/mount-util.c                |  5 ++--
+ src/shared/varlink.c                   |  4 ++-
+ src/udev/udev-builtin-net_id.c         | 36 +++++++++++++++-----------
+ 21 files changed, 110 insertions(+), 59 deletions(-)
+
+diff --git a/src/basic/unit-file.c b/src/basic/unit-file.c
+index 83c29bb25f..2f5ec5b702 100644
+--- a/src/basic/unit-file.c
++++ b/src/basic/unit-file.c
+@@ -348,13 +348,13 @@ int unit_file_resolve_symlink(
+                 if (r < 0)
+                         return r;
+                 if (is_path(tail))
+-                        log_warning("Suspicious symlink %s/%s→%s, treating as alias.",
+-                                    dir, filename, simplified);
++                        log_warning("Suspicious symlink %s/%s %s %s, treating as alias.",
++                                    dir, filename, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), simplified);
+ 
+                 dst = resolve_destination_target ? TAKE_PTR(simplified) : TAKE_PTR(target_name);
+ 
+         } else {
+-                log_debug("Linked unit file: %s/%s → %s", dir, filename, simplified);
++                log_debug("Linked unit file: %s/%s %s %s", dir, filename, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), simplified);
+ 
+                 if (resolve_destination_target)
+                         dst = TAKE_PTR(simplified);
+@@ -569,8 +569,8 @@ int unit_file_build_name_map(
+ 
+                         r = hashmap_ensure_put(&ids, &string_hash_ops_free_free, key, dst);
+                         if (r < 0)
+-                                return log_warning_errno(r, "Failed to add entry to hashmap (%s→%s): %m",
+-                                                         de->d_name, dst);
++                                return log_warning_errno(r, "Failed to add entry to hashmap (%s%s%s): %m",
++                                                         de->d_name, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), dst);
+                         key = dst = NULL;
+                 }
+         }
+@@ -612,7 +612,8 @@ int unit_file_build_name_map(
+ 
+                 r = string_strv_hashmap_put(&names, dst, src);
+                 if (r < 0)
+-                        return log_warning_errno(r, "Failed to add entry to hashmap (%s→%s): %m", dst, src);
++                        return log_warning_errno(r, "Failed to add entry to hashmap (%s%s%s): %m",
++                                                 dst, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), src);
+         }
+ 
+         if (cache_timestamp_hash)
+diff --git a/src/core/dbus-service.c b/src/core/dbus-service.c
+index e90fe4f596..3f7c161b0e 100644
+--- a/src/core/dbus-service.c
++++ b/src/core/dbus-service.c
+@@ -493,7 +493,8 @@ static int bus_service_set_transient_property(
+                                         return log_oom();
+ 
+                                 if (!UNIT_WRITE_FLAGS_NOOP(flags))
+-                                        log_unit_notice(u, "Transient unit's PIDFile= property references path below legacy directory /var/run, updating %s → %s; please update client accordingly.", n, z);
++                                        log_unit_notice(u, "Transient unit's PIDFile= property references path below legacy directory /var/run, updating %s %s %s; please update client accordingly.",
++                                                        n, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), z);
+ 
+                                 free_and_replace(n, z);
+                         }
+diff --git a/src/core/manager-serialize.c b/src/core/manager-serialize.c
+index 60a35f48f3..007af3ee1f 100644
+--- a/src/core/manager-serialize.c
++++ b/src/core/manager-serialize.c
+@@ -307,9 +307,11 @@ int manager_deserialize(Manager *m, FILE *f, FDSet *fds) {
+ 
+                                 r = fd_get_path(fd, &fn);
+                                 if (r < 0)
+-                                        log_debug_errno(r, "Received serialized fd %i → %m", fd);
++                                        log_debug_errno(r, "Received serialized fd %i %s %m",
++                                                        fd, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT));
+                                 else
+-                                        log_debug("Received serialized fd %i → %s", fd, strna(fn));
++                                        log_debug("Received serialized fd %i %s %s",
++                                                  fd, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), strna(fn));
+                         }
+                 }
+         }
+diff --git a/src/core/namespace.c b/src/core/namespace.c
+index 4bd63f6227..3bf6524935 100644
+--- a/src/core/namespace.c
++++ b/src/core/namespace.c
+@@ -17,6 +17,7 @@
+ #include "extension-release.h"
+ #include "fd-util.h"
+ #include "format-util.h"
++#include "glyph-util.h"
+ #include "label.h"
+ #include "list.h"
+ #include "loop-util.h"
+@@ -1210,7 +1211,8 @@ static int follow_symlink(
+                                        "Symlink loop on '%s'.",
+                                        mount_entry_path(m));
+ 
+-        log_debug("Followed mount entry path symlink %s → %s.", mount_entry_path(m), target);
++        log_debug("Followed mount entry path symlink %s %s %s.",
++                  mount_entry_path(m), special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), target);
+ 
+         mount_entry_consume_prefix(m, TAKE_PTR(target));
+ 
+@@ -1308,7 +1310,8 @@ static int apply_one_mount(
+                 if (r < 0)
+                         return log_debug_errno(r, "Failed to follow symlinks on %s: %m", mount_entry_source(m));
+ 
+-                log_debug("Followed source symlinks %s → %s.", mount_entry_source(m), chased);
++                log_debug("Followed source symlinks %s %s %s.",
++                          mount_entry_source(m), special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), chased);
+ 
+                 free_and_replace(m->source_malloc, chased);
+ 
+diff --git a/src/core/socket.c b/src/core/socket.c
+index 8da9f14db6..cdb1e75e7a 100644
+--- a/src/core/socket.c
++++ b/src/core/socket.c
+@@ -1291,7 +1291,8 @@ static int socket_symlink(Socket *s) {
+                 }
+ 
+                 if (r < 0)
+-                        log_unit_warning_errno(UNIT(s), r, "Failed to create symlink %s → %s, ignoring: %m", p, *i);
++                        log_unit_warning_errno(UNIT(s), r, "Failed to create symlink %s %s %s, ignoring: %m",
++                                               p, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), *i);
+         }
+ 
+         return 0;
+diff --git a/src/home/homed-home.c b/src/home/homed-home.c
+index 1340cf30d3..c78918ab1a 100644
+--- a/src/home/homed-home.c
++++ b/src/home/homed-home.c
+@@ -19,6 +19,7 @@
+ #include "fileio.h"
+ #include "filesystems.h"
+ #include "fs-util.h"
++#include "glyph-util.h"
+ #include "home-util.h"
+ #include "homed-home-bus.h"
+ #include "homed-home.h"
+@@ -479,8 +480,9 @@ static void home_set_state(Home *h, HomeState state) {
+         new_state = home_get_state(h); /* Query the new state, since the 'state' variable might be set to -1,
+                                         * in which case we synthesize an high-level state on demand */
+ 
+-        log_info("%s: changing state %s → %s", h->user_name,
++        log_info("%s: changing state %s %s %s", h->user_name,
+                  home_state_to_string(old_state),
++                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
+                  home_state_to_string(new_state));
+ 
+         home_update_pin_fd(h, new_state);
+diff --git a/src/home/homed-manager.c b/src/home/homed-manager.c
+index f04b87e366..f70c9f95e4 100644
+--- a/src/home/homed-manager.c
++++ b/src/home/homed-manager.c
+@@ -23,6 +23,7 @@
+ #include "fileio.h"
+ #include "format-util.h"
+ #include "fs-util.h"
++#include "glyph-util.h"
+ #include "gpt.h"
+ #include "home-util.h"
+ #include "homed-conf.h"
+@@ -1939,8 +1940,10 @@ static int manager_rebalance_calculate(Manager *m) {
+                     (m->rebalance_state == REBALANCE_GROWING && h->rebalance_goal < h->rebalance_size))
+                         h->rebalance_pending = false;
+                 else {
+-                        log_debug("Rebalancing home directory '%s' %s → %s.", h->user_name,
+-                                  FORMAT_BYTES(h->rebalance_size), FORMAT_BYTES(h->rebalance_goal));
++                        log_debug("Rebalancing home directory '%s' %s %s %s.", h->user_name,
++                                  FORMAT_BYTES(h->rebalance_size),
++                                  special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
++                                  FORMAT_BYTES(h->rebalance_goal));
+                         h->rebalance_pending = true;
+                 }
+ 
+diff --git a/src/home/homework-luks.c b/src/home/homework-luks.c
+index f8f4afb253..f5653b4e14 100644
+--- a/src/home/homework-luks.c
++++ b/src/home/homework-luks.c
+@@ -28,6 +28,7 @@
+ #include "filesystems.h"
+ #include "fs-util.h"
+ #include "fsck-util.h"
++#include "glyph-util.h"
+ #include "home-util.h"
+ #include "homework-luks.h"
+ #include "homework-mount.h"
+@@ -3312,12 +3313,15 @@ int home_resize_luks(
+         if (resize_type == CAN_RESIZE_OFFLINE && FLAGS_SET(flags, HOME_SETUP_ALREADY_ACTIVATED))
+                 return log_error_errno(SYNTHETIC_ERRNO(ETXTBSY), "File systems of this type can only be resized offline, but is currently online.");
+ 
+-        log_info("Ready to resize image size %s → %s, partition size %s → %s, file system size %s → %s.",
++        log_info("Ready to resize image size %s %s %s, partition size %s %s %s, file system size %s %s %s.",
+                  FORMAT_BYTES(old_image_size),
++                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
+                  FORMAT_BYTES(new_image_size),
+                  FORMAT_BYTES(setup->partition_size),
++                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
+                  FORMAT_BYTES(new_partition_size),
+                  FORMAT_BYTES(old_fs_size),
++                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
+                  FORMAT_BYTES(new_fs_size));
+ 
+         r = prepare_resize_partition(
+diff --git a/src/home/homework-mount.c b/src/home/homework-mount.c
+index 0b028dad37..6dc665e323 100644
+--- a/src/home/homework-mount.c
++++ b/src/home/homework-mount.c
+@@ -7,6 +7,7 @@
+ #include "alloc-util.h"
+ #include "fd-util.h"
+ #include "format-util.h"
++#include "glyph-util.h"
+ #include "home-util.h"
+ #include "homework-mount.h"
+ #include "homework.h"
+@@ -283,7 +284,8 @@ int home_shift_uid(int dir_fd, const char *target, uid_t stored_uid, uid_t expos
+         if (r < 0)
+                 return log_error_errno(errno, "Failed to apply UID/GID map: %m");
+ 
+-        log_debug("Applied uidmap mount to %s. Mapping is " UID_FMT " → " UID_FMT ".", strna(target), stored_uid, exposed_uid);
++        log_debug("Applied uidmap mount to %s. Mapping is " UID_FMT " %s " UID_FMT ".",
++                  strna(target), stored_uid, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), exposed_uid);
+ 
+         if (ret_mount_fd)
+                 *ret_mount_fd = TAKE_FD(mount_fd);
+diff --git a/src/libsystemd/sd-bus/sd-bus.c b/src/libsystemd/sd-bus/sd-bus.c
+index 9e1d29cc1d..d117199cf9 100644
+--- a/src/libsystemd/sd-bus/sd-bus.c
++++ b/src/libsystemd/sd-bus/sd-bus.c
+@@ -30,6 +30,7 @@
+ #include "def.h"
+ #include "errno-util.h"
+ #include "fd-util.h"
++#include "glyph-util.h"
+ #include "hexdecoct.h"
+ #include "hostname-util.h"
+ #include "io-util.h"
+@@ -521,7 +522,8 @@ void bus_set_state(sd_bus *bus, enum bus_state state) {
+         if (state == bus->state)
+                 return;
+ 
+-        log_debug("Bus %s: changing state %s → %s", strna(bus->description), table[bus->state], table[state]);
++        log_debug("Bus %s: changing state %s %s %s", strna(bus->description),
++                  table[bus->state], special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), table[state]);
+         bus->state = state;
+ }
+ 
+diff --git a/src/network/networkd-link.c b/src/network/networkd-link.c
+index f409d1f33a..15c188cb6d 100644
+--- a/src/network/networkd-link.c
++++ b/src/network/networkd-link.c
+@@ -26,6 +26,7 @@
+ #include "fileio.h"
+ #include "format-util.h"
+ #include "fs-util.h"
++#include "glyph-util.h"
+ #include "ipvlan.h"
+ #include "missing_network.h"
+ #include "netlink-util.h"
+@@ -2122,7 +2123,8 @@ static int link_update_master(Link *link, sd_netlink_message *message) {
+         else if (master_ifindex == 0)
+                 log_link_debug(link, "Leaved from master interface: %i", link->master_ifindex);
+         else
+-                log_link_debug(link, "Master interface is changed: %i → %i", link->master_ifindex, master_ifindex);
++                log_link_debug(link, "Master interface changed: %i %s %i", link->master_ifindex,
++                               special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), master_ifindex);
+ 
+         link_drop_from_master(link);
+ 
+@@ -2158,8 +2160,10 @@ static int link_update_hardware_address(Link *link, sd_netlink_message *message)
+         if (link->hw_addr.length == 0)
+                 log_link_debug(link, "Saved hardware address: %s", HW_ADDR_TO_STR(&addr));
+         else {
+-                log_link_debug(link, "Hardware address is changed: %s → %s",
+-                               HW_ADDR_TO_STR(&link->hw_addr), HW_ADDR_TO_STR(&addr));
++                log_link_debug(link, "Hardware address is changed: %s %s %s",
++                               HW_ADDR_TO_STR(&link->hw_addr),
++                               special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
++                               HW_ADDR_TO_STR(&addr));
+ 
+                 if (hashmap_get(link->manager->links_by_hw_addr, &link->hw_addr) == link)
+                         hashmap_remove(link->manager->links_by_hw_addr, &link->hw_addr);
+@@ -2256,8 +2260,9 @@ static int link_update_mtu(Link *link, sd_netlink_message *message) {
+                 return 0;
+ 
+         if (link->mtu != 0)
+-                log_link_debug(link, "MTU is changed: %"PRIu32" → %"PRIu32" (min: %"PRIu32", max: %"PRIu32")",
+-                               link->mtu, mtu, link->min_mtu, link->max_mtu);
++                log_link_debug(link, "MTU is changed: %"PRIu32" %s %"PRIu32" (min: %"PRIu32", max: %"PRIu32")",
++                               link->mtu, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), mtu,
++                               link->min_mtu, link->max_mtu);
+ 
+         link->mtu = mtu;
+ 
+diff --git a/src/partition/repart.c b/src/partition/repart.c
+index 9f95713130..d41411caeb 100644
+--- a/src/partition/repart.c
++++ b/src/partition/repart.c
+@@ -1096,7 +1096,8 @@ static int config_parse_size4096(
+                 *sz = parsed;
+ 
+         if (*sz != parsed)
+-                log_syntax(unit, LOG_NOTICE, filename, line, r, "Rounded %s= size %" PRIu64 " → %" PRIu64 ", a multiple of 4096.", lvalue, parsed, *sz);
++                log_syntax(unit, LOG_NOTICE, filename, line, r, "Rounded %s= size %" PRIu64 " %s %" PRIu64 ", a multiple of 4096.",
++                           lvalue, parsed, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), *sz);
+ 
+         return 0;
+ }
+@@ -4295,8 +4296,8 @@ static int parse_argv(int argc, char *argv[]) {
+                                 return log_error_errno(SYNTHETIC_ERRNO(ERANGE), "Specified image size too large, refusing.");
+ 
+                         if (rounded != parsed)
+-                                log_warning("Specified size is not a multiple of 4096, rounding up automatically. (%" PRIu64 " → %" PRIu64 ")",
+-                                            parsed, rounded);
++                                log_warning("Specified size is not a multiple of 4096, rounding up automatically. (%" PRIu64 " %s %" PRIu64 ")",
++                                            parsed, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), rounded);
+ 
+                         arg_size = rounded;
+                         arg_size_auto = false;
+diff --git a/src/resolve/resolved-dns-query.c b/src/resolve/resolved-dns-query.c
+index 3b5e456db2..ddb66c4659 100644
+--- a/src/resolve/resolved-dns-query.c
++++ b/src/resolve/resolved-dns-query.c
+@@ -3,6 +3,7 @@
+ #include "alloc-util.h"
+ #include "dns-domain.h"
+ #include "dns-type.h"
++#include "glyph-util.h"
+ #include "hostname-util.h"
+ #include "local-addresses.h"
+ #include "resolved-dns-query.h"
+@@ -1016,7 +1017,10 @@ static int dns_query_cname_redirect(DnsQuery *q, const DnsResourceRecord *cname)
+         if (r < 0)
+                 return r;
+         if (r > 0)
+-                log_debug("Following CNAME/DNAME %s → %s.", dns_question_first_name(q->question_idna), dns_question_first_name(nq_idna));
++                log_debug("Following CNAME/DNAME %s %s %s.",
++                          dns_question_first_name(q->question_idna),
++                          special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
++                          dns_question_first_name(nq_idna));
+ 
+         k = dns_question_is_equal(q->question_idna, q->question_utf8);
+         if (k < 0)
+@@ -1030,7 +1034,10 @@ static int dns_query_cname_redirect(DnsQuery *q, const DnsResourceRecord *cname)
+                 if (k < 0)
+                         return k;
+                 if (k > 0)
+-                        log_debug("Following UTF8 CNAME/DNAME %s → %s.", dns_question_first_name(q->question_utf8), dns_question_first_name(nq_utf8));
++                        log_debug("Following UTF8 CNAME/DNAME %s %s %s.",
++                                  dns_question_first_name(q->question_utf8),
++                                  special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
++                                  dns_question_first_name(nq_utf8));
+         }
+ 
+         if (r == 0 && k == 0) /* No actual cname happened? */
+diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
+index 0cf9912712..1ae8103a14 100644
+--- a/src/resolve/resolved-dns-transaction.c
++++ b/src/resolve/resolved-dns-transaction.c
+@@ -8,6 +8,7 @@
+ #include "errno-list.h"
+ #include "errno-util.h"
+ #include "fd-util.h"
++#include "glyph-util.h"
+ #include "random-util.h"
+ #include "resolved-dns-cache.h"
+ #include "resolved-dns-transaction.h"
+@@ -2591,21 +2592,22 @@ int dns_transaction_request_dnssec_keys(DnsTransaction *t) {
+                         r = dns_name_parent(&name);
+                         if (r > 0) {
+                                 type = DNS_TYPE_SOA;
+-                                log_debug("Requesting parent SOA (→ %s) to validate transaction %" PRIu16 " (%s, unsigned empty DS response).",
+-                                          name, t->id, dns_resource_key_name(dns_transaction_key(t)));
++                                log_debug("Requesting parent SOA (%s %s) to validate transaction %" PRIu16 " (%s, unsigned empty DS response).",
++                                          special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), name, t->id,
++                                          dns_resource_key_name(dns_transaction_key(t)));
+                         } else
+                                 name = NULL;
+ 
+                 } else if (IN_SET(dns_transaction_key(t)->type, DNS_TYPE_SOA, DNS_TYPE_NS)) {
+ 
+                         type = DNS_TYPE_DS;
+-                        log_debug("Requesting DS (→ %s) to validate transaction %" PRIu16 " (%s, unsigned empty SOA/NS response).",
+-                                  name, t->id, name);
++                        log_debug("Requesting DS (%s %s) to validate transaction %" PRIu16 " (%s, unsigned empty SOA/NS response).",
++                                  special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), name, t->id, name);
+ 
+                 } else {
+                         type = DNS_TYPE_SOA;
+-                        log_debug("Requesting SOA (→ %s) to validate transaction %" PRIu16 " (%s, unsigned empty non-SOA/NS/DS response).",
+-                                  name, t->id, name);
++                        log_debug("Requesting SOA (%s %s) to validate transaction %" PRIu16 " (%s, unsigned empty non-SOA/NS/DS response).",
++                                  special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), name, t->id, name);
+                 }
+ 
+                 if (name) {
+diff --git a/src/run-generator/run-generator.c b/src/run-generator/run-generator.c
+index fb62209704..e3fb7f24fe 100644
+--- a/src/run-generator/run-generator.c
++++ b/src/run-generator/run-generator.c
+@@ -7,6 +7,7 @@
+ #include "fd-util.h"
+ #include "fileio.h"
+ #include "generator.h"
++#include "glyph-util.h"
+ #include "mkdir.h"
+ #include "proc-cmdline.h"
+ #include "special.h"
+@@ -116,7 +117,8 @@ static int generate(void) {
+         /* And now redirect default.target to our new target */
+         p = strjoina(arg_dest, "/" SPECIAL_DEFAULT_TARGET);
+         if (symlink("kernel-command-line.target", p) < 0)
+-                return log_error_errno(errno, "Failed to link unit file kernel-command-line.target → %s: %m", p);
++                return log_error_errno(errno, "Failed to link unit file kernel-command-line.target %s %s: %m",
++                                       special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), p);
+ 
+         return 0;
+ }
+diff --git a/src/shared/devnode-acl.c b/src/shared/devnode-acl.c
+index 89ff566832..21d8130e0d 100644
+--- a/src/shared/devnode-acl.c
++++ b/src/shared/devnode-acl.c
+@@ -12,6 +12,7 @@
+ #include "escape.h"
+ #include "fd-util.h"
+ #include "format-util.h"
++#include "glyph-util.h"
+ #include "set.h"
+ #include "string-util.h"
+ #include "util.h"
+@@ -242,8 +243,8 @@ int devnode_acl_all(const char *seat,
+         SET_FOREACH(n, nodes) {
+                 int k;
+ 
+-                log_debug("Changing ACLs at %s for seat %s (uid "UID_FMT"→"UID_FMT"%s%s)",
+-                          n, seat, old_uid, new_uid,
++                log_debug("Changing ACLs at %s for seat %s (uid "UID_FMT"%s"UID_FMT"%s%s)",
++                          n, seat, old_uid, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), new_uid,
+                           del ? " del" : "", add ? " add" : "");
+ 
+                 k = devnode_acl(n, flush, del, old_uid, add, new_uid);
+diff --git a/src/shared/dns-domain.c b/src/shared/dns-domain.c
+index f54b187a1b..49ce9cfa10 100644
+--- a/src/shared/dns-domain.c
++++ b/src/shared/dns-domain.c
+@@ -7,6 +7,7 @@
+ 
+ #include "alloc-util.h"
+ #include "dns-domain.h"
++#include "glyph-util.h"
+ #include "hashmap.h"
+ #include "hexdecoct.h"
+ #include "hostname-util.h"
+@@ -1300,7 +1301,7 @@ int dns_name_apply_idna(const char *name, char **ret) {
+                 r = sym_idn2_lookup_u8((uint8_t*) name, (uint8_t**) &t,
+                                        IDN2_NFC_INPUT | IDN2_TRANSITIONAL);
+ 
+-        log_debug("idn2_lookup_u8: %s → %s", name, t);
++        log_debug("idn2_lookup_u8: %s %s %s", name, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), t);
+         if (r == IDN2_OK) {
+                 if (!startswith(name, "xn--")) {
+                         _cleanup_free_ char *s = NULL;
+@@ -1314,8 +1315,9 @@ int dns_name_apply_idna(const char *name, char **ret) {
+                         }
+ 
+                         if (!streq_ptr(name, s)) {
+-                                log_debug("idn2 roundtrip failed: \"%s\" → \"%s\" → \"%s\", ignoring.",
+-                                          name, t, s);
++                                log_debug("idn2 roundtrip failed: \"%s\" %s \"%s\" %s \"%s\", ignoring.",
++                                          name, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), t,
++                                          special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), s);
+                                 *ret = NULL;
+                                 return 0;
+                         }
+diff --git a/src/shared/install.c b/src/shared/install.c
+index 4c7d0d6cad..d3661521a9 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -523,7 +523,8 @@ static int create_symlink(
+         }
+ 
+         if (chroot_unit_symlinks_equivalent(lp, new_path, dest, old_path)) {
+-                log_debug("Symlink %s → %s already exists", new_path, dest);
++                log_debug("Symlink %s %s %s already exists",
++                          new_path, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), dest);
+                 return 1;
+         }
+ 
+diff --git a/src/shared/mount-util.c b/src/shared/mount-util.c
+index 12c7044f04..e0c8cff14a 100644
+--- a/src/shared/mount-util.c
++++ b/src/shared/mount-util.c
+@@ -17,6 +17,7 @@
+ #include "fd-util.h"
+ #include "fileio.h"
+ #include "fs-util.h"
++#include "glyph-util.h"
+ #include "hashmap.h"
+ #include "label.h"
+ #include "libmount-util.h"
+@@ -672,8 +673,8 @@ int mount_verbose_full(
+                 log_debug("Bind-mounting %s on %s (%s \"%s\")...",
+                           what, where, strnull(fl), strempty(o));
+         else if (f & MS_MOVE)
+-                log_debug("Moving mount %s → %s (%s \"%s\")...",
+-                          what, where, strnull(fl), strempty(o));
++                log_debug("Moving mount %s %s %s (%s \"%s\")...",
++                          what, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), where, strnull(fl), strempty(o));
+         else
+                 log_debug("Mounting %s (%s) on %s (%s \"%s\")...",
+                           strna(what), strna(type), where, strnull(fl), strempty(o));
+diff --git a/src/shared/varlink.c b/src/shared/varlink.c
+index e0038dfd28..f18301d3c4 100644
+--- a/src/shared/varlink.c
++++ b/src/shared/varlink.c
+@@ -6,6 +6,7 @@
+ #include "alloc-util.h"
+ #include "errno-util.h"
+ #include "fd-util.h"
++#include "glyph-util.h"
+ #include "hashmap.h"
+ #include "io-util.h"
+ #include "list.h"
+@@ -236,8 +237,9 @@ static void varlink_set_state(Varlink *v, VarlinkState state) {
+                 varlink_log(v, "Setting state %s",
+                             varlink_state_to_string(state));
+         else
+-                varlink_log(v, "Changing state %s → %s",
++                varlink_log(v, "Changing state %s %s %s",
+                             varlink_state_to_string(v->state),
++                            special_glyph(SPECIAL_GLYPH_ARROW_RIGHT),
+                             varlink_state_to_string(state));
+ 
+         v->state = state;
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index 673ed7a7ca..1ca7983cfe 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -28,6 +28,7 @@
+ #include "dirent-util.h"
+ #include "fd-util.h"
+ #include "fileio.h"
++#include "glyph-util.h"
+ #include "netif-naming-scheme.h"
+ #include "parse-util.h"
+ #include "proc-cmdline.h"
+@@ -215,9 +216,9 @@ static int dev_pci_onboard(sd_device *dev, const LinkInfo *info, NetNames *names
+                 l = strpcpyf(&s, l, "d%lu", dev_port);
+         if (l == 0)
+                 names->pci_onboard[0] = '\0';
+-        log_device_debug(dev, "Onboard index identifier: index=%lu phys_port=%s dev_port=%lu → %s",
++        log_device_debug(dev, "Onboard index identifier: index=%lu phys_port=%s dev_port=%lu %s %s",
+                          idx, strempty(info->phys_port_name), dev_port,
+-                         empty_to_na(names->pci_slot));
++                         special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), empty_to_na(names->pci_slot));
+ 
+         if (sd_device_get_sysattr_value(names->pcidev, "label", &names->pci_onboard_label) >= 0)
+                 log_device_debug(dev, "Onboard label from PCI device: %s", names->pci_onboard_label);
+@@ -393,9 +394,9 @@ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+         if (l == 0)
+                 names->pci_path[0] = '\0';
+ 
+-        log_device_debug(dev, "PCI path identifier: domain=%u bus=%u slot=%u func=%u phys_port=%s dev_port=%lu → %s",
++        log_device_debug(dev, "PCI path identifier: domain=%u bus=%u slot=%u func=%u phys_port=%s dev_port=%lu %s %s",
+                          domain, bus, slot, func, strempty(info->phys_port_name), dev_port,
+-                         empty_to_na(names->pci_path));
++                         special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), empty_to_na(names->pci_path));
+ 
+         /* ACPI _SUN — slot user number */
+         r = sd_device_new_from_subsystem_sysname(&pci, "subsystem", "pci");
+@@ -487,9 +488,9 @@ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+                 if (l == 0)
+                         names->pci_slot[0] = '\0';
+ 
+-                log_device_debug(dev, "Slot identifier: domain=%u slot=%"PRIu32" func=%u phys_port=%s dev_port=%lu → %s",
++                log_device_debug(dev, "Slot identifier: domain=%u slot=%"PRIu32" func=%u phys_port=%s dev_port=%lu %s %s",
+                                  domain, hotplug_slot, func, strempty(info->phys_port_name), dev_port,
+-                                 empty_to_na(names->pci_slot));
++                                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), empty_to_na(names->pci_slot));
+         }
+ 
+         return 0;
+@@ -529,7 +530,8 @@ static int names_vio(sd_device *dev, NetNames *names) {
+ 
+         xsprintf(names->vio_slot, "v%u", slotid);
+         names->type = NET_VIO;
+-        log_device_debug(dev, "Vio slot identifier: slotid=%u → %s", slotid, names->vio_slot);
++        log_device_debug(dev, "Vio slot identifier: slotid=%u %s %s",
++                         slotid, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), names->vio_slot);
+         return 0;
+ }
+ 
+@@ -596,8 +598,8 @@ static int names_platform(sd_device *dev, NetNames *names, bool test) {
+ 
+         xsprintf(names->platform_path, "a%s%xi%u", vendor, model, instance);
+         names->type = NET_PLATFORM;
+-        log_device_debug(dev, "Platform identifier: vendor=%s model=%u instance=%u → %s",
+-                         vendor, model, instance, names->platform_path);
++        log_device_debug(dev, "Platform identifier: vendor=%s model=%u instance=%u %s %s",
++                         vendor, model, instance, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), names->platform_path);
+         return 0;
+ }
+ 
+@@ -718,8 +720,9 @@ static int names_usb(sd_device *dev, NetNames *names) {
+         if (l == 0)
+                 return log_device_debug_errno(dev, SYNTHETIC_ERRNO(ENAMETOOLONG),
+                                               "Generated USB name would be too long.");
+-        log_device_debug(dev, "USB name identifier: ports=%.*s config=%s interface=%s → %s",
+-                         (int) strlen(ports), sysname + (ports - name), config, interf, names->usb_ports);
++        log_device_debug(dev, "USB name identifier: ports=%.*s config=%s interface=%s %s %s",
++                         (int) strlen(ports), sysname + (ports - name), config, interf,
++                         special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), names->usb_ports);
+         names->type = NET_USB;
+         return 0;
+ }
+@@ -752,7 +755,8 @@ static int names_bcma(sd_device *dev, NetNames *names) {
+                 xsprintf(names->bcma_core, "b%u", core);
+ 
+         names->type = NET_BCMA;
+-        log_device_debug(dev, "BCMA core identifier: core=%u → \"%s\"", core, names->bcma_core);
++        log_device_debug(dev, "BCMA core identifier: core=%u %s \"%s\"",
++                         core, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), names->bcma_core);
+         return 0;
+ }
+ 
+@@ -813,7 +817,8 @@ static int names_ccw(sd_device *dev, NetNames *names) {
+                 return log_device_debug_errno(dev, SYNTHETIC_ERRNO(ENAMETOOLONG),
+                                               "Generated CCW name would be too long.");
+         names->type = NET_CCW;
+-        log_device_debug(dev, "CCW identifier: ccw_busid=%s → \"%s\"", bus_id, names->ccw_busid);
++        log_device_debug(dev, "CCW identifier: ccw_busid=%s %s \"%s\"",
++                         bus_id, special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), names->ccw_busid);
+         return 0;
+ }
+ 
+@@ -1027,8 +1032,9 @@ static int builtin_net_id(sd_device *dev, sd_netlink **rtnl, int argc, char *arg
+ 
+                 xsprintf(str, "%sx%s", prefix, HW_ADDR_TO_STR_FULL(&info.hw_addr, HW_ADDR_TO_STRING_NO_COLON));
+                 udev_builtin_add_property(dev, test, "ID_NET_NAME_MAC", str);
+-                log_device_debug(dev, "MAC address identifier: hw_addr=%s → %s",
+-                                 HW_ADDR_TO_STR(&info.hw_addr), str + strlen(prefix));
++                log_device_debug(dev, "MAC address identifier: hw_addr=%s %s %s",
++                                 HW_ADDR_TO_STR(&info.hw_addr),
++                                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), str + strlen(prefix));
+ 
+                 ieee_oui(dev, &info, test);
+         }

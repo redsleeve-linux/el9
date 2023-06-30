@@ -1,0 +1,59 @@
+From f06a6ff8b3dba8ba48ca5bb6ebaa04a86b4c06d6 Mon Sep 17 00:00:00 2001
+From: Alper Nebi Yasak <alpernebiyasak@gmail.com>
+Date: Wed, 10 Aug 2022 22:09:32 +0300
+Subject: [PATCH] hwdb: Apply existing accel orientation quirk to all
+ Chromebooks
+
+The cros-ec-accel and cros-ec-accel-legacy kernel modules internally
+correct for the board-specific accelerometer mounting orientations.
+Their sensor outputs are in a standard reference frame consistent across
+different boards, so the orientation matrix already added for a number
+of devices should apply to every device using cros-ec accelerometers.
+The different matrix for the 'Nocturne' board seems to be an error.
+
+Replace the existing hwdb rules for select Chromebooks with generic
+rules that apply to all Chromebooks.
+
+(cherry picked from commit 1800f7098a3e91a1d28697ef11a15e4b4193d21f)
+
+Related: #2087778
+---
+ hwdb.d/60-sensor.hwdb | 22 ++++------------------
+ 1 file changed, 4 insertions(+), 18 deletions(-)
+
+diff --git a/hwdb.d/60-sensor.hwdb b/hwdb.d/60-sensor.hwdb
+index 1c3f6b62bb..7978675943 100644
+--- a/hwdb.d/60-sensor.hwdb
++++ b/hwdb.d/60-sensor.hwdb
+@@ -406,27 +406,13 @@ sensor:modalias:acpi:KXCJ9000*:dmi:*:bvrZY-8-BI-PX4S70VTR400-X423B-005-D:*:rvnAM
+ #########################################
+ # Google Chromebooks
+ #########################################
+-sensor:modalias:platform:cros-ec-accel:dmi:*:svnGOOGLE:*
+- ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, -1, 0; 0, 0, -1
+-
+-# caroline board (Samsung Chromebook Pro) reports itself as svnGoogle
+-sensor:modalias:platform:cros-ec-accel:dmi:*:svnGoogle:pnCaroline*:*
+- ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, -1, 0; 0, 0, -1
+-
+-# Dell Inspiron Chromebook 14 2-in-1
+-sensor:modalias:platform:cros-ec-accel:dmi:*svnGoogle:pnVayne*:*
+- ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, -1, 0; 0, 0, -1
+-
+-# nocturne board (Google Pixel Slate)
+-sensor:modalias:platform:cros-ec-accel:dmi:*Google_Nocturne*:*
+- ACCEL_MOUNT_MATRIX=1, 0, 0; 0, -1, 0; 0, 0, 1
+ 
+-# rammus board (Asus Chromebook Flip C433)
+-sensor:modalias:platform:cros-ec-accel:dmi:*svnGoogle:pnRammus*:*
++# CrOS EC & kernel drivers internally correct for per-board sensor orientations,
++# but they return values in the inverse direction (Android & W3C specs vs HID).
++sensor:modalias:platform:cros-ec-accel:*
+  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, -1, 0; 0, 0, -1
+ 
+-# Lenovo ThinkPad C13 Yoga
+-sensor:modalias:platform:cros-ec-accel:dmi:*svnGoogle:pnMorphius*:*
++sensor:modalias:platform:cros-ec-accel-legacy:*
+  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, -1, 0; 0, 0, -1
+ 
+ #########################################

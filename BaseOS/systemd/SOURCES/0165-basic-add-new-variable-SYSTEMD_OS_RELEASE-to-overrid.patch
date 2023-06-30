@@ -1,0 +1,85 @@
+From d424adce45d593d41e52294bd8f32fd33c625498 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 7 Mar 2022 18:54:50 +0100
+Subject: [PATCH] basic: add new variable $SYSTEMD_OS_RELEASE to override
+ location of os-release
+
+The test for the variable is added in test-systemctl-enable because there we
+can do it almost for free, and the variable is most likely to be used with
+'systemctl enable --root' anyway.
+
+(cherry picked from commit df78419d107662dd49892d76a745c294d7031d66)
+
+Related: #2082131
+---
+ docs/ENVIRONMENT.md           |  5 +++++
+ src/basic/os-util.c           | 16 +++++++++++-----
+ test/test-systemctl-enable.sh | 12 ++++++++++--
+ 3 files changed, 26 insertions(+), 7 deletions(-)
+
+diff --git a/docs/ENVIRONMENT.md b/docs/ENVIRONMENT.md
+index 71d6c55010..5e9548449c 100644
+--- a/docs/ENVIRONMENT.md
++++ b/docs/ENVIRONMENT.md
+@@ -43,6 +43,11 @@ All tools:
+   debugging, in order to test generators and other code against specific kernel
+   command lines.
+ 
++* `$SYSTEMD_OS_RELEASE` — if set, use this path instead of `/etc/os-release` or
++  `/usr/lib/os-release`. When operating under some root (e.g. `systemctl
++  --root=…`), the path is taken relative to the outside root. Only useful for
++  debugging.
++
+ * `$SYSTEMD_FSTAB` — if set, use this path instead of `/etc/fstab`. Only useful
+   for debugging.
+ 
+diff --git a/src/basic/os-util.c b/src/basic/os-util.c
+index a6e4d09473..38b2179e48 100644
+--- a/src/basic/os-util.c
++++ b/src/basic/os-util.c
+@@ -170,13 +170,19 @@ int open_extension_release(const char *root, const char *extension, char **ret_p
+                         }
+                 }
+         } else {
+-                FOREACH_STRING(p, "/etc/os-release", "/usr/lib/os-release") {
+-                        r = chase_symlinks(p, root, CHASE_PREFIX_ROOT,
++                const char *var = secure_getenv("SYSTEMD_OS_RELEASE");
++                if (var)
++                        r = chase_symlinks(var, root, 0,
+                                            ret_path ? &q : NULL,
+                                            ret_fd ? &fd : NULL);
+-                        if (r != -ENOENT)
+-                                break;
+-                }
++                else
++                        FOREACH_STRING(path, "/etc/os-release", "/usr/lib/os-release") {
++                                r = chase_symlinks(path, root, CHASE_PREFIX_ROOT,
++                                                   ret_path ? &q : NULL,
++                                                   ret_fd ? &fd : NULL);
++                                if (r != -ENOENT)
++                                        break;
++                        }
+         }
+         if (r < 0)
+                 return r;
+diff --git a/test/test-systemctl-enable.sh b/test/test-systemctl-enable.sh
+index 30ba6532e7..769341129c 100644
+--- a/test/test-systemctl-enable.sh
++++ b/test/test-systemctl-enable.sh
+@@ -518,6 +518,14 @@ check_alias z 'z' && { echo "Expected failure because %z is not known" >&2; exit
+ 
+ # FIXME: if there's an invalid Alias=, we shouldn't preach about empty [Install]
+ 
+-exit 0  # yes, this is needed because the last test above fails
+-
+ # TODO: repeat the tests above for presets
++
++: -------SYSTEMD_OS_RELEASE relative to root------------------
++# check that os-release overwriting works as expected with root
++test -e "$root/etc/os-release"
++
++cat >"$root/etc/os-release2" <<EOF
++ID='the-id2'
++EOF
++
++SYSTEMD_OS_RELEASE="$root/etc/os-release2" check_alias o 'the-id2'

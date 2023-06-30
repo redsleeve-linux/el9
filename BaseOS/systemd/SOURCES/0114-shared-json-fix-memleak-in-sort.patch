@@ -1,0 +1,43 @@
+From 51bbb027e93637f5821215ebb067454ad6620190 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 10 May 2022 10:51:43 +0200
+Subject: [PATCH] shared/json: fix memleak in sort
+
+(cherry picked from commit 99b1145aae682ddd7554c7e3ac5ebf778e88f87d)
+Related: #2087652
+---
+ src/shared/json.c             | 4 ++--
+ test/fuzz/fuzz-json/leak-sort | 1 +
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+ create mode 100644 test/fuzz/fuzz-json/leak-sort
+
+diff --git a/src/shared/json.c b/src/shared/json.c
+index 06ef556233..6d23bdf4f9 100644
+--- a/src/shared/json.c
++++ b/src/shared/json.c
+@@ -4581,7 +4581,7 @@ static int json_cmp_strings(const void *x, const void *y) {
+ 
+ int json_variant_sort(JsonVariant **v) {
+         _cleanup_free_ JsonVariant **a = NULL;
+-        JsonVariant *n = NULL;
++        _cleanup_(json_variant_unrefp) JsonVariant *n = NULL;
+         size_t m;
+         int r;
+ 
+@@ -4614,7 +4614,7 @@ int json_variant_sort(JsonVariant **v) {
+         if (!n->sorted) /* Check if this worked. This will fail if there are multiple identical keys used. */
+                 return -ENOTUNIQ;
+ 
+-        JSON_VARIANT_REPLACE(*v, n);
++        JSON_VARIANT_REPLACE(*v, TAKE_PTR(n));
+ 
+         return 1;
+ }
+diff --git a/test/fuzz/fuzz-json/leak-sort b/test/fuzz/fuzz-json/leak-sort
+new file mode 100644
+index 0000000000..f8446dbdc7
+--- /dev/null
++++ b/test/fuzz/fuzz-json/leak-sort
+@@ -0,0 +1 @@
++{"":2,"":6,"-":7}
+\ No newline at end of file

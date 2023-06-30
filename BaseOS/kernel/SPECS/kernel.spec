@@ -118,7 +118,7 @@ Summary: The Linux kernel
 %global signmodules 1
 
 # Compress modules only for architectures that build modules
-%ifarch noarch %{arm}
+%ifarch noarch
 %global zipmodules 0
 %else
 %global zipmodules 1
@@ -161,15 +161,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 284.11.1
+%define pkgrelease 284.18.1
 %define kversion 5
-%define tarfile_release 5.14.0-284.11.1.el9_2
+%define tarfile_release 5.14.0-284.18.1.el9_2
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 284.11.1%{?buildid}%{?dist}
+%define specrelease 284.18.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-284.11.1.el9_2
+%define kabiversion 5.14.0-284.18.1.el9_2
 
 #
 # End of genspec.sh variables
@@ -503,7 +503,7 @@ Summary: The Linux kernel
 %define kernel_mflags KALLSYMS_EXTRA_PASS=1
 # we only build headers/perf/tools on the base arm arches
 # just like we used to only build them on i386 for x86
-%ifnarch armv7hl armv6hl
+%ifnarch armv7hl
 %define with_headers 0
 %define with_cross_headers 0
 %endif
@@ -517,11 +517,6 @@ Summary: The Linux kernel
 %define hdrarch arm64
 %define make_target Image.gz
 %define kernel_image arch/arm64/boot/Image.gz
-%endif
-
-%ifarch %{arm}
-%define asmarch arm
-%define hdrarch arm
 %endif
 
 # Should make listnewconfig fail if there's config options
@@ -602,7 +597,7 @@ Name: kernel
 License: GPLv2 and Redistributable, no modification permitted
 URL: https://www.kernel.org/
 Version: %{specversion}
-Release: %{pkg_release}.redsleeve
+Release: %{pkg_release}
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
 # SET %%nobuildarches (ABOVE) INSTEAD
 %if 0%{?fedora}
@@ -625,7 +620,7 @@ BuildRequires: kmod, bash, coreutils, tar, git-core, which
 BuildRequires: bzip2, xz, findutils, gzip, m4, perl-interpreter, perl-Carp, perl-devel, perl-generators, make, diffutils, gawk
 BuildRequires: gcc, binutils, redhat-rpm-config, hmaccalc, bison, flex, gcc-c++
 BuildRequires: net-tools, hostname, bc, elfutils-devel
-#BuildRequires: dwarves
+BuildRequires: dwarves
 BuildRequires: python3-devel
 BuildRequires: gcc-plugin-devel
 BuildRequires: kernel-rpm-macros >= 185-9
@@ -784,18 +779,14 @@ Source1: Makefile.rhelver
 %define secureboot_ca_0 %{_datadir}/pki/sb-certs/secureboot-ca-%{_arch}.cer
 %define secureboot_key_0 %{_datadir}/pki/sb-certs/secureboot-kernel-%{_arch}.cer
 
-%if 0%{?centos}
-%define pesign_name_0 centossecureboot201
-%else
 %ifarch x86_64 aarch64
-%define pesign_name_0 redhatsecureboot501
+%define pesign_name_0 rockybootsigningcert
 %endif
 %ifarch s390x
-%define pesign_name_0 redhatsecureboot302
+%define pesign_name_0 rockybootsigningcert
 %endif
 %ifarch ppc64le
-%define pesign_name_0 redhatsecureboot701
-%endif
+%define pesign_name_0 rockybootsigningcert
 %endif
 
 # signkernel
@@ -869,8 +860,8 @@ Source82: update_scripts.sh
 Source84: mod-internal.list
 Source85: mod-partner.list
 
-Source100: rheldup3.x509
-Source101: rhelkpatch1.x509
+Source100: rockydup1.x509
+Source101: rockykpatch1.x509
 
 Source150: dracut-virt.conf
 
@@ -916,6 +907,7 @@ Patch1: patch-%{patchversion}-redhat.patch
 
 # empty final patch to facilitate testing of kernel patches
 Patch999999: linux-kernel-test.patch
+Patch1000000: debrand-rh-main.patch
 
 # END OF PATCH DEFINITIONS
 
@@ -1040,10 +1032,10 @@ This package provides debug information for the perf python bindings.
 Summary: Assortment of tools for the Linux kernel
 License: GPLv2
 %ifarch %{cpupowerarchs}
-Provides:  cpupowerutils = 1:009-0.6.p1
+Provides: cpupowerutils = 1:009-0.6.p1
 Obsoletes: cpupowerutils < 1:009-0.6.p1
-Provides:  cpufreq-utils = 1:009-0.6.p1
-Provides:  cpufrequtils = 1:009-0.6.p1
+Provides: cpufreq-utils = 1:009-0.6.p1
+Provides: cpufrequtils = 1:009-0.6.p1
 Obsoletes: cpufreq-utils < 1:009-0.6.p1
 Obsoletes: cpufrequtils < 1:009-0.6.p1
 Obsoletes: cpuspeed < 1:1.5-16
@@ -1066,7 +1058,7 @@ Summary: Assortment of tools for the Linux kernel
 License: GPLv2
 Requires: kernel-tools = %{version}-%{release}
 %ifarch %{cpupowerarchs}
-Provides:  cpupowerutils-devel = 1:009-0.6.p1
+Provides: cpupowerutils-devel = 1:009-0.6.p1
 Obsoletes: cpupowerutils-devel < 1:009-0.6.p1
 %endif
 Requires: kernel-tools-libs = %{version}-%{release}
@@ -1160,10 +1152,10 @@ kernel-gcov includes the gcov graph and source files for gcov coverage collectio
 %endif
 
 %package -n kernel-abi-stablelists
-Summary: The Red Hat Enterprise Linux kernel ABI symbol stablelists
+Summary: The Rocky Linux kernel ABI symbol stablelists
 AutoReqProv: no
 %description -n kernel-abi-stablelists
-The kABI package contains information pertaining to the Red Hat Enterprise
+The kABI package contains information pertaining to the Rocky
 Linux kernel ABI, including lists of kernel symbols that are needed by
 external Linux kernel modules, and a yum plugin to aid enforcement.
 
@@ -1173,7 +1165,7 @@ Summary: The baseline dataset for kABI verification using DWARF data
 Group: System Environment/Kernel
 AutoReqProv: no
 %description kernel-kabidw-base-internal
-The package contains data describing the current ABI of the Red Hat Enterprise
+The package contains data describing the current ABI of the Rocky
 Linux kernel, suitable for the kabi-dw tool.
 %endif
 
@@ -1273,7 +1265,7 @@ Requires: kernel%{?1:-%{1}}-modules-core-uname-r = %{KVERREL}%{uname_suffix %{?1
 AutoReq: no\
 AutoProv: yes\
 %description %{?1:%{1}-}modules-internal\
-This package provides kernel modules for the %{?2:%{2} }kernel package for Red Hat internal usage.\
+This package provides kernel modules for the %{?2:%{2} }kernel package for Rocky internal usage.\
 %{nil}
 
 #
@@ -1565,6 +1557,7 @@ cp -a %{SOURCE1} .
 ApplyOptionalPatch patch-%{patchversion}-redhat.patch
 %endif
 
+ApplyOptionalPatch debrand-rh-main.patch
 ApplyOptionalPatch linux-kernel-test.patch
 
 # END OF PATCH APPLICATIONS
@@ -1657,7 +1650,7 @@ done
 # Adjust FIPS module name for RHEL
 %if 0%{?rhel}
 for i in *.config; do
-  sed -i 's/CONFIG_CRYPTO_FIPS_NAME=.*/CONFIG_CRYPTO_FIPS_NAME="Red Hat Enterprise Linux %{rhel} - Kernel Cryptographic API"/' $i
+  sed -i 's/CONFIG_CRYPTO_FIPS_NAME=.*/CONFIG_CRYPTO_FIPS_NAME="Rocky Linux %{rhel} - Kernel Cryptographic API"/' $i
 done
 %endif
 
@@ -2450,7 +2443,7 @@ BuildKernel %make_target %kernel_image %{use_vdso} lpae
 BuildKernel %make_target %kernel_image %{_use_vdso}
 %endif
 
-%ifnarch noarch i686 %{arm}
+%ifnarch noarch i686
 %if !%{with_debug} && !%{with_zfcpdump} && !%{with_pae} && !%{with_up} && !%{with_arm64_64k}
 # If only building the user space tools, then initialize the build environment
 # and some variables so that the various userspace tools can be built.
@@ -3442,11 +3435,105 @@ fi
 #
 #
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> 5.14.0-184.11.1.el9.redsleeve]
-- added flags for armv6
+* Thu Jun 22 2023 Release Engineering <releng@rockylinux.org> - 5.14.0-284.18.1
+- Porting to 9.2, debranding and Rocky branding with new release pkg (Sherif Nagy)
+- Porting to 9.2, debranding and Rocky branding (Louis Abel)
 
-* Tue May 09 2023 CentOS Sources <bugs@centos.org> - 5.14.0-284.11.1.el9.centos
-- Apply debranding changes
+* Wed May 31 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.18.1.el9_2]
+- x86/i8259: Mark legacy PIC interrupts with IRQ_LEVEL (Baoquan He) [2210614 2116317]
+- bluetooth: Perform careful capability checks in hci_sock_ioctl() (Ricardo Robaina) [2196340 2196341] {CVE-2023-2002}
+- perf vendor events intel: Refresh jaketown metrics and events (Michael Petlan) [2207471 2190010]
+- perf vendor events: Update Intel jaketown (Michael Petlan) [2207471 2190010]
+- perf vendor events intel: Refresh ivytown metrics and events (Michael Petlan) [2207471 2190010]
+- perf vendor events: Update Intel ivytown (Michael Petlan) [2207471 2190010]
+- hugetlbfs: don't delete error page from pagecache (Aristeu Rozanski) [2192348 2184858]
+
+* Thu May 25 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.17.1.el9_2]
+- cifs: fix wrong unlock before return from cifs_tree_connect() (Ronnie Sahlberg) [2209045 2182524]
+- CI: Use GA builder container (Michael Hofmann)
+- Remove the unnecessary unicode character (Tao Liu) [2208242 2187350]
+- workqueue: Fold rebind_worker() within rebind_workers() (Waiman Long) [2203229 2182337]
+- workqueue: Unbind kworkers before sending them to exit() (Waiman Long) [2203229 2182337]
+- workqueue: Don't hold any lock while rcuwait'ing for !POOL_MANAGER_ACTIVE (Waiman Long) [2203229 2182337]
+- workqueue: Convert the idle_timer to a timer + work_struct (Waiman Long) [2203229 2182337]
+- workqueue: Factorize unbind/rebind_workers() logic (Waiman Long) [2203229 2182337]
+- workqueue: Protects wq_unbound_cpumask with wq_pool_attach_mutex (Waiman Long) [2203229 2182337]
+- workqueue: don't skip lockdep work dependency in cancel_work_sync() (Waiman Long) [2203229 2182337]
+- workqueue: Change the comments of the synchronization about the idle_list (Waiman Long) [2203229 2182337]
+- workqueue: Remove the mb() pair between wq_worker_sleeping() and insert_work() (Waiman Long) [2203229 2182337]
+- workqueue: Remove the cacheline_aligned for nr_running (Waiman Long) [2203229 2182337]
+- workqueue: Move the code of waking a worker up in unbind_workers() (Waiman Long) [2203229 2182337]
+- workqueue: Remove the outdated comment before wq_worker_sleeping() (Waiman Long) [2203229 2182337]
+- workqueue: Fix unbind_workers() VS wq_worker_sleeping() race (Waiman Long) [2203229 2182337]
+- NFSD: RHEL-only bug introduced in fix for COMMIT and NFS4ERR_DELAY loop (Benjamin Coddington) [2203335 2196432]
+- NFSD: Fix problem of COMMIT and NFS4ERR_DELAY in infinite loop (Benjamin Coddington) [2203335 2196432]
+- net: tls: fix possible race condition between do_tls_getsockopt_conf() and do_tls_setsockopt_conf() (Sabrina Dubroca) [2184152 2179816] {CVE-2023-28466}
+- netfilter: nf_tables: deactivate anonymous set from preparation phase (Florian Westphal) [2196134 2196135] {CVE-2023-32233}
+- xfs: verify buffer contents when we skip log replay (Andrey Albershteyn) [2187447 2187448] {CVE-2023-2124}
+- watchdog: wdat_wdt: Avoid unimplemented get_timeleft (David Arcari) [2192585 2189867]
+- watchdog: wdat_wdt: Set the min and max timeout values properly (David Arcari) [2192585 2189867]
+- watchdog: wdat_wdt: Remove #ifdef guards for PM related functions (David Arcari) [2192585 2189867]
+- watchdog: wdat_wdt: Stop watchdog when uninstalling module (David Arcari) [2192585 2189867]
+- watchdog: wdat_wdt: Stop watchdog when rebooting the system (David Arcari) [2192585 2189867]
+- watchdog: wdat_wdt: Using the existing function to check parameter timeout (David Arcari) [2192585 2189867]
+- i2c: xgene-slimpro: Fix out-of-bounds bug in xgene_slimpro_i2c_xfer() (Tony Camuso) [2189487 2188409] {CVE-2023-2194}
+- mm/filemap: fix page end in filemap_get_read_batch (Nico Pache) [2189349 2181263]
+
+* Thu May 18 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.16.1.el9_2]
+- perf: Fix check before add_event_to_groups() in perf_group_detach() (Michael Petlan) [2192659 2192660] {CVE-2023-2235}
+- sched/core: Fix arch_scale_freq_tick() on tickless systems (Phil Auld) [2203178 1996625]
+- ice: sleep, don't busy-wait, in the SQ send retry loop (Michal Schmidt) [2203154 RHEL-406]
+- ice: remove unused buffer copy code in ice_sq_send_cmd_retry() (Michal Schmidt) [2203154 RHEL-406]
+- ice: sleep, don't busy-wait, for ICE_CTL_Q_SQ_CMD_TIMEOUT (Michal Schmidt) [2203154 RHEL-406]
+- ice: remove ice_ctl_q_info::sq_cmd_timeout (Michal Schmidt) [2203154 RHEL-406]
+- ice: increase the GNSS data polling interval to 20 ms (Michal Schmidt) [2203154 RHEL-406]
+- ice: do not busy-wait to read GNSS data (Michal Schmidt) [2203154 RHEL-406]
+- redhat: set default zstream brew target for 9.2 (Herton R. Krzesinski)
+
+* Thu May 11 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.15.1.el9_2]
+- redhat/configs: Fix incorrect configs location and content (Vladis Dronov)
+- wifi: iwlwifi: mvm: protect TXQ list manipulation (Jose Ignacio Tornos Martinez) [2186723 2183490]
+- wifi: iwlwifi: mvm: fix mvmtxq->stopped handling (Jose Ignacio Tornos Martinez) [2186723 2183490]
+
+* Fri May 05 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.14.1.el9_2]
+- cpufreq: intel_pstate: hybrid: Use known scaling factor for P-cores (David Arcari) [2178857 2155861]
+- cpufreq: intel_pstate: Read all MSRs on the target CPU (David Arcari) [2178857 2155861]
+
+* Thu Apr 27 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.13.1.el9_2]
+- sched/deadline: Add more reschedule cases to prio_changed_dl() (Valentin Schneider) [2188655 2123590]
+- sched/rt: Fix bad task migration for rt tasks (Valentin Schneider) [2187709 2182900]
+- crypto: qat - add support for 402xx devices (Vladis Dronov) [2176846 2144528]
+- crypto: qat - drop log level of msg in get_instance_node() (Vladis Dronov) [2176846 2144528]
+- crypto: qat - fix out-of-bounds read (Vladis Dronov) [2176846 2144528]
+- Documentation: qat: change kernel version (Vladis Dronov) [2176846 2144528]
+- crypto: qat - add qat_zlib_deflate (Vladis Dronov) [2176846 2144528]
+- crypto: qat - extend buffer list logic interface (Vladis Dronov) [2176846 2144528]
+- crypto: qat - fix spelling mistakes from 'bufer' to 'buffer' (Vladis Dronov) [2176846 2144528]
+- crypto: qat - add resubmit logic for decompression (Vladis Dronov) [2176846 2144528]
+- crypto: acomp - define max size for destination (Vladis Dronov) [2176846 2144528]
+- crypto: qat - enable deflate for QAT GEN4 (Vladis Dronov) [2176846 2144528]
+- crypto: qat - expose deflate through acomp api for QAT GEN2 (Vladis Dronov) [2176846 2144528]
+- crypto: qat - rename and relocate GEN2 config function (Vladis Dronov) [2176846 2144528]
+- crypto: qat - relocate qat_algs_alloc_flags() (Vladis Dronov) [2176846 2144528]
+- crypto: qat - relocate backlog related structures (Vladis Dronov) [2176846 2144528]
+- crypto: qat - extend buffer list interface (Vladis Dronov) [2176846 2144528]
+- crypto: qat - generalize crypto request buffers (Vladis Dronov) [2176846 2144528]
+- crypto: qat - change bufferlist logic interface (Vladis Dronov) [2176846 2144528]
+- crypto: qat - rename bufferlist functions (Vladis Dronov) [2176846 2144528]
+- crypto: qat - relocate bufferlist logic (Vladis Dronov) [2176846 2144528]
+- crypto: qat - Use helper to set reqsize (Vladis Dronov) [2176846 2144528]
+- crypto: kpp - Add helper to set reqsize (Vladis Dronov) [2176846 2144528]
+- crypto: qat - fix error return code in adf_probe (Vladis Dronov) [2176846 2144528]
+- crypto: qat - remove ADF_STATUS_PF_RUNNING flag from probe (Vladis Dronov) [2176846 2144528]
+
+* Thu Apr 20 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.12.1.el9_2]
+- blk-mq: directly poll requests (Ming Lei) [2187536 2186507]
+- crypto: drbg - Only fail when jent is unavailable in FIPS mode (Vladis Dronov) [2181727 2175240]
+- crypto: jitter - permanent and intermittent health errors (Vladis Dronov) [2181727 2175240]
+- crypto: jitter - quit sample collection loop upon RCT failure (Vladis Dronov) [2181727 2175240]
+- crypto: jitter - don't limit ->health_failure check to FIPS mode (Vladis Dronov) [2181727 2175240]
+- crypto: jitter - drop kernel-doc notation (Vladis Dronov) [2181727 2175240]
+- KVM: VMX: Fix crash due to uninitialized current_vmcs (Vitaly Kuznetsov) [2186822 2181329]
 
 * Wed Apr 12 2023 Herton R. Krzesinski <herton@redhat.com> [5.14.0-284.11.1.el9_2]
 - vfio: Make the group FD disassociate from the iommu_group (Alex Williamson) [2180649]

@@ -1,0 +1,83 @@
+From 7738d7793bc83421536f9962c794633006613725 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 9 Feb 2022 13:59:36 +0100
+Subject: [PATCH] kernel-install: don't try to persist used machine ID locally
+
+This reworks the how machine ID used by the boot loader spec snippet
+generation logic. Instead of persisting it automatically to /etc/ we'll
+append it via systemd.machined_id= to the kernel command line, and thus
+persist it in the generated boot loader spec snippets instead. This has
+nice benefits:
+
+  1. We do not collide with read-only root
+  2. The machine ID remains stable across factory reset, so that we can
+     safely recognize the path in $BOOT we drop our kernel images in
+     again, i.e. kernel updates will work correctly and safely across
+     kernel factory resets.
+  3. Previously regular systems had different machine IDs while in
+     initrd and after booting into the host system. With this change
+     they will now have the same.
+
+This then drops implicit persisting of KERNEL_INSTALL_MACHINE_ID, as its
+unnecessary then. The field is still honoured though, for compat
+reasons.
+
+This also drops the "Default" fallback previously used, as it actually
+is without effect, the randomized ID generation already took precedence
+in all cases. This means $MACHNE_ID/KERNEL_INSTALL_MACHINE_ID are now
+guaranteed to look like a proper machine ID, which is useful for us,
+given you need it that way to be able to pass it to the
+systemd.machine_id= kernel command line option.
+
+(cherry picked from commit 11ce3ea2f2219ab9c0700bcf7f8ed4312d80e937)
+
+Related: #2065061
+---
+ src/kernel-install/90-loaderentry.install |  6 +++++-
+ src/kernel-install/kernel-install         | 16 +++++++---------
+ 2 files changed, 12 insertions(+), 10 deletions(-)
+
+diff --git a/src/kernel-install/90-loaderentry.install b/src/kernel-install/90-loaderentry.install
+index 3edefdefb4..046771169c 100644
+--- a/src/kernel-install/90-loaderentry.install
++++ b/src/kernel-install/90-loaderentry.install
+@@ -68,7 +68,11 @@ elif [ -r /usr/lib/kernel/cmdline ]; then
+ else
+     BOOT_OPTIONS="$(tr -s "$IFS" '\n' </proc/cmdline | grep -ve '^BOOT_IMAGE=' -e '^initrd=' | tr '\n' ' ')"
+ fi
+-BOOT_OPTIONS="${BOOT_OPTIONS% }"
++
++# Suffix with the machine ID we use, so that the machine ID remains stable,
++# even during factory reset, in the initrd (where the system's machine ID is
++# not directly accessible yet), and if the root file system is volatile.
++BOOT_OPTIONS="${BOOT_OPTIONS% } systemd.machine_id=$MACHINE_ID"
+ 
+ if [ -r /etc/kernel/tries ]; then
+     read -r TRIES </etc/kernel/tries
+diff --git a/src/kernel-install/kernel-install b/src/kernel-install/kernel-install
+index 8cfef3208d..e94aa79bc6 100755
+--- a/src/kernel-install/kernel-install
++++ b/src/kernel-install/kernel-install
+@@ -89,15 +89,13 @@ elif [ -r "/usr/lib/kernel/install.conf" ]; then
+     . /usr/lib/kernel/install.conf
+ fi
+ 
+-# Prefer to use an existing machine ID from /etc/machine-info or /etc/machine-id. If we're using the machine
+-# ID /etc/machine-id, try to persist it in /etc/machine-info. If no machine ID is found, try to generate
+-# a new machine ID in /etc/machine-info. If that fails, use "Default".
+-[ -z "$MACHINE_ID" ] && [ -r /etc/machine-info ]              && . /etc/machine-info && MACHINE_ID="$KERNEL_INSTALL_MACHINE_ID"
+-[ -z "$MACHINE_ID" ] && [ -r /etc/machine-id ]                && read -r MACHINE_ID </etc/machine-id
+-[ -n "$MACHINE_ID" ] && [ -z "$KERNEL_INSTALL_MACHINE_ID" ]   && echo "KERNEL_INSTALL_MACHINE_ID=$MACHINE_ID" >>/etc/machine-info
+-[ -z "$MACHINE_ID" ] && NEW_MACHINE_ID="$(systemd-id128 new)" && echo "KERNEL_INSTALL_MACHINE_ID=$NEW_MACHINE_ID" >>/etc/machine-info
+-[ -z "$MACHINE_ID" ] && [ -r /etc/machine-info ]              && . /etc/machine-info && MACHINE_ID="$KERNEL_INSTALL_MACHINE_ID"
+-[ -z "$MACHINE_ID" ] && MACHINE_ID="Default"
++# If /etc/machine-id is initialized we'll use it, otherwise we'll use a freshly
++# generated one. If the user configured an explicit machine ID to use in
++# /etc/machine-info to use for our purpose, we'll use that instead (for
++# compatibility).
++[ -z "$MACHINE_ID" ] && [ -r /etc/machine-info ] && . /etc/machine-info && MACHINE_ID="$KERNEL_INSTALL_MACHINE_ID"
++[ -z "$MACHINE_ID" ] && [ -r /etc/machine-id ]   && read -r MACHINE_ID </etc/machine-id
++[ -z "$MACHINE_ID" ] && MACHINE_ID="$(systemd-id128 new)"
+ 
+ [ -z "$BOOT_ROOT" ] && for suff in "$MACHINE_ID" "loader/entries"; do
+     for pref in "/efi" "/boot" "/boot/efi" ; do

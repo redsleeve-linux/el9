@@ -1,0 +1,36 @@
+From b07519fd5241eacfdb735917eca4ccbf441b5a8a Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Tue, 22 Feb 2022 11:06:00 +0000
+Subject: [PATCH] systemctl: Show how long a service ran for after it exited in
+ status output
+
+(cherry picked from commit 0802f62efc1d1c67d5be67223b529c93536cf2ed)
+
+Related: #2017035
+---
+ src/systemctl/systemctl-show.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/systemctl/systemctl-show.c b/src/systemctl/systemctl-show.c
+index 37c898f313..9b23471990 100644
+--- a/src/systemctl/systemctl-show.c
++++ b/src/systemctl/systemctl-show.c
+@@ -433,6 +433,18 @@ static void print_status_info(
+                                FORMAT_TIMESTAMP_STYLE(until_timestamp, arg_timestamp_style),
+                                FORMAT_TIMESTAMP_RELATIVE(until_timestamp));
+                 }
++
++                if (!endswith(i->id, ".target") &&
++                        STRPTR_IN_SET(i->active_state, "inactive", "failed") &&
++                        timestamp_is_set(i->active_enter_timestamp) &&
++                        timestamp_is_set(i->active_exit_timestamp) &&
++                        i->active_exit_timestamp >= i->active_enter_timestamp) {
++
++                        usec_t duration;
++
++                        duration = i->active_exit_timestamp - i->active_enter_timestamp;
++                        printf("   Duration: %s\n", FORMAT_TIMESPAN(duration, MSEC_PER_SEC));
++                }
+         } else
+                 printf("\n");
+ 

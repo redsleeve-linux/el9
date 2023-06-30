@@ -1,0 +1,43 @@
+From 16908e1ec833d857cb418712c382c6f604426b36 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 1 Feb 2022 20:18:29 +0100
+Subject: [PATCH] test: introduce `get_cgroup_hierarchy() helper
+
+which returns the host's cgroup hierarchy (unified, hybrid, or legacy).
+
+(cherry picked from commit f723740871bd3eb89d16a526a1ff77c04bb3787a)
+
+Related: #2047768
+---
+ test/test-functions | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/test/test-functions b/test/test-functions
+index 35d8f074a9..4827b6bedf 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -1996,6 +1996,24 @@ import_initdir() {
+     export initdir
+ }
+ 
++get_cgroup_hierarchy() {
++    case "$(stat -c '%T' -f /sys/fs/cgroup)" in
++        cgroup2fs)
++            echo "unified"
++            ;;
++        tmpfs)
++            if [[ -d /sys/fs/cgroup/unified && "$(stat -c '%T' -f /sys/fs/cgroup/unified)" == cgroup2fs ]]; then
++                echo "hybrid"
++            else
++                echo "legacy"
++            fi
++            ;;
++        *)
++            dfatal "Failed to determine host's cgroup hierarchy"
++            exit 1
++    esac
++}
++
+ ## @brief Converts numeric logging level to the first letter of level name.
+ #
+ # @param lvl Numeric logging level in range from 1 to 6.

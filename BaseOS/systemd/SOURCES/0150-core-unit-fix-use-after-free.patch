@@ -1,0 +1,29 @@
+From b8ccf30c4654ed5697562842a8a608e627425370 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 9 May 2022 00:56:05 +0900
+Subject: [PATCH] core/unit: fix use-after-free
+
+Fixes #23312.
+
+(cherry picked from commit 734582830b58e000a26e18807ea277c18778573c)
+
+Related: #2087652
+---
+ src/core/unit.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/unit.c b/src/core/unit.c
+index aac87dcc7a..0eade13ee9 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -671,8 +671,8 @@ Unit* unit_free(Unit *u) {
+ 
+         unit_dequeue_rewatch_pids(u);
+ 
+-        sd_bus_slot_unref(u->match_bus_slot);
+-        sd_bus_track_unref(u->bus_track);
++        u->match_bus_slot = sd_bus_slot_unref(u->match_bus_slot);
++        u->bus_track = sd_bus_track_unref(u->bus_track);
+         u->deserialized_refs = strv_free(u->deserialized_refs);
+         u->pending_freezer_message = sd_bus_message_unref(u->pending_freezer_message);
+ 

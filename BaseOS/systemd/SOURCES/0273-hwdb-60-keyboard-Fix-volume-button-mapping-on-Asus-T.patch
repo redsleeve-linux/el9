@@ -1,0 +1,47 @@
+From c064473f6993a04ad126770a3218da623316c543 Mon Sep 17 00:00:00 2001
+From: Hans de Goede <hdegoede@redhat.com>
+Date: Sat, 25 Dec 2021 11:19:03 +0100
+Subject: [PATCH] hwdb: 60-keyboard: Fix volume-button mapping on Asus TF103C
+
+The Asus TF103C misses the home button in its PNP0C40 GPIO resources
+causing the button mappings for the volume buttons to be off by one,
+leading to the volume-up button sending home button presses and the
+volume-down button sending volume-up button presses.
+
+Add a 60-keyboard hwdb entry to correct the mappings. Note this is
+split over 2 input devices because the soc_button_array driver
+creates separate input devices for power + home and vol up/down.
+This is done because power/home act as wakeup buttons where as
+the volume buttons do not.
+
+This means that after this fixup the home -> volume-up button
+still acts as a wakeup button, there is nothing which can be done
+about this without adding a kludge to the kernel which is not
+worth the trouble (IMHO).
+
+(cherry picked from commit 04b457d8ef9c93be3b2048c6f545cdbcf1b893a1)
+
+Related: #2087778
+---
+ hwdb.d/60-keyboard.hwdb | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/hwdb.d/60-keyboard.hwdb b/hwdb.d/60-keyboard.hwdb
+index b614a22c8c..3d6e56983b 100644
+--- a/hwdb.d/60-keyboard.hwdb
++++ b/hwdb.d/60-keyboard.hwdb
+@@ -231,6 +231,14 @@ evdev:name:Asus Laptop extra buttons:dmi:bvn*:bvr*:bd*:svnASUS*:pn*:*
+ evdev:input:b0003v0B05p1869*
+  KEYBOARD_KEY_ff31007c=f20                              # Remap micmute to f20
+ 
++# Asus TF103C misses the home button in its PNP0C40 GPIO resources
++# causing the volume-button mappings to be off by one, correct this
++evdev:name:gpio-keys:phys:gpio-keys/input0:ev:3:dmi:*:svnASUSTeKCOMPUTERINC.:pnTF103C*:*
++ KEYBOARD_KEY_1=volumeup
++
++evdev:name:gpio-keys:phys:gpio-keys/input0:ev:100003:dmi:*:svnASUSTeKCOMPUTERINC.:pnTF103C*:*
++ KEYBOARD_KEY_0=volumedown
++
+ ###########################################################
+ # BenQ
+ ###########################################################
