@@ -18,52 +18,52 @@
 %bcond_without tests
 %bcond_without lto
 
-Name:           systemd
-Url:            https://systemd.io
-Version:        252
-Release:        14%{?dist}.1.redsleeve
+Name: systemd
+Url: https://systemd.io
+Version: 252
+Release: 14%{?dist}.3.0.1
 # For a breakdown of the licensing, see README
-License:        LGPLv2+ and MIT and GPLv2+
-Summary:        System and Service Manager
+License: LGPLv2+ and MIT and GPLv2+
+Summary: System and Service Manager
 
 # download tarballs with "spectool -g systemd.spec"
 %if %{defined commit}
-Source0:        https://github.com/systemd/systemd%{?stable:-stable}/archive/%{commit}/%{name}-%{shortcommit}.tar.gz
+Source0: https://github.com/systemd/systemd%{?stable:-stable}/archive/%{commit}/%{name}-%{shortcommit}.tar.gz
 %else
 %if 0%{?stable}
-Source0:        https://github.com/systemd/systemd-stable/archive/v%{version_no_tilde}/%{name}-%{version_no_tilde}.tar.gz
+Source0: https://github.com/systemd/systemd-stable/archive/v%{version_no_tilde}/%{name}-%{version_no_tilde}.tar.gz
 %else
-Source0:        https://github.com/systemd/systemd/archive/v%{version_no_tilde}/%{name}-%{version_no_tilde}.tar.gz
+Source0: https://github.com/systemd/systemd/archive/v%{version_no_tilde}/%{name}-%{version_no_tilde}.tar.gz
 %endif
 %endif
 # This file must be available before %%prep.
 # It is generated during systemd build and can be found in build/src/core/.
-Source1:        triggers.systemd
-Source2:        split-files.py
-Source3:        purge-nobody-user
+Source1: triggers.systemd
+Source2: split-files.py
+Source3: purge-nobody-user
 
 # Prevent accidental removal of the systemd package
-Source4:        yum-protect-systemd.conf
+Source4: yum-protect-systemd.conf
 
-Source5:        inittab
-Source6:        sysctl.conf.README
-Source7:        systemd-journal-remote.xml
-Source8:        systemd-journal-gatewayd.xml
-Source9:        20-yama-ptrace.conf
-Source10:       systemd-udev-trigger-no-reload.conf
-Source11:       20-grubby.install
-Source12:       systemd-user
-Source13:       libsystemd-shared.abignore
+Source5: inittab
+Source6: sysctl.conf.README
+Source7: systemd-journal-remote.xml
+Source8: systemd-journal-gatewayd.xml
+Source9: 20-yama-ptrace.conf
+Source10: systemd-udev-trigger-no-reload.conf
+Source11: 20-grubby.install
+Source12: systemd-user
+Source13: libsystemd-shared.abignore
 
-Source14:       10-oomd-defaults.conf
-Source15:       10-oomd-root-slice-defaults.conf
-Source16:       10-oomd-user-service-defaults.conf
+Source14: 10-oomd-defaults.conf
+Source15: 10-oomd-root-slice-defaults.conf
+Source16: 10-oomd-user-service-defaults.conf
 
-Source21:       macros.sysusers
-Source22:       sysusers.attr
-Source23:       sysusers.prov
-Source24:       sysusers.generate-pre.sh
-Source25:       rc.local
+Source21: macros.sysusers
+Source22: sysusers.attr
+Source23: sysusers.prov
+Source24: sysusers.generate-pre.sh
+Source25: rc.local
 
 %if 0
 GIT_DIR=../../src/systemd/.git git format-patch-ab --no-signature -M -N v235..v235-stable
@@ -323,6 +323,9 @@ Patch0242: 0242-sd-journal-allow-to-specify-compression-algorithm-th.patch
 Patch0243: 0243-test-add-test-case-that-journal-file-is-created-with.patch
 Patch0244: 0244-ci-workflow-for-gathering-metadata-for-source-git-au.patch
 Patch0245: 0245-ci-first-part-of-the-source-git-automation-commit-li.patch
+Patch0246: 0246-elf-util-discard-PT_LOAD-segment-early-based-on-the-.patch
+Patch0247: 0247-elf-util-check-for-overflow-when-computing-end-of-co.patch
+Patch0248: 0248-manager-don-t-taint-the-host-if-cgroups-v1-is-used.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -330,64 +333,64 @@ Patch0245: 0245-ci-first-part-of-the-source-git-automation-commit-li.patch
 %global have_gnu_efi 1
 %endif
 
-BuildRequires:  gcc
-BuildRequires:  gcc-c++
-BuildRequires:  coreutils
-BuildRequires:  libcap-devel
-BuildRequires:  libmount-devel
-BuildRequires:  libfdisk-devel
-BuildRequires:  pam-devel
-BuildRequires:  libselinux-devel
-BuildRequires:  audit-libs-devel
+BuildRequires: gcc
+BuildRequires: gcc-c++
+BuildRequires: coreutils
+BuildRequires: libcap-devel
+BuildRequires: libmount-devel
+BuildRequires: libfdisk-devel
+BuildRequires: pam-devel
+BuildRequires: libselinux-devel
+BuildRequires: audit-libs-devel
 %if %{without bootstrap}
-BuildRequires:  cryptsetup-devel
+BuildRequires: cryptsetup-devel
 %endif
-BuildRequires:  dbus-devel
+BuildRequires: dbus-devel
 # /usr/bin/getfacl is needed by test-acl-util
-BuildRequires:  acl
-BuildRequires:  libacl-devel
-BuildRequires:  gobject-introspection-devel
-BuildRequires:  libblkid-devel
-BuildRequires:  xz-devel
-BuildRequires:  xz
-BuildRequires:  lz4-devel
-BuildRequires:  lz4
-BuildRequires:  bzip2-devel
-BuildRequires:  libzstd-devel
-BuildRequires:  libidn2-devel
-BuildRequires:  libcurl-devel
-BuildRequires:  kmod-devel
-BuildRequires:  elfutils-devel
-BuildRequires:  openssl-devel
-BuildRequires:  libgcrypt-devel
-BuildRequires:  libgpg-error-devel
-BuildRequires:  gnutls-devel
-BuildRequires:  libmicrohttpd-devel
-BuildRequires:  libxkbcommon-devel
-BuildRequires:  libxslt
-BuildRequires:  docbook-style-xsl
-BuildRequires:  pkgconfig
-BuildRequires:  gperf
-BuildRequires:  gawk
-BuildRequires:  tree
-BuildRequires:  hostname
-BuildRequires:  python3dist(lxml)
-BuildRequires:  python3dist(jinja2)
-BuildRequires:  firewalld-filesystem
-BuildRequires:  libseccomp-devel
-BuildRequires:  meson >= 0.43
-BuildRequires:  gettext
+BuildRequires: acl
+BuildRequires: libacl-devel
+BuildRequires: gobject-introspection-devel
+BuildRequires: libblkid-devel
+BuildRequires: xz-devel
+BuildRequires: xz
+BuildRequires: lz4-devel
+BuildRequires: lz4
+BuildRequires: bzip2-devel
+BuildRequires: libzstd-devel
+BuildRequires: libidn2-devel
+BuildRequires: libcurl-devel
+BuildRequires: kmod-devel
+BuildRequires: elfutils-devel
+BuildRequires: openssl-devel
+BuildRequires: libgcrypt-devel
+BuildRequires: libgpg-error-devel
+BuildRequires: gnutls-devel
+BuildRequires: libmicrohttpd-devel
+BuildRequires: libxkbcommon-devel
+BuildRequires: libxslt
+BuildRequires: docbook-style-xsl
+BuildRequires: pkgconfig
+BuildRequires: gperf
+BuildRequires: gawk
+BuildRequires: tree
+BuildRequires: hostname
+BuildRequires: python3dist(lxml)
+BuildRequires: python3dist(jinja2)
+BuildRequires: firewalld-filesystem
+BuildRequires: libseccomp-devel
+BuildRequires: meson >= 0.43
+BuildRequires: gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires:  valgrind-devel
-BuildRequires:  pkgconfig(bash-completion)
-BuildRequires:  pkgconfig(tss2-esys)
-BuildRequires:  pkgconfig(tss2-rc)
-BuildRequires:  pkgconfig(tss2-mu)
-BuildRequires:  perl
-BuildRequires:  perl(IPC::SysV)
-BuildRequires:  git-core
+BuildRequires: valgrind-devel
+BuildRequires: pkgconfig(bash-completion)
+BuildRequires: pkgconfig(tss2-esys)
+BuildRequires: pkgconfig(tss2-rc)
+BuildRequires: pkgconfig(tss2-mu)
+BuildRequires: perl
+BuildRequires: perl(IPC::SysV)
+BuildRequires: git-core
 %if 0%{?have_gnu_efi}
-BuildRequires:  gnu-efi gnu-efi-devel
+BuildRequires: gnu-efi gnu-efi-devel
 %endif
 
 Requires(post): coreutils
@@ -399,35 +402,35 @@ Requires(post): openssl-libs
 Requires(pre):  coreutils
 Requires(pre):  /usr/bin/getent
 Requires(pre):  /usr/sbin/groupadd
-Requires:       dbus >= 1.9.18
-Requires:       %{name}-pam = %{version}-%{release}
-Requires:       %{name}-rpm-macros = %{version}-%{release}
-Requires:       %{name}-libs = %{version}-%{release}
-Requires:       util-linux
-Provides:       /bin/systemctl
-Provides:       /sbin/shutdown
-Provides:       syslog
-Provides:       systemd-units = %{version}-%{release}
-Obsoletes:      system-setup-keyboard < 0.9
-Provides:       system-setup-keyboard = 0.9
+Requires: dbus >= 1.9.18
+Requires: %{name}-pam = %{version}-%{release}
+Requires: %{name}-rpm-macros = %{version}-%{release}
+Requires: %{name}-libs = %{version}-%{release}
+Requires: util-linux
+Provides: /bin/systemctl
+Provides: /sbin/shutdown
+Provides: syslog
+Provides: systemd-units = %{version}-%{release}
+Obsoletes: system-setup-keyboard < 0.9
+Provides: system-setup-keyboard = 0.9
 # systemd-sysv-convert was removed in f20: https://fedorahosted.org/fpc/ticket/308
-Obsoletes:      systemd-sysv < 206
+Obsoletes: systemd-sysv < 206
 # self-obsoletes so that dnf will install new subpackages on upgrade (#1260394)
-Obsoletes:      %{name} < 246.6-2
-Provides:       systemd-sysv = 206
-Conflicts:      initscripts < 9.56.1
+Obsoletes: %{name} < 246.6-2
+Provides: systemd-sysv = 206
+Conflicts: initscripts < 9.56.1
 %if 0%{?fedora}
-Conflicts:      fedora-release < 23-0.12
+Conflicts: fedora-release < 23-0.12
 %endif
-Obsoletes:      timedatex < 0.6-3
-Provides:       timedatex = 0.6-3
-Conflicts:      %{name}-standalone-tmpfiles < %{version}-%{release}^
-Obsoletes:      %{name}-standalone-tmpfiles < %{version}-%{release}^
-Conflicts:      %{name}-standalone-sysusers < %{version}-%{release}^
-Obsoletes:      %{name}-standalone-sysusers < %{version}-%{release}^
+Obsoletes: timedatex < 0.6-3
+Provides: timedatex = 0.6-3
+Conflicts: %{name}-standalone-tmpfiles < %{version}-%{release}^
+Obsoletes: %{name}-standalone-tmpfiles < %{version}-%{release}^
+Conflicts: %{name}-standalone-sysusers < %{version}-%{release}^
+Obsoletes: %{name}-standalone-sysusers < %{version}-%{release}^
 
 # Requires deps for stuff that is dlopen()ed
-Requires:       pcre2%{?_isa}
+Requires: pcre2%{?_isa}
 
 %description
 systemd is a system and service manager that runs as PID 1 and starts
@@ -448,15 +451,15 @@ This package was built from the %{version}-stable branch of systemd.
 %endif
 
 %package libs
-Summary:        systemd libraries
-License:        LGPLv2+ and MIT
-Obsoletes:      libudev < 183
-Obsoletes:      systemd < 185-4
-Conflicts:      systemd < 185-4
-Obsoletes:      systemd-compat-libs < 230
-Obsoletes:      nss-myhostname < 0.4
-Provides:       nss-myhostname = 0.4
-Provides:       nss-myhostname%{_isa} = 0.4
+Summary: systemd libraries
+License: LGPLv2+ and MIT
+Obsoletes: libudev < 183
+Obsoletes: systemd < 185-4
+Conflicts: systemd < 185-4
+Obsoletes: systemd-compat-libs < 230
+Obsoletes: nss-myhostname < 0.4
+Provides: nss-myhostname = 0.4
+Provides: nss-myhostname%{_isa} = 0.4
 Requires(post): coreutils
 Requires(post): sed
 Requires(post): grep
@@ -466,32 +469,32 @@ Requires(post): /usr/bin/getent
 Libraries for systemd and udev.
 
 %package pam
-Summary:        systemd PAM module
-Requires:       %{name} = %{version}-%{release}
+Summary: systemd PAM module
+Requires: %{name} = %{version}-%{release}
 
 %description pam
 Systemd PAM module registers the session with systemd-logind.
 
 %package rpm-macros
-Summary:        Macros that define paths and scriptlets related to systemd
-BuildArch:      noarch
+Summary: Macros that define paths and scriptlets related to systemd
+BuildArch: noarch
 
 %description rpm-macros
 Just the definitions of rpm macros.
 
 See
-https://docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/#_systemd
+https: //docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/#_systemd
 for information how to use those macros.
 
 %package devel
-Summary:        Development headers for systemd
-License:        LGPLv2+ and MIT
-Requires:       %{name}-libs%{?_isa} = %{version}-%{release}
-Provides:       libudev-devel = %{version}
-Provides:       libudev-devel%{_isa} = %{version}
-Obsoletes:      libudev-devel < 183
+Summary: Development headers for systemd
+License: LGPLv2+ and MIT
+Requires: %{name}-libs%{?_isa} = %{version}-%{release}
+Provides: libudev-devel = %{version}
+Provides: libudev-devel%{_isa} = %{version}
+Obsoletes: libudev-devel < 183
 # Fake dependency to make sure systemd-pam is pulled into multilib (#1414153)
-Requires:       %{name}-pam = %{version}-%{release}
+Requires: %{name}-pam = %{version}-%{release}
 
 %description devel
 Development headers and auxiliary files for developing applications linking
@@ -499,36 +502,36 @@ to libudev or libsystemd.
 
 %package udev
 Summary: Rule-based device node and kernel event manager
-License:        LGPLv2+
+License: LGPLv2+
 
-Requires:       systemd%{?_isa} = %{version}-%{release}
+Requires: systemd%{?_isa} = %{version}-%{release}
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd
 Requires(post): grep
-Requires:       kmod >= 18-4
+Requires: kmod >= 18-4
 # https://bodhi.fedoraproject.org/updates/FEDORA-2020-dd43dd05b1
-Obsoletes:      systemd < 245.6-1
-Provides:       udev = %{version}
-Provides:       udev%{_isa} = %{version}
-Obsoletes:      udev < 183
+Obsoletes: systemd < 245.6-1
+Provides: udev = %{version}
+Provides: udev%{_isa} = %{version}
+Obsoletes: udev < 183
 
 # https://bugzilla.redhat.com/show_bug.cgi?id=1377733#c9
-Suggests:       systemd-bootchart
+Suggests: systemd-bootchart
 # https://bugzilla.redhat.com/show_bug.cgi?id=1408878
-Requires:       kbd
+Requires: kbd
 
 # Requires deps for stuff that is dlopen()ed
-Requires:       cryptsetup-libs%{?_isa}
+Requires: cryptsetup-libs%{?_isa}
 # https://bugzilla.redhat.com/show_bug.cgi?id=2017541
-Requires:       tpm2-tss%{?_isa}
+Requires: tpm2-tss%{?_isa}
 
 # https://bugzilla.redhat.com/show_bug.cgi?id=1753381
-Provides:       u2f-hidraw-policy = 1.0.2-40
-Obsoletes:      u2f-hidraw-policy < 1.0.2-40
+Provides: u2f-hidraw-policy = 1.0.2-40
+Obsoletes: u2f-hidraw-policy < 1.0.2-40
 
 # self-obsoletes to install both packages after split of systemd-boot
-Obsoletes:      systemd-udev < 252-8
+Obsoletes: systemd-udev < 252-8
 
 %description udev
 This package contains systemd-udev and the rules and hardware database
@@ -547,7 +550,7 @@ Provides: version(systemd-boot-unsigned) = %version
 Provides: version(systemd-boot-unsigned)%{_isa} = %version
 
 # self-obsoletes to install both packages after split of systemd-boot
-Obsoletes:      systemd-udev < 252-8
+Obsoletes: systemd-udev < 252-8
 
 %description boot-unsigned
 systemd-boot (short: sd-boot) is a simple UEFI boot manager. It provides a
@@ -561,13 +564,13 @@ the version that works with Secure Boot.
 %package container
 # Name is the same as in Debian
 Summary: Tools for containers and VMs
-Requires:       %{name}%{?_isa} = %{version}-%{release}
+Requires: %{name}%{?_isa} = %{version}-%{release}
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd
 # obsolete parent package so that dnf will install new subpackage on upgrade (#1260394)
-Obsoletes:      %{name} < 229-5
-License:        LGPLv2+
+Obsoletes: %{name} < 229-5
+License: LGPLv2+
 
 %description container
 Systemd tools to spawn and manage containers and virtual machines.
@@ -577,17 +580,17 @@ and systemd-importd.
 
 %package journal-remote
 # Name is the same as in Debian
-Summary:        Tools to send journal events over the network
-Requires:       %{name}%{?_isa} = %{version}-%{release}
-License:        LGPLv2+
+Summary: Tools to send journal events over the network
+Requires: %{name}%{?_isa} = %{version}-%{release}
+License: LGPLv2+
 Requires(pre):    /usr/bin/getent
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd
-Requires:       firewalld-filesystem
-Provides:       %{name}-journal-gateway = %{version}-%{release}
-Provides:       %{name}-journal-gateway%{_isa} = %{version}-%{release}
-Obsoletes:      %{name}-journal-gateway < 227-7
+Requires: firewalld-filesystem
+Provides: %{name}-journal-gateway = %{version}-%{release}
+Provides: %{name}-journal-gateway%{_isa} = %{version}-%{release}
+Obsoletes: %{name}-journal-gateway < 227-7
 
 %description journal-remote
 Programs to forward journal entries over the network, using encrypted HTTP,
@@ -597,9 +600,9 @@ This package contains systemd-journal-gatewayd,
 systemd-journal-remote, and systemd-journal-upload.
 
 %package resolved
-Summary:        System daemon that provides network name resolution to local applications
-Requires:       %{name}%{?_isa} = %{version}-%{release}
-License:        LGPLv2+
+Summary: System daemon that provides network name resolution to local applications
+Requires: %{name}%{?_isa} = %{version}-%{release}
+License: LGPLv2+
 
 %description resolved
 systemd-resolved is a system service that provides network name
@@ -608,10 +611,10 @@ validating DNS/DNSSEC stub resolver, as well as an LLMNR and
 MulticastDNS resolver and responder.
 
 %package oomd
-Summary:        A userspace out-of-memory (OOM) killer
-Requires:       %{name}%{?_isa} = %{version}-%{release}
-License:        LGPLv2+
-Provides:       %{name}-oomd-defaults = %{version}-%{release}
+Summary: A userspace out-of-memory (OOM) killer
+Requires: %{name}%{?_isa} = %{version}-%{release}
+License: LGPLv2+
+Provides: %{name}-oomd-defaults = %{version}-%{release}
 
 %description oomd
 systemd-oomd is a system service that uses cgroups-v2 and pressure stall
@@ -619,7 +622,7 @@ information (PSI) to monitor and take action on processes before an OOM
 occurs in kernel space.
 
 %package standalone-tmpfiles
-Summary:       Standalone tmpfiles binary for use in non-systemd systems
+Summary: Standalone tmpfiles binary for use in non-systemd systems
 RemovePathPostfixes: .standalone
 
 %description standalone-tmpfiles
@@ -628,7 +631,7 @@ or other libraries from systemd-libs. This package conflicts with the main
 systemd package and is meant for use in non-systemd systems.
 
 %package standalone-sysusers
-Summary:       Standalone sysusers binary for use in non-systemd systems
+Summary: Standalone sysusers binary for use in non-systemd systems
 RemovePathPostfixes: .standalone
 
 %description standalone-sysusers
@@ -1144,8 +1147,15 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 %files standalone-sysusers -f .file-list-standalone-sysusers
 
 %changelog
-* Sat Jul 01 2023 Jacco Ligthart <jacco@redsleeve.org> - 250-14.1.redsleeve
-- removed valgrind
+* Thu Aug 24 2023 Release Engineering <releng@rockylinux.org> - 252-14.0.1
+- Rebuild package to address build system issue
+
+* Mon Jul 17 2023 systemd maintenance team <systemd-maint@redhat.com> - 252-14.3
+- manager: don't taint the host if cgroups v1 is used (#2196479)
+
+* Thu Jul 13 2023 systemd maintenance team <systemd-maint@redhat.com> - 252-14.2
+- elf-util: discard PT_LOAD segment early based on the start address. (#2222259)
+- elf-util: check for overflow when computing end of core's PT_LOAD segments (#2222259)
 
 * Wed May 24 2023 systemd maintenance team <systemd-maint@redhat.com> - 252-14.1
 - Bump version to 252-14.1 to make sure that NEVRA is higher than systemd-252-14.el9.rhaos4.13 (#2184929)
