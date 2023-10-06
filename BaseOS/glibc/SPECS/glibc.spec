@@ -155,7 +155,7 @@ end \
 Summary: The GNU libc libraries
 Name: glibc
 Version: %{glibcversion}
-Release: 60%{?dist}.redsleeve
+Release: 60%{?dist}.7
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -195,8 +195,6 @@ Source10: wrap-find-debuginfo.sh
 Source11: parse-SUPPORTED.py
 # Include in the source RPM for reference.
 Source12: ChangeLog.old
-
-Source1000: glibc-arm-dl-tunables.list
 
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
@@ -702,6 +700,26 @@ Patch468: glibc-upstream-2.34-386.patch
 # glibc-upstream-2.34-387.patch is a NEWS-only update.  Skipped downstream.
 Patch469: glibc-upstream-2.34-388.patch
 Patch470: glibc-upstream-2.34-389.patch
+# (Reverted fixes for RHEL-3385 were here.)
+Patch476: glibc-rh2234715.patch
+Patch477: glibc-RHEL-2437.patch
+Patch478: glibc-RHEL-2425-1.patch
+Patch479: glibc-RHEL-2425-2.patch
+Patch480: glibc-RHEL-2425-3.patch
+Patch481: glibc-RHEL-2425-4.patch
+Patch482: glibc-RHEL-2425-5.patch
+Patch483: glibc-RHEL-2425-6.patch
+Patch484: glibc-RHEL-2425-7.patch
+Patch485: glibc-RHEL-2425-8.patch
+Patch486: glibc-RHEL-2425-9.patch
+Patch487: glibc-RHEL-2425-10.patch
+Patch488: glibc-RHEL-2425-11.patch
+Patch489: glibc-RHEL-2425-12.patch
+Patch490: glibc-RHEL-2425-13.patch
+Patch491: glibc-RHEL-2425-14.patch
+Patch492: glibc-RHEL-2999.patch
+Patch493: glibc-RHEL-2425-15.patch
+Patch494: glibc-RHEL-2425-16.patch
 
 ##############################################################################
 # Continued list of core "glibc" package information:
@@ -1523,10 +1541,6 @@ that can be installed across architectures.
 ##############################################################################
 %prep
 %autosetup -n %{glibcsrcdir} -p1
-
-%ifarch %{arm}
-cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
-%endif
 
 ##############################################################################
 # %%prep - Additional prep required...
@@ -2865,8 +2879,26 @@ fi
 %endif
 
 %changelog
-* Sun May 28 2023 Jacco Ligthart <jacco@redsleeve.org> - 2.34-60.redsleeve
-- add dl-tunables.list for arm 
+* Mon Sep 25 2023 Florian Weimer <fweimer@redhat.com> - 2.34-60.7
+- Fix memory leak regression in getaddrinfo (RHEL-2425)
+
+* Tue Sep 19 2023 Carlos O'Donell <carlos@redhat.com> - 2.34-60.6
+- CVE-2023-4911 glibc: buffer overflow in ld.so leading to privilege escalation (RHEL-2999)
+
+* Tue Sep 19 2023 Carlos O'Donell <carlos@redhat.com> - 2.34-60.5
+- Revert: Always call destructors in reverse constructor order (RHEL-3385)
+
+* Mon Sep 18 2023 Siddhesh Poyarekar <siddhesh@redhat.com> - 2.34-60.4
+- CVE-2023-4806 glibc: potential use-after-free in getaddrinfo (RHEL-2425)
+
+* Fri Sep 15 2023 Siddhesh Poyarekar <siddhesh@redhat.com> - 2.34-60.3
+- CVE-2023-4813: potential use-after-free in gaih_inet (RHEL-2437)
+
+* Fri Sep 15 2023 Carlos O'Donell <carlos@redhat.com> - 2.34-60.2
+- CVE-2023-4527: Stack read overflow in getaddrinfo in no-aaaa mode (#2234715)
+
+* Wed Sep 13 2023 Florian Weimer <fweimer@redhat.com> - 2.34-60.1
+- Always call destructors in reverse constructor order (RHEL-3385)
 
 * Wed Feb  8 2023 Florian Weimer <fweimer@redhat.com> - 2.34-60
 - Upstream test for ldconfig -p (#2167811)
