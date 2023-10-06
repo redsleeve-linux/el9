@@ -21,7 +21,7 @@
 Name: systemd
 Url: https://systemd.io
 Version: 252
-Release: 14%{?dist}.3.0.1
+Release: 14%{?dist}.3.redsleeve
 # For a breakdown of the licensing, see README
 License: LGPLv2+ and MIT and GPLv2+
 Summary: System and Service Manager
@@ -381,7 +381,7 @@ BuildRequires: libseccomp-devel
 BuildRequires: meson >= 0.43
 BuildRequires: gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-BuildRequires: valgrind-devel
+#BuildRequires: valgrind-devel
 BuildRequires: pkgconfig(bash-completion)
 BuildRequires: pkgconfig(tss2-esys)
 BuildRequires: pkgconfig(tss2-rc)
@@ -1147,6 +1147,9 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 %files standalone-sysusers -f .file-list-standalone-sysusers
 
 %changelog
+* Fri Aug 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 250-14.3.redsleeve
+- removed valgrind
+
 * Thu Aug 24 2023 Release Engineering <releng@rockylinux.org> - 252-14.0.1
 - Rebuild package to address build system issue
 
