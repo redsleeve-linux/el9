@@ -29,7 +29,7 @@
 # Define GOROOT macros
 %global goroot          %{_prefix}/lib/%{name}
 %global gopath          %{_datadir}/gocode
-%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
+%global golang_arches   x86_64 aarch64 ppc64le s390x
 %global golibdir        %{_libdir}/%{name}
 
 # Golang build options.
@@ -96,13 +96,13 @@
 %endif
 
 %global go_api 1.19
-%global go_version 1.19.10
+%global go_version 1.19.13
 %global version %{go_version}
-%global pkg_release 1
+%global pkg_release 2
 
 Name:           golang
 Version:        %{version}
-Release:        1%{?dist}.redsleeve
+Release:        1%{?dist}
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD and Public Domain
@@ -151,8 +151,6 @@ Patch1939923:   skip_test_rhbz1939923.patch
 # are incompatible with dlopen in golang-fips
 Patch2: 	disable_static_tests_part1.patch
 Patch3: 	disable_static_tests_part2.patch
-
-Patch4:		fix-memory-leak-evp-sign-verify.patch
 
 # Having documentation separate was broken
 Obsoletes:      %{name}-docs < 1.1-4
@@ -248,6 +246,8 @@ tar -xf %{SOURCE1}
 popd
 patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/000-initial-setup.patch
 patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/001-initial-openssl-for-fips.patch
+patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/002-strict-fips-runtime-detection.patch
+patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/003-h2-bundle-fix-CVE-2023-39325.patch
 
 # Configure crypto tests
 pushd ../go-go%{version}-%{pkg_release}-openssl-fips
@@ -257,7 +257,6 @@ popd
 
 %patch2 -p1
 %patch3 -p1
-%patch4 -p1
 
 %patch221 -p1
 
@@ -448,7 +447,7 @@ export CGO_ENABLED=0
 %endif
 
 # make sure to not timeout
-export GO_TEST_TIMEOUT_SCALE=2
+export GO_TEST_TIMEOUT_SCALE=20
 
 export GO_TEST_RUN=""
 %ifarch aarch64
@@ -533,8 +532,17 @@ cd ..
 %endif
 
 %changelog
-* Sat Jul 01 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.19.10-1.redsleeve
-- added arm to golang_arches
+* Thu Oct 12 2023 Derek Parker <deparker@redhat.com> - 1.19.13-1
+- Fix CVE-2023-39325
+- Resolves: RHEL-12622
+
+* Wed Sep 13 2023 Archana Ravindar <aravinda@redhat.com> - 1.19.12-2
+- Add strict fips runtime detection patch
+- Related: rhbz#2223637
+
+* Fri Sep 1 2023 Archana Ravindar <aravinda@redhat.com> - 1.19.12-1
+- Update to Go 1.19.12
+- Resolves: rhbz#2223637
 
 * Tue Jun 6 2023 David Benoit <dbenoit@redhat.com> - 1.19.10-1
 - Update to Go 1.19.10
