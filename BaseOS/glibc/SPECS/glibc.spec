@@ -155,7 +155,7 @@ end \
 Summary: The GNU libc libraries
 Name: glibc
 Version: %{glibcversion}
-Release: 60%{?dist}.7
+Release: 60%{?dist}.7.redsleeve
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -195,6 +195,8 @@ Source10: wrap-find-debuginfo.sh
 Source11: parse-SUPPORTED.py
 # Include in the source RPM for reference.
 Source12: ChangeLog.old
+
+Source1000: glibc-arm-dl-tunables.list
 
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
@@ -1542,6 +1544,10 @@ that can be installed across architectures.
 %prep
 %autosetup -n %{glibcsrcdir} -p1
 
+%ifarch %{arm}
+cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
+%endif
+
 ##############################################################################
 # %%prep - Additional prep required...
 ##############################################################################
@@ -2879,6 +2885,9 @@ fi
 %endif
 
 %changelog
+* Fri Oct 06 2023 Jacco Ligthart <jacco@redsleeve.org> - 2.34-60.7.redsleeve
+- add dl-tunables.list for arm 
+
 * Mon Sep 25 2023 Florian Weimer <fweimer@redhat.com> - 2.34-60.7
 - Fix memory leak regression in getaddrinfo (RHEL-2425)
 
