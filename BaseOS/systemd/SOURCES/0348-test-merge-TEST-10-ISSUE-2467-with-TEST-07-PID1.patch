@@ -1,0 +1,158 @@
+From a001c9160b0722ce1c0943646b2a32d3841cddd5 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 10 May 2023 13:41:03 +0200
+Subject: [PATCH] test: merge TEST-10-ISSUE-2467 with TEST-07-PID1
+
+(cherry picked from commit a8faac7dae6f54e88aad08d2d8c34e165ce6e922)
+
+Related: #2213521
+---
+ test/TEST-07-PID1/test.sh                     |  8 +++++++
+ test/TEST-10-ISSUE-2467/Makefile              |  1 -
+ test/TEST-10-ISSUE-2467/test.sh               | 22 -------------------
+ test/meson.build                              |  3 +++
+ .../issue2467.service}                        |  2 +-
+ .../issue2467.socket}                         |  0
+ test/units/testsuite-07.issue-2467.sh         | 17 ++++++++++++++
+ test/units/testsuite-10.service               | 16 --------------
+ 8 files changed, 29 insertions(+), 40 deletions(-)
+ delete mode 120000 test/TEST-10-ISSUE-2467/Makefile
+ delete mode 100755 test/TEST-10-ISSUE-2467/test.sh
+ rename test/{testsuite-10.units/test10.service => testsuite-07.units/issue2467.service} (90%)
+ rename test/{testsuite-10.units/test10.socket => testsuite-07.units/issue2467.socket} (100%)
+ create mode 100755 test/units/testsuite-07.issue-2467.sh
+ delete mode 100644 test/units/testsuite-10.service
+
+diff --git a/test/TEST-07-PID1/test.sh b/test/TEST-07-PID1/test.sh
+index c241840327..1c3d7137fe 100755
+--- a/test/TEST-07-PID1/test.sh
++++ b/test/TEST-07-PID1/test.sh
+@@ -10,6 +10,14 @@ TEST_DESCRIPTION="Tests for core PID1 functionality"
+ test_append_files() {
+     local workspace="${1:?}"
+ 
++    # Collecting coverage slows this particular test quite a bit, causing
++    # it to fail with the default settings (20 triggers per 2 secs).
++    # Let's help it a bit in such case.
++    if get_bool "$IS_BUILT_WITH_COVERAGE"; then
++        mkdir -p "$workspace/etc/systemd/system/issue2467.socket.d"
++        printf "[Socket]\nTriggerLimitIntervalSec=10\n" >"$workspace/etc/systemd/system/issue2467.socket.d/coverage-override.conf"
++    fi
++
+     # Issue: https://github.com/systemd/systemd/issues/2730
+     mkdir -p "$workspace/etc/systemd/system/"
+     cat >"$workspace/etc/systemd/system/issue2730.mount" <<EOF
+diff --git a/test/TEST-10-ISSUE-2467/Makefile b/test/TEST-10-ISSUE-2467/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-10-ISSUE-2467/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-10-ISSUE-2467/test.sh b/test/TEST-10-ISSUE-2467/test.sh
+deleted file mode 100755
+index 8dabf3f2b6..0000000000
+--- a/test/TEST-10-ISSUE-2467/test.sh
++++ /dev/null
+@@ -1,22 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2467"
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-test_append_files() {
+-    (
+-        # Collecting coverage slows this particular test quite a bit, causing
+-        # it to fail with the default settings (20 triggers per 2 secs)
+-        # to trip over the default limit. Let's help it a bit in such case.
+-        if get_bool "$IS_BUILT_WITH_COVERAGE"; then
+-            mkdir -p "${initdir:?}/etc/systemd/system/test10.socket.d"
+-            printf "[Socket]\nTriggerLimitIntervalSec=10\n" >"${initdir:?}/etc/systemd/system/test10.socket.d/coverage-override.conf"
+-        fi
+-    )
+-}
+-
+-do_test "$@"
+diff --git a/test/meson.build b/test/meson.build
+index 044ae781ee..92c92dcb3b 100644
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -36,6 +36,9 @@ if install_tests
+         install_subdir('testsuite-06.units',
+                        exclude_files : '.gitattributes',
+                        install_dir : testdata_dir)
++        install_subdir('testsuite-07.units',
++                       exclude_files : '.gitattributes',
++                       install_dir : testdata_dir)
+         install_subdir('testsuite-10.units',
+                        exclude_files : '.gitattributes',
+                        install_dir : testdata_dir)
+diff --git a/test/testsuite-10.units/test10.service b/test/testsuite-07.units/issue2467.service
+similarity index 90%
+rename from test/testsuite-10.units/test10.service
+rename to test/testsuite-07.units/issue2467.service
+index fc8fad9327..99d886f025 100644
+--- a/test/testsuite-10.units/test10.service
++++ b/test/testsuite-07.units/issue2467.service
+@@ -1,6 +1,6 @@
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ [Unit]
+-Requires=test10.socket
++Requires=issue2467.socket
+ ConditionPathExistsGlob=/tmp/nonexistent
+ # Make sure we hit the socket trigger limit in the test and not the service start limit.
+ StartLimitInterval=1000
+diff --git a/test/testsuite-10.units/test10.socket b/test/testsuite-07.units/issue2467.socket
+similarity index 100%
+rename from test/testsuite-10.units/test10.socket
+rename to test/testsuite-07.units/issue2467.socket
+diff --git a/test/units/testsuite-07.issue-2467.sh b/test/units/testsuite-07.issue-2467.sh
+new file mode 100755
+index 0000000000..a5dcfd55dd
+--- /dev/null
++++ b/test/units/testsuite-07.issue-2467.sh
+@@ -0,0 +1,17 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++# Don't start services every few ms if condition fails
++# Issue: https://github.com/systemd/systemd/issues/2467
++
++rm -f /tmp/nonexistent
++systemctl start issue2467.socket
++nc -w20 -U /run/test.ctl || :
++
++# TriggerLimitIntervalSec= by default is set to 2s. A "sleep 10" should give
++# systemd enough time even on slower machines, to reach the trigger limit.
++# shellcheck disable=SC2016
++timeout 10 bash -c 'while ! [[ "$(systemctl show issue2467.socket -P ActiveState)" == failed ]]; do sleep .5; done'
++[[ "$(systemctl show issue2467.socket -P Result)" == trigger-limit-hit ]]
+diff --git a/test/units/testsuite-10.service b/test/units/testsuite-10.service
+deleted file mode 100644
+index 9fcfd673c6..0000000000
+--- a/test/units/testsuite-10.service
++++ /dev/null
+@@ -1,16 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-10-ISSUE-2467
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-Type=oneshot
+-ExecStart=rm -f /tmp/nonexistent
+-ExecStart=systemctl start test10.socket
+-ExecStart=-nc -w20 -U /run/test.ctl
+-# TriggerLimitIntervalSec= by default is set to 2s. A "sleep 10" should give
+-# systemd enough time even on slower machines, to reach the trigger limit.
+-ExecStart=sleep 10
+-ExecStart=sh -x -c 'test "$(systemctl show test10.socket -P ActiveState)" = failed'
+-ExecStart=sh -x -c 'test "$(systemctl show test10.socket -P Result)" = trigger-limit-hit'
+-ExecStart=sh -x -c 'echo OK >/testok'

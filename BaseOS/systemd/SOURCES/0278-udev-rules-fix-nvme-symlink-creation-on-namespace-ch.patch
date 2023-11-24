@@ -1,0 +1,61 @@
+From b4bf6261b5025dabf92997bf124f57e2e314935e Mon Sep 17 00:00:00 2001
+From: Thomas Blume <Thomas.Blume@suse.com>
+Date: Thu, 2 Mar 2023 12:06:13 +0100
+Subject: [PATCH] udev-rules: fix nvme symlink creation on namespace changes
+
+The nvme by-id symlink changes to the latest namespace when a new namespace gets
+added, for example by connecting multiple NVMe/TCP host controllers via nvme
+connect-all.
+That is incorrect for persistent device links.
+The persistent symbolic device link should continue to point to the same NVMe
+namespace throughout the lifetime of the current boot.
+Therefore the namespace id needs to be added to the link name.
+
+(cherry picked from commit c5ba7a2a4dd19a2d31b8a9d52d3c4bdde78387f0)
+
+Resolves: #2172509
+---
+ rules.d/60-persistent-storage.rules | 8 ++++++++
+ test/units/testsuite-64.sh          | 2 ++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/rules.d/60-persistent-storage.rules b/rules.d/60-persistent-storage.rules
+index 18588e4c45..d6612daf7d 100644
+--- a/rules.d/60-persistent-storage.rules
++++ b/rules.d/60-persistent-storage.rules
+@@ -37,14 +37,22 @@ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{serial}=="?*", ENV{ID_S
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{wwid}=="?*", ENV{ID_WWN}="$attr{wwid}"
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{model}=="?*", ENV{ID_MODEL}="$attr{model}"
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{firmware_rev}=="?*", ENV{ID_REVISION}="$attr{firmware_rev}"
++KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{nsid}=="?*", ENV{ID_NSID}="$attr{nsid}"
++# obsolete symlink that might get overridden on adding a new nvme controller, kept for backward compatibility
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*", \
+   OPTIONS="string_escape=replace", ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}"
++KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*", ENV{ID_NSID}=="?*",\
++  OPTIONS="string_escape=replace", ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}_$env{ID_NSID}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}"
+ 
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{serial}=="?*", ENV{ID_SERIAL_SHORT}="$attr{serial}"
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{model}=="?*", ENV{ID_MODEL}="$attr{model}"
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{firmware_rev}=="?*", ENV{ID_REVISION}="$attr{firmware_rev}"
++KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{nsid}=="?*", ENV{ID_NSID}="$attr{nsid}"
++# obsolete symlink that might get overridden on adding a new nvme controller, kept for backward compatibility
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*", \
+   OPTIONS="string_escape=replace", ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}-part%n"
++KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*",  ENV{ID_NSID}=="?*",\
++  OPTIONS="string_escape=replace", ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}_$env{ID_NSID}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}-part%n"
+ 
+ # virtio-blk
+ KERNEL=="vd*[!0-9]", ATTRS{serial}=="?*", ENV{ID_SERIAL}="$attr{serial}", SYMLINK+="disk/by-id/virtio-$env{ID_SERIAL}"
+diff --git a/test/units/testsuite-64.sh b/test/units/testsuite-64.sh
+index 201a673d06..f7298ed0d6 100755
+--- a/test/units/testsuite-64.sh
++++ b/test/units/testsuite-64.sh
+@@ -182,6 +182,8 @@ testcase_nvme_subsystem() {
+     local expected_symlinks=(
+         # Controller(s)
+         /dev/disk/by-id/nvme-QEMU_NVMe_Ctrl_deadbeef
++        /dev/disk/by-id/nvme-QEMU_NVMe_Ctrl_deadbeef_16
++        /dev/disk/by-id/nvme-QEMU_NVMe_Ctrl_deadbeef_17
+         # Shared namespaces
+         /dev/disk/by-path/pci-*-nvme-16
+         /dev/disk/by-path/pci-*-nvme-17

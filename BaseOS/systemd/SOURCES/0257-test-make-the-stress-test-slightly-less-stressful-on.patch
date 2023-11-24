@@ -1,0 +1,32 @@
+From 36426e030fc9f2afc5926b2c484b9943f9970529 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 19 May 2023 10:48:15 +0200
+Subject: [PATCH] test: make the stress test slightly less stressful on slower
+ machines
+
+Without acceleration this part of the test takes over 10 minutes (!),
+which feels quite unnecessary. Let's cut down the number of stuff we
+dump to the journal in such case, but keep the original value if we run
+with acceleration (since in that case it takes less than 10 seconds).
+
+(cherry picked from commit ff40235b9bd2a944131c36b1c7ccfd88f49a194e)
+
+Related: #2170883
+---
+ test/units/testsuite-04.sh | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/test/units/testsuite-04.sh b/test/units/testsuite-04.sh
+index bb41045809..b5ff2ff704 100755
+--- a/test/units/testsuite-04.sh
++++ b/test/units/testsuite-04.sh
+@@ -8,7 +8,8 @@ trap "journalctl --rotate --vacuum-size=16M" EXIT
+ 
+ # Rotation/flush test, see https://github.com/systemd/systemd/issues/19895
+ journalctl --relinquish-var
+-for _ in {0..50}; do
++[[ "$(systemd-detect-virt -v)" == "qemu" ]] && ITERATIONS=10 || ITERATIONS=50
++for ((i = 0; i < ITERATIONS; i++)); do
+     dd if=/dev/urandom bs=1M count=1 | base64 | systemd-cat
+ done
+ journalctl --rotate

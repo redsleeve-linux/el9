@@ -1,0 +1,55 @@
+From 0884a1675b2ad20fdf7f98849ad6592a10b893e4 Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Thu, 25 May 2023 01:20:45 +0800
+Subject: [PATCH] loginctl: list-sessions: fix timestamp for idle hint
+
+Follow-up for 556723e738b96a5c2b2d45a96b87b7b80e0c5664
+
+TABLE_TIMESTAMP_RELATIVE takes a realtime timestamp.
+
+(cherry picked from commit be88af3d9646c8bd1aaea3d4a00520e97ee8674d)
+
+Related: #2209912
+---
+ src/login/loginctl.c | 14 +++++++-------
+ 1 file changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/src/login/loginctl.c b/src/login/loginctl.c
+index 25e5787c11..598acf766d 100644
+--- a/src/login/loginctl.c
++++ b/src/login/loginctl.c
+@@ -73,7 +73,7 @@ typedef struct SessionStatusInfo {
+         const char *scope;
+         const char *desktop;
+         bool idle_hint;
+-        dual_timestamp idle_hint_timestamp;
++        usec_t idle_hint_timestamp;
+ } SessionStatusInfo;
+ 
+ typedef struct UserStatusInfo {
+@@ -171,11 +171,11 @@ static int show_table(Table *table, const char *word) {
+ 
+ static int list_sessions(int argc, char *argv[], void *userdata) {
+ 
+-        static const struct bus_properties_map map[]  = {
+-                { "IdleHint",               "b",    NULL,   offsetof(SessionStatusInfo, idle_hint)                      },
+-                { "IdleSinceHintMonotonic", "t",    NULL,   offsetof(SessionStatusInfo, idle_hint_timestamp.monotonic)  },
+-                { "State",                  "s",    NULL,   offsetof(SessionStatusInfo, state)                          },
+-                { "TTY",                    "s",    NULL,   offsetof(SessionStatusInfo, tty)                            },
++        static const struct bus_properties_map map[] = {
++                { "IdleHint",      "b", NULL, offsetof(SessionStatusInfo, idle_hint)           },
++                { "IdleSinceHint", "t", NULL, offsetof(SessionStatusInfo, idle_hint_timestamp) },
++                { "State",         "s", NULL, offsetof(SessionStatusInfo, state)               },
++                { "TTY",           "s", NULL, offsetof(SessionStatusInfo, tty)                 },
+                 {},
+         };
+ 
+@@ -239,7 +239,7 @@ static int list_sessions(int argc, char *argv[], void *userdata) {
+                         return table_log_add_error(r);
+ 
+                 if (i.idle_hint)
+-                        r = table_add_cell(table, NULL, TABLE_TIMESTAMP_RELATIVE, &i.idle_hint_timestamp.monotonic);
++                        r = table_add_cell(table, NULL, TABLE_TIMESTAMP_RELATIVE, &i.idle_hint_timestamp);
+                 else
+                         r = table_add_cell(table, NULL, TABLE_EMPTY, NULL);
+                 if (r < 0)

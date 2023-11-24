@@ -4,135 +4,138 @@
 # 2) When making changes, update version by +1, leave release alone.
 #
 
-Summary: Red Hat specific rpm configuration files
-Name: redhat-rpm-config
-Version: 199
-Release: 1%{?dist}.redsleeve
+Summary:              Red Hat specific rpm configuration files
+Name:                 redhat-rpm-config
+Version:              201
+Release:              1%{?dist}
 # No version specified.
-License: GPL+
-URL: https://src.fedoraproject.org/rpms/redhat-rpm-config
+License:              GPL+
+URL:                  https://src.fedoraproject.org/rpms/redhat-rpm-config
 
 # Core rpm settings
-Source0: macros
-Source1: rpmrc
+Source0:              macros
+Source1:              rpmrc
 
 # gcc specs files for hardened builds
-Source50: redhat-hardened-cc1
-Source51: redhat-hardened-ld
-Source52: redhat-hardened-clang.cfg
+Source50:             redhat-hardened-cc1
+Source51:             redhat-hardened-ld
+Source52:             redhat-hardened-clang.cfg
 
 # gcc specs files for annobin builds
-Source60: redhat-annobin-cc1
-Source61: redhat-annobin-select-gcc-built-plugin
-Source62: redhat-annobin-select-annobin-built-plugin
-Source63: redhat-annobin-plugin-select.sh
+Source60:             redhat-annobin-cc1
+Source61:             redhat-annobin-select-gcc-built-plugin
+Source62:             redhat-annobin-select-annobin-built-plugin
+Source63:             redhat-annobin-plugin-select.sh
 
 # The macros defined by these files are for things that need to be defined
 # at srpm creation time when it is not feasible to require the base packages
 # that would otherwise be providing the macros. other language/arch specific
 # macros should not be defined here but instead in the base packages that can
 # be pulled in at rpm build time, this is specific for srpm creation.
-Source100: macros.fedora-misc-srpm
-Source102: macros.mono-srpm
-Source103: macros.nodejs-srpm
-Source104: macros.ldc-srpm
-Source105: macros.valgrind-srpm
+Source100:            macros.fedora-misc-srpm
+Source102:            macros.mono-srpm
+Source103:            macros.nodejs-srpm
+Source104:            macros.ldc-srpm
+Source105:            macros.valgrind-srpm
 
 # Other misc macros
-Source150: macros.dwz
-Source152: macros.vpath
-Source153: macros.forge
-Source154: macros.ldconfig
-Source155: macros.fedora-misc
+Source150:            macros.dwz
+Source152:            macros.vpath
+Source153:            macros.forge
+Source154:            macros.ldconfig
+Source155:            macros.fedora-misc
 
 # Build policy scripts
 # this comes from https://github.com/rpm-software-management/rpm/pull/344
 # added a python -> python2 conversion for fedora with warning
 # and an echo when the mangling happens
-Source201: brp-mangle-shebangs
+Source201:            brp-mangle-shebangs
 
 # this comes from rpm itself
 # however, now we can do Fedora changes within
-Source202: brp-python-bytecompile
+Source202:            brp-python-bytecompile
 
 # for fixing pyc files reproducibility with marshalparser
 # https://github.com/fedora-python/marshalparser
-Source203: brp-fix-pyc-reproducibility
+Source203:            brp-fix-pyc-reproducibility
 
 # for converting llvm LTO bitcode objects into ELF
-Source204: brp-llvm-compile-lto-elf
+Source204:            brp-llvm-compile-lto-elf
 
 # Dependency generator scripts (deprecated)
-Source300: find-provides
-Source304: find-requires
+Source300:            find-provides
+Source304:            find-requires
 
 # Misc helper scripts
-Source400: dist.sh
-Source404: gpgverify
+Source400:            dist.sh
+Source404:            gpgverify
 
 # 2016-10-02 snapshots from http://git.savannah.gnu.org/gitweb/?p=config.git
-Source500: config.guess
-Source501: config.sub
+Source500:            config.guess
+Source501:            config.sub
 
 # Dependency generators & their rules
-Source602: libsymlink.attr
+Source602:            libsymlink.attr
 
 # BRPs
-Source700: brp-ldconfig
-Source701: brp-strip-lto
+Source700:            brp-ldconfig
+Source701:            brp-strip-lto
 
 # Convenience lua functions
-Source800: common.lua
-Source801: forge.lua
+Source800:            common.lua
+Source801:            forge.lua
 
 # Documentation
-Source900: buildflags.md
+Source900:            buildflags.md
 
-Patch1: macros-arm.patch 
 
-BuildArch: noarch
-BuildRequires: perl-generators
-Requires: coreutils
 
-Requires: efi-srpm-macros
-Requires: fonts-srpm-macros
-Requires: ghc-srpm-macros
-Requires: go-srpm-macros
+BuildArch:            noarch
+BuildRequires:        perl-generators
+Requires:             coreutils
+
+Requires:             efi-srpm-macros
+Requires:             fonts-srpm-macros
+Requires:             ghc-srpm-macros
+Requires:             go-srpm-macros
 # ↓ Provides kmod.attr originally shipped by us
-Requires: kernel-srpm-macros >= 1.0-6
-Requires: lua-srpm-macros
-Requires: ocaml-srpm-macros
-Requires: openblas-srpm-macros
-Requires: perl-srpm-macros
+Requires:             kernel-srpm-macros >= 1.0-6
+Requires:             lua-srpm-macros
+Requires:             ocaml-srpm-macros
+Requires:             openblas-srpm-macros
+Requires:             perl-srpm-macros
 # ↓ Provides compileall2 Python module
-Requires: python-srpm-macros >= 3-46
-Requires: qt5-srpm-macros
-Requires: rust-srpm-macros
-Requires: pyproject-srpm-macros
+Requires:             python-srpm-macros >= 3-46
+Requires:             qt5-srpm-macros
+Requires:             rust-srpm-macros
+Requires:             pyproject-srpm-macros
 
 %if ! 0%{?rhel}
-Requires: fpc-srpm-macros
-Requires: gnat-srpm-macros
-Requires: nim-srpm-macros
+Requires:             fpc-srpm-macros
+Requires:             gnat-srpm-macros
+Requires:             nim-srpm-macros
 %endif
 
-Requires: rpm >= 4.11.0
-Requires: dwz >= 0.4
-Requires: zip
-Requires: (annobin if (gcc or clang))
-Requires: (gcc-plugin-annobin if gcc)
+Requires:             rpm >= 4.11.0
+Requires:             dwz >= 0.4
+Requires:             zip
+Requires:             (annobin if (gcc or clang))
+Requires:             (gcc-plugin-annobin if gcc)
 
 # for brp-mangle-shebangs
-Requires: %{_bindir}/find
-Requires: %{_bindir}/file
-Requires: %{_bindir}/grep
-Requires: %{_bindir}/sed
-Requires: %{_bindir}/xargs
+Requires:             %{_bindir}/find
+Requires:             %{_bindir}/file
+Requires:             %{_bindir}/grep
+Requires:             %{_bindir}/sed
+Requires:             %{_bindir}/xargs
+
+# for brp-llvm-compile-lto-elf
+Requires:             (llvm if clang)
 
 # -fstack-clash-protection and -fcf-protection require GCC 8.
-Conflicts: gcc < 8.0.1-0.22
+Conflicts:            gcc < 8.0.1-0.22
 
-Provides: system-rpm-config = %{version}-%{release}
+Provides:             system-rpm-config = %{version}-%{release}
 
 %global rrcdir /usr/lib/rpm/redhat
 
@@ -169,8 +172,6 @@ install -p -m 644 -t %{buildroot}%{_fileattrsdir} *.attr
 mkdir -p %{buildroot}%{_rpmluadir}/fedora/{rpm,srpm}
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora common.lua
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
-
-patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
 
 # This trigger is used to decide which version of the annobin plugin for gcc
 # should be used.  See comments in the script for full details.
@@ -254,12 +255,19 @@ patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
 %doc buildflags.md
 
 %changelog
-* Fri Jun 24 2023 Jacco Ligthart <jaco@redsleeve.org> 199-1.el9.redsleeve
-- patched for sha1 build-ids on arm when using clang
-- cherry picked from https://src.fedoraproject.org/rpms/redhat-rpm-config/pull-request/155
+* Wed Oct 18 2023 Release Engineering <releng@rockylinux.org> - 201-1
+- Add Rocky to dist.sh
 
-* Tue May 09 2023 CentOS Sources <bugs@centos.org> - 199-1.el9.centos
-- Apply debranding changes
+* Wed Oct 18 2023 Release Engineering <releng@rockylinux.org> - 201-1
+- Change Red Hat to Rocky and add Rocky to dist.sh
+
+* Mon May 08 2023 Nikita Popov <npopov@redhat.com> - 201-1
+- Add llvm dependency if clang toolchain used
+- Resolves: rhbz#2193406
+
+* Wed Apr 19 2023 Nikita Popov <npopov@redhat.com> - 200-1
+- Change clang LTO default to ThinLTO
+- Resolves: rhbz#2178788
 
 * Mon Feb 13 2023 Miro Hrončok <mhroncok@redhat.com> - 199-1
 - Add pyproject-srpm-macros to the default buildroot

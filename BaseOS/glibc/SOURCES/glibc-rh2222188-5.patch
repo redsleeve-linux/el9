@@ -1,0 +1,938 @@
+commit 8a78f833d670f86302f2d0c32eb1e4357d9166ff
+Author: Joseph Myers <joseph@codesourcery.com>
+Date:   Fri Jan 6 19:33:29 2023 +0000
+
+    C2x semantics for <tgmath.h>
+
+    <tgmath.h> implements semantics for integer generic arguments that
+    handle cases involving _FloatN / _FloatNx types as specified in TS
+    18661-3 plus some defect fixes.
+
+    C2x has further changes to the semantics for <tgmath.h> macros with
+    such types, which should also be considered defect fixes (although
+    handled through the integration of TS 18661-3 in C2x rather than
+    through an issue tracking process).  Specifically, the rules were
+    changed because of problems raised with using the macros with the
+    evaluation format types such as float_t and _Float32_t: the older
+    version of the rules didn't allow passing _FloatN / _FloatNx types to
+    the narrowing macros returning float or double, or passing float /
+    double / long double to the narrowing macros returning _FloatN /
+    _FloatNx, which was a problem with the evaluation format types which
+    could be either kind of type depending on the value of
+    FLT_EVAL_METHOD.
+
+    Thus the new rules allow cases of mixing types which were not allowed
+    before, and, as part of the changes, the handling of integer arguments
+    was also changed: if there is any _FloatNx generic argument, integer
+    generic arguments are treated as _Float32x (not double), while the
+    rule about treating integer arguments to narrowing macros returning
+    _FloatN or _FloatNx as _Float64 not double was removed (no longer
+    needed now double is a valid argument to such macros).
+
+    I've implemented the changes in GCC's __builtin_tgmath, which thus
+    requires updates to glibc's test expectations so that the tests
+    continue to build with GCC 13 (the test is also updated to test the
+    argument types that weren't allowed before but are now valid under C2x
+    rules).
+
+    Given those test changes, it's then also necessary to fix the
+    implementations in <tgmath.h> to have appropriate semantics with older
+    GCC so that the tests pass with GCC versions before GCC 13 as well.
+    For some cases (non-narrowing macros with two or three generic
+    arguments; narrowing macros returning _Float32x), the older version of
+    __builtin_tgmath doesn't correspond sufficiently well to C2x
+    semantics, so in those cases <tgmath.h> is adjusted to use the older
+    macro implementation instead of __builtin_tgmath.  The older macro
+    implementation is itself adjusted to give the desired semantics, with
+    GCC 7 and later.  (It's not possible to get the right semantics in all
+    cases for the narrowing macros with GCC 6 and before when the _FloatN
+    / _FloatNx names are typedefs rather than distinct types.)
+
+    Tested as follows: with the full glibc testsuite for x86_64, GCC 6, 7,
+    11, 13; with execution of the math/tests for aarch64, arm, powerpc and
+    powerpc64le, GCC 6, 7, 12 and 13 (powerpc64le only with GCC 12 and
+    13); with build-many-glibcs.py with GCC 6, 7, 12 and 13.
+
+Conflicts:
+	math/tgmath.h
+	  (missing support for narrowing fma/sqrt downstream
+	  means that the definitions for __TGMATH_1_NARROW_*
+	  and __TGMATH_3_NARROW_* are not needed)
+
+diff --git a/math/gen-tgmath-tests.py b/math/gen-tgmath-tests.py
+index 364963da6525e08d..be5e8cd9a07ef071 100755
+--- a/math/gen-tgmath-tests.py
++++ b/math/gen-tgmath-tests.py
+@@ -19,14 +19,13 @@
+ 
+ # As glibc does not support decimal floating point, the types to
+ # consider for generic parameters are standard and binary
+-# floating-point types, and integer types which are treated as double.
+-# The corresponding complex types may also be used (including complex
+-# integer types, which are a GNU extension, but are currently disabled
+-# here because they do not work properly with tgmath.h).
+-
+-# The proposed resolution to TS 18661-1 DR#9
+-# <http://www.open-std.org/jtc1/sc22/wg14/www/docs/n2149.htm#dr_9>
+-# makes the <tgmath.h> rules for selecting a function to call
++# floating-point types, and integer types which are treated as
++# _Float32x if any argument has a _FloatNx type and otherwise as
++# double.  The corresponding complex types may also be used (including
++# complex integer types, which are a GNU extension, but are currently
++# disabled here because they do not work properly with tgmath.h).
++
++# C2x makes the <tgmath.h> rules for selecting a function to call
+ # correspond to the usual arithmetic conversions (applied successively
+ # to the arguments for generic parameters in order), which choose the
+ # type whose set of values contains that of the other type (undefined
+@@ -69,10 +68,6 @@ class Type(object):
+     # Real argument types that correspond to a standard floating type
+     # (float, double or long double; not _FloatN or _FloatNx).
+     standard_real_argument_types_list = []
+-    # Real argument types other than float, double and long double
+-    # (i.e., those that are valid as arguments to narrowing macros
+-    # returning _FloatN or _FloatNx).
+-    non_standard_real_argument_types_list = []
+     # The real floating types by their order properties (which are
+     # tuples giving the positions in both the possible orders above).
+     real_types_order = {}
+@@ -86,13 +81,16 @@ class Type(object):
+     float64_type = None
+     # The type _Complex _Float64.
+     complex_float64_type = None
++    # The type _Float32x.
++    float32x_type = None
++    # The type _Complex _Float32x.
++    complex_float32x_type = None
+     # The type _Float64x.
+     float64x_type = None
+-    # The type _Float64x if available, otherwise _Float64.
+-    float32x_ext_type = None
+ 
+     def __init__(self, name, suffix=None, mant_dig=None, condition='1',
+-                 order=None, integer=False, complex=False, real_type=None):
++                 order=None, integer=False, complex=False, real_type=None,
++                 floatnx=False):
+         """Initialize a Type object, creating any corresponding complex type
+         in the process."""
+         self.name = name
+@@ -102,6 +100,7 @@ class Type(object):
+         self.order = order
+         self.integer = integer
+         self.complex = complex
++        self.floatnx = floatnx
+         if complex:
+             self.complex_type = self
+             self.real_type = real_type
+@@ -119,8 +118,6 @@ class Type(object):
+                 Type.real_argument_types_list.append(self)
+                 if not self.name.startswith('_Float'):
+                     Type.standard_real_argument_types_list.append(self)
+-                if self.name not in ('float', 'double', 'long double'):
+-                    Type.non_standard_real_argument_types_list.append(self)
+         if self.order is not None:
+             Type.real_types_order[self.order] = self
+         if self.name == 'double':
+@@ -133,26 +130,28 @@ class Type(object):
+             Type.float64_type = self
+         if self.name == '_Complex _Float64':
+             Type.complex_float64_type = self
++        if self.name == '_Float32x':
++            Type.float32x_type = self
++        if self.name == '_Complex _Float32x':
++            Type.complex_float32x_type = self
+         if self.name == '_Float64x':
+             Type.float64x_type = self
+-        if self.name == 'Float32x_ext':
+-            Type.float32x_ext_type = self
+ 
+     @staticmethod
+     def create_type(name, suffix=None, mant_dig=None, condition='1', order=None,
+                     integer=False, complex_name=None, complex_ok=True,
+-                    internal=False):
++                    floatnx=False, internal=False):
+         """Create and register a Type object for a real type, creating any
+         corresponding complex type in the process."""
+         real_type = Type(name, suffix=suffix, mant_dig=mant_dig,
+                          condition=condition, order=order, integer=integer,
+-                         complex=False)
++                         complex=False, floatnx=floatnx)
+         if complex_ok:
+             if complex_name is None:
+                 complex_name = '_Complex %s' % name
+             complex_type = Type(complex_name, condition=condition,
+                                 integer=integer, complex=True,
+-                                real_type=real_type)
++                                real_type=real_type, floatnx=floatnx)
+         else:
+             complex_type = None
+         real_type.complex_type = complex_type
+@@ -160,13 +159,13 @@ class Type(object):
+         if complex_type is not None:
+             complex_type.register_type(internal)
+ 
+-    def floating_type(self, floatn):
++    def floating_type(self, integer_float32x):
+         """Return the corresponding floating type."""
+         if self.integer:
+-            if floatn:
+-                return (Type.complex_float64_type
++            if integer_float32x:
++                return (Type.complex_float32x_type
+                         if self.complex
+-                        else Type.float64_type)
++                        else Type.float32x_type)
+             else:
+                 return (Type.complex_double_type
+                         if self.complex
+@@ -174,9 +173,9 @@ class Type(object):
+         else:
+             return self
+ 
+-    def real_floating_type(self, floatn):
++    def real_floating_type(self, integer_float32x):
+         """Return the corresponding real floating type."""
+-        return self.real_type.floating_type(floatn)
++        return self.real_type.floating_type(integer_float32x)
+ 
+     def __str__(self):
+         """Return string representation of a type."""
+@@ -194,7 +193,8 @@ class Type(object):
+                          condition='defined HUGE_VAL_F32', order=(2, 2))
+         Type.create_type('_Float32x', 'f32x', 'FLT32X_MANT_DIG',
+                          complex_name='__CFLOAT32X',
+-                         condition='defined HUGE_VAL_F32X', order=(3, 3))
++                         condition='defined HUGE_VAL_F32X', order=(3, 3),
++                         floatnx=True)
+         Type.create_type('double', '', 'DBL_MANT_DIG', order=(4, 4))
+         Type.create_type('long double', 'l', 'LDBL_MANT_DIG', order=(5, 7))
+         Type.create_type('_Float64', 'f64', 'FLT64_MANT_DIG',
+@@ -202,7 +202,8 @@ class Type(object):
+                          condition='defined HUGE_VAL_F64', order=(6, 5))
+         Type.create_type('_Float64x', 'f64x', 'FLT64X_MANT_DIG',
+                          complex_name='__CFLOAT64X',
+-                         condition='defined HUGE_VAL_F64X', order=(7, 6))
++                         condition='defined HUGE_VAL_F64X', order=(7, 6),
++                         floatnx=True)
+         Type.create_type('_Float128', 'f128', 'FLT128_MANT_DIG',
+                          complex_name='__CFLOAT128',
+                          condition='defined HUGE_VAL_F128', order=(8, 8))
+@@ -235,21 +236,16 @@ class Type(object):
+                          complex_name='complex_long_double_Float64x',
+                          condition='defined HUGE_VAL_F64X', order=(7, 7),
+                          internal=True)
+-        # An internal type for the argument type used by f32x*
+-        # narrowing macros (_Float64x if available, otherwise
+-        # _Float64).
+-        Type.create_type('Float32x_ext', None, 'FLT32X_EXT_MANT_DIG',
+-                         complex_name='complex_Float32x_ext',
+-                         condition='1', internal=True)
+ 
+     @staticmethod
+-    def can_combine_types(types, floatn):
++    def can_combine_types(types):
+         """Return a C preprocessor conditional for whether the given list of
+         types can be used together as type-generic macro arguments."""
+         have_long_double = False
+         have_float128 = False
++        integer_float32x = any(t.floatnx for t in types)
+         for t in types:
+-            t = t.real_floating_type(floatn)
++            t = t.real_floating_type(integer_float32x)
+             if t.name == 'long double':
+                 have_long_double = True
+             if t.name == '_Float128' or t.name == '_Float64x':
+@@ -262,14 +258,15 @@ class Type(object):
+         return '1'
+ 
+     @staticmethod
+-    def combine_types(types, floatn):
++    def combine_types(types):
+         """Return the result of combining a set of types."""
+         have_complex = False
+         combined = None
++        integer_float32x = any(t.floatnx for t in types)
+         for t in types:
+             if t.complex:
+                 have_complex = True
+-            t = t.real_floating_type(floatn)
++            t = t.real_floating_type(integer_float32x)
+             if combined is None:
+                 combined = t
+             else:
+@@ -375,18 +372,8 @@ class Tests(object):
+                          '# endif\n')
+         float64x_text = if_cond_text([Type.float64x_type.condition],
+                                      float64x_text)
+-        float32x_ext_text = ('#ifdef HUGE_VAL_F64X\n'
+-                             'typedef _Float64x Float32x_ext;\n'
+-                             'typedef __CFLOAT64X complex_Float32x_ext;\n'
+-                             '# define FLT32X_EXT_MANT_DIG FLT64X_MANT_DIG\n'
+-                             '#else\n'
+-                             'typedef _Float64 Float32x_ext;\n'
+-                             'typedef __CFLOAT64 complex_Float32x_ext;\n'
+-                             '# define FLT32X_EXT_MANT_DIG FLT64_MANT_DIG\n'
+-                             '#endif\n')
+         self.header_list.append(float64_text)
+         self.header_list.append(float64x_text)
+-        self.header_list.append(float32x_ext_text)
+         self.types_seen = set()
+         for t in Type.all_types_list:
+             self.add_type_var(t.name, t.condition)
+@@ -439,39 +426,33 @@ class Tests(object):
+             narrowing_std = True
+             narrow_cond = '1'
+             narrow_args = [Type.double_type, Type.long_double_type]
+-            narrow_fallback = Type.double_type
+         elif ret == 'double':
+             narrowing = True
+             narrowing_std = True
+             narrow_cond = '1'
+             narrow_args = [Type.long_double_type]
+-            narrow_fallback = Type.long_double_type
+         elif ret.startswith('_Float'):
+             narrowing = True
+-            narrow_args = []
++            narrow_args_1 = []
++            narrow_args_2 = []
+             nret_type = None
+-            narrow_fallback = None
+             for order, real_type in sorted(Type.real_types_order.items()):
+                 if real_type.name == ret:
+                     nret_type = real_type
+                 elif nret_type and real_type.name.startswith('_Float'):
+-                    narrow_args.append(real_type)
+-                    if (narrow_fallback is None
+-                        and ret.endswith('x') == real_type.name.endswith('x')):
+-                        narrow_fallback = real_type
++                    if ret.endswith('x') == real_type.name.endswith('x'):
++                        narrow_args_1.append(real_type)
++                    else:
++                        narrow_args_2.append(real_type)
++            narrow_args = narrow_args_1 + narrow_args_2
+             if narrow_args:
+                 narrow_cond = ('(%s && (%s))'
+                                % (nret_type.condition,
+                                   ' || '.join(t.condition
+                                               for t in narrow_args)))
+-                if narrow_fallback is None:
+-                    narrow_fallback = narrow_args[0]
+-                if ret == '_Float32x':
+-                    narrow_fallback = Type.float32x_ext_type
+             else:
+                 # No possible argument types, even conditionally.
+                 narrow_cond = '0'
+-        narrowing_nonstd = narrowing and not narrowing_std
+         types = [ret] + args
+         for t in types:
+             if t != 'c' and t != 'g' and t != 'r' and t != 's':
+@@ -530,19 +511,13 @@ class Tests(object):
+             if t == 'g' or t == 'c':
+                 arg_types.append(Type.argument_types_list)
+             elif t == 'r':
+-                if narrowing_std:
+-                    arg_types.append(Type.standard_real_argument_types_list)
+-                elif narrowing:
+-                    arg_types.append(
+-                        Type.non_standard_real_argument_types_list)
+-                else:
+-                    arg_types.append(Type.real_argument_types_list)
++                arg_types.append(Type.real_argument_types_list)
+             elif t == 's':
+                 arg_types.append(Type.standard_real_argument_types_list)
+         arg_types_product = list_product(arg_types)
+         test_num = 0
+         for this_args in arg_types_product:
+-            comb_type = Type.combine_types(this_args, narrowing_nonstd)
++            comb_type = Type.combine_types(this_args)
+             if narrowing:
+                 # As long as there are no integer arguments, and as
+                 # long as the chosen argument type is as wide as all
+@@ -550,22 +525,22 @@ class Tests(object):
+                 # of the macro call do not depend on the exact
+                 # function chosen.  In particular, for f32x functions
+                 # when _Float64x exists, the chosen type should differ
+-                # for _Float32x and _Float64 arguments, but it is not
+-                # always possible to distinguish those types before
+-                # GCC 7 and the implementation does not attempt to do
+-                # so before GCC 8.
++                # for double / _Float32x and _Float64 arguments, but
++                # it is not always possible to distinguish those types
++                # before GCC 7 (resulting in some cases - only real
++                # arguments - where a wider argument type is used,
++                # which is semantically OK, and others - integer
++                # arguments present - where it may not be OK, but is
++                # unavoidable).
+                 narrow_mant_dig = comb_type.real_type.mant_dig
+                 for arg_type in this_args:
+                     if arg_type.integer:
+                         narrow_mant_dig = 0
+             else:
+                 narrow_mant_dig = 0
+-            if (narrowing
+-                and comb_type not in narrow_args
+-                and narrow_fallback is not None):
+-                comb_type = narrow_fallback
+-            can_comb = Type.can_combine_types(this_args, narrowing_nonstd)
++            can_comb = Type.can_combine_types(this_args)
+             all_conds = [t.condition for t in this_args]
++            narrow_args_cond = '(%s)' % ' && '.join(sorted(set(all_conds)))
+             all_conds.append(can_comb)
+             if narrowing:
+                 all_conds.append(narrow_cond)
+@@ -579,10 +554,69 @@ class Tests(object):
+             test_func_name = 'test_%s_%d' % (macro, test_num)
+             test_num += 1
+             mant_dig = comb_type.real_type.mant_dig
++            test_mant_dig_comp = ''
++            if (narrowing
++                and comb_type not in narrow_args):
++                # The expected argument type is the first in
++                # narrow_args that can represent all the values of
++                # comb_type (which, for the supported cases, means the
++                # first with mant_dig at least as large as that for
++                # comb_type, provided this isn't the case of an IBM
++                # long double argument with binary128 type from
++                # narrow_args).
++                narrow_extra_conds = []
++                test_mant_dig_list = ['#undef NARROW_MANT_DIG\n#if 0\n']
++                for t in narrow_args:
++                    t_cond = '(%s && %s && %s <= %s && %s)' % (
++                        narrow_args_cond, t.condition, mant_dig, t.mant_dig,
++                        Type.can_combine_types(this_args + [t]))
++                    narrow_extra_conds.append(t_cond)
++                    test_mant_dig_list.append('#elif %s\n'
++                                              '#define NARROW_MANT_DIG %s\n'
++                                              % (t_cond, t.mant_dig))
++                test_mant_dig_list.append('#endif\n')
++                test_mant_dig_comp = ''.join(test_mant_dig_list)
++                all_conds.append('(%s)' % ' || '.join(narrow_extra_conds))
++                # A special case where this logic isn't correct is
++                # where comb_type is the internal long_double_Float64
++                # or long_double_Float64x, which will be detected as
++                # not in narrow_args even if the actual type chosen in
++                # a particular configuration would have been in
++                # narrow_args, so check for that case and handle it
++                # appropriately.  In particular, if long double has
++                # the same format as double and there are long double
++                # and _Float64 arguments, and the macro returns
++                # _Float32x, the function called should be one for
++                # _Float64 arguments, not one for _Float64x arguments
++                # that would arise from this logic.
++                if comb_type.real_type.name == 'long_double_Float64':
++                    comb_type_1 = Type.long_double_type
++                    comb_type_2 = Type.float64_type
++                    comb_type_is_2_cond = 'LDBL_MANT_DIG <= FLT64_MANT_DIG'
++                elif comb_type.real_type.name == 'long_double_Float64x':
++                    comb_type_1 = Type.long_double_type
++                    comb_type_2 = Type.float64x_type
++                    comb_type_is_2_cond = 'LDBL_MANT_DIG < FLT64X_MANT_DIG'
++                else:
++                    comb_type_1 = None
++                    comb_type_2 = None
++                if comb_type_1 is None:
++                    mant_dig = 'NARROW_MANT_DIG'
++                else:
++                    mant_dig = ''
++                    if comb_type_1 in narrow_args:
++                        mant_dig += '!(%s) ? %s : ' % (comb_type_is_2_cond,
++                                                       comb_type_1.mant_dig)
++                    if comb_type_2 in narrow_args:
++                        mant_dig += '%s ? %s : ' % (comb_type_is_2_cond,
++                                                    comb_type_2.mant_dig)
++                    mant_dig += 'NARROW_MANT_DIG'
++                if narrow_mant_dig != 0:
++                    narrow_mant_dig = mant_dig
+             test_text = '%s, "%s", "%s", %s, %s' % (test_func_name, func_name,
+                                                     test_name, mant_dig,
+                                                     narrow_mant_dig)
+-            test_text = '    { %s },\n' % test_text
++            test_text = '%s    { %s },\n' % (test_mant_dig_comp, test_text)
+             test_text = if_cond_text(all_conds, test_text)
+             self.test_array_list.append(test_text)
+             call_args = []
+@@ -730,7 +764,7 @@ class Tests(object):
+                        '          && strcmp (called_func_name,\n'
+                        '                     tests[i].func_name) == 0)\n'
+                        '        num_pass++;\n'
+-                       '#if !__GNUC_PREREQ (8, 0)\n'
++                       '#if !__GNUC_PREREQ (7, 0)\n'
+                        '      else if (tests[i].narrow_mant_dig > 0\n'
+                        '               && (called_mant_dig\n'
+                        '                   >= tests[i].narrow_mant_dig)\n'
+@@ -747,6 +781,21 @@ class Tests(object):
+                        '                  tests[i].mant_dig,\n'
+                        '                  called_func_name, called_mant_dig);\n'
+                        '        }\n'
++                       '      else if (tests[i].narrow_mant_dig == 0\n'
++                       '               && strcmp (called_func_name,\n'
++                       '                          tests[i].func_name) == 0)\n'
++                       '        {\n'
++                       '          num_pass++;\n'
++                       '          printf ("Test %zu (%s):\\n"\n'
++                       '                  "  Expected: %s precision %d\\n"\n'
++                       '                  "  Actual: %s precision %d\\n"\n'
++                       '                  "  (unavoidable with old GCC)'
++                       '\\n\\n",\n'
++                       '                  i, tests[i].test_name,\n'
++                       '                  tests[i].func_name,\n'
++                       '                  tests[i].mant_dig,\n'
++                       '                  called_func_name, called_mant_dig);\n'
++                       '        }\n'
+                        '#endif\n'
+                        '      else\n'
+                        '        {\n'
+diff --git a/math/tgmath.h b/math/tgmath.h
+index b55cb39c93575ddc..dbd165dd1882dcc4 100644
+--- a/math/tgmath.h
++++ b/math/tgmath.h
+@@ -37,9 +37,17 @@
+    for older GCC, using other compiler extensions but with macros
+    expanding their arguments many times (so resulting in exponential
+    blowup of the size of expansions when calls to such macros are
+-   nested inside arguments to such macros).  */
++   nested inside arguments to such macros).  Because of a long series
++   of defect fixes made after the initial release of TS 18661-1, GCC
++   versions before GCC 13 have __builtin_tgmath semantics that, when
++   integer arguments are passed to narrowing macros returning
++   _Float32x, or non-narrowing macros with at least two generic
++   arguments, do not always correspond to the C2X semantics, so more
++   complicated macro definitions are also used in some cases for
++   versions from GCC 8 to GCC 12.  */
+ 
+ #define __HAVE_BUILTIN_TGMATH __GNUC_PREREQ (8, 0)
++#define __HAVE_BUILTIN_TGMATH_C2X __GNUC_PREREQ (13, 0)
+ 
+ #if __GNUC_PREREQ (2, 7)
+ 
+@@ -135,13 +143,14 @@
+   __builtin_tgmath (__TGMATH_NARROW_FUNCS_F32 (F) (X), (Y))
+ #  define __TGMATH_2_NARROW_F64(F, X, Y)			\
+   __builtin_tgmath (__TGMATH_NARROW_FUNCS_F64 (F) (X), (Y))
+-#  if __HAVE_FLOAT128
++#  if __HAVE_FLOAT128 && __HAVE_BUILTIN_TGMATH_C2X
+ #   define __TGMATH_2_NARROW_F32X(F, X, Y)			\
+   __builtin_tgmath (__TGMATH_NARROW_FUNCS_F32X (F) (X), (Y))
+ #  endif
+ 
+-# else /* !__HAVE_BUILTIN_TGMATH.  */
++# endif
+ 
++# if !__HAVE_BUILTIN_TGMATH_C2X
+ #  ifdef __NO_LONG_DOUBLE_MATH
+ #   define __tgml(fct) fct
+ #  else
+@@ -181,13 +190,17 @@
+ /* Whether an expression (of arithmetic type) has a real type.  */
+ #  define __expr_is_real(E) (__builtin_classify_type (E) != 9)
+ 
++/* Type T1 if E is 1, type T2 is E is 0.  */
++#  define __tgmath_type_if(T1, T2, E)					\
++  __typeof__ (*(0 ? (__typeof__ (0 ? (T2 *) 0 : (void *) (E))) 0	\
++		: (__typeof__ (0 ? (T1 *) 0 : (void *) (!(E)))) 0))
++
+ /* The tgmath real type for T, where E is 0 if T is an integer type
+    and 1 for a floating type.  If T has a complex type, it is
+    unspecified whether the return type is real or complex (but it has
+    the correct corresponding real type).  */
+ #  define __tgmath_real_type_sub(T, E) \
+-  __typeof__ (*(0 ? (__typeof__ (0 ? (double *) 0 : (void *) (E))) 0	      \
+-		  : (__typeof__ (0 ? (T *) 0 : (void *) (!(E)))) 0))
++  __tgmath_type_if (T, double, E)
+ 
+ /* The tgmath real type of EXPR.  */
+ #  define __tgmath_real_type(expr) \
+@@ -215,6 +228,56 @@
+ 			     __real_integer_type (__typeof__ (+(expr))), \
+ 			     __complex_integer_type (__typeof__ (+(expr))))
+ 
++/* The tgmath real type of EXPR1 combined with EXPR2, without handling
++   the C2X rule of interpreting integer arguments as _Float32x if any
++   argument is _FloatNx.  */
++#  define __tgmath_real_type2_base(expr1, expr2)			\
++  __typeof ((__tgmath_real_type (expr1)) 0 + (__tgmath_real_type (expr2)) 0)
++
++/* The tgmath complex type of EXPR1 combined with EXPR2, without
++   handling the C2X rule of interpreting integer arguments as
++   _Float32x if any argument is _FloatNx.  */
++#  define __tgmath_complex_type2_base(expr1, expr2)	\
++  __typeof ((__tgmath_complex_type (expr1)) 0		\
++	    + (__tgmath_complex_type (expr2)) 0)
++
++/* The tgmath real type of EXPR1 combined with EXPR2 and EXPR3,
++   without handling the C2X rule of interpreting integer arguments as
++   _Float32x if any argument is _FloatNx.  */
++#  define __tgmath_real_type3_base(expr1, expr2, expr3)	\
++  __typeof ((__tgmath_real_type (expr1)) 0		\
++	    + (__tgmath_real_type (expr2)) 0		\
++	    + (__tgmath_real_type (expr3)) 0)
++
++/* The tgmath real or complex type of EXPR1 combined with EXPR2 (and
++   EXPR3 if applicable).  */
++#  if __HAVE_FLOATN_NOT_TYPEDEF
++#   define __tgmath_real_type2(expr1, expr2)				\
++  __tgmath_type_if (_Float32x, __tgmath_real_type2_base (expr1, expr2), \
++		    _Generic ((expr1) + (expr2), _Float32x: 1, default: 0))
++#   define __tgmath_complex_type2(expr1, expr2)				\
++  __tgmath_type_if (_Float32x,						\
++		    __tgmath_type_if (_Complex _Float32x,		\
++				      __tgmath_complex_type2_base (expr1, \
++								   expr2), \
++				      _Generic ((expr1) + (expr2),	\
++						_Complex _Float32x: 1,	\
++						default: 0)),		\
++		    _Generic ((expr1) + (expr2), _Float32x: 1, default: 0))
++#   define __tgmath_real_type3(expr1, expr2, expr3)			\
++  __tgmath_type_if (_Float32x,						\
++		    __tgmath_real_type3_base (expr1, expr2, expr3),	\
++		    _Generic ((expr1) + (expr2) + (expr3),		\
++			      _Float32x: 1, default: 0))
++#  else
++#   define __tgmath_real_type2(expr1, expr2)	\
++  __tgmath_real_type2_base (expr1, expr2)
++#   define __tgmath_complex_type2(expr1, expr2)	\
++  __tgmath_complex_type2_base (expr1, expr2)
++#   define __tgmath_real_type3(expr1, expr2, expr3)	\
++  __tgmath_real_type3_base (expr1, expr2, expr3)
++#  endif
++
+ #  if (__HAVE_DISTINCT_FLOAT16			\
+       || __HAVE_DISTINCT_FLOAT32		\
+       || __HAVE_DISTINCT_FLOAT64		\
+@@ -226,7 +289,10 @@
+ 
+ /* Expand to text that checks if ARG_COMB has type _Float128, and if
+    so calls the appropriately suffixed FCT (which may include a cast),
+-   or FCT and CFCT for complex functions, with arguments ARG_CALL.  */
++   or FCT and CFCT for complex functions, with arguments ARG_CALL.
++   __TGMATH_F128LD (only used in the __HAVE_FLOAT64X_LONG_DOUBLE case,
++   for narrowing macros) handles long double the same as
++   _Float128.  */
+ #  if __HAVE_DISTINCT_FLOAT128 && __GLIBC_USE (IEC_60559_TYPES_EXT)
+ #   if (!__HAVE_FLOAT64X			\
+        || __HAVE_FLOAT64X_LONG_DOUBLE		\
+@@ -234,6 +300,10 @@
+ #    define __TGMATH_F128(arg_comb, fct, arg_call)			\
+   __builtin_types_compatible_p (__typeof (+(arg_comb)), _Float128)	\
+   ? fct ## f128 arg_call :
++#    define __TGMATH_F128LD(arg_comb, fct, arg_call)			\
++  (__builtin_types_compatible_p (__typeof (+(arg_comb)), _Float128)	\
++   || __builtin_types_compatible_p (__typeof (+(arg_comb)), long double)) \
++  ? fct ## f128 arg_call :
+ #    define __TGMATH_CF128(arg_comb, fct, cfct, arg_call)		\
+   __builtin_types_compatible_p (__typeof (+__real__ (arg_comb)), _Float128) \
+   ? (__expr_is_real (arg_comb)						\
+@@ -259,7 +329,7 @@
+ #   define __TGMATH_CF128(arg_comb, fct, cfct, arg_call) /* Nothing.  */
+ #  endif
+ 
+-# endif /* !__HAVE_BUILTIN_TGMATH.  */
++# endif /* !__HAVE_BUILTIN_TGMATH_C2X.  */
+ 
+ /* We have two kinds of generic macros: to support functions which are
+    only defined on real valued parameters and those which are defined
+@@ -272,14 +342,18 @@
+   __TGMATH_2 (Fct, (Val1), (Val2))
+ #  define __TGMATH_BINARY_FIRST_REAL_STD_ONLY(Val1, Val2, Fct)	\
+   __TGMATH_2STD (Fct, (Val1), (Val2))
+-#  define __TGMATH_BINARY_REAL_ONLY(Val1, Val2, Fct)	\
++#  if __HAVE_BUILTIN_TGMATH_C2X
++#   define __TGMATH_BINARY_REAL_ONLY(Val1, Val2, Fct)	\
+   __TGMATH_2 (Fct, (Val1), (Val2))
++#  endif
+ #  define __TGMATH_BINARY_REAL_STD_ONLY(Val1, Val2, Fct)	\
+   __TGMATH_2STD (Fct, (Val1), (Val2))
+-#  define __TGMATH_TERNARY_FIRST_SECOND_REAL_ONLY(Val1, Val2, Val3, Fct) \
++#  if __HAVE_BUILTIN_TGMATH_C2X
++#   define __TGMATH_TERNARY_FIRST_SECOND_REAL_ONLY(Val1, Val2, Val3, Fct) \
+   __TGMATH_3 (Fct, (Val1), (Val2), (Val3))
+-#  define __TGMATH_TERNARY_REAL_ONLY(Val1, Val2, Val3, Fct)	\
++#   define __TGMATH_TERNARY_REAL_ONLY(Val1, Val2, Val3, Fct)	\
+   __TGMATH_3 (Fct, (Val1), (Val2), (Val3))
++#  endif
+ #  define __TGMATH_TERNARY_FIRST_REAL_RET_ONLY(Val1, Val2, Val3, Fct)	\
+   __TGMATH_3 (Fct, (Val1), (Val2), (Val3))
+ #  define __TGMATH_UNARY_REAL_IMAG(Val, Fct, Cfct)	\
+@@ -289,11 +363,14 @@
+   __TGMATH_1C (Fct, Cfct, (Val))
+ #  define __TGMATH_UNARY_REAL_IMAG_RET_REAL_SAME(Val, Cfct)	\
+   __TGMATH_1 (Cfct, (Val))
+-#  define __TGMATH_BINARY_REAL_IMAG(Val1, Val2, Fct, Cfct)	\
++#  if __HAVE_BUILTIN_TGMATH_C2X
++#   define __TGMATH_BINARY_REAL_IMAG(Val1, Val2, Fct, Cfct)	\
+   __TGMATH_2C (Fct, Cfct, (Val1), (Val2))
++#  endif
+ 
+-# else /* !__HAVE_BUILTIN_TGMATH.  */
++# endif
+ 
++# if !__HAVE_BUILTIN_TGMATH
+ #  define __TGMATH_UNARY_REAL_ONLY(Val, Fct)				\
+   (__extension__ ((sizeof (+(Val)) == sizeof (double)			      \
+ 		      || __builtin_classify_type (Val) != 8)		      \
+@@ -330,29 +407,28 @@
+ 		     : (sizeof (+(Val1)) == sizeof (float))		      \
+ 		     ? (__tgmath_real_type (Val1)) Fct##f (Val1, Val2)	      \
+ 		     : (__tgmath_real_type (Val1)) __tgml(Fct) (Val1, Val2)))
++# endif
+ 
++# if !__HAVE_BUILTIN_TGMATH_C2X
+ #  define __TGMATH_BINARY_REAL_ONLY(Val1, Val2, Fct) \
+      (__extension__ ((sizeof ((Val1) + (Val2)) > sizeof (double)	      \
+ 		      && __builtin_classify_type ((Val1) + (Val2)) == 8)      \
+ 		     ? __TGMATH_F128 ((Val1) + (Val2),			      \
+-				      (__typeof				      \
+-				       ((__tgmath_real_type (Val1)) 0	      \
+-					+ (__tgmath_real_type (Val2)) 0)) Fct, \
++				      (__tgmath_real_type2 (Val1, Val2)) Fct, \
+ 				      (Val1, Val2))			      \
+-		     (__typeof ((__tgmath_real_type (Val1)) 0		      \
+-				+ (__tgmath_real_type (Val2)) 0))	      \
++		     (__tgmath_real_type2 (Val1, Val2))			      \
+ 		     __tgml(Fct) (Val1, Val2)				      \
+ 		     : (sizeof (+(Val1)) == sizeof (double)		      \
+ 			|| sizeof (+(Val2)) == sizeof (double)		      \
+ 			|| __builtin_classify_type (Val1) != 8		      \
+ 			|| __builtin_classify_type (Val2) != 8)		      \
+-		     ? (__typeof ((__tgmath_real_type (Val1)) 0		      \
+-				   + (__tgmath_real_type (Val2)) 0))	      \
++		     ? (__tgmath_real_type2 (Val1, Val2))		      \
+ 		       Fct (Val1, Val2)					      \
+-		     : (__typeof ((__tgmath_real_type (Val1)) 0		      \
+-				   + (__tgmath_real_type (Val2)) 0))	      \
++		     : (__tgmath_real_type2 (Val1, Val2))		      \
+ 		       Fct##f (Val1, Val2)))
++# endif
+ 
++# if !__HAVE_BUILTIN_TGMATH
+ #  define __TGMATH_BINARY_REAL_STD_ONLY(Val1, Val2, Fct) \
+      (__extension__ ((sizeof ((Val1) + (Val2)) > sizeof (double)	      \
+ 		      && __builtin_classify_type ((Val1) + (Val2)) == 8)      \
+@@ -369,27 +445,24 @@
+ 		     : (__typeof ((__tgmath_real_type (Val1)) 0		      \
+ 				   + (__tgmath_real_type (Val2)) 0))	      \
+ 		       Fct##f (Val1, Val2)))
++# endif
+ 
++# if !__HAVE_BUILTIN_TGMATH_C2X
+ #  define __TGMATH_TERNARY_FIRST_SECOND_REAL_ONLY(Val1, Val2, Val3, Fct) \
+      (__extension__ ((sizeof ((Val1) + (Val2)) > sizeof (double)	      \
+ 		      && __builtin_classify_type ((Val1) + (Val2)) == 8)      \
+ 		     ? __TGMATH_F128 ((Val1) + (Val2),			      \
+-				      (__typeof				      \
+-				       ((__tgmath_real_type (Val1)) 0	      \
+-					+ (__tgmath_real_type (Val2)) 0)) Fct, \
++				      (__tgmath_real_type2 (Val1, Val2)) Fct, \
+ 				      (Val1, Val2, Val3))		      \
+-		     (__typeof ((__tgmath_real_type (Val1)) 0		      \
+-				+ (__tgmath_real_type (Val2)) 0))	      \
++		     (__tgmath_real_type2 (Val1, Val2))			      \
+ 		     __tgml(Fct) (Val1, Val2, Val3)			      \
+ 		     : (sizeof (+(Val1)) == sizeof (double)		      \
+ 			|| sizeof (+(Val2)) == sizeof (double)		      \
+ 			|| __builtin_classify_type (Val1) != 8		      \
+ 			|| __builtin_classify_type (Val2) != 8)		      \
+-		     ? (__typeof ((__tgmath_real_type (Val1)) 0		      \
+-				   + (__tgmath_real_type (Val2)) 0))	      \
++		     ? (__tgmath_real_type2 (Val1, Val2))		      \
+ 		       Fct (Val1, Val2, Val3)				      \
+-		     : (__typeof ((__tgmath_real_type (Val1)) 0		      \
+-				   + (__tgmath_real_type (Val2)) 0))	      \
++		     : (__tgmath_real_type2 (Val1, Val2))		      \
+ 		       Fct##f (Val1, Val2, Val3)))
+ 
+ #  define __TGMATH_TERNARY_REAL_ONLY(Val1, Val2, Val3, Fct) \
+@@ -397,14 +470,10 @@
+ 		      && __builtin_classify_type ((Val1) + (Val2) + (Val3))   \
+ 			 == 8)						      \
+ 		     ? __TGMATH_F128 ((Val1) + (Val2) + (Val3),		      \
+-				      (__typeof				      \
+-				       ((__tgmath_real_type (Val1)) 0	      \
+-					+ (__tgmath_real_type (Val2)) 0	      \
+-					+ (__tgmath_real_type (Val3)) 0)) Fct, \
++				      (__tgmath_real_type3 (Val1, Val2,	      \
++							    Val3)) Fct,	      \
+ 				      (Val1, Val2, Val3))		      \
+-		     (__typeof ((__tgmath_real_type (Val1)) 0		      \
+-				+ (__tgmath_real_type (Val2)) 0		      \
+-				+ (__tgmath_real_type (Val3)) 0))	      \
++		     (__tgmath_real_type3 (Val1, Val2, Val3))		      \
+ 		       __tgml(Fct) (Val1, Val2, Val3)			      \
+ 		     : (sizeof (+(Val1)) == sizeof (double)		      \
+ 			|| sizeof (+(Val2)) == sizeof (double)		      \
+@@ -412,15 +481,13 @@
+ 			|| __builtin_classify_type (Val1) != 8		      \
+ 			|| __builtin_classify_type (Val2) != 8		      \
+ 			|| __builtin_classify_type (Val3) != 8)		      \
+-		     ? (__typeof ((__tgmath_real_type (Val1)) 0		      \
+-				   + (__tgmath_real_type (Val2)) 0	      \
+-				   + (__tgmath_real_type (Val3)) 0))	      \
++		     ? (__tgmath_real_type3 (Val1, Val2, Val3))		      \
+ 		       Fct (Val1, Val2, Val3)				      \
+-		     : (__typeof ((__tgmath_real_type (Val1)) 0		      \
+-				   + (__tgmath_real_type (Val2)) 0	      \
+-				   + (__tgmath_real_type (Val3)) 0))	      \
++		     : (__tgmath_real_type3 (Val1, Val2, Val3))		      \
+ 		       Fct##f (Val1, Val2, Val3)))
++# endif
+ 
++# if !__HAVE_BUILTIN_TGMATH
+ #  define __TGMATH_TERNARY_FIRST_REAL_RET_ONLY(Val1, Val2, Val3, Fct) \
+      (__extension__ ((sizeof (+(Val1)) == sizeof (double)		\
+ 		      || __builtin_classify_type (Val1) != 8)		\
+@@ -496,7 +563,9 @@
+ 		      __tgml(Cfct) (Val))))
+ #  define __TGMATH_UNARY_REAL_IMAG_RET_REAL_SAME(Val, Cfct)	\
+   __TGMATH_UNARY_REAL_IMAG_RET_REAL ((Val), Cfct, Cfct)
++# endif
+ 
++# if !__HAVE_BUILTIN_TGMATH_C2X
+ /* XXX This definition has to be changed as soon as the compiler understands
+    the imaginary keyword.  */
+ #  define __TGMATH_BINARY_REAL_IMAG(Val1, Val2, Fct, Cfct) \
+@@ -505,46 +574,39 @@
+ 		      && __builtin_classify_type (__real__ (Val1)	      \
+ 						  + __real__ (Val2)) == 8)    \
+ 		     ? __TGMATH_CF128 ((Val1) + (Val2),			      \
+-				       (__typeof			      \
+-					((__tgmath_complex_type (Val1)) 0     \
+-					 + (__tgmath_complex_type (Val2)) 0)) \
++				       (__tgmath_complex_type2 (Val1, Val2))  \
+ 				       Fct,				      \
+-				       (__typeof			      \
+-					((__tgmath_complex_type (Val1)) 0     \
+-					 + (__tgmath_complex_type (Val2)) 0)) \
++				       (__tgmath_complex_type2 (Val1, Val2))  \
+ 				       Cfct,				      \
+ 				       (Val1, Val2))			      \
+ 		     (__expr_is_real ((Val1) + (Val2))			      \
+-		      ? (__typeof ((__tgmath_complex_type (Val1)) 0	      \
+-				   + (__tgmath_complex_type (Val2)) 0))	      \
++		      ? (__tgmath_complex_type2 (Val1, Val2))		      \
+ 		      __tgml(Fct) (Val1, Val2)				      \
+-		      : (__typeof ((__tgmath_complex_type (Val1)) 0	      \
+-				   + (__tgmath_complex_type (Val2)) 0))	      \
++		      : (__tgmath_complex_type2 (Val1, Val2))		      \
+ 		      __tgml(Cfct) (Val1, Val2))			      \
+ 		     : (sizeof (+__real__ (Val1)) == sizeof (double)	      \
+ 			|| sizeof (+__real__ (Val2)) == sizeof (double)	      \
+ 			|| __builtin_classify_type (__real__ (Val1)) != 8     \
+ 			|| __builtin_classify_type (__real__ (Val2)) != 8)    \
+ 		     ? (__expr_is_real ((Val1) + (Val2))		      \
+-			? (__typeof ((__tgmath_complex_type (Val1)) 0	      \
+-				   + (__tgmath_complex_type (Val2)) 0))	      \
++			? (__tgmath_complex_type2 (Val1, Val2))		      \
+ 			  Fct (Val1, Val2)				      \
+-			: (__typeof ((__tgmath_complex_type (Val1)) 0	      \
+-				   + (__tgmath_complex_type (Val2)) 0))	      \
++			: (__tgmath_complex_type2 (Val1, Val2))		      \
+ 			  Cfct (Val1, Val2))				      \
+ 		     : (__expr_is_real ((Val1) + (Val2))		      \
+-			? (__typeof ((__tgmath_complex_type (Val1)) 0	      \
+-				   + (__tgmath_complex_type (Val2)) 0))	      \
++			? (__tgmath_complex_type2 (Val1, Val2))		      \
+ 			  Fct##f (Val1, Val2)				      \
+-			: (__typeof ((__tgmath_complex_type (Val1)) 0	      \
+-				   + (__tgmath_complex_type (Val2)) 0))	      \
++			: (__tgmath_complex_type2 (Val1, Val2))		      \
+ 			  Cfct##f (Val1, Val2))))
++# endif
+ 
++# if !__HAVE_BUILTIN_TGMATH
+ #  define __TGMATH_2_NARROW_F(F, X, Y)					\
+   (__extension__ (sizeof ((__tgmath_real_type (X)) 0			\
+ 			  + (__tgmath_real_type (Y)) 0) > sizeof (double) \
+ 		  ? F ## l (X, Y)					\
+ 		  : F (X, Y)))
++# endif
+ /* In most cases, these narrowing macro definitions based on sizeof
+    ensure that the function called has the right argument format, as
+    for other <tgmath.h> macros for compilers before GCC 8, but may not
+@@ -553,35 +615,50 @@
+ 
+    In the case of macros for _Float32x return type, when _Float64x
+    exists, _Float64 arguments should result in the *f64 function being
+-   called while _Float32x arguments should result in the *f64x
+-   function being called.  These cases cannot be distinguished using
+-   sizeof (or at all if the types are typedefs rather than different
+-   types).  However, for these functions it is OK (does not affect the
+-   final result) to call a function with any argument format at least
+-   as wide as all the floating-point arguments, unless that affects
+-   rounding of integer arguments.  Integer arguments are considered to
+-   have type _Float64, so the *f64 functions are preferred for f32x*
+-   macros when no argument has a wider floating-point type.  */
+-#  if __HAVE_FLOAT64X_LONG_DOUBLE && __HAVE_DISTINCT_FLOAT128
++   called while _Float32x, float and double arguments should result in
++   the *f64x function being called (and integer arguments are
++   considered to have type _Float32x if any argument has type
++   _FloatNx, or double otherwise).  These cases cannot be
++   distinguished using sizeof (or at all if the types are typedefs
++   rather than different types, in which case we err on the side of
++   using the wider type if unsure).  */
++# if !__HAVE_BUILTIN_TGMATH_C2X
++#  if __HAVE_FLOATN_NOT_TYPEDEF
++#   define __TGMATH_NARROW_F32X_USE_F64X(X)			\
++  !__builtin_types_compatible_p (__typeof (+(X)), _Float64)
++#  else
++#   define __TGMATH_NARROW_F32X_USE_F64X(X)			\
++  (__builtin_types_compatible_p (__typeof (+(X)), double)	\
++   || __builtin_types_compatible_p (__typeof (+(X)), float)	\
++   || !__floating_type (__typeof (+(X))))
++#  endif
++# endif
++# if __HAVE_FLOAT64X_LONG_DOUBLE && __HAVE_DISTINCT_FLOAT128
++#  if !__HAVE_BUILTIN_TGMATH
+ #   define __TGMATH_2_NARROW_F32(F, X, Y)				\
+   (__extension__ (sizeof ((__tgmath_real_type (X)) 0			\
+ 			  + (__tgmath_real_type (Y)) 0) > sizeof (_Float64) \
+-		  ? __TGMATH_F128 ((X) + (Y), F, (X, Y))		\
++		  ? __TGMATH_F128LD ((X) + (Y), F, (X, Y))		\
+ 		  F ## f64x (X, Y)					\
+ 		  : F ## f64 (X, Y)))
+ #   define __TGMATH_2_NARROW_F64(F, X, Y)				\
+   (__extension__ (sizeof ((__tgmath_real_type (X)) 0			\
+ 			  + (__tgmath_real_type (Y)) 0) > sizeof (_Float64) \
+-		  ? __TGMATH_F128 ((X) + (Y), F, (X, Y))		\
++		  ? __TGMATH_F128LD ((X) + (Y), F, (X, Y))		\
+ 		  F ## f64x (X, Y)					\
+ 		  : F ## f128 (X, Y)))
++#  endif
++#  if !__HAVE_BUILTIN_TGMATH_C2X
+ #   define __TGMATH_2_NARROW_F32X(F, X, Y)				\
+   (__extension__ (sizeof ((__tgmath_real_type (X)) 0			\
+ 			  + (__tgmath_real_type (Y)) 0) > sizeof (_Float64) \
++		  || __TGMATH_NARROW_F32X_USE_F64X ((X) + (Y))		\
+ 		  ? __TGMATH_F128 ((X) + (Y), F, (X, Y))		\
+ 		  F ## f64x (X, Y)					\
+ 		  : F ## f64 (X, Y)))
+-#  elif __HAVE_FLOAT128
++#  endif
++# elif __HAVE_FLOAT128
++#  if !__HAVE_BUILTIN_TGMATH
+ #   define __TGMATH_2_NARROW_F32(F, X, Y)				\
+   (__extension__ (sizeof ((__tgmath_real_type (X)) 0			\
+ 			  + (__tgmath_real_type (Y)) 0) > sizeof (_Float64) \
+@@ -589,16 +666,21 @@
+ 		  : F ## f64 (X, Y)))
+ #   define __TGMATH_2_NARROW_F64(F, X, Y)	\
+   (F ## f128 (X, Y))
++#  endif
++#  if !__HAVE_BUILTIN_TGMATH_C2X
+ #   define __TGMATH_2_NARROW_F32X(F, X, Y)				\
+   (__extension__ (sizeof ((__tgmath_real_type (X)) 0			\
+ 			  + (__tgmath_real_type (Y)) 0) > sizeof (_Float32x) \
++		  || __TGMATH_NARROW_F32X_USE_F64X ((X) + (Y))		\
+ 		  ? F ## f64x (X, Y)					\
+ 		  : F ## f64 (X, Y)))
+-#  else
++#  endif
++# else
++#  if !__HAVE_BUILTIN_TGMATH
+ #   define __TGMATH_2_NARROW_F32(F, X, Y)	\
+   (F ## f64 (X, Y))
+ #  endif
+-# endif /* !__HAVE_BUILTIN_TGMATH.  */
++# endif
+ #else
+ # error "Unsupported compiler; you cannot use <tgmath.h>"
+ #endif

@@ -1,0 +1,48 @@
+From cf363a503bf7cc4827dbbcd9a670987bf680d5b4 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 7 Dec 2022 12:01:59 +0900
+Subject: [PATCH] core: use correct scope of looking up units
+
+Fixes a bug introduced by 3b3557c410c7910fae0990599dcb82711cf5fbb7.
+
+Fixes #25625.
+
+(cherry picked from commit 47c57b4813c81187db86ed6e33ecf11f8a25825a)
+
+Resolves: #2226980
+---
+ src/core/dbus-manager.c | 11 ++++-------
+ 1 file changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/src/core/dbus-manager.c b/src/core/dbus-manager.c
+index 2db12721a1..00380cc9c1 100644
+--- a/src/core/dbus-manager.c
++++ b/src/core/dbus-manager.c
+@@ -2629,11 +2629,10 @@ static int method_add_dependency_unit_files(sd_bus_message *message, void *userd
+ 
+ static int method_get_unit_file_links(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
++        Manager *m = ASSERT_PTR(userdata);
+         InstallChange *changes = NULL;
+         size_t n_changes = 0, i;
+-        UnitFileFlags flags;
+         const char *name;
+-        char **p;
+         int runtime, r;
+ 
+         r = sd_bus_message_read(message, "sb", &name, &runtime);
+@@ -2648,11 +2647,9 @@ static int method_get_unit_file_links(sd_bus_message *message, void *userdata, s
+         if (r < 0)
+                 return r;
+ 
+-        p = STRV_MAKE(name);
+-        flags = UNIT_FILE_DRY_RUN |
+-                (runtime ? UNIT_FILE_RUNTIME : 0);
+-
+-        r = unit_file_disable(LOOKUP_SCOPE_SYSTEM, flags, NULL, p, &changes, &n_changes);
++        r = unit_file_disable(m->unit_file_scope,
++                              UNIT_FILE_DRY_RUN | (runtime ? UNIT_FILE_RUNTIME : 0),
++                              NULL, STRV_MAKE(name), &changes, &n_changes);
+         if (r < 0) {
+                 log_error_errno(r, "Failed to get file links for %s: %m", name);
+                 goto finish;

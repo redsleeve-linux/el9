@@ -1,0 +1,345 @@
+From 8a964936a2c117b3e6706781026a239dd5727975 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 12 May 2023 03:54:13 +0900
+Subject: [PATCH] test-fstab-generator: also check file contents
+
+Since e683878c0f03a4ffa123e37b27933fbf7e144901, only filenames are
+checked. Let's check contents of generated unit files.
+
+(cherry picked from commit 70bf9f62b9f3c46bb7d111342889bfac7c9ca45e)
+
+Related: #2190226
+---
+ test/test-fstab-generator.sh                  | 55 ++++++++++++++++---
+ .../sysroot.mount                             |  1 +
+ .../sysroot.mount                             |  1 +
+ .../systemd-fsck-root.service                 |  1 +
+ .../sysroot.mount                             |  1 +
+ .../sysroot.mount                             |  1 +
+ .../systemd-fsck-root.service                 |  1 +
+ .../sysroot.mount                             |  1 +
+ .../sysroot.mount                             |  1 +
+ .../systemd-fsck-root.service                 |  1 +
+ .../sysroot.mount                             |  1 +
+ .../sysroot.mount                             |  1 +
+ .../systemd-fsck-root.service                 |  1 +
+ .../sysroot.mount                             |  1 +
+ .../sysroot.mount                             |  1 +
+ .../sysroot-usr.mount                         |  1 +
+ .../sysroot.mount                             |  1 +
+ .../sysroot.mount                             |  1 +
+ .../sysusr-usr.mount                          |  1 +
+ .../systemd-fsck-root.service                 |  1 +
+ 20 files changed, 67 insertions(+), 7 deletions(-)
+ mode change 100644 => 120000 test/test-fstab-generator/test-12-dev-sdx.expected/initrd-root-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-12-dev-sdx.expected/initrd-usr-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-13-label.expected/initrd-root-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-13-label.expected/initrd-usr-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-14-uuid.expected/initrd-root-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-14-uuid.expected/initrd-usr-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-15-partuuid.expected/initrd-root-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-15-partuuid.expected/initrd-usr-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-16-tmpfs.expected/initrd-root-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-16-tmpfs.expected/initrd-usr-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-fs.target.requires/sysroot-usr.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-root-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysroot.mount
+ mode change 100644 => 120000 test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysusr-usr.mount
+
+diff --git a/test/test-fstab-generator.sh b/test/test-fstab-generator.sh
+index c86914a107..c844d0dae1 100755
+--- a/test/test-fstab-generator.sh
++++ b/test/test-fstab-generator.sh
+@@ -1,6 +1,8 @@
+ #!/usr/bin/env bash
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ set -e
++shopt -s nullglob
++shopt -s globstar
+ 
+ if [[ -n "$1" ]]; then
+     generator=$1
+@@ -25,23 +27,62 @@ for f in "$src"/test-*.input; do
+         # shellcheck disable=SC2064
+         trap "rm -rf '$out'" EXIT INT QUIT PIPE
+ 
+-        # shellcheck disable=SC2046
+-        if [[ "$f" == *.fstab.input ]]; then
++        exp="${f%.input}.expected"
++
++        if [[ "${f##*/}" =~ \.fstab\.input ]]; then
+             SYSTEMD_LOG_LEVEL=debug SYSTEMD_IN_INITRD=yes SYSTEMD_SYSFS_CHECK=no SYSTEMD_PROC_CMDLINE="fstab=yes root=fstab" SYSTEMD_FSTAB="$f" SYSTEMD_SYSROOT_FSTAB="/dev/null" $generator "$out" "$out" "$out"
+         else
+             SYSTEMD_LOG_LEVEL=debug SYSTEMD_IN_INITRD=yes SYSTEMD_PROC_CMDLINE="fstab=no $(cat "$f")" $generator "$out" "$out" "$out"
+         fi
+ 
+-        if [[ -f "$out"/systemd-fsck-root.service ]]; then
+-            # For split-usr system
+-            sed -i -e 's:ExecStart=/lib/systemd/systemd-fsck:ExecStart=/usr/lib/systemd/systemd-fsck:' "$out"/systemd-fsck-root.service
++        # For split-usr system
++        for i in "$out"/systemd-*.service; do
++            sed -i -e 's:ExecStart=/lib/systemd/:ExecStart=/usr/lib/systemd/:' "$i"
++        done
++
++        if [[ "${f##*/}" =~ \.fstab\.input ]]; then
++            for i in "$out"/*.{automount,mount,swap}; do
++                sed -i -e 's:SourcePath=.*$:SourcePath=/etc/fstab:' "$i"
++            done
+         fi
+ 
+-        # We store empty files rather than symlinks, so that they don't get pruned when packaged up, so compare
++        # We store empty files rather than dead symlinks, so that they don't get pruned when packaged up, so compare
+         # the list of filenames rather than their content
+-        if ! diff -u <(find "$out" -printf '%P\n' | sort) <(find "${f%.input}.expected" -printf '%P\n' | sort); then
++        if ! diff -u <(find "$out" -printf '%P\n' | sort) <(find "$exp" -printf '%P\n' | sort); then
++            echo "**** Unexpected output for $f"
++            exit 1
++        fi
++
++        # Check the main units.
++        if ! diff -u "$out" "$exp"; then
+             echo "**** Unexpected output for $f"
+             exit 1
+         fi
++
++        # Also check drop-ins.
++        for i in "$out"/*; do
++            [[ -d "$i" ]] || continue
++
++            dir="${i##*/}"
++
++            for j in "$i"/*; do
++                fname="${j##*/}"
++                expf="$exp/$dir/$fname"
++
++                if [[ -L "$j" && ! -e "$j" ]]; then
++                    # For dead symlink, we store an empty file.
++                    if [[ ! -e "$expf" || -n "$(cat "$expf")" ]]; then
++                        echo "**** Unexpected symlink $j created by $f"
++                        exit 1
++                    fi
++                    continue
++                fi
++
++                if ! diff -u "$j" "$expf"; then
++                    echo "**** Unexpected output in $j for $f"
++                    exit 1
++                fi
++            done
++        done
+     ) || exit 1
+ done
+diff --git a/test/test-fstab-generator/test-12-dev-sdx.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-12-dev-sdx.expected/initrd-root-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-12-dev-sdx.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-12-dev-sdx.expected/initrd-root-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-12-dev-sdx.expected/initrd-root-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-12-dev-sdx.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-12-dev-sdx.expected/initrd-usr-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-12-dev-sdx.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-12-dev-sdx.expected/initrd-usr-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-12-dev-sdx.expected/initrd-usr-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-12-dev-sdx.expected/systemd-fsck-root.service b/test/test-fstab-generator/test-12-dev-sdx.expected/systemd-fsck-root.service
+index 7f914fdd14..95d943b87a 100644
+--- a/test/test-fstab-generator/test-12-dev-sdx.expected/systemd-fsck-root.service
++++ b/test/test-fstab-generator/test-12-dev-sdx.expected/systemd-fsck-root.service
+@@ -3,6 +3,7 @@
+ [Unit]
+ Description=File System Check on /dev/sdx1
+ Documentation=man:systemd-fsck-root.service(8)
++
+ DefaultDependencies=no
+ BindsTo=dev-sdx1.device
+ Conflicts=shutdown.target
+diff --git a/test/test-fstab-generator/test-13-label.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-13-label.expected/initrd-root-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-13-label.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-13-label.expected/initrd-root-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-13-label.expected/initrd-root-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-13-label.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-13-label.expected/initrd-usr-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-13-label.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-13-label.expected/initrd-usr-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-13-label.expected/initrd-usr-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-13-label.expected/systemd-fsck-root.service b/test/test-fstab-generator/test-13-label.expected/systemd-fsck-root.service
+index a1327396ca..d6c59ff608 100644
+--- a/test/test-fstab-generator/test-13-label.expected/systemd-fsck-root.service
++++ b/test/test-fstab-generator/test-13-label.expected/systemd-fsck-root.service
+@@ -3,6 +3,7 @@
+ [Unit]
+ Description=File System Check on /dev/disk/by-label/Root
+ Documentation=man:systemd-fsck-root.service(8)
++
+ DefaultDependencies=no
+ BindsTo=dev-disk-by\x2dlabel-Root.device
+ Conflicts=shutdown.target
+diff --git a/test/test-fstab-generator/test-14-uuid.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-14-uuid.expected/initrd-root-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-14-uuid.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-14-uuid.expected/initrd-root-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-14-uuid.expected/initrd-root-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-14-uuid.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-14-uuid.expected/initrd-usr-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-14-uuid.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-14-uuid.expected/initrd-usr-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-14-uuid.expected/initrd-usr-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-14-uuid.expected/systemd-fsck-root.service b/test/test-fstab-generator/test-14-uuid.expected/systemd-fsck-root.service
+index 5945560287..cd9583c4dd 100644
+--- a/test/test-fstab-generator/test-14-uuid.expected/systemd-fsck-root.service
++++ b/test/test-fstab-generator/test-14-uuid.expected/systemd-fsck-root.service
+@@ -3,6 +3,7 @@
+ [Unit]
+ Description=File System Check on /dev/disk/by-uuid/3f5ad593-4546-4a94-a374-bcfb68aa11f7
+ Documentation=man:systemd-fsck-root.service(8)
++
+ DefaultDependencies=no
+ BindsTo=dev-disk-by\x2duuid-3f5ad593\x2d4546\x2d4a94\x2da374\x2dbcfb68aa11f7.device
+ Conflicts=shutdown.target
+diff --git a/test/test-fstab-generator/test-15-partuuid.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-15-partuuid.expected/initrd-root-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-15-partuuid.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-15-partuuid.expected/initrd-root-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-15-partuuid.expected/initrd-root-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-15-partuuid.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-15-partuuid.expected/initrd-usr-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-15-partuuid.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-15-partuuid.expected/initrd-usr-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-15-partuuid.expected/initrd-usr-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-15-partuuid.expected/systemd-fsck-root.service b/test/test-fstab-generator/test-15-partuuid.expected/systemd-fsck-root.service
+index aa1d455ecd..650ed8070a 100644
+--- a/test/test-fstab-generator/test-15-partuuid.expected/systemd-fsck-root.service
++++ b/test/test-fstab-generator/test-15-partuuid.expected/systemd-fsck-root.service
+@@ -3,6 +3,7 @@
+ [Unit]
+ Description=File System Check on /dev/disk/by-partuuid/3f5ad593-4546-4a94-a374-bcfb68aa11f7
+ Documentation=man:systemd-fsck-root.service(8)
++
+ DefaultDependencies=no
+ BindsTo=dev-disk-by\x2dpartuuid-3f5ad593\x2d4546\x2d4a94\x2da374\x2dbcfb68aa11f7.device
+ Conflicts=shutdown.target
+diff --git a/test/test-fstab-generator/test-16-tmpfs.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-16-tmpfs.expected/initrd-root-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-16-tmpfs.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-16-tmpfs.expected/initrd-root-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-16-tmpfs.expected/initrd-root-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-16-tmpfs.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-16-tmpfs.expected/initrd-usr-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-16-tmpfs.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-16-tmpfs.expected/initrd-usr-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-16-tmpfs.expected/initrd-usr-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-fs.target.requires/sysroot-usr.mount b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-fs.target.requires/sysroot-usr.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-fs.target.requires/sysroot-usr.mount b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-fs.target.requires/sysroot-usr.mount
+new file mode 120000
+index 0000000000..8bcbb16eae
+--- /dev/null
++++ b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-fs.target.requires/sysroot-usr.mount
+@@ -0,0 +1 @@
++../sysroot-usr.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-root-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-root-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-root-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysroot.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysusr-usr.mount b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysusr-usr.mount
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysusr-usr.mount b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysusr-usr.mount
+new file mode 120000
+index 0000000000..8fb2e18647
+--- /dev/null
++++ b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/initrd-usr-fs.target.requires/sysusr-usr.mount
+@@ -0,0 +1 @@
++../sysusr-usr.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/systemd-fsck-root.service b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/systemd-fsck-root.service
+index 7f914fdd14..95d943b87a 100644
+--- a/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/systemd-fsck-root.service
++++ b/test/test-fstab-generator/test-17-initrd-sysroot.fstab.expected/systemd-fsck-root.service
+@@ -3,6 +3,7 @@
+ [Unit]
+ Description=File System Check on /dev/sdx1
+ Documentation=man:systemd-fsck-root.service(8)
++
+ DefaultDependencies=no
+ BindsTo=dev-sdx1.device
+ Conflicts=shutdown.target

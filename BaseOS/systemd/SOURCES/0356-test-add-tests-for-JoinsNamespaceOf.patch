@@ -1,0 +1,208 @@
+From c8d082c62be5c14f74270739144bc8e49360ba47 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 25 May 2023 06:48:16 +0900
+Subject: [PATCH] test: add tests for JoinsNamespaceOf=
+
+To illustrate the current behavior of the dependency.
+
+(cherry picked from commit 8493a82d0bd5915eb951512cff5e570c43386283)
+
+Related: #2213521
+---
+ .../testsuite-23-joins-namespace-of-1.service |  7 +++++
+ .../testsuite-23-joins-namespace-of-2.service | 10 ++++++
+ .../testsuite-23-joins-namespace-of-3.service | 10 ++++++
+ .../testsuite-23-joins-namespace-of-4.service | 10 ++++++
+ .../testsuite-23-joins-namespace-of-5.service |  6 ++++
+ .../testsuite-23-joins-namespace-of-6.service | 10 ++++++
+ .../testsuite-23-joins-namespace-of-7.service | 11 +++++++
+ .../testsuite-23-joins-namespace-of-8.service |  9 ++++++
+ .../testsuite-23-joins-namespace-of-9.service | 11 +++++++
+ test/units/testsuite-23.JoinsNamespaceOf.sh   | 31 +++++++++++++++++++
+ 10 files changed, 115 insertions(+)
+ create mode 100644 test/testsuite-23.units/testsuite-23-joins-namespace-of-1.service
+ create mode 100644 test/testsuite-23.units/testsuite-23-joins-namespace-of-2.service
+ create mode 100644 test/testsuite-23.units/testsuite-23-joins-namespace-of-3.service
+ create mode 100644 test/testsuite-23.units/testsuite-23-joins-namespace-of-4.service
+ create mode 100644 test/testsuite-23.units/testsuite-23-joins-namespace-of-5.service
+ create mode 100644 test/testsuite-23.units/testsuite-23-joins-namespace-of-6.service
+ create mode 100644 test/testsuite-23.units/testsuite-23-joins-namespace-of-7.service
+ create mode 100644 test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service
+ create mode 100644 test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service
+ create mode 100755 test/units/testsuite-23.JoinsNamespaceOf.sh
+
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-1.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-1.service
+new file mode 100644
+index 0000000000..9919a9fa82
+--- /dev/null
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-1.service
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Service]
++Type=notify
++NotifyAccess=all
++MountAPIVFS=yes
++PrivateTmp=yes
++ExecStart=/bin/bash -c 'touch /tmp/shared-private-file && systemd-notify --ready && sleep infinity'
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-2.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-2.service
+new file mode 100644
+index 0000000000..36b4c272fd
+--- /dev/null
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-2.service
+@@ -0,0 +1,10 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Unit]
++JoinsNamespaceOf=testsuite-23-joins-namespace-of-1.service
++
++[Service]
++Type=oneshot
++MountAPIVFS=yes
++PrivateTmp=yes
++ExecStart=test -e /tmp/shared-private-file
++ExecStart=touch /tmp/hoge
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-3.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-3.service
+new file mode 100644
+index 0000000000..9094445020
+--- /dev/null
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-3.service
+@@ -0,0 +1,10 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Unit]
++JoinsNamespaceOf=testsuite-23-joins-namespace-of-1.service
++
++[Service]
++Type=oneshot
++MountAPIVFS=yes
++PrivateTmp=yes
++ExecStart=test -e /tmp/shared-private-file
++ExecStart=test -e /tmp/hoge
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-4.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-4.service
+new file mode 100644
+index 0000000000..5e823a1778
+--- /dev/null
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-4.service
+@@ -0,0 +1,10 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Unit]
++JoinsNamespaceOf=testsuite-23-joins-namespace-of-5.service
++
++[Service]
++Type=notify
++NotifyAccess=all
++MountAPIVFS=yes
++PrivateTmp=yes
++ExecStart=/bin/bash -c 'touch /tmp/shared-private-file && systemd-notify --ready && sleep infinity'
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-5.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-5.service
+new file mode 100644
+index 0000000000..80594ccba2
+--- /dev/null
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-5.service
+@@ -0,0 +1,6 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Service]
++Type=oneshot
++MountAPIVFS=yes
++PrivateTmp=yes
++ExecStart=test ! -e /tmp/shared-private-file
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-6.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-6.service
+new file mode 100644
+index 0000000000..bbbfd7c67d
+--- /dev/null
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-6.service
+@@ -0,0 +1,10 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Unit]
++JoinsNamespaceOf=testsuite-23-joins-namespace-of-8.service
++
++[Service]
++Type=notify
++NotifyAccess=all
++MountAPIVFS=yes
++PrivateTmp=yes
++ExecStart=/bin/bash -c 'touch /tmp/shared-private-file-x && systemd-notify --ready && sleep infinity'
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-7.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-7.service
+new file mode 100644
+index 0000000000..6c7bbdb097
+--- /dev/null
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-7.service
+@@ -0,0 +1,11 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Unit]
++JoinsNamespaceOf=testsuite-23-joins-namespace-of-8.service
++
++[Service]
++Type=oneshot
++MountAPIVFS=yes
++PrivateTmp=yes
++ExecStart=test ! -e /tmp/shared-private-file-x
++ExecStart=test ! -e /tmp/shared-private-file-y
++ExecStart=touch /tmp/hoge
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service
+new file mode 100644
+index 0000000000..f3ec0668de
+--- /dev/null
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service
+@@ -0,0 +1,9 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Service]
++Type=notify
++NotifyAccess=all
++MountAPIVFS=yes
++PrivateTmp=yes
++ExecStartPre=test ! -e /tmp/shared-private-file-x
++ExecStartPre=test ! -e /tmp/hoge
++ExecStart=/bin/bash -c 'touch /tmp/shared-private-file-y && systemd-notify --ready && sleep infinity'
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service
+new file mode 100644
+index 0000000000..01de7f9054
+--- /dev/null
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service
+@@ -0,0 +1,11 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Unit]
++JoinsNamespaceOf=testsuite-23-joins-namespace-of-8.service
++
++[Service]
++Type=oneshot
++MountAPIVFS=yes
++PrivateTmp=yes
++ExecStart=test ! -e /tmp/shared-private-file-x
++ExecStart=test -e /tmp/shared-private-file-y
++ExecStart=test ! -e /tmp/hoge
+diff --git a/test/units/testsuite-23.JoinsNamespaceOf.sh b/test/units/testsuite-23.JoinsNamespaceOf.sh
+new file mode 100755
+index 0000000000..68ba465072
+--- /dev/null
++++ b/test/units/testsuite-23.JoinsNamespaceOf.sh
+@@ -0,0 +1,31 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++
++set -eux
++set -o pipefail
++
++# Test JoinsNamespaceOf= with PrivateTmp=yes
++
++systemd-analyze log-level debug
++systemd-analyze log-target journal
++
++# simple case
++systemctl start testsuite-23-joins-namespace-of-1.service
++systemctl start testsuite-23-joins-namespace-of-2.service
++systemctl start testsuite-23-joins-namespace-of-3.service
++systemctl stop testsuite-23-joins-namespace-of-1.service
++
++# inverse dependency
++systemctl start testsuite-23-joins-namespace-of-4.service
++systemctl start testsuite-23-joins-namespace-of-5.service
++systemctl stop testsuite-23-joins-namespace-of-4.service
++
++# transitive dependency
++systemctl start testsuite-23-joins-namespace-of-6.service
++systemctl start testsuite-23-joins-namespace-of-7.service
++systemctl start testsuite-23-joins-namespace-of-8.service
++systemctl start testsuite-23-joins-namespace-of-9.service
++systemctl stop testsuite-23-joins-namespace-of-6.service
++systemctl stop testsuite-23-joins-namespace-of-8.service
++
++systemd-analyze log-level info

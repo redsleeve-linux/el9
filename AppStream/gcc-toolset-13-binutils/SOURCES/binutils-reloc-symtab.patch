@@ -1,0 +1,50 @@
+--- binutils.orig/bfd/elf.c	2023-03-30 10:01:40.824181703 +0100
++++ binutils-2.40/bfd/elf.c	2023-03-30 10:02:23.103135337 +0100
+@@ -3877,21 +3877,23 @@ assign_section_numbers (bfd *abfd, struc
+ 	{
+ 	case SHT_REL:
+ 	case SHT_RELA:
+-	  /* A reloc section which we are treating as a normal BFD
+-	     section.  sh_link is the section index of the symbol
+-	     table.  sh_info is the section index of the section to
+-	     which the relocation entries apply.  We assume that an
+-	     allocated reloc section uses the dynamic symbol table
+-	     if there is one.  Otherwise we guess the normal symbol
+-	     table.  FIXME: How can we be sure?  */
+-	  if (d->this_hdr.sh_link == 0 && (sec->flags & SEC_ALLOC) != 0)
++	  /* sh_link is the section index of the symbol table.
++	     sh_info is the section index of the section to which the
++	     relocation entries apply.  */
++	  if (d->this_hdr.sh_link == 0)
+ 	    {
+-	      s = bfd_get_section_by_name (abfd, ".dynsym");
+-	      if (s != NULL)
+-		d->this_hdr.sh_link = elf_section_data (s)->this_idx;
++	      /* FIXME maybe: If this is a reloc section which we are
++		 treating as a normal section then we likely should
++		 not be assuming its sh_link is .dynsym or .symtab.  */
++	      if ((sec->flags & SEC_ALLOC) != 0)
++		{
++		  s = bfd_get_section_by_name (abfd, ".dynsym");
++		  if (s != NULL)
++		    d->this_hdr.sh_link = elf_section_data (s)->this_idx;
++		}
++	      else
++		d->this_hdr.sh_link = elf_onesymtab (abfd);
+ 	    }
+-	  if (d->this_hdr.sh_link == 0)
+-	    d->this_hdr.sh_link = elf_onesymtab (abfd);
+ 
+ 	  s = elf_get_reloc_section (sec);
+ 	  if (s != NULL)
+--- binutils.orig/binutils/objcopy.c	2023-03-30 10:01:41.063181441 +0100
++++ binutils-2.40/binutils/objcopy.c	2023-03-30 12:25:41.439108276 +0100
+@@ -2256,7 +2256,7 @@ merge_gnu_build_notes (bfd *          ab
+ 	{
+ 	  if (pnote->note.namedata[4] == '2')
+ 	    ++ version_2_seen;
+-	  else if (pnote->note.namedata[4] == '3')
++	  else if (pnote->note.namedata[4] == '3' || pnote->note.namedata[4] == '4')
+ 	    ++ version_3_seen;
+ 	  else
+ 	    {

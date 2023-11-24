@@ -1,0 +1,31 @@
+From 8ad2a47f14cd674644d1a4893ec7996c6bcb9be4 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 26 Jul 2023 09:31:54 +0900
+Subject: [PATCH] fstab-generator: fix target of /sysroot/usr
+
+If /usr mount is picked from the main system's fstab file (prefix_sysroot
+is true, and the path is prefixed as /sysroot/usr), then previously it
+was installed in the wrong target unit.
+
+(cherry picked from commit b93d9e06fc6abbd496ec3fb150a4e01c3b7ec72b)
+
+Related: #2190226
+---
+ src/fstab-generator/fstab-generator.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
+index 07f5ae5b73..a7c34cfdf7 100644
+--- a/src/fstab-generator/fstab-generator.c
++++ b/src/fstab-generator/fstab-generator.c
+@@ -912,9 +912,9 @@ static int parse_fstab_one(
+         bool is_sysroot_usr = in_initrd() && path_equal(where, "/sysroot/usr");
+ 
+         const char *target_unit =
+-                        prefix_sysroot ?                    SPECIAL_INITRD_FS_TARGET :
+                         is_sysroot ?                        SPECIAL_INITRD_ROOT_FS_TARGET :
+                         is_sysroot_usr ?                    SPECIAL_INITRD_USR_FS_TARGET :
++                        prefix_sysroot ?                    SPECIAL_INITRD_FS_TARGET :
+                         mount_is_network(fstype, options) ? SPECIAL_REMOTE_FS_TARGET :
+                                                             SPECIAL_LOCAL_FS_TARGET;
+ 

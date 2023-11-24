@@ -1,0 +1,66 @@
+From 509b535eaad77038984604eac486b0bb76accc6d Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 4 Apr 2023 16:43:44 +0900
+Subject: [PATCH] sd-journal: cache results of parsing environment variables
+
+(cherry picked from commit 9dfbae203e3afa500163bc46e0070c4cb2180aac)
+
+Resolves: #2183546
+---
+ src/libsystemd/sd-journal/journal-file.c | 34 +++++++++++++++---------
+ 1 file changed, 22 insertions(+), 12 deletions(-)
+
+diff --git a/src/libsystemd/sd-journal/journal-file.c b/src/libsystemd/sd-journal/journal-file.c
+index cf86bab2dc..00de564499 100644
+--- a/src/libsystemd/sd-journal/journal-file.c
++++ b/src/libsystemd/sd-journal/journal-file.c
+@@ -296,27 +296,37 @@ JournalFile* journal_file_close(JournalFile *f) {
+ }
+ 
+ static bool keyed_hash_requested(void) {
++        static thread_local int cached = -1;
+         int r;
+ 
+-        r = getenv_bool("SYSTEMD_JOURNAL_KEYED_HASH");
+-        if (r >= 0)
+-                return r;
+-        if (r != -ENXIO)
+-                log_debug_errno(r, "Failed to parse $SYSTEMD_JOURNAL_KEYED_HASH environment variable, ignoring: %m");
++        if (cached < 0) {
++                r = getenv_bool("SYSTEMD_JOURNAL_KEYED_HASH");
++                if (r < 0) {
++                        if (r != -ENXIO)
++                                log_debug_errno(r, "Failed to parse $SYSTEMD_JOURNAL_KEYED_HASH environment variable, ignoring: %m");
++                        cached = true;
++                } else
++                        cached = r;
++        }
+ 
+-        return true;
++        return cached;
+ }
+ 
+ static bool compact_mode_requested(void) {
++        static thread_local int cached = -1;
+         int r;
+ 
+-        r = getenv_bool("SYSTEMD_JOURNAL_COMPACT");
+-        if (r >= 0)
+-                return r;
+-        if (r != -ENXIO)
+-                log_debug_errno(r, "Failed to parse $SYSTEMD_JOURNAL_COMPACT environment variable, ignoring: %m");
++        if (cached < 0) {
++                r = getenv_bool("SYSTEMD_JOURNAL_COMPACT");
++                if (r < 0) {
++                        if (r != -ENXIO)
++                                log_debug_errno(r, "Failed to parse $SYSTEMD_JOURNAL_COMPACT environment variable, ignoring: %m");
++                        cached = true;
++                } else
++                        cached = r;
++        }
+ 
+-        return true;
++        return cached;
+ }
+ 
+ static int journal_file_init_header(JournalFile *f, JournalFileFlags file_flags, JournalFile *template) {

@@ -2,9 +2,10 @@
 %bcond_without check
 
 %global lld_srcdir lld-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
-%global maj_ver 15
+%global cmake_srcdir cmake-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
+%global maj_ver 16
 %global min_ver 0
-%global patch_ver 7
+%global patch_ver 6
 
 %global pkg_name lld
 %global install_prefix /usr
@@ -13,20 +14,21 @@
 
 Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}
-Release:	4%{?dist}.redsleeve
+Release:	1%{?dist}
 Summary:	The LLVM Linker
 
-License:	NCSA
+License:	Apache-2.0 WITH LLVM-exception OR NCSA
 URL:		http://llvm.org
 Source0:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{lld_srcdir}.tar.xz
 Source1:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{lld_srcdir}.tar.xz.sig
-Source2:	release-keys.asc
+Source2:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz
+Source3:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz.sig
+Source4:	release-keys.asc
 
 ExcludeArch:	s390x
 
-Patch0:		0001-PATCH-lld-CMake-Check-for-gtest-headers-even-if-lit..patch
-
-Patch1000:	1000_patch_atomic_arm.patch
+# Backport from LLVM 17.
+Patch0:     0001-lld-Use-installed-llvm_gtest-in-standalone-builds.patch
 
 # Bundle libunwind header need during build for MachO support
 Patch1:		0002-PATCH-lld-Import-compact_unwind_encoding.h-from-libu.patch
@@ -77,14 +79,17 @@ Shared libraries for LLD.
 
 
 %prep
-%{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
+%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
+%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE3}' --data='%{SOURCE2}'
+%setup -T -q -b 2 -n %{cmake_srcdir}
+# TODO: It would be more elegant to set -DLLVM_COMMON_CMAKE_UTILS=%{_builddir}/%{cmake_srcdir},
+# but this is not a CACHED variable, so we can't actually set it externally :(
+cd ..
+mv %{cmake_srcdir} cmake
 %autosetup -n %{lld_srcdir} -p2
 
 
 %build
-
-# Disable lto since it causes the COFF/libpath.test lit test to crash.
-%global _lto_cflags %{nil}
 
 %cmake \
 	-GNinja \
@@ -119,6 +124,8 @@ rm %{buildroot}%{install_includedir}/mach-o/compact_unwind_encoding.h
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/Alternatives/
 touch %{buildroot}%{_bindir}/ld
 
+install -D -m 644 -t  %{buildroot}%{_mandir}/man1/ docs/ld.lld.1
+
 %post
 %{_sbindir}/update-alternatives --install %{_bindir}/ld ld %{_bindir}/ld.lld 1
 
@@ -142,6 +149,7 @@ fi
 %{_bindir}/ld.lld
 %{_bindir}/ld64.lld
 %{_bindir}/wasm-ld
+%{_mandir}/man1/ld.lld.1*
 
 %files devel
 %{install_includedir}/lld
@@ -153,8 +161,14 @@ fi
 
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart < jacco@redsleeve.org> - 15.0.7-4.redsleeve
-- link COFF with atomic
+* Wed Jul 05 2023 Nikita Popov <npopov@redhat.com> - 16.0.6-1
+- Update to LLVM 16.0.6
+
+* Fri May 05 2023 Nikita Popov <npopov@redhat.com> - 16.0.1-2
+- Build with LTO
+
+* Wed Apr 19 2023 Nikita Popov <npopov@redhat.com> - 16.0.1-1
+- Update to LLVM 16.0.1
 
 * Tue Jan 31 2023 Konrad Kleine <kkleine@redhat.com> - 15.0.7-4
 - Fixup for obsoleting lld-test < 15.0.7

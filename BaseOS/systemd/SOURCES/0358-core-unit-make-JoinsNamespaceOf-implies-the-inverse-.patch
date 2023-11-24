@@ -1,0 +1,113 @@
+From 096cfb2903d48b115e417010767388ff5c49b282 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 23 May 2023 06:36:44 +0900
+Subject: [PATCH] core/unit: make JoinsNamespaceOf= implies the inverse
+ dependency
+
+Previously, even if a.service has JoinsNamespaceOf=b.service, the
+inverse direction of reference was not introduced.
+Hence, a.service is started earlier than b.service, the namespace will
+not shared with b.service.
+Also, even if a.service had the reference to b.service, b.service did not.
+If b.service is freed earlier, then unit_clear_dependencies() does not clear
+the reference from a to b, and will cause use-after-free on unit_free() for
+a.service.
+
+Let's make JoinsNamespaceOf=b.service in a.service implies the inverse
+dependency, i.e. JoinsNamespaceOf=a.service for b.service. Then, we can safely
+free b.service.
+
+(cherry picked from commit a60f96fcf55c3452e5b13d6daec537af1909eda3)
+
+Related: #2213521
+---
+ man/systemd.unit.xml                                 | 12 +++++++-----
+ src/core/unit.c                                      | 11 +++++------
+ .../testsuite-23-joins-namespace-of-5.service        |  2 +-
+ .../testsuite-23-joins-namespace-of-8.service        |  2 +-
+ .../testsuite-23-joins-namespace-of-9.service        |  2 +-
+ 5 files changed, 15 insertions(+), 14 deletions(-)
+
+diff --git a/man/systemd.unit.xml b/man/systemd.unit.xml
+index 8e1a3464df..d41909bcc6 100644
+--- a/man/systemd.unit.xml
++++ b/man/systemd.unit.xml
+@@ -858,16 +858,18 @@
+         <term><varname>JoinsNamespaceOf=</varname></term>
+ 
+         <listitem><para>For units that start processes (such as service units), lists one or more other units
+-        whose network and/or temporary file namespace to join. This only applies to unit types which support
+-        the <varname>PrivateNetwork=</varname>, <varname>NetworkNamespacePath=</varname>,
++        whose network and/or temporary file namespace to join. If this is specified on a unit (say, a.service
++        has <varname>JoinsNamespaceOf=b.service</varname>), then this the inverse dependency
++        (<varname>JoinsNamespaceOf=a.service</varname> for b.service) is implied. This only applies to unit
++        types which support the <varname>PrivateNetwork=</varname>, <varname>NetworkNamespacePath=</varname>,
+         <varname>PrivateIPC=</varname>, <varname>IPCNamespacePath=</varname>, and
+         <varname>PrivateTmp=</varname> directives (see
+         <citerefentry><refentrytitle>systemd.exec</refentrytitle><manvolnum>5</manvolnum></citerefentry> for
+         details). If a unit that has this setting set is started, its processes will see the same
+         <filename>/tmp/</filename>, <filename>/var/tmp/</filename>, IPC namespace and network namespace as
+-        one listed unit that is started. If multiple listed units are already started, it is not defined
+-        which namespace is joined. Note that this setting only has an effect if
+-        <varname>PrivateNetwork=</varname>/<varname>NetworkNamespacePath=</varname>,
++        one listed unit that is started. If multiple listed units are already started and these do not share
++        their namespace, then it is not defined which namespace is joined. Note that this setting only has an
++        effect if <varname>PrivateNetwork=</varname>/<varname>NetworkNamespacePath=</varname>,
+         <varname>PrivateIPC=</varname>/<varname>IPCNamespacePath=</varname> and/or
+         <varname>PrivateTmp=</varname> is enabled for both the unit that joins the namespace and the unit
+         whose namespace is joined.</para></listitem>
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 0faf66413b..8b66139ad9 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -3108,12 +3108,11 @@ int unit_add_dependency(
+                 return r;
+         notify = r > 0;
+ 
+-        if (inverse_table[d] != _UNIT_DEPENDENCY_INVALID && inverse_table[d] != d) {
+-                r = unit_add_dependency_hashmap(&other->dependencies, inverse_table[d], u, 0, mask);
+-                if (r < 0)
+-                        return r;
+-                notify_other = r > 0;
+-        }
++        assert(inverse_table[d] >= 0 && inverse_table[d] < _UNIT_DEPENDENCY_MAX);
++        r = unit_add_dependency_hashmap(&other->dependencies, inverse_table[d], u, 0, mask);
++        if (r < 0)
++                return r;
++        notify_other = r > 0;
+ 
+         if (add_reference) {
+                 r = unit_add_dependency_hashmap(&u->dependencies, UNIT_REFERENCES, other, mask, 0);
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-5.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-5.service
+index 80594ccba2..c3d316bfa2 100644
+--- a/test/testsuite-23.units/testsuite-23-joins-namespace-of-5.service
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-5.service
+@@ -3,4 +3,4 @@
+ Type=oneshot
+ MountAPIVFS=yes
+ PrivateTmp=yes
+-ExecStart=test ! -e /tmp/shared-private-file
++ExecStart=test -e /tmp/shared-private-file
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service
+index f3ec0668de..42053b99f8 100644
+--- a/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service
+@@ -4,6 +4,6 @@ Type=notify
+ NotifyAccess=all
+ MountAPIVFS=yes
+ PrivateTmp=yes
+-ExecStartPre=test ! -e /tmp/shared-private-file-x
++ExecStartPre=test -e /tmp/shared-private-file-x
+ ExecStartPre=test ! -e /tmp/hoge
+ ExecStart=/bin/bash -c 'touch /tmp/shared-private-file-y && systemd-notify --ready && sleep infinity'
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service
+index 01de7f9054..a50a7fcdc2 100644
+--- a/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service
+@@ -7,5 +7,5 @@ Type=oneshot
+ MountAPIVFS=yes
+ PrivateTmp=yes
+ ExecStart=test ! -e /tmp/shared-private-file-x
+-ExecStart=test -e /tmp/shared-private-file-y
++ExecStart=test ! -e /tmp/shared-private-file-y
+ ExecStart=test ! -e /tmp/hoge

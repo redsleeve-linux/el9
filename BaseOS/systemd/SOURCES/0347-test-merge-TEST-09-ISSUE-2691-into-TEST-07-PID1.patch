@@ -1,0 +1,76 @@
+From 53da89d4a318cca04a9ec75e5d4431c36e10c140 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 10 May 2023 13:13:12 +0200
+Subject: [PATCH] test: merge TEST-09-ISSUE-2691 into TEST-07-PID1
+
+(cherry picked from commit 4966a31ba3ef1eae37733a81bf318f4b18d11a96)
+
+Related: #2213521
+---
+ test/TEST-09-ISSUE-2691/Makefile |  1 -
+ test/TEST-09-ISSUE-2691/test.sh  | 11 -----------
+ test/units/testsuite-07.service  |  6 +++++-
+ test/units/testsuite-09.service  | 11 -----------
+ 4 files changed, 5 insertions(+), 24 deletions(-)
+ delete mode 120000 test/TEST-09-ISSUE-2691/Makefile
+ delete mode 100755 test/TEST-09-ISSUE-2691/test.sh
+ delete mode 100644 test/units/testsuite-09.service
+
+diff --git a/test/TEST-09-ISSUE-2691/Makefile b/test/TEST-09-ISSUE-2691/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-09-ISSUE-2691/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-09-ISSUE-2691/test.sh b/test/TEST-09-ISSUE-2691/test.sh
+deleted file mode 100755
+index 3fc243cc55..0000000000
+--- a/test/TEST-09-ISSUE-2691/test.sh
++++ /dev/null
+@@ -1,11 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2691"
+-TEST_NO_NSPAWN=1
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-do_test "$@"
+diff --git a/test/units/testsuite-07.service b/test/units/testsuite-07.service
+index c478e12360..f45b9c7c5b 100644
+--- a/test/units/testsuite-07.service
++++ b/test/units/testsuite-07.service
+@@ -3,6 +3,10 @@
+ Description=TEST-07-ISSUE-1981
+ 
+ [Service]
++Type=oneshot
+ ExecStartPre=rm -f /failed /testok
+ ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-Type=oneshot
++# Issue: https://github.com/systemd/systemd/issues/2691
++ExecStop=sh -c 'kill -SEGV $$$$'
++RemainAfterExit=yes
++TimeoutStopSec=270s
+diff --git a/test/units/testsuite-09.service b/test/units/testsuite-09.service
+deleted file mode 100644
+index 6f6cd9c522..0000000000
+--- a/test/units/testsuite-09.service
++++ /dev/null
+@@ -1,11 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-09-ISSUE-2691
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=sh -c '>/testok'
+-ExecStop=sh -c 'kill -SEGV $$$$'
+-Type=oneshot
+-RemainAfterExit=yes
+-TimeoutStopSec=270s

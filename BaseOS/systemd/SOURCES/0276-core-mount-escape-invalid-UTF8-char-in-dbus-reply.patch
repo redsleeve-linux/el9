@@ -1,0 +1,106 @@
+From fcdec60764cd1d6f2d859558303390fffcec3633 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 11 May 2023 19:21:57 +0900
+Subject: [PATCH] core/mount: escape invalid UTF8 char in dbus reply
+
+When What= or Options= may contain invalid UTF8 chars.
+
+Replaces aaf7b0e41105d7b7cf30912cdac32820f011a219 (#27541).
+
+(cherry picked from commit 4804da58536ab7ad46178a03f4d2da49fd8e4ba2)
+
+Resolves: #2208240
+---
+ src/core/dbus-mount.c | 67 +++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 55 insertions(+), 12 deletions(-)
+
+diff --git a/src/core/dbus-mount.c b/src/core/dbus-mount.c
+index 73702b1a16..55ad4f2c98 100644
+--- a/src/core/dbus-mount.c
++++ b/src/core/dbus-mount.c
+@@ -9,21 +9,66 @@
+ #include "mount.h"
+ #include "string-util.h"
+ #include "unit.h"
++#include "utf8.h"
++
++static int property_get_what(
++                sd_bus *bus,
++                const char *path,
++                const char *interface,
++                const char *property,
++                sd_bus_message *reply,
++                void *userdata,
++                sd_bus_error *error) {
++
++        _cleanup_free_ char *escaped = NULL;
++        Mount *m = ASSERT_PTR(userdata);
++        const char *s = NULL;
++
++        assert(bus);
++        assert(reply);
+ 
+-static const char *mount_get_what(const Mount *m) {
+         if (m->from_proc_self_mountinfo && m->parameters_proc_self_mountinfo.what)
+-                return m->parameters_proc_self_mountinfo.what;
+-        if (m->from_fragment && m->parameters_fragment.what)
+-                return m->parameters_fragment.what;
+-        return NULL;
++                s = m->parameters_proc_self_mountinfo.what;
++        else if (m->from_fragment && m->parameters_fragment.what)
++                s = m->parameters_fragment.what;
++
++        if (s) {
++                escaped = utf8_escape_invalid(s);
++                if (!escaped)
++                        return -ENOMEM;
++        }
++
++        return sd_bus_message_append_basic(reply, 's', escaped);
+ }
+ 
+-static const char *mount_get_options(const Mount *m) {
++static int property_get_options(
++                sd_bus *bus,
++                const char *path,
++                const char *interface,
++                const char *property,
++                sd_bus_message *reply,
++                void *userdata,
++                sd_bus_error *error) {
++
++        _cleanup_free_ char *escaped = NULL;
++        Mount *m = ASSERT_PTR(userdata);
++        const char *s = NULL;
++
++        assert(bus);
++        assert(reply);
++
+         if (m->from_proc_self_mountinfo && m->parameters_proc_self_mountinfo.options)
+-                return m->parameters_proc_self_mountinfo.options;
+-        if (m->from_fragment && m->parameters_fragment.options)
+-                return m->parameters_fragment.options;
+-        return NULL;
++                s = m->parameters_proc_self_mountinfo.options;
++        else if (m->from_fragment && m->parameters_fragment.options)
++                s = m->parameters_fragment.options;
++
++        if (s) {
++                escaped = utf8_escape_invalid(s);
++                if (!escaped)
++                        return -ENOMEM;
++        }
++
++        return sd_bus_message_append_basic(reply, 's', escaped);
+ }
+ 
+ static const char *mount_get_fstype(const Mount *m) {
+@@ -34,8 +79,6 @@ static const char *mount_get_fstype(const Mount *m) {
+         return NULL;
+ }
+ 
+-static BUS_DEFINE_PROPERTY_GET(property_get_what, "s", Mount, mount_get_what);
+-static BUS_DEFINE_PROPERTY_GET(property_get_options, "s", Mount, mount_get_options);
+ static BUS_DEFINE_PROPERTY_GET(property_get_type, "s", Mount, mount_get_fstype);
+ static BUS_DEFINE_PROPERTY_GET_ENUM(property_get_result, mount_result, MountResult);
+ 

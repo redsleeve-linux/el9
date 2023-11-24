@@ -1,0 +1,72 @@
+From fd613a23cb8763da1ac47fcd1d7faacc8fd550d2 Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Thu, 13 Jul 2023 23:13:10 +0800
+Subject: [PATCH] fstab-util: add fstab_is_bind
+
+(cherry picked from commit 35df78cd88e784abafd5df4545feeb3dd98e14a4)
+
+Related: #2190226
+---
+ src/core/mount.c        |  9 +--------
+ src/shared/fstab-util.c | 13 +++++++++++++
+ src/shared/fstab-util.h |  2 ++
+ 3 files changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/src/core/mount.c b/src/core/mount.c
+index ba55f7dd86..a46ac804d8 100644
+--- a/src/core/mount.c
++++ b/src/core/mount.c
+@@ -119,14 +119,7 @@ static bool mount_is_loop(const MountParameters *p) {
+ 
+ static bool mount_is_bind(const MountParameters *p) {
+         assert(p);
+-
+-        if (fstab_test_option(p->options, "bind\0" "rbind\0"))
+-                return true;
+-
+-        if (p->fstype && STR_IN_SET(p->fstype, "bind", "rbind"))
+-                return true;
+-
+-        return false;
++        return fstab_is_bind(p->options, p->fstype);
+ }
+ 
+ static bool mount_is_bound_to_device(Mount *m) {
+diff --git a/src/shared/fstab-util.c b/src/shared/fstab-util.c
+index f683f05981..35e0d0d6f7 100644
+--- a/src/shared/fstab-util.c
++++ b/src/shared/fstab-util.c
+@@ -19,6 +19,8 @@ int fstab_has_fstype(const char *fstype) {
+         _cleanup_endmntent_ FILE *f = NULL;
+         struct mntent *m;
+ 
++        assert(fstype);
++
+         f = setmntent(fstab_path(), "re");
+         if (!f)
+                 return errno == ENOENT ? false : -errno;
+@@ -286,3 +288,14 @@ char *fstab_node_to_udev_node(const char *p) {
+ 
+         return strdup(p);
+ }
++
++bool fstab_is_bind(const char *options, const char *fstype) {
++
++        if (fstab_test_option(options, "bind\0" "rbind\0"))
++                return true;
++
++        if (fstype && STR_IN_SET(fstype, "bind", "rbind"))
++                return true;
++
++        return false;
++}
+diff --git a/src/shared/fstab-util.h b/src/shared/fstab-util.h
+index 6b596baafa..5979b476b6 100644
+--- a/src/shared/fstab-util.h
++++ b/src/shared/fstab-util.h
+@@ -40,3 +40,5 @@ char *fstab_node_to_udev_node(const char *p);
+ static inline const char* fstab_path(void) {
+         return secure_getenv("SYSTEMD_FSTAB") ?: "/etc/fstab";
+ }
++
++bool fstab_is_bind(const char *options, const char *fstype);

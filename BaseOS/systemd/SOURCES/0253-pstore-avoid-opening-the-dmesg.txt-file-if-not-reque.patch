@@ -1,0 +1,68 @@
+From 4c6c7127a96f086b919b4c082b9da6b29f791bb8 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 28 Apr 2023 11:50:33 +0200
+Subject: [PATCH] pstore: avoid opening the dmesg.txt file if not requested
+
+Even with Storage=journal we would still attempt to open the final
+dmesg.txt file which causes a lot of noise in the journal:
+
+```
+[    5.764111] H testsuite-82.sh[658]: + systemctl start systemd-pstore
+[    5.806385] H systemd[1]: Starting modprobe@efi_pstore.service...
+[    5.808656] H systemd[1]: modprobe@efi_pstore.service: Deactivated successfully.
+[    5.808971] H systemd[1]: Finished modprobe@efi_pstore.service.
+[    5.818845] H kernel: audit: type=1130 audit(1682630623.637:114): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg='unit=modprobe@efi_pstore comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? termin>
+[    5.818865] H kernel: audit: type=1131 audit(1682630623.637:115): pid=1 uid=0 auid=4294967295 ses=4294967295 subj=kernel msg='unit=modprobe@efi_pstore comm="systemd" exe="/usr/lib/systemd/systemd" hostname=? addr=? termin>
+[    5.816052] H systemd[1]: Starting systemd-pstore.service...
+[    5.840703] H systemd-pstore[806]: PStore dmesg-efi-168263062313014.
+[    5.841239] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.841428] H systemd-pstore[806]: PStore dmesg-efi-168263062312014.
+[    5.841575] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.841712] H systemd-pstore[806]: PStore dmesg-efi-168263062311014.
+[    5.841839] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.841989] H systemd-pstore[806]: PStore dmesg-efi-168263062310014.
+[    5.842141] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.842274] H systemd-pstore[806]: PStore dmesg-efi-168263062309014.
+[    5.842423] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.842589] H systemd-pstore[806]: PStore dmesg-efi-168263062308014.
+[    5.842722] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.842865] H systemd-pstore[806]: PStore dmesg-efi-168263062307014.
+[    5.843003] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.843153] H systemd-pstore[806]: PStore dmesg-efi-168263062306014.
+[    5.843280] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.843434] H systemd-pstore[806]: PStore dmesg-efi-168263062305014.
+[    5.843570] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.843702] H systemd-pstore[806]: PStore dmesg-efi-168263062304014.
+[    5.843831] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.843958] H systemd-pstore[806]: PStore dmesg-efi-168263062303014.
+[    5.844093] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.844250] H systemd-pstore[806]: PStore dmesg-efi-168263062302014.
+[    5.844412] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.844619] H systemd-pstore[806]: PStore dmesg-efi-168263062301014.
+[    5.844781] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.844956] H systemd-pstore[806]: PStore dmesg-efi-168263062300014.
+[    5.845168] H systemd-pstore[806]: Failed to open file /var/lib/systemd/pstore/1682630623/014/dmesg.txt: Operation not permitted
+[    5.851101] H systemd[1]: Finished systemd-pstore.service.
+```
+
+(cherry picked from commit ad5980803adac8dc1cf980447a07cb18962c238b)
+
+Related: #2170883
+---
+ src/pstore/pstore.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/pstore/pstore.c b/src/pstore/pstore.c
+index 066d8ebb81..7fff6cee62 100644
+--- a/src/pstore/pstore.c
++++ b/src/pstore/pstore.c
+@@ -180,6 +180,9 @@ static int append_dmesg(PStoreEntry *pe, const char *subdir1, const char *subdir
+ 
+         assert(pe);
+ 
++        if (arg_storage != PSTORE_STORAGE_EXTERNAL)
++                return 0;
++
+         if (pe->content_size == 0)
+                 return 0;
+ 

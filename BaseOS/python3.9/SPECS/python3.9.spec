@@ -13,16 +13,12 @@ URL: https://www.python.org/
 
 #  WARNING  When rebasing to a new Python version,
 #           remember to update the python3-docs package as well
-%global general_version %{pybasever}.16
+%global general_version %{pybasever}.18
 #global prerel ...
 %global upstream_version %{general_version}%{?prerel}
 Version: %{general_version}%{?prerel:~%{prerel}}
-Release: 1%{?dist}.2.redsleeve
+Release: 1%{?dist}
 License: Python
-
-%ifarch armv6hl
-%define _gnu "-gnueabihf"
-%endif
 
 
 # ==================================
@@ -329,7 +325,7 @@ Patch189: 00189-use-rpm-wheels.patch
 # The versions are written in Lib/ensurepip/__init__.py, this patch removes them.
 # When the bundled setuptools/pip wheel is updated, the patch no longer applies cleanly.
 # In such cases, the patch needs to be amended and the versions updated here:
-%global pip_version 22.0.4
+%global pip_version 23.0.1
 %global setuptools_version 58.1.0
 
 # 00251 # 1b1047c14ff98eae6d355b4aac4df3e388813f62
@@ -403,27 +399,15 @@ Patch329: 00329-fips.patch
 # a nightmare because it's basically a binary file.
 Patch353: 00353-architecture-names-upstream-downstream.patch
 
-# 00399 # c32eff86eb80f6a6bdcbf4b1b6535fbc627b51a2
-# CVE-2023-24329
-#
-# * gh-102153: Start stripping C0 control and space chars in `urlsplit` (GH-102508)
-#
-# `urllib.parse.urlsplit` has already been respecting the WHATWG spec a bit GH-25595.
-#
-# This adds more sanitizing to respect the "Remove any leading C0 control or space from input" [rule](https://url.spec.whatwg.org/GH-url-parsing:~:text=Remove%%20any%%20leading%%20and%%20trailing%%20C0%%20control%%20or%%20space%%20from%%20input.) in response to [CVE-2023-24329](https://nvd.nist.gov/vuln/detail/CVE-2023-24329).
-#
-# ---------
-Patch399: 00399-cve-2023-24329.patch
-
-# 00404 #
-# CVE-2023-40217
-#
-# Security fix for CVE-2023-40217: Bypass TLS handshake on closed sockets
-# Resolved upstream: https://github.com/python/cpython/issues/108310
-# Fixups added on top from:
-# https://github.com/python/cpython/issues/108342
-#
-Patch404: 00404-cve-2023-40217.patch
+# 00397 #
+# Add filters for tarfile extraction (CVE-2007-4559, PEP-706)
+# First patch fixes determination of symlink targets, which were treated
+# as relative to the root of the archive,
+# rather than the directory containing the symlink.
+# Not yet upstream as of this writing.
+# The second patch is Red Hat configuration, see KB for documentation:
+# - https://access.redhat.com/articles/7004769
+Patch397: 00397-tarfile-filter.patch
 
 # (New patches go here ^^^)
 #
@@ -1023,10 +1007,10 @@ InstallPython() {
 %endif # with gdb_hooks
 
   # Rename the -devel script that differs on different arches to arch specific name
-#  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
-#  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
-#    %{buildroot}%{_bindir}/python${LDVersion}-config
-#    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
+  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
+  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
+    %{buildroot}%{_bindir}/python${LDVersion}-config
+    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
 
   # Make python3-devel multilib-ready
   mv %{buildroot}%{_includedir}/python${LDVersion}/pyconfig.h \
@@ -1211,7 +1195,7 @@ ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python
 ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python%{pybasever}
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python-config
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-config
-#ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
+ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
 # There were also executables with %%{LDVERSION_optimized} in RHEL 8,
 # but since Python 3.8 %%{LDVERSION_optimized} == %%{pybasever}.
 # We list both in the %%files section to assert this.
@@ -1219,7 +1203,7 @@ ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-p
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python-debug
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}
 ln -s %{_bindir}/python%{LDVERSION_debug}-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-config
-#ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
+ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
 %endif
 %endif
 
@@ -1603,7 +1587,7 @@ CheckPython optimized
 
 %{_bindir}/python%{pybasever}-config
 %{_bindir}/python%{LDVERSION_optimized}-config
-#%{_bindir}/python%{LDVERSION_optimized}-*-config
+%{_bindir}/python%{LDVERSION_optimized}-*-config
 %{_libdir}/libpython%{LDVERSION_optimized}.so
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}.pc
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}-embed.pc
@@ -1614,8 +1598,8 @@ CheckPython optimized
 %{_libexecdir}/platform-python-config
 %{_libexecdir}/platform-python%{pybasever}-config
 %{_libexecdir}/platform-python%{LDVERSION_optimized}-config
-#%{_libexecdir}/platform-python%{pybasever}-*-config
-#%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
+%{_libexecdir}/platform-python%{pybasever}-*-config
+%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
 %endif
 
 
@@ -1775,7 +1759,7 @@ CheckPython optimized
 %{pylibdir}/config-%{LDVERSION_debug}-%{platform_triplet}
 %{_includedir}/python%{LDVERSION_debug}
 %{_bindir}/python%{LDVERSION_debug}-config
-#%{_bindir}/python%{LDVERSION_debug}-*-config
+%{_bindir}/python%{LDVERSION_debug}-*-config
 %{_libdir}/libpython%{LDVERSION_debug}.so
 %{_libdir}/libpython%{LDVERSION_debug}.so.%{py_SOVERSION}
 %{_libdir}/pkgconfig/python-%{LDVERSION_debug}.pc
@@ -1785,7 +1769,7 @@ CheckPython optimized
 %{_libexecdir}/platform-python-debug
 %{_libexecdir}/platform-python%{LDVERSION_debug}
 %{_libexecdir}/platform-python%{LDVERSION_debug}-config
-#%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
+%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
 %endif
 
 # Analog of the -tools subpackage's files:
@@ -1826,16 +1810,23 @@ CheckPython optimized
 # ======================================================
 
 %changelog
-* Fri Oct 06 2023 Jacco Ligthart <jacco@redsleeve.org> - 3.9.16-1.2.redsleeve
-- three minor changes for armv6
-
-* Tue Sep 12 2023 Charalampos Stratakis <cstratak@redhat.com> - 3.9.16-1.2
+* Thu Sep 07 2023 Charalampos Stratakis <cstratak@redhat.com> - 3.9.18-1
+- Update to 3.9.18
 - Security fix for CVE-2023-40217
-Resolves: RHEL-2934
+Resolves: RHEL-3043
 
-* Mon May 29 2023 Charalampos Stratakis <cstratak@redhat.com> - 3.9.16-1.1
+* Wed Aug 09 2023 Petr Viktorin <pviktori@redhat.com> - 3.9.17-2
+- Fix symlink handling in the fix for CVE-2023-24329
+Resolves: rhbz#263261
+
+* Mon Jun 26 2023 Charalampos Stratakis <cstratak@redhat.com> - 3.9.17-1
+- Update to 3.9.17
 - Security fix for CVE-2023-24329
 Resolves: rhbz#2173917
+
+* Tue Mar 07 2023 Petr Viktorin <pviktori@redhat.com> - 3.9.16-2
+- Add filters for tarfile extraction (CVE-2007-4559, PEP-706)
+Resolves: rhbz#263261
 
 * Thu Dec 08 2022 Charalampos Stratakis <cstratak@redhat.com> - 3.9.16-1
 - Update to 3.9.16

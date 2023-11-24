@@ -1,0 +1,196 @@
+From ac7fc3fd00a6f468b14ba05b80d7e2d41b46d485 Mon Sep 17 00:00:00 2001
+From: Ivan Vecera <ivecera@redhat.com>
+Date: Thu, 22 Jun 2023 10:06:27 +0200
+Subject: [PATCH] udev-builtin-net_id: align VF representor names with VF names
+
+Certain cards support to set their eswitch to switchdev mode. In this
+mode for each created VF there is also created so called VF representor.
+This representor is helper network interface used for configuration of
+mentioned eswitch and belongs to an appropriate PF.
+
+VF representors are identified by the specific value of phys_port_name
+attribute and the value has format "pfMvfN" where M is PF function
+number and N is VF number inside this PF.
+
+As the VF representor interfaces belong to PF PCI device the naming
+scheme used for them is the same like for other PCI devices. In this
+case name of PF interface is used and phys_port_name suffix is appended.
+
+E.g.
+ PF=enp65s0f0np0 # phys_port_name for PF interface is 'p0'
+ VF=enp65s0f0np0v0 # v0 is appended for VF0 in case of NAMING_SR_IOV_V
+REP=enp65s0f0np0pf0vf0 # phys_port_name for VF0 representor is 'pf0vf0'
+
+First as the phys_port_name for representors is long (6+ chars) then the
+generated name does not fit into IFNAMSIZ so this name is used only as
+alternate interface name and for the primary one is used generic one
+like eth<N>. Second 'f0' and 'pf0' in REP name is redundant.
+
+This patch fixes this issue by introducing another naming scheme for VF
+representors and appending 'rN' suffix to PF interface name for them.
+N is VF number so the name used for representor interface is similar to
+VF interface and differs only by the suffix.
+
+For the example above we get:
+ PF=enp65s0f0np0
+ VF=enp65s0f0np0v0
+REP=enp65s0f0np0r0
+
+This eases for userspace to determine which representor interface
+represents particular VF.
+
+Signed-off-by: Ivan Vecera <ivecera@redhat.com>
+(cherry picked from commit 88d2bda8120dcc375a90e28b64de06b9646ab3b6)
+
+Resolves: #2218886
+---
+ man/systemd.net-naming-scheme.xml | 22 ++++++++++++++++++++++
+ src/shared/netif-naming-scheme.h  |  2 ++
+ src/udev/udev-builtin-net_id.c    | 25 ++++++++++++++++++++-----
+ 3 files changed, 44 insertions(+), 5 deletions(-)
+
+diff --git a/man/systemd.net-naming-scheme.xml b/man/systemd.net-naming-scheme.xml
+index 0886369c9b..ade4e27e31 100644
+--- a/man/systemd.net-naming-scheme.xml
++++ b/man/systemd.net-naming-scheme.xml
+@@ -158,6 +158,7 @@
+           <term><varname>ID_NET_NAME_SLOT=<replaceable>prefix</replaceable>[<constant>P</constant><replaceable>domain</replaceable>]<constant>s</constant><replaceable>slot</replaceable>[<constant>f</constant><replaceable>function</replaceable>][<constant>n</constant><replaceable>port_name</replaceable>|<constant>d</constant><replaceable>dev_port</replaceable>]<constant>b</constant><replaceable>number</replaceable></varname></term>
+           <term><varname>ID_NET_NAME_SLOT=<replaceable>prefix</replaceable>[<constant>P</constant><replaceable>domain</replaceable>]<constant>s</constant><replaceable>slot</replaceable>[<constant>f</constant><replaceable>function</replaceable>][<constant>n</constant><replaceable>port_name</replaceable>|<constant>d</constant><replaceable>dev_port</replaceable>]<constant>u</constant><replaceable>port</replaceable>…[<constant>c</constant><replaceable>config</replaceable>][<constant>i</constant><replaceable>interface</replaceable>]</varname></term>
+           <term><varname>ID_NET_NAME_SLOT=<replaceable>prefix</replaceable>[<constant>P</constant><replaceable>domain</replaceable>]<constant>s</constant><replaceable>slot</replaceable>[<constant>f</constant><replaceable>function</replaceable>][<constant>n</constant><replaceable>port_name</replaceable>|<constant>d</constant><replaceable>dev_port</replaceable>]<constant>v</constant><replaceable>slot</replaceable></varname></term>
++          <term><varname>ID_NET_NAME_SLOT=<replaceable>prefix</replaceable>[<constant>P</constant><replaceable>domain</replaceable>]<constant>s</constant><replaceable>slot</replaceable>[<constant>f</constant><replaceable>function</replaceable>][<constant>n</constant><replaceable>port_name</replaceable>|<constant>d</constant><replaceable>dev_port</replaceable>]<constant>r</constant><replaceable>slot</replaceable></varname></term>
+ 
+           <listitem><para>This property describes the slot position. Different schemes are used depending on
+           the bus type, as described in the table below. In case of USB, BCMA, and SR-VIO devices, the full
+@@ -205,6 +206,11 @@
+                   <entry>… <constant>v</constant><replaceable>slot</replaceable></entry>
+                   <entry>SR-VIO slot number</entry>
+                 </row>
++
++                <row>
++                  <entry>… <constant>r</constant><replaceable>slot</replaceable></entry>
++                  <entry>SR-IOV slot number</entry>
++                </row>
+               </tbody>
+             </tgroup>
+           </table>
+@@ -225,6 +231,11 @@
+           <constant>v</constant> and the virtual device number, with any leading zeros removed. The bus
+           number is ignored.</para>
+ 
++          <para>SR-IOV virtual device representors are named based on the name of the physical device
++          interface, with a suffix of <constant>r</constant> and the number of the virtual device that
++          is linked to the particular representor, with any leading zeros removed. The physical port
++          name and the bus number are ignored.</para>
++
+           <para>In some configurations a parent PCI bridge of a given network controller may be associated
+           with a slot. In such case we don't generate this device property to avoid possible naming conflicts.</para>
+           </listitem>
+@@ -472,6 +483,17 @@
+            <listitem><para>Same as naming scheme <constant>rhel-9.0</constant>.</para></listitem>
+         </varlistentry>
+ 
++        <varlistentry>
++            <term><constant>rhel-9.3</constant></term>
++
++          <listitem><para>Naming was changed for SR-IOV virtual device representors.</para>
++
++          <para>The <literal>r<replaceable>slot</replaceable></literal> suffix was added to differentiate SR-IOV
++          virtual device representors attached to a single physical device interface.
++          </para>
++          </listitem>
++        </varlistentry>
++
+       </variablelist>
+ 
+     <para>Note that <constant>latest</constant> may be used to denote the latest scheme known (to this
+diff --git a/src/shared/netif-naming-scheme.h b/src/shared/netif-naming-scheme.h
+index 3e35c5e2fa..fb3c8eb9b3 100644
+--- a/src/shared/netif-naming-scheme.h
++++ b/src/shared/netif-naming-scheme.h
+@@ -38,6 +38,7 @@ typedef enum NamingSchemeFlags {
+         NAMING_XEN_VIF                   = 1 << 13, /* Generate names for Xen netfront devices */
+         NAMING_BRIDGE_MULTIFUNCTION_SLOT = 1 << 14, /* Use PCI hotplug slot information associated with bridge, but only if PCI device is multifunction */
+         NAMING_DEVICETREE_ALIASES        = 1 << 15, /* Generate names from devicetree aliases */
++        NAMING_SR_IOV_R                  = 1 << 17, /* Use "r" suffix for SR-IOV VF representors */
+ 
+         /* And now the masks that combine the features above */
+         NAMING_V238 = 0,
+@@ -54,6 +55,7 @@ typedef enum NamingSchemeFlags {
+         NAMING_RHEL_9_0 = NAMING_V250 | NAMING_BRIDGE_MULTIFUNCTION_SLOT,
+         NAMING_RHEL_9_1 = NAMING_RHEL_9_0,
+         NAMING_RHEL_9_2 = NAMING_RHEL_9_0,
++        NAMING_RHEL_9_3 = NAMING_RHEL_9_0 | NAMING_SR_IOV_R,
+ 
+         EXTRA_NET_NAMING_SCHEMES
+ 
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index d4e9dcb60d..c57568f8cb 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -80,6 +80,7 @@ typedef struct LinkInfo {
+         int ifindex;
+         int iflink;
+         int iftype;
++        int vf_representor_id;
+         const char *devtype;
+         const char *phys_port_name;
+         struct hw_addr_data hw_addr;
+@@ -208,7 +209,10 @@ static int dev_pci_onboard(sd_device *dev, const LinkInfo *info, NetNames *names
+         s = names->pci_onboard;
+         l = sizeof(names->pci_onboard);
+         l = strpcpyf(&s, l, "o%lu", idx);
+-        if (!isempty(info->phys_port_name))
++        if (naming_scheme_has(NAMING_SR_IOV_R) && info->vf_representor_id >= 0)
++                /* For VF representor append 'r<VF_NUM>' and not phys_port_name */
++                l = strpcpyf(&s, l, "r%d", info->vf_representor_id);
++        else if (!isempty(info->phys_port_name))
+                 /* kernel provided front panel port name for multiple port PCI device */
+                 l = strpcpyf(&s, l, "n%s", info->phys_port_name);
+         else if (dev_port > 0)
+@@ -391,7 +395,10 @@ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+         l = strpcpyf(&s, l, "p%us%u", bus, slot);
+         if (func > 0 || is_pci_multifunction(names->pcidev) > 0)
+                 l = strpcpyf(&s, l, "f%u", func);
+-        if (!isempty(info->phys_port_name))
++        if (naming_scheme_has(NAMING_SR_IOV_R) && info->vf_representor_id >= 0)
++                /* For VF representor append 'r<VF_NUM>' and not phys_port_name */
++                l = strpcpyf(&s, l, "r%d", info->vf_representor_id);
++        else if (!isempty(info->phys_port_name))
+                 /* kernel provided front panel port name for multi-port PCI device */
+                 l = strpcpyf(&s, l, "n%s", info->phys_port_name);
+         else if (dev_port > 0)
+@@ -485,7 +492,10 @@ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+                 l = strpcpyf(&s, l, "s%"PRIu32, hotplug_slot);
+                 if (func > 0 || is_pci_multifunction(names->pcidev) > 0)
+                         l = strpcpyf(&s, l, "f%u", func);
+-                if (!isempty(info->phys_port_name))
++                if (naming_scheme_has(NAMING_SR_IOV_R) && info->vf_representor_id >= 0)
++                        /* For VF representor append 'r<VF_NUM>' and not phys_port_name */
++                        l = strpcpyf(&s, l, "r%d", info->vf_representor_id);
++                else if (!isempty(info->phys_port_name))
+                         l = strpcpyf(&s, l, "n%s", info->phys_port_name);
+                 else if (dev_port > 0)
+                         l = strpcpyf(&s, l, "d%lu", dev_port);
+@@ -1082,7 +1092,10 @@ static int get_link_info(sd_device *dev, LinkInfo *info) {
+         if (r < 0 && r != -ENOENT)
+                 return r;
+ 
+-        (void) sd_device_get_sysattr_value(dev, "phys_port_name", &info->phys_port_name);
++        r = sd_device_get_sysattr_value(dev, "phys_port_name", &info->phys_port_name);
++        if (r >= 0)
++                /* Check if phys_port_name indicates virtual device representor */
++                (void) sscanf(info->phys_port_name, "pf%*uvf%d", &info->vf_representor_id);
+ 
+         r = sd_device_get_sysattr_value(dev, "address", &s);
+         if (r < 0 && r != -ENOENT)
+@@ -1099,7 +1112,9 @@ static int get_link_info(sd_device *dev, LinkInfo *info) {
+ static int builtin_net_id(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
+         const char *prefix;
+         NetNames names = {};
+-        LinkInfo info = {};
++        LinkInfo info = {
++                .vf_representor_id = -1,
++        };
+         int r;
+ 
+         r = get_link_info(dev, &info);

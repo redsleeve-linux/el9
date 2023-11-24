@@ -1,0 +1,545 @@
+commit 8091199cdf4d0aa9c28e4526548ddc25d02898ca
+Author: Andreas Krebbel <krebbel@linux.ibm.com>
+Date:   Wed Feb 1 08:59:42 2023 +0100
+
+    IBM zSystems: Save argument registers to the stack -mpreserve-args
+    
+    This adds support for preserving the content of parameter registers to
+    the stack and emit CFI for it. This useful for applications which want
+    to implement their own stack unwinding and need access to function
+    arguments.
+    
+    With the -mpreserve-args option GPRs and FPRs are save to the stack
+    slots which are reserved for stdargs in the register save area.
+    
+    gcc/ChangeLog:
+    
+            * config/s390/s390.c (s390_restore_gpr_p): New function.
+            (s390_preserve_gpr_arg_in_range_p): New function.
+            (s390_preserve_gpr_arg_p): New function.
+            (s390_preserve_fpr_arg_p): New function.
+            (s390_register_info_stdarg_fpr): Rename to ...
+            (s390_register_info_arg_fpr): ... this. Add -mpreserve-args handling.
+            (s390_register_info_stdarg_gpr): Rename to ...
+            (s390_register_info_arg_gpr): ... this. Add -mpreserve-args handling.
+            (s390_register_info): Use the renamed functions above.
+            (s390_optimize_register_info): Likewise.
+            (save_fpr): Generate CFI for -mpreserve-args.
+            (save_gprs): Generate CFI for -mpreserve-args. Drop return value.
+            (s390_emit_prologue): Adjust to changed calling convention of save_gprs.
+            (s390_optimize_prologue): Likewise.
+            * config/s390/s390.opt: New option -mpreserve-args
+    
+    gcc/testsuite/ChangeLog:
+    
+            * gcc.target/s390/preserve-args-1.c: New test.
+            * gcc.target/s390/preserve-args-2.c: New test.
+
+--- a/gcc/config/s390/s390.c
++++ b/gcc/config/s390/s390.c
+@@ -411,6 +411,45 @@ struct s390_address
+ #define FP_ARG_NUM_REG (TARGET_64BIT? 4 : 2)
+ #define VEC_ARG_NUM_REG 8
+ 
++/* Return TRUE if GPR REGNO is supposed to be restored in the function
++   epilogue.  */
++static inline bool
++s390_restore_gpr_p (int regno)
++{
++  return (cfun_frame_layout.first_restore_gpr != -1
++	  && regno >= cfun_frame_layout.first_restore_gpr
++	  && regno <= cfun_frame_layout.last_restore_gpr);
++}
++
++/* Return TRUE if any of the registers in range [FIRST, LAST] is saved
++   because of -mpreserve-args.  */
++static inline bool
++s390_preserve_gpr_arg_in_range_p (int first, int last)
++{
++  int num_arg_regs = MIN (crtl->args.info.gprs + cfun->va_list_gpr_size,
++			  GP_ARG_NUM_REG);
++  return (num_arg_regs
++	  && s390_preserve_args_p
++	  && first <= GPR2_REGNUM + num_arg_regs - 1
++	  && last >= GPR2_REGNUM);
++}
++
++static inline bool
++s390_preserve_gpr_arg_p (int regno)
++{
++  return s390_preserve_gpr_arg_in_range_p (regno, regno);
++}
++
++static inline bool
++s390_preserve_fpr_arg_p (int regno)
++{
++  int num_arg_regs = MIN (crtl->args.info.fprs + cfun->va_list_fpr_size,
++			  FP_ARG_NUM_REG);
++  return (s390_preserve_args_p
++	  && regno <= FPR0_REGNUM + num_arg_regs - 1
++	  && regno >= FPR0_REGNUM);
++}
++
+ /* A couple of shortcuts.  */
+ #define CONST_OK_FOR_J(x) \
+ 	CONST_OK_FOR_CONSTRAINT_P((x), 'J', "J")
+@@ -9893,61 +9932,89 @@ s390_register_info_gprtofpr ()
+ }
+ 
+ /* Set the bits in fpr_bitmap for FPRs which need to be saved due to
+-   stdarg.
++   stdarg or -mpreserve-args.
+    This is a helper routine for s390_register_info.  */
+-
+ static void
+-s390_register_info_stdarg_fpr ()
++s390_register_info_arg_fpr ()
+ {
+   int i;
+-  int min_fpr;
+-  int max_fpr;
++  int min_stdarg_fpr = INT_MAX, max_stdarg_fpr = -1;
++  int min_preserve_fpr = INT_MAX, max_preserve_fpr = -1;
++  int min_fpr, max_fpr;
+ 
+   /* Save the FP argument regs for stdarg. f0, f2 for 31 bit and
+      f0-f4 for 64 bit.  */
+-  if (!cfun->stdarg
+-      || !TARGET_HARD_FLOAT
+-      || !cfun->va_list_fpr_size
+-      || crtl->args.info.fprs >= FP_ARG_NUM_REG)
+-    return;
++  if (cfun->stdarg
++      && TARGET_HARD_FLOAT
++      && cfun->va_list_fpr_size
++      && crtl->args.info.fprs < FP_ARG_NUM_REG)
++    {
++      min_stdarg_fpr = crtl->args.info.fprs;
++      max_stdarg_fpr = min_stdarg_fpr + cfun->va_list_fpr_size - 1;
++      if (max_stdarg_fpr >= FP_ARG_NUM_REG)
++	max_stdarg_fpr = FP_ARG_NUM_REG - 1;
++
++      /* FPR argument regs start at f0.  */
++      min_stdarg_fpr += FPR0_REGNUM;
++      max_stdarg_fpr += FPR0_REGNUM;
++    }
+ 
+-  min_fpr = crtl->args.info.fprs;
+-  max_fpr = min_fpr + cfun->va_list_fpr_size - 1;
+-  if (max_fpr >= FP_ARG_NUM_REG)
+-    max_fpr = FP_ARG_NUM_REG - 1;
++  if (s390_preserve_args_p && crtl->args.info.fprs)
++    {
++      min_preserve_fpr = FPR0_REGNUM;
++      max_preserve_fpr = MIN (FPR0_REGNUM + FP_ARG_NUM_REG - 1,
++			      FPR0_REGNUM + crtl->args.info.fprs - 1);
++    }
+ 
+-  /* FPR argument regs start at f0.  */
+-  min_fpr += FPR0_REGNUM;
+-  max_fpr += FPR0_REGNUM;
++  min_fpr = MIN (min_stdarg_fpr, min_preserve_fpr);
++  max_fpr = MAX (max_stdarg_fpr, max_preserve_fpr);
++
++  if (max_fpr == -1)
++    return;
+ 
+   for (i = min_fpr; i <= max_fpr; i++)
+     cfun_set_fpr_save (i);
+ }
+ 
++
+ /* Reserve the GPR save slots for GPRs which need to be saved due to
+-   stdarg.
++   stdarg or -mpreserve-args.
+    This is a helper routine for s390_register_info.  */
+ 
+ static void
+-s390_register_info_stdarg_gpr ()
++s390_register_info_arg_gpr ()
+ {
+   int i;
+-  int min_gpr;
+-  int max_gpr;
++  int min_stdarg_gpr = INT_MAX, max_stdarg_gpr = -1;
++  int min_preserve_gpr = INT_MAX, max_preserve_gpr = -1;
++  int min_gpr, max_gpr;
+ 
+-  if (!cfun->stdarg
+-      || !cfun->va_list_gpr_size
+-      || crtl->args.info.gprs >= GP_ARG_NUM_REG)
+-    return;
++  if (cfun->stdarg
++      && cfun->va_list_gpr_size
++      && crtl->args.info.gprs < GP_ARG_NUM_REG)
++    {
++      min_stdarg_gpr = crtl->args.info.gprs;
++      max_stdarg_gpr = min_stdarg_gpr + cfun->va_list_gpr_size - 1;
++      if (max_stdarg_gpr >= GP_ARG_NUM_REG)
++	max_stdarg_gpr = GP_ARG_NUM_REG - 1;
++
++      /* GPR argument regs start at r2.  */
++      min_stdarg_gpr += GPR2_REGNUM;
++      max_stdarg_gpr += GPR2_REGNUM;
++    }
++
++  if (s390_preserve_args_p && crtl->args.info.gprs)
++    {
++      min_preserve_gpr = GPR2_REGNUM;
++      max_preserve_gpr = MIN (GPR6_REGNUM,
++			      GPR2_REGNUM + crtl->args.info.gprs - 1);
++    }
+ 
+-  min_gpr = crtl->args.info.gprs;
+-  max_gpr = min_gpr + cfun->va_list_gpr_size - 1;
+-  if (max_gpr >= GP_ARG_NUM_REG)
+-    max_gpr = GP_ARG_NUM_REG - 1;
++  min_gpr = MIN (min_stdarg_gpr, min_preserve_gpr);
++  max_gpr = MAX (max_stdarg_gpr, max_preserve_gpr);
+ 
+-  /* GPR argument regs start at r2.  */
+-  min_gpr += GPR2_REGNUM;
+-  max_gpr += GPR2_REGNUM;
++  if (max_gpr == -1)
++    return;
+ 
+   /* If r6 was supposed to be saved into an FPR and now needs to go to
+      the stack for vararg we have to adjust the restore range to make
+@@ -10079,14 +10146,14 @@ s390_register_info ()
+     if (clobbered_regs[i])
+       cfun_gpr_save_slot (i) = SAVE_SLOT_STACK;
+ 
+-  s390_register_info_stdarg_fpr ();
++  s390_register_info_arg_fpr ();
+   s390_register_info_gprtofpr ();
+   s390_register_info_set_ranges ();
+-  /* stdarg functions might need to save GPRs 2 to 6.  This might
+-     override the GPR->FPR save decision made by
+-     s390_register_info_gprtofpr for r6 since vararg regs must go to
+-     the stack.  */
+-  s390_register_info_stdarg_gpr ();
++
++  /* Forcing argument registers to be saved on the stack might
++     override the GPR->FPR save decision for r6 so this must come
++     last.  */
++  s390_register_info_arg_gpr ();
+ }
+ 
+ /* Return true if REGNO is a global register, but not one
+@@ -10141,7 +10208,7 @@ s390_optimize_register_info ()
+       cfun_gpr_save_slot (i) = SAVE_SLOT_NONE;
+ 
+   s390_register_info_set_ranges ();
+-  s390_register_info_stdarg_gpr ();
++  s390_register_info_arg_gpr ();
+ }
+ 
+ /* Fill cfun->machine with info about frame of current function.  */
+@@ -10864,14 +10931,28 @@ static rtx
+ save_fpr (rtx base, int offset, int regnum)
+ {
+   rtx addr;
++  rtx insn;
++
+   addr = gen_rtx_MEM (DFmode, plus_constant (Pmode, base, offset));
+ 
+-  if (regnum >= 16 && regnum <= (16 + FP_ARG_NUM_REG))
++  if (regnum >= FPR0_REGNUM && regnum <= (FPR0_REGNUM + FP_ARG_NUM_REG))
+     set_mem_alias_set (addr, get_varargs_alias_set ());
+   else
+     set_mem_alias_set (addr, get_frame_alias_set ());
+ 
+-  return emit_move_insn (addr, gen_rtx_REG (DFmode, regnum));
++  insn = emit_move_insn (addr, gen_rtx_REG (DFmode, regnum));
++
++  if (!call_used_regs[regnum] || s390_preserve_fpr_arg_p (regnum))
++    RTX_FRAME_RELATED_P (insn) = 1;
++
++  if (s390_preserve_fpr_arg_p (regnum) && !cfun_fpr_save_p (regnum))
++    {
++      rtx reg = gen_rtx_REG (DFmode, regnum);
++      add_reg_note (insn, REG_CFA_NO_RESTORE, reg);
++      add_reg_note (insn, REG_CFA_OFFSET, gen_rtx_SET (addr, reg));
++    }
++
++  return insn;
+ }
+ 
+ /* Emit insn to restore fpr REGNUM from offset OFFSET relative
+@@ -10891,10 +10972,11 @@ restore_fpr (rtx base, int offset, int regnum)
+    the register save area located at offset OFFSET
+    relative to register BASE.  */
+ 
+-static rtx
+-save_gprs (rtx base, int offset, int first, int last)
++static void
++save_gprs (rtx base, int offset, int first, int last, rtx_insn *before = NULL)
+ {
+   rtx addr, insn, note;
++  rtx_insn *out_insn;
+   int i;
+ 
+   addr = plus_constant (Pmode, base, offset);
+@@ -10910,7 +10992,15 @@ save_gprs (rtx base, int offset, int first, int last)
+ 
+       if (!global_not_special_regno_p (first))
+ 	RTX_FRAME_RELATED_P (insn) = 1;
+-      return insn;
++
++      if (s390_preserve_gpr_arg_p (first) && !s390_restore_gpr_p (first))
++	{
++	  rtx reg = gen_rtx_REG (Pmode, first);
++	  add_reg_note (insn, REG_CFA_NO_RESTORE, reg);
++	  add_reg_note (insn, REG_CFA_OFFSET, gen_rtx_SET (addr, reg));
++	}
++
++      goto emit;
+     }
+ 
+ 
+@@ -10939,7 +11029,12 @@ save_gprs (rtx base, int offset, int first, int last)
+      set, even if it does not.  Therefore we emit a new pattern
+      without those registers as REG_FRAME_RELATED_EXPR note.  */
+ 
+-  if (first >= 6 && !global_not_special_regno_p (first))
++  /* In these cases all of the sets are marked as frame related:
++     1. call-save GPR saved and restored
++     2. argument GPR saved because of -mpreserve-args */
++  if ((first >= GPR6_REGNUM && !global_not_special_regno_p (first))
++      || s390_preserve_gpr_arg_in_range_p (first, last))
++
+     {
+       rtx pat = PATTERN (insn);
+ 
+@@ -10950,6 +11045,24 @@ save_gprs (rtx base, int offset, int first, int last)
+ 	  RTX_FRAME_RELATED_P (XVECEXP (pat, 0, i)) = 1;
+ 
+       RTX_FRAME_RELATED_P (insn) = 1;
++
++      /* For the -mpreserve-args register saves no restore operations
++	 will be emitted. CFI checking would complain about this. We
++	 manually generate the REG_CFA notes here to be able to mark
++	 those operations with REG_CFA_NO_RESTORE.  */
++      if (s390_preserve_gpr_arg_in_range_p (first, last))
++	{
++	  for (int regno = first; regno <= last; regno++)
++	    {
++	      rtx reg = gen_rtx_REG (Pmode, regno);
++	      rtx reg_addr = plus_constant (Pmode, base,
++					    offset + (regno - first) * UNITS_PER_LONG);
++	      if (!s390_restore_gpr_p (regno))
++		add_reg_note (insn, REG_CFA_NO_RESTORE, reg);
++	      add_reg_note (insn, REG_CFA_OFFSET,
++			    gen_rtx_SET (gen_frame_mem (Pmode, reg_addr), reg));
++	    }
++	}
+     }
+   else if (last >= 6)
+     {
+@@ -10960,7 +11073,7 @@ save_gprs (rtx base, int offset, int first, int last)
+ 	  break;
+ 
+       if (start > last)
+-	return insn;
++	goto emit;
+ 
+       addr = plus_constant (Pmode, base,
+ 			    offset + (start - first) * UNITS_PER_LONG);
+@@ -10978,7 +11091,7 @@ save_gprs (rtx base, int offset, int first, int last)
+ 	  add_reg_note (insn, REG_FRAME_RELATED_EXPR, note);
+ 	  RTX_FRAME_RELATED_P (insn) = 1;
+ 
+-	  return insn;
++	  goto emit;
+ 	}
+ 
+       note = gen_store_multiple (gen_rtx_MEM (Pmode, addr),
+@@ -10997,9 +11110,15 @@ save_gprs (rtx base, int offset, int first, int last)
+       RTX_FRAME_RELATED_P (insn) = 1;
+     }
+ 
+-  return insn;
++ emit:
++  if (before != NULL_RTX)
++    out_insn = emit_insn_before (insn, before);
++  else
++    out_insn = emit_insn (insn);
++  INSN_ADDRESSES_NEW (out_insn, -1);
+ }
+ 
++
+ /* Generate insn to restore registers FIRST to LAST from
+    the register save area located at offset OFFSET
+    relative to register BASE.  */
+@@ -11423,12 +11542,12 @@ s390_emit_prologue (void)
+   /* Save call saved gprs.  */
+   if (cfun_frame_layout.first_save_gpr != -1)
+     {
+-      insn = save_gprs (stack_pointer_rtx,
+-			cfun_frame_layout.gprs_offset +
+-			UNITS_PER_LONG * (cfun_frame_layout.first_save_gpr
+-					  - cfun_frame_layout.first_save_gpr_slot),
+-			cfun_frame_layout.first_save_gpr,
+-			cfun_frame_layout.last_save_gpr);
++      save_gprs (stack_pointer_rtx,
++		 cfun_frame_layout.gprs_offset +
++		 UNITS_PER_LONG * (cfun_frame_layout.first_save_gpr
++				   - cfun_frame_layout.first_save_gpr_slot),
++		 cfun_frame_layout.first_save_gpr,
++		 cfun_frame_layout.last_save_gpr);
+ 
+       /* This is not 100% correct.  If we have more than one register saved,
+ 	 then LAST_PROBE_OFFSET can move even closer to sp.  */
+@@ -11436,8 +11555,6 @@ s390_emit_prologue (void)
+ 	= (cfun_frame_layout.gprs_offset +
+ 	   UNITS_PER_LONG * (cfun_frame_layout.first_save_gpr
+ 			     - cfun_frame_layout.first_save_gpr_slot));
+-
+-      emit_insn (insn);
+     }
+ 
+   /* Dummy insn to mark literal pool slot.  */
+@@ -11467,15 +11584,10 @@ s390_emit_prologue (void)
+     {
+       if (cfun_fpr_save_p (i))
+ 	{
+-	  insn = save_fpr (stack_pointer_rtx, offset, i);
++	  save_fpr (stack_pointer_rtx, offset, i);
+ 	  if (offset < last_probe_offset)
+ 	    last_probe_offset = offset;
+ 	  offset += 8;
+-
+-	  /* If f4 and f6 are call clobbered they are saved due to
+-	     stdargs and therefore are not frame related.  */
+-	  if (!call_used_regs[i])
+-	    RTX_FRAME_RELATED_P (insn) = 1;
+ 	}
+       else if (!TARGET_PACKED_STACK || call_used_regs[i])
+ 	offset += 8;
+@@ -11491,11 +11603,10 @@ s390_emit_prologue (void)
+       for (i = FPR15_REGNUM; i >= FPR8_REGNUM && offset >= 0; i--)
+ 	if (cfun_fpr_save_p (i))
+ 	  {
+-	    insn = save_fpr (stack_pointer_rtx, offset, i);
++	    save_fpr (stack_pointer_rtx, offset, i);
+ 	    if (offset < last_probe_offset)
+ 	      last_probe_offset = offset;
+ 
+-	    RTX_FRAME_RELATED_P (insn) = 1;
+ 	    offset -= 8;
+ 	  }
+       if (offset >= cfun_frame_layout.f8_offset)
+@@ -11663,7 +11774,6 @@ s390_emit_prologue (void)
+ 
+ 	    insn = save_fpr (temp_reg, offset, i);
+ 	    offset += 8;
+-	    RTX_FRAME_RELATED_P (insn) = 1;
+ 	    add_reg_note (insn, REG_FRAME_RELATED_EXPR,
+ 			  gen_rtx_SET (gen_rtx_MEM (DFmode, addr),
+ 				       gen_rtx_REG (DFmode, i)));
+@@ -14158,15 +14268,11 @@ s390_optimize_prologue (void)
+ 	    continue;
+ 
+ 	  if (cfun_frame_layout.first_save_gpr != -1)
+-	    {
+-	      rtx s_pat = save_gprs (base,
+-				     off + (cfun_frame_layout.first_save_gpr
+-					    - first) * UNITS_PER_LONG,
+-				     cfun_frame_layout.first_save_gpr,
+-				     cfun_frame_layout.last_save_gpr);
+-	      new_insn = emit_insn_before (s_pat, insn);
+-	      INSN_ADDRESSES_NEW (new_insn, -1);
+-	    }
++	    save_gprs (base,
++		       off + (cfun_frame_layout.first_save_gpr
++			      - first) * UNITS_PER_LONG,
++		       cfun_frame_layout.first_save_gpr,
++		       cfun_frame_layout.last_save_gpr, insn);
+ 
+ 	  remove_insn (insn);
+ 	  continue;
+diff --git a/gcc/config/s390/s390.opt b/gcc/config/s390/s390.opt
+index 57d1b95bd65..344aa551f44 100644
+--- a/gcc/config/s390/s390.opt
++++ b/gcc/config/s390/s390.opt
+@@ -321,3 +321,7 @@ and the default behavior is to emit separate multiplication and addition
+ instructions for long doubles in vector registers, because measurements show
+ that this improves performance.  This option allows overriding it for testing
+ purposes.
++
++mpreserve-args
++Target Var(s390_preserve_args_p) Init(0)
++Store all argument registers on the stack.
+diff --git a/gcc/testsuite/gcc.target/s390/preserve-args-1.c b/gcc/testsuite/gcc.target/s390/preserve-args-1.c
+new file mode 100644
+index 00000000000..24dcf547432
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/s390/preserve-args-1.c
+@@ -0,0 +1,17 @@
++/* Functional tests for the -mpreserve-args cmdline option.  */
++
++/* { dg-do compile } */
++/* { dg-options "-O3 -march=z900 -mpreserve-args" } */
++
++
++int
++foo (int a, int b, int c, double d, double e)
++{
++  return a + c + (int)d + (int)e;
++}
++
++/* { dg-final { scan-assembler "stmg\t%r2,%r4,\[0-9\]*\\(%r15\\)" { target lp64 } } } */
++/* { dg-final { scan-assembler "stm\t%r2,%r4,\[0-9\]*\\(%r15\\)" { target { ! lp64 } } } } */
++
++/* { dg-final { scan-assembler "std\t%f0,\[0-9\]*\\(%r15\\)" } } */
++/* { dg-final { scan-assembler "std\t%f2,\[0-9\]*\\(%r15\\)" } } */
+diff --git a/gcc/testsuite/gcc.target/s390/preserve-args-2.c b/gcc/testsuite/gcc.target/s390/preserve-args-2.c
+new file mode 100644
+index 00000000000..006aad9c371
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/s390/preserve-args-2.c
+@@ -0,0 +1,19 @@
++/* This test requires special handling of a GPR which is saved because
++   of -mpreserve-args but not restored.  dwarf2cfi used to ICE for
++   this in maybe_record_trace_start.  The solution was to introduce a
++   REG_CFA_NORESTORE reg note.  */
++
++/* { dg-do compile } */
++/* { dg-options "-O2 -march=z900 -mpreserve-args" } */
++
++void *foo (void *);
++void bar ();
++int x;
++void *
++baz (void *y)
++{
++  if (__builtin_expect (x, 0))
++    return foo (y);
++  bar ();
++  return foo (y);
++}
+diff --git a/gcc/testsuite/gcc.target/s390/preserve-args-3.c b/gcc/testsuite/gcc.target/s390/preserve-args-3.c
+new file mode 100644
+index 00000000000..f4b135ab8e6
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/s390/preserve-args-3.c
+@@ -0,0 +1,19 @@
++/* Functional tests for the -mpreserve-args cmdline option.  */
++
++/* { dg-do compile } */
++/* { dg-options "-O3 -march=z900 -mpreserve-args" } */
++
++#include <stdarg.h>
++int
++foo (int a, int, int c, double d, ...)
++{
++  va_list argp;
++  va_start(argp, d);
++  return a + c + va_arg(argp, int) + va_arg(argp, int) + (int)va_arg(argp, double);
++}
++
++/* { dg-final { scan-assembler "stmg\t%r2,%r15,\[0-9\]*\\(%r15\\)" { target lp64 } } } */
++/* { dg-final { scan-assembler "stm\t%r2,%r15,\[0-9\]*\\(%r15\\)" { target { ! lp64 } } } } */
++
++/* { dg-final { scan-assembler "std\t%f0,\[0-9\]*\\(%r15\\)" } } */
++/* { dg-final { scan-assembler "std\t%f2,\[0-9\]*\\(%r15\\)" } } */

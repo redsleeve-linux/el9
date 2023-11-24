@@ -1,0 +1,457 @@
+From c8626acc63c4ae1c6cf5d1505e0209ac10f44e81 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Tue, 28 Jun 2022 21:58:55 +0100
+Subject: [PATCH] copy: Use preferred block size for copying
+
+You're not supposed to read or write NBD servers at a granularity less
+than the advertised minimum block size.  nbdcopy has ignored this
+requirement, and this is usually fine because the NBD servers we care
+about support 512-byte sector granularity, and never advertise sizes /
+extents less granular than sectors (even if it's a bit suboptimal in a
+few cases).
+
+However there is one new case where we do care: When writing to a
+compressed qcow2 file, qemu advertises a minimum and preferred block
+size of 64K, and it really means it.  You cannot write blocks smaller
+than this because of the way qcow2 compression is implemented.
+
+This commit attempts to do the least work possible to fix this.
+
+The previous multi-thread-copying loop was driven by the extent map
+received from the source.  I have modified the loop so that it
+iterates over request_size blocks.  request_size is set from the
+command line (--request-size) but will be adjusted upwards if either
+the source or destination preferred block size is larger.  So this
+will always copy blocks which are at least the preferred block size
+(except for the very last block of the disk).
+
+While copying these blocks we consult the source extent map.  If it
+contains only zero regions covering the whole block (only_zeroes
+function) then we can skip straight to zeroing the target
+(fill_dst_range_with_zeroes), else we do read + write as before.
+
+I only modified the multi-thread-copying loop, not the synchronous
+loop.  That should be updated in the same way later.
+
+One side effect of this change is it always makes larger requests,
+even for regions we know are sparse.  This is clear in the
+copy-sparse.sh and copy-sparse-allocated.sh tests which were
+previously driven by the 32K sparse map granularity of the source.
+Without changing these tests, they would make make 256K reads & writes
+(and also read from areas of the disk even though we know they are
+sparse).  I adjusted these tests to use --request-size=32768 to force
+the existing behaviour.
+
+Note this doesn't attempt to limit the maximum block size when reading
+or writing.  That is for future work.
+
+This is a partial fix for https://bugzilla.redhat.com/2047660.
+Further changes will be required in virt-v2v.
+
+Link: https://lists.gnu.org/archive/html/qemu-block/2022-01/threads.html#00729
+Link: https://bugzilla.redhat.com/show_bug.cgi?id=2047660
+(cherry picked from commit 4058fe1ff03fb41156b67302ba1006b9d06b0218)
+---
+ TODO                                  |   4 +-
+ copy/Makefile.am                      |   6 +-
+ copy/copy-file-to-qcow2-compressed.sh |  64 +++++++++++
+ copy/copy-sparse-allocated.sh         |   4 +-
+ copy/copy-sparse.sh                   |   7 +-
+ copy/main.c                           |  13 +++
+ copy/multi-thread-copying.c           | 149 +++++++++++++++++++-------
+ copy/nbdcopy.pod                      |   5 +-
+ 8 files changed, 202 insertions(+), 50 deletions(-)
+ create mode 100755 copy/copy-file-to-qcow2-compressed.sh
+
+diff --git a/TODO b/TODO
+index 7c9c15e..bc38d70 100644
+--- a/TODO
++++ b/TODO
+@@ -28,7 +28,9 @@ Performance: Chart it over various buffer sizes and threads, as that
+ Examine other fuzzers: https://gitlab.com/akihe/radamsa
+ 
+ nbdcopy:
+- - Minimum/preferred/maximum block size.
++ - Enforce maximum block size.
++ - Synchronous loop should be adjusted to take into account
++   the NBD preferred block size, as was done for multi-thread loop.
+  - Benchmark.
+  - Better page cache usage, see nbdkit-file-plugin options
+    fadvise=sequential cache=none.
+diff --git a/copy/Makefile.am b/copy/Makefile.am
+index e729f86..25f75c5 100644
+--- a/copy/Makefile.am
++++ b/copy/Makefile.am
+@@ -23,6 +23,7 @@ EXTRA_DIST = \
+ 	copy-file-to-nbd.sh \
+ 	copy-file-to-null.sh \
+ 	copy-file-to-qcow2.sh \
++	copy-file-to-qcow2-compressed.sh \
+ 	copy-nbd-to-block.sh \
+ 	copy-nbd-to-file.sh \
+ 	copy-nbd-to-hexdump.sh \
+@@ -142,7 +143,10 @@ TESTS += \
+ 	$(NULL)
+ 
+ if HAVE_QEMU_NBD
+-TESTS += copy-file-to-qcow2.sh
++TESTS += \
++	copy-file-to-qcow2.sh \
++	copy-file-to-qcow2-compressed.sh \
++	$(NULL)
+ endif
+ 
+ if HAVE_GNUTLS
+diff --git a/copy/copy-file-to-qcow2-compressed.sh b/copy/copy-file-to-qcow2-compressed.sh
+new file mode 100755
+index 0000000..dfe4fa5
+--- /dev/null
++++ b/copy/copy-file-to-qcow2-compressed.sh
+@@ -0,0 +1,64 @@
++#!/usr/bin/env bash
++# nbd client library in userspace
++# Copyright (C) 2020-2022 Red Hat Inc.
++#
++# This library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2 of the License, or (at your option) any later version.
++#
++# This library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with this library; if not, write to the Free Software
++# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++
++. ../tests/functions.sh
++
++set -e
++set -x
++
++requires $QEMU_NBD --version
++requires nbdkit --exit-with-parent --version
++requires nbdkit sparse-random --dump-plugin
++requires qemu-img --version
++requires stat --version
++
++file1=copy-file-to-qcow2-compressed.file1
++file2=copy-file-to-qcow2-compressed.file2
++rm -f $file1 $file2
++cleanup_fn rm -f $file1 $file2
++
++size=1G
++seed=$RANDOM
++
++# Create a compressed qcow2 file1.
++#
++# sparse-random files should compress easily because by default each
++# block uses repeated bytes.
++qemu-img create -f qcow2 $file1 $size
++nbdcopy -- [ nbdkit --exit-with-parent sparse-random $size seed=$seed ] \
++        [ $QEMU_NBD --image-opts driver=compress,file.driver=qcow2,file.file.driver=file,file.file.filename=$file1 ]
++
++ls -l $file1
++
++# Create an uncompressed qcow2 file2 with the same data.
++qemu-img create -f qcow2 $file2 $size
++nbdcopy -- [ nbdkit --exit-with-parent sparse-random $size seed=$seed ] \
++        [ $QEMU_NBD --image-opts driver=qcow2,file.driver=file,file.filename=$file2 ]
++
++ls -l $file2
++
++# file1 < file2 (shows the compression is having some effect).
++size1="$( stat -c %s $file1 )"
++size2="$( stat -c %s $file2 )"
++if [ $size1 -ge $size2 ]; then
++    echo "$0: qcow2 compression did not make the file smaller"
++    exit 1
++fi
++
++# Logical content of the files should be identical.
++qemu-img compare -f qcow2 $file1 -F qcow2 $file2
+diff --git a/copy/copy-sparse-allocated.sh b/copy/copy-sparse-allocated.sh
+index 203c3b9..465e347 100755
+--- a/copy/copy-sparse-allocated.sh
++++ b/copy/copy-sparse-allocated.sh
+@@ -17,8 +17,6 @@
+ # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ 
+ # Adapted from copy-sparse.sh.
+-#
+-# This test depends on the nbdkit default sparse block size (32K).
+ 
+ . ../tests/functions.sh
+ 
+@@ -33,7 +31,7 @@ requires nbdkit eval --version
+ out=copy-sparse-allocated.out
+ cleanup_fn rm -f $out
+ 
+-$VG nbdcopy --allocated -- \
++$VG nbdcopy --allocated --request-size=32768 -- \
+     [ nbdkit --exit-with-parent data data='
+              1
+              @1073741823 1
+diff --git a/copy/copy-sparse.sh b/copy/copy-sparse.sh
+index 1a6da86..7912a21 100755
+--- a/copy/copy-sparse.sh
++++ b/copy/copy-sparse.sh
+@@ -16,8 +16,6 @@
+ # License along with this library; if not, write to the Free Software
+ # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+ 
+-# This test depends on the nbdkit default sparse block size (32K).
+-
+ . ../tests/functions.sh
+ 
+ set -e
+@@ -34,8 +32,9 @@ cleanup_fn rm -f $out
+ # Copy from a sparse data disk to an nbdkit-eval-plugin instance which
+ # is logging everything.  This allows us to see exactly what nbdcopy
+ # is writing, to ensure it is writing and zeroing the target as
+-# expected.
+-$VG nbdcopy -S 0 -- \
++# expected.  Force request size to match nbdkit default sparse
++# allocator block size (32K).
++$VG nbdcopy -S 0 --request-size=32768 -- \
+     [ nbdkit --exit-with-parent data data='
+              1
+              @1073741823 1
+diff --git a/copy/main.c b/copy/main.c
+index 19ec384..0e27db8 100644
+--- a/copy/main.c
++++ b/copy/main.c
+@@ -40,6 +40,7 @@
+ 
+ #include "ispowerof2.h"
+ #include "human-size.h"
++#include "minmax.h"
+ #include "version.h"
+ #include "nbdcopy.h"
+ 
+@@ -379,10 +380,22 @@ main (int argc, char *argv[])
+   if (threads < connections)
+     connections = threads;
+ 
++  /* request_size must always be at least as large as the preferred
++   * size of source & destination.
++   */
++  request_size = MAX (request_size, src->preferred);
++  request_size = MAX (request_size, dst->preferred);
++
+   /* Adapt queue to size to request size if needed. */
+   if (request_size > queue_size)
+     queue_size = request_size;
+ 
++  /* Sparse size (if using) must not be smaller than the destination
++   * preferred size, otherwise we end up creating too small requests.
++   */
++  if (sparse_size > 0 && sparse_size < dst->preferred)
++    sparse_size = dst->preferred;
++
+   /* Truncate the destination to the same size as the source.  Only
+    * has an effect on regular files.
+    */
+diff --git a/copy/multi-thread-copying.c b/copy/multi-thread-copying.c
+index 06cdb8e..9267545 100644
+--- a/copy/multi-thread-copying.c
++++ b/copy/multi-thread-copying.c
+@@ -166,6 +166,62 @@ decrease_queue_size (struct worker *worker, size_t len)
+   worker->queue_size -= len;
+ }
+ 
++/* Using the extents map 'exts', check if the region
++ * [offset..offset+len-1] intersects only with zero extents.
++ *
++ * The invariant for '*i' is always an extent which starts before or
++ * equal to the current offset.
++ */
++static bool
++only_zeroes (const extent_list exts, size_t *i,
++             uint64_t offset, unsigned len)
++{
++  size_t j;
++
++  /* Invariant. */
++  assert (*i < exts.len);
++  assert (exts.ptr[*i].offset <= offset);
++
++  /* Update the invariant.  Search for the last possible extent in the
++   * list which is <= offset.
++   */
++  for (j = *i + 1; j < exts.len; ++j) {
++    if (exts.ptr[j].offset <= offset)
++      *i = j;
++    else
++      break;
++  }
++
++  /* Check invariant again. */
++  assert (*i < exts.len);
++  assert (exts.ptr[*i].offset <= offset);
++
++  /* If *i is not the last extent, then the next extent starts
++   * strictly beyond our current offset.
++   */
++  assert (*i == exts.len - 1 || exts.ptr[*i + 1].offset > offset);
++
++  /* Search forward, look for any non-zero extents overlapping the region. */
++  for (j = *i; j < exts.len; ++j) {
++    uint64_t start, end;
++
++    /* [start..end-1] is the current extent. */
++    start = exts.ptr[j].offset;
++    end = exts.ptr[j].offset + exts.ptr[j].length;
++
++    assert (end > offset);
++
++    if (start >= offset + len)
++      break;
++
++    /* Non-zero extent covering this region => test failed. */
++    if (!exts.ptr[j].zero)
++      return false;
++  }
++
++  return true;
++}
++
+ /* There are 'threads' worker threads, each copying work ranges from
+  * src to dst until there are no more work ranges.
+  */
+@@ -177,7 +233,10 @@ worker_thread (void *wp)
+   extent_list exts = empty_vector;
+ 
+   while (get_next_offset (&offset, &count)) {
+-    size_t i;
++    struct command *command;
++    size_t extent_index;
++    bool is_zeroing = false;
++    uint64_t zeroing_start = 0; /* initialized to avoid bogus GCC warning */
+ 
+     assert (0 < count && count <= THREAD_WORK_SIZE);
+     if (extents)
+@@ -185,52 +244,64 @@ worker_thread (void *wp)
+     else
+       default_get_extents (src, w->index, offset, count, &exts);
+ 
+-    for (i = 0; i < exts.len; ++i) {
+-      struct command *command;
+-      size_t len;
++    extent_index = 0; // index into extents array used to optimize only_zeroes
++    while (count) {
++      const size_t len = MIN (count, request_size);
+ 
+-      if (exts.ptr[i].zero) {
++      if (only_zeroes (exts, &extent_index, offset, len)) {
+         /* The source is zero so we can proceed directly to skipping,
+-         * fast zeroing, or writing zeroes at the destination.
++         * fast zeroing, or writing zeroes at the destination.  Defer
++         * zeroing so we can send it as a single large command.
+          */
+-        command = create_command (exts.ptr[i].offset, exts.ptr[i].length,
+-                                  true, w);
+-        fill_dst_range_with_zeroes (command);
++        if (!is_zeroing) {
++          is_zeroing = true;
++          zeroing_start = offset;
++        }
+       }
+-
+       else /* data */ {
+-        /* As the extent might be larger than permitted for a single
+-         * command, we may have to split this into multiple read
+-         * requests.
+-         */
+-        while (exts.ptr[i].length > 0) {
+-          len = exts.ptr[i].length;
+-          if (len > request_size)
+-            len = request_size;
+-
+-          command = create_command (exts.ptr[i].offset, len,
+-                                    false, w);
+-
+-          wait_for_request_slots (w);
+-
+-          /* NOTE: Must increase the queue size after waiting. */
+-          increase_queue_size (w, len);
+-
+-          /* Begin the asynch read operation. */
+-          src->ops->asynch_read (src, command,
+-                                 (nbd_completion_callback) {
+-                                   .callback = finished_read,
+-                                   .user_data = command,
+-                                 });
+-
+-          exts.ptr[i].offset += len;
+-          exts.ptr[i].length -= len;
++        /* If we were in the middle of deferred zeroing, do it now. */
++        if (is_zeroing) {
++          /* Note that offset-zeroing_start can never exceed
++           * THREAD_WORK_SIZE, so there is no danger of overflowing
++           * size_t.
++           */
++          command = create_command (zeroing_start, offset-zeroing_start,
++                                    true, w);
++          fill_dst_range_with_zeroes (command);
++          is_zeroing = false;
+         }
++
++        /* Issue the asynchronous read command. */
++        command = create_command (offset, len, false, w);
++
++        wait_for_request_slots (w);
++
++        /* NOTE: Must increase the queue size after waiting. */
++        increase_queue_size (w, len);
++
++        /* Begin the asynch read operation. */
++        src->ops->asynch_read (src, command,
++                               (nbd_completion_callback) {
++                                 .callback = finished_read,
++                                 .user_data = command,
++                               });
+       }
+ 
+-      offset += count;
+-      count = 0;
+-    } /* for extents */
++      offset += len;
++      count -= len;
++    } /* while (count) */
++
++    /* If we were in the middle of deferred zeroing, do it now. */
++    if (is_zeroing) {
++      /* Note that offset-zeroing_start can never exceed
++       * THREAD_WORK_SIZE, so there is no danger of overflowing
++       * size_t.
++       */
++      command = create_command (zeroing_start, offset - zeroing_start,
++                                true, w);
++      fill_dst_range_with_zeroes (command);
++      is_zeroing = false;
++    }
+   }
+ 
+   /* Wait for in flight NBD requests to finish. */
+diff --git a/copy/nbdcopy.pod b/copy/nbdcopy.pod
+index fd10f7c..f06d112 100644
+--- a/copy/nbdcopy.pod
++++ b/copy/nbdcopy.pod
+@@ -182,8 +182,9 @@ Set the maximum number of requests in flight per NBD connection.
+ =item B<--sparse=>N
+ 
+ Detect all zero blocks of size N (bytes) and make them sparse on the
+-output.  You can also turn off sparse detection using S<I<-S 0>>.
+-The default is 4096 bytes.
++output.  You can also turn off sparse detection using S<I<-S 0>>.  The
++default is 4096 bytes, or the destination preferred block size,
++whichever is larger.
+ 
+ =item B<--synchronous>
+ 
+-- 
+2.31.1
+

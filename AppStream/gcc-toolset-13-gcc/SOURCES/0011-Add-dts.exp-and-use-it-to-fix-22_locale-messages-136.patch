@@ -1,0 +1,117 @@
+From b6989e3a4acda2d75612f3f3847dbea4245ff536 Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Wed, 1 Sep 2021 15:39:45 -0400
+Subject: [PATCH 11/17] Add dts.exp and use it to fix
+ 22_locale/messages/13631.cc
+
+This test was added upstream 2014-12-03:
+  "re PR libstdc++/13631 (Problems in messages)"
+    https://gcc.gnu.org/git/?p=gcc.git;a=commitdiff;h=d31008d7a0d53b431f176aad8dda5498de823122
+
+as part of a fix that is present in the system libstdc++.so in
+GCC 5 onwards.
+
+When run in DTS against such a system library, this test will fail.
+This patch introduces a dts.exp which detects the version of the
+underlying system libstdc++.so and exposes it to tests via
+-D__CXXSTDLIB_SO_VERSION__=, so that we can ifdef specific tests
+away, conditionally on the base GCC.
+---
+ .../testsuite/22_locale/messages/13631.cc     |  7 +++++
+ libstdc++-v3/testsuite/lib/dts.exp            | 31 +++++++++++++++++++
+ libstdc++-v3/testsuite/lib/libstdc++.exp      |  6 ++++
+ 3 files changed, 44 insertions(+)
+ create mode 100644 libstdc++-v3/testsuite/lib/dts.exp
+
+diff --git a/libstdc++-v3/testsuite/22_locale/messages/13631.cc b/libstdc++-v3/testsuite/22_locale/messages/13631.cc
+index b8ae3d4f1..5b20df382 100644
+--- a/libstdc++-v3/testsuite/22_locale/messages/13631.cc
++++ b/libstdc++-v3/testsuite/22_locale/messages/13631.cc
+@@ -50,7 +50,10 @@ void test01()
+   msgs_facet.close(fake_msgs);
+   msgs_facet.close(msgs);
+ 
++  // Fixed upstream in GCC 5
++#if __CXXSTDLIB_SO_VERSION__ >= 501000
+   VERIFY( translation1 == translation2 );
++#endif
+ }
+ 
+ void test02()
+@@ -72,8 +75,12 @@ void test02()
+   std::wstring translation1 = msgs_facet.get(msgs, 0, 0, msgid);
+ 
+   // Without a real translation this test doesn't mean anything:
++
++  // Fixed upstream in GCC 5
++#if __CXXSTDLIB_SO_VERSION__ >= 501000
+   VERIFY( !translation1.empty() );
+   VERIFY( translation1 != msgid );
++#endif
+ 
+   // Opening another catalog was enough to show the problem, even a fake
+   // catalog.
+diff --git a/libstdc++-v3/testsuite/lib/dts.exp b/libstdc++-v3/testsuite/lib/dts.exp
+new file mode 100644
+index 000000000..76ece66d3
+--- /dev/null
++++ b/libstdc++-v3/testsuite/lib/dts.exp
+@@ -0,0 +1,31 @@
++# For DTS testing, generate a number expressing the
++# system version of libstdc++.so
++#
++# Generate a version number equivalent to
++#  #define GCC_VERSION (__GNUC__ * 10000 \
++#                       + __GNUC_MINOR__ * 100 \
++#                       + __GNUC_PATCHLEVEL__)
++#
++# For example, given an underlying version of gcc 4.8.5
++# this function will return 408050.
++
++proc get_dts_base_version { } {
++
++    # Invoke gcc in the PATH to get at the underlying GCC version
++    # in dotted form (e.g. "4.8.5").
++    set dotted_version [exec gcc -dumpversion]
++    verbose "dotted_version: '$dotted_version'" 2
++
++    # Extract major, minor, patchlevel
++    regexp {([0-9]+)\.([0-9]+)\.([0-9]+)} \
++	$dotted_version \
++	_ major minor patchlevel
++    verbose "major: '$major'" 2
++    verbose "minor: '$minor'" 2
++    verbose "patchlevel: '$patchlevel'" 2
++
++    set base_gcc_version [expr (($major * 10000) + ($minor * 100)  + $patchlevel)]
++    verbose "base_gcc_version: '$base_gcc_version'" 2
++
++    return $base_gcc_version
++}
+diff --git a/libstdc++-v3/testsuite/lib/libstdc++.exp b/libstdc++-v3/testsuite/lib/libstdc++.exp
+index 7f9580db8..5e4b32f76 100644
+--- a/libstdc++-v3/testsuite/lib/libstdc++.exp
++++ b/libstdc++-v3/testsuite/lib/libstdc++.exp
+@@ -58,6 +58,7 @@ load_gcc_lib timeout.exp
+ load_gcc_lib timeout-dg.exp
+ load_gcc_lib wrapper.exp
+ load_gcc_lib target-utils.exp
++load_lib dts.exp
+ 
+ # Useful for debugging.  Pass the name of a variable and the verbosity
+ # threshold (number of -v's on the command line).
+@@ -323,6 +324,11 @@ proc libstdc++_init { testfile } {
+     set ccflags "$cxxflags -DLOCALEDIR=\".\""
+     set cxxflags "$cxxflags -DLOCALEDIR=\".\""
+ 
++    # For DTS testing, expose the system version of libstdc++.so as
++    # a preprocessor define.
++    set base_gcc_version [get_dts_base_version]
++    set cxxflags "$cxxflags -D__CXXSTDLIB_SO_VERSION__=$base_gcc_version"
++
+     # If a PCH file is available, use it.  We must delay performing
+     # this check until $cxx and such have been initialized because we
+     # perform a test compilation.  (Ideally, gcc --print-file-name would
+-- 
+2.31.1
+

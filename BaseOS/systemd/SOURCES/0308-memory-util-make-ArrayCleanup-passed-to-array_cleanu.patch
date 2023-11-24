@@ -1,0 +1,45 @@
+From 0b4518d1f00543a25b5fc30a6203cd59c84cf8c4 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 7 May 2023 18:34:35 +0900
+Subject: [PATCH] memory-util: make ArrayCleanup passed to array_cleanup()
+ const
+
+Should not change any behavior, preparation for later commits.
+
+(cherry picked from commit 3facdc7da8ad424a38ce9c673fbb94a41e070a7d)
+
+Related: #2190226
+---
+ src/basic/memory-util.h | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/basic/memory-util.h b/src/basic/memory-util.h
+index 8d75befed5..eea9c0e92f 100644
+--- a/src/basic/memory-util.h
++++ b/src/basic/memory-util.h
+@@ -123,13 +123,13 @@ static inline void erase_char(char *p) {
+ }
+ 
+ /* An automatic _cleanup_-like logic for destroy arrays (i.e. pointers + size) when leaving scope */
+-struct ArrayCleanup {
++typedef struct ArrayCleanup {
+         void **parray;
+         size_t *pn;
+         free_array_func_t pfunc;
+-};
++} ArrayCleanup;
+ 
+-static inline void array_cleanup(struct ArrayCleanup *c) {
++static inline void array_cleanup(const ArrayCleanup *c) {
+         assert(c);
+ 
+         assert(!c->parray == !c->pn);
+@@ -147,7 +147,7 @@ static inline void array_cleanup(struct ArrayCleanup *c) {
+ }
+ 
+ #define CLEANUP_ARRAY(array, n, func)                                   \
+-        _cleanup_(array_cleanup) _unused_ struct ArrayCleanup CONCATENATE(_cleanup_array_, UNIQ) = { \
++        _cleanup_(array_cleanup) _unused_ const ArrayCleanup CONCATENATE(_cleanup_array_, UNIQ) = { \
+                 .parray = (void**) &(array),                            \
+                 .pn = &(n),                                             \
+                 .pfunc = (free_array_func_t) ({                         \

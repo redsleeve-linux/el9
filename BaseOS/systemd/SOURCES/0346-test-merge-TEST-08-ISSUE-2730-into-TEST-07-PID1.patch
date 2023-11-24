@@ -1,0 +1,188 @@
+From b6d8ff21df92e6686ce37b047c70c43967b8a2c1 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 10 May 2023 13:07:26 +0200
+Subject: [PATCH] test: merge TEST-08-ISSUE-2730 into TEST-07-PID1
+
+(cherry picked from commit cd62ba42a40e5d87a83a98bc421419bd2778d4ec)
+
+Related: #2213521
+---
+ test/TEST-07-PID1/test.sh                     | 19 +++++++++++++++++++
+ test/TEST-08-ISSUE-2730/Makefile              |  1 -
+ test/TEST-08-ISSUE-2730/test.sh               | 14 --------------
+ test/meson.build                              | 12 ------------
+ test/testsuite-08.units/-.mount               | 12 ------------
+ .../local-fs.target.wants/-.mount             |  1 -
+ test/testsuite-08.units/root.mount            |  1 -
+ .../systemd-remount-fs.service                | 12 ------------
+ test/units/testsuite-07.sh                    |  4 ++++
+ test/units/testsuite-08.service               |  8 --------
+ 10 files changed, 23 insertions(+), 61 deletions(-)
+ delete mode 120000 test/TEST-08-ISSUE-2730/Makefile
+ delete mode 100755 test/TEST-08-ISSUE-2730/test.sh
+ delete mode 100644 test/testsuite-08.units/-.mount
+ delete mode 120000 test/testsuite-08.units/local-fs.target.wants/-.mount
+ delete mode 120000 test/testsuite-08.units/root.mount
+ delete mode 100644 test/testsuite-08.units/systemd-remount-fs.service
+ delete mode 100644 test/units/testsuite-08.service
+
+diff --git a/test/TEST-07-PID1/test.sh b/test/TEST-07-PID1/test.sh
+index 2b9dd418b8..c241840327 100755
+--- a/test/TEST-07-PID1/test.sh
++++ b/test/TEST-07-PID1/test.sh
+@@ -7,4 +7,23 @@ TEST_DESCRIPTION="Tests for core PID1 functionality"
+ # shellcheck source=test/test-functions
+ . "${TEST_BASE_DIR:?}/test-functions"
+ 
++test_append_files() {
++    local workspace="${1:?}"
++
++    # Issue: https://github.com/systemd/systemd/issues/2730
++    mkdir -p "$workspace/etc/systemd/system/"
++    cat >"$workspace/etc/systemd/system/issue2730.mount" <<EOF
++[Mount]
++What=tmpfs
++Where=/issue2730
++Type=tmpfs
++
++[Install]
++WantedBy=local-fs.target
++Alias=issue2730-alias.mount
++EOF
++    "${SYSTEMCTL:?}" enable --root="$workspace" issue2730.mount
++    ln -svrf "$workspace/etc/systemd/system/issue2730.mount" "$workspace/etc/systemd/system/issue2730-alias.mount"
++}
++
+ do_test "$@"
+diff --git a/test/TEST-08-ISSUE-2730/Makefile b/test/TEST-08-ISSUE-2730/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-08-ISSUE-2730/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-08-ISSUE-2730/test.sh b/test/TEST-08-ISSUE-2730/test.sh
+deleted file mode 100755
+index 0564314a86..0000000000
+--- a/test/TEST-08-ISSUE-2730/test.sh
++++ /dev/null
+@@ -1,14 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/2730"
+-IMAGE_NAME="test08"
+-TEST_NO_NSPAWN=1
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-TEST_FORCE_NEWIMAGE=1
+-
+-do_test "$@"
+diff --git a/test/meson.build b/test/meson.build
+index f2080b5a9a..044ae781ee 100644
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -61,18 +61,6 @@ if install_tests
+         install_data(kbd_model_map,
+                      install_dir : testdata_dir + '/test-keymap-util')
+ 
+-        testsuite08_dir = testdata_dir + '/testsuite-08.units'
+-        install_data('testsuite-08.units/-.mount',
+-                     install_dir : testsuite08_dir)
+-        install_data('testsuite-08.units/systemd-remount-fs.service',
+-                     install_dir : testsuite08_dir)
+-        meson.add_install_script(meson_make_symlink,
+-                                 './-.mount',
+-                                 testsuite08_dir + '/root.mount')
+-        meson.add_install_script(meson_make_symlink,
+-                                 '../-.mount',
+-                                 testsuite08_dir + '/local-fs.target.wants/-.mount')
+-
+         if conf.get('HAVE_GNU_EFI') == 1 and conf.get('HAVE_ZSTD') == 1
+                 install_subdir('test-bcd',
+                                exclude_files : '.gitattributes',
+diff --git a/test/testsuite-08.units/-.mount b/test/testsuite-08.units/-.mount
+deleted file mode 100644
+index 66f29afab9..0000000000
+--- a/test/testsuite-08.units/-.mount
++++ /dev/null
+@@ -1,12 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Before=local-fs.target
+-
+-[Mount]
+-What=/dev/sda1
+-Where=/
+-Options=noatime
+-
+-[Install]
+-WantedBy=local-fs.target
+-Alias=root.mount
+diff --git a/test/testsuite-08.units/local-fs.target.wants/-.mount b/test/testsuite-08.units/local-fs.target.wants/-.mount
+deleted file mode 120000
+index 5566fceaa3..0000000000
+--- a/test/testsuite-08.units/local-fs.target.wants/-.mount
++++ /dev/null
+@@ -1 +0,0 @@
+-../-.mount
+\ No newline at end of file
+diff --git a/test/testsuite-08.units/root.mount b/test/testsuite-08.units/root.mount
+deleted file mode 120000
+index fd8c47d1b0..0000000000
+--- a/test/testsuite-08.units/root.mount
++++ /dev/null
+@@ -1 +0,0 @@
+--.mount
+\ No newline at end of file
+diff --git a/test/testsuite-08.units/systemd-remount-fs.service b/test/testsuite-08.units/systemd-remount-fs.service
+deleted file mode 100644
+index c7fdf2f68e..0000000000
+--- a/test/testsuite-08.units/systemd-remount-fs.service
++++ /dev/null
+@@ -1,12 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-DefaultDependencies=no
+-Conflicts=shutdown.target
+-After=systemd-fsck-root.service
+-Before=local-fs-pre.target local-fs.target shutdown.target
+-Wants=local-fs-pre.target
+-
+-[Service]
+-Type=oneshot
+-RemainAfterExit=yes
+-ExecStart=/bin/systemctl reload /
+diff --git a/test/units/testsuite-07.sh b/test/units/testsuite-07.sh
+index 13c767e490..8c004a72e5 100755
+--- a/test/units/testsuite-07.sh
++++ b/test/units/testsuite-07.sh
+@@ -5,6 +5,10 @@ set -o pipefail
+ 
+ : >/failed
+ 
++# Issue: https://github.com/systemd/systemd/issues/2730
++# See TEST-07-PID1/test.sh for the first "half" of the test
++mountpoint /issue2730
++
+ for script in "${0%.sh}".*.sh; do
+     echo "Running $script"
+     "./$script"
+diff --git a/test/units/testsuite-08.service b/test/units/testsuite-08.service
+deleted file mode 100644
+index d6937663e2..0000000000
+--- a/test/units/testsuite-08.service
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-08-ISSUE-2730
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=sh -x -c 'mount -o remount,rw /dev/sda1 && echo OK >/testok; systemctl poweroff'
+-Type=oneshot

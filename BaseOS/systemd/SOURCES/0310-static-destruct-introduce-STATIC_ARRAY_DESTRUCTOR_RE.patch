@@ -1,0 +1,172 @@
+From a8f31096dcd402b4c8d57c2a8f86b52146077ce3 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 9 May 2023 06:44:27 +0900
+Subject: [PATCH] static-destruct: introduce STATIC_ARRAY_DESTRUCTOR_REGISTER()
+
+(cherry picked from commit 9695b0c01bf3d4b260432fb6754c7fbe9173c7db)
+
+Related: #2190226
+---
+ src/basic/static-destruct.h     | 50 ++++++++++++++++++++++++++++++---
+ src/test/test-static-destruct.c | 41 ++++++++++++++++++++++++---
+ 2 files changed, 83 insertions(+), 8 deletions(-)
+
+diff --git a/src/basic/static-destruct.h b/src/basic/static-destruct.h
+index 4bc82889be..2ffc6516f8 100644
+--- a/src/basic/static-destruct.h
++++ b/src/basic/static-destruct.h
+@@ -4,6 +4,7 @@
+ 
+ #include "alloc-util.h"
+ #include "macro.h"
++#include "memory-util.h"
+ 
+ /* A framework for registering static variables that shall be freed on shutdown of a process. It's a bit like gcc's
+  * destructor attribute, but allows us to precisely schedule when we want to free the variables. This is supposed to
+@@ -25,9 +26,24 @@
+          * packed next to each other so that we can enumerate it. */    \
+         _variable_no_sanitize_address_
+ 
+-typedef struct StaticDestructor {
++typedef enum StaticDestructorType {
++        STATIC_DESTRUCTOR_SIMPLE,
++        STATIC_DESTRUCTOR_ARRAY,
++        _STATIC_DESTRUCTOR_TYPE_MAX,
++        _STATIC_DESTRUCTOR_INVALID = -EINVAL,
++} StaticDestructorType;
++
++typedef struct SimpleCleanup {
+         void *data;
+         free_func_t destroy;
++} SimpleCleanup;
++
++typedef struct StaticDestructor {
++        StaticDestructorType type;
++        union {
++                SimpleCleanup simple;
++                ArrayCleanup array;
++        };
+ } StaticDestructor;
+ 
+ #define STATIC_DESTRUCTOR_REGISTER(variable, func) \
+@@ -41,10 +57,25 @@ typedef struct StaticDestructor {
+         }                                                               \
+         _common_static_destruct_attrs_                                  \
+         static const StaticDestructor UNIQ_T(static_destructor_entry, uq) = { \
+-                .data = &(variable),                                    \
+-                .destroy = UNIQ_T(static_destructor_wrapper, uq),       \
++                .type = STATIC_DESTRUCTOR_SIMPLE,                       \
++                .simple.data = &(variable),                             \
++                .simple.destroy = UNIQ_T(static_destructor_wrapper, uq), \
+         }
+ 
++#define STATIC_ARRAY_DESTRUCTOR_REGISTER(a, n, func)            \
++        _STATIC_ARRAY_DESTRUCTOR_REGISTER(UNIQ, a, n, func)
++
++#define _STATIC_ARRAY_DESTRUCTOR_REGISTER(uq, a, n, func)               \
++        /* Type-safety check */                                         \
++        _unused_ static void (* UNIQ_T(static_destructor_wrapper, uq))(typeof(a[0]) *x, size_t y) = (func); \
++        _common_static_destruct_attrs_                                  \
++        static const StaticDestructor UNIQ_T(static_destructor_entry, uq) = { \
++                .type = STATIC_DESTRUCTOR_ARRAY,                        \
++                .array.parray = (void**) &(a),                          \
++                .array.pn = &(n),                                       \
++                .array.pfunc = (free_array_func_t) (func),              \
++        };
++
+ /* Beginning and end of our section listing the destructors. We define these as weak as we want this to work
+  * even if no destructors are defined and the section is missing. */
+ extern const StaticDestructor _weak_ __start_SYSTEMD_STATIC_DESTRUCT[];
+@@ -59,5 +90,16 @@ static inline void static_destruct(void) {
+         for (const StaticDestructor *d = ALIGN_PTR(__start_SYSTEMD_STATIC_DESTRUCT);
+              d < __stop_SYSTEMD_STATIC_DESTRUCT;
+              d = ALIGN_PTR(d + 1))
+-                d->destroy(d->data);
++                switch (d->type) {
++                case STATIC_DESTRUCTOR_SIMPLE:
++                        d->simple.destroy(d->simple.data);
++                        break;
++
++                case STATIC_DESTRUCTOR_ARRAY:
++                        array_cleanup(&d->array);
++                        break;
++
++                default:
++                        assert_not_reached();
++                }
+ }
+diff --git a/src/test/test-static-destruct.c b/src/test/test-static-destruct.c
+index cb518ea362..ef8648f588 100644
+--- a/src/test/test-static-destruct.c
++++ b/src/test/test-static-destruct.c
+@@ -2,17 +2,38 @@
+ 
+ #include "alloc-util.h"
+ #include "static-destruct.h"
++#include "strv.h"
+ #include "tests.h"
+ 
+ static int foo = 0;
+ static int bar = 0;
+ static int baz = 0;
+-static char* memory = NULL;
++static char *memory = NULL;
++static char **strings = NULL;
++static size_t n_strings = 0;
++static int *integers = NULL;
++static size_t n_integers = 0;
+ 
+ static void test_destroy(int *b) {
+         (*b)++;
+ }
+ 
++static void test_strings_destroy(char **array, size_t n) {
++        assert_se(n == 3);
++        assert_se(strv_equal(array, STRV_MAKE("a", "bbb", "ccc")));
++
++        strv_free(array);
++}
++
++static void test_integers_destroy(int *array, size_t n) {
++        assert_se(n == 10);
++
++        for (size_t i = 0; i < n; i++)
++                assert_se(array[i] == (int)(i * i));
++
++        free(array);
++}
++
+ STATIC_DESTRUCTOR_REGISTER(foo, test_destroy);
+ STATIC_DESTRUCTOR_REGISTER(bar, test_destroy);
+ STATIC_DESTRUCTOR_REGISTER(bar, test_destroy);
+@@ -20,15 +41,27 @@ STATIC_DESTRUCTOR_REGISTER(baz, test_destroy);
+ STATIC_DESTRUCTOR_REGISTER(baz, test_destroy);
+ STATIC_DESTRUCTOR_REGISTER(baz, test_destroy);
+ STATIC_DESTRUCTOR_REGISTER(memory, freep);
++STATIC_ARRAY_DESTRUCTOR_REGISTER(strings, n_strings, test_strings_destroy);
++STATIC_ARRAY_DESTRUCTOR_REGISTER(integers, n_integers, test_integers_destroy);
+ 
+ TEST(static_destruct) {
++        assert_se(foo == 0 && bar == 0 && baz == 0);
+         assert_se(memory = strdup("hallo"));
++        assert_se(strings = strv_new("a", "bbb", "ccc"));
++        n_strings = strv_length(strings);
++        n_integers = 10;
++        assert_se(integers = new(int, n_integers));
++        for (size_t i = 0; i < n_integers; i++)
++                integers[i] = i * i;
+ 
+-        assert_se(foo == 0 && bar == 0 && baz == 0);
+         static_destruct();
+-        assert_se(foo == 1 && bar == 2 && baz == 3);
+ 
+-        assert_se(memory == NULL);
++        assert_se(foo == 1 && bar == 2 && baz == 3);
++        assert_se(!memory);
++        assert_se(!strings);
++        assert_se(n_strings == 0);
++        assert_se(!integers);
++        assert_se(n_integers == 0);
+ }
+ 
+ DEFINE_TEST_MAIN(LOG_INFO);

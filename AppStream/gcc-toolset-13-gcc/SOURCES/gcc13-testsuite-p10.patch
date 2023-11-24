@@ -1,0 +1,131 @@
+commit 38dc1b9145d3b27317a03ace3ab21fb76f6c428a
+Author: Carl Love <cel@us.ibm.com>
+Date:   Fri Mar 10 18:16:52 2023 -0500
+
+    rs6000: Fix test int_128bit-runnable.c instruction counts
+    
+    The test reports two failures on Power 10LE:
+    
+    FAIL: .../int_128bit-runnable.c scan-assembler-times \\\\mvdivsq\\\\M 1
+    FAIL: .../int_128bit-runnable.c scan-assembler-times \\\\mvextsd2q\\\\M 6
+    
+    The current counts are :
+    
+      vdivsq   3
+      vextsd2q 4
+    
+    The counts changed with commit:
+    
+      commit 852b11da11a181df517c0348df044354ff0656d6
+      Author: Michael Meissner <meissner@linux.ibm.com>
+      Date:   Wed Jul 7 21:55:38 2021 -0400
+    
+          Generate 128-bit int divide/modulus on power10.
+    
+          This patch adds support for the VDIVSQ, VDIVUQ, VMODSQ, and VMODUQ
+          instructions to do 128-bit arithmetic.
+    
+          2021-07-07  Michael Meissner  <meissner@linux.ibm.com>
+    
+    The code generation changed significantly.  There are two places where
+    the vextsd2q is "replaced" by a vdivsq instruction thus increasing the
+    vdivsq count from 1 to 3.  The first case is:
+    
+    expected_result = vec_arg1[0]/4;
+        10000af8:   60 01 df e8     ld      r6,352(r31)
+        10000afc:   68 01 ff e8     ld      r7,360(r31)
+        10000b00:   76 fe e9 7c     sradi   r9,r7,63
+        10000b04:   67 4b 00 7c     mtvsrdd vs32,0,r9
+        10000b08:   02 06 1b 10     vextsd2q v0,v0         <----
+        10000b0c:   03 00 40 39     li      r10,3
+        10000b10:   00 00 60 39     li      r11,0
+        10000b14:   67 00 09 7c     mfvrd   r9,v0
+        10000b18:   67 02 08 7c     mfvsrld r8,vs32
+        10000b1c:   38 50 08 7d     and     r8,r8,r10
+        10000b20:   38 58 29 7d     and     r9,r9,r11
+        10000b24:   78 4b 2b 7d     mr      r11,r9
+        10000b28:   78 43 0a 7d     mr      r10,r8
+        10000b2c:   14 30 4a 7f     addc    r26,r10,r6
+        10000b30:   14 39 6b 7f     adde    r27,r11,r7
+        10000b34:   46 f0 69 7b     sldi    r9,r27,62
+        10000b38:   82 f0 58 7b     srdi    r24,r26,2
+        10000b3c:   78 c3 38 7d     or      r24,r9,r24
+        10000b40:   74 16 79 7f     sradi   r25,r27,2
+        10000b44:   30 00 1f fb     std     r24,48(r31)
+        10000b48:   38 00 3f fb     std     r25,56(r31)
+    
+    To:
+    
+       expected_result = vec_arg1[0]/4;
+        10000af8:   69 01 1f f4     lxv     vs32,352(r31)
+        10000afc:   04 00 20 39     li      r9,4
+        10000b00:   00 00 40 39     li      r10,0
+        10000b04:   67 4b 2a 7c     mtvsrdd vs33,r10,r9
+        10000b08:   0b 09 00 10     vdivsq  v0,v0,v1       <----
+        10000b0c:   3d 00 1f f4     stxv    vs32,48(r31)
+    
+    The second case were a vexts2q instruction is replaced with vdivsq:
+    
+    From:
+    
+      expected_result = arg1/16;
+        10000c24:   40 00 df e8     ld      r6,64(r31)
+        10000c28:   48 00 ff e8     ld      r7,72(r31)
+        10000c2c:   76 fe e9 7c     sradi   r9,r7,63
+        10000c30:   67 4b 00 7c     mtvsrdd vs32,0,r9
+        10000c34:   02 06 1b 10     vextsd2q v0,v0        <---
+        10000c38:   0f 00 40 39     li      r10,15
+        10000c3c:   00 00 60 39     li      r11,0
+        10000c40:   67 00 09 7c     mfvrd   r9,v0
+        10000c44:   67 02 08 7c     mfvsrld r8,vs32
+        10000c48:   38 50 08 7d     and     r8,r8,r10
+        10000c4c:   38 58 29 7d     and     r9,r9,r11
+        10000c50:   78 4b 2b 7d     mr      r11,r9
+        10000c54:   78 43 0a 7d     mr      r10,r8
+        10000c58:   14 30 ca 7e     addc    r22,r10,r6
+        10000c5c:   14 39 eb 7e     adde    r23,r11,r7
+        10000c60:   c6 e0 e9 7a     sldi    r9,r23,60
+        10000c64:   02 e1 d4 7a     srdi    r20,r22,4
+        10000c68:   78 a3 34 7d     or      r20,r9,r20
+        10000c6c:   74 26 f5 7e     sradi   r21,r23,4
+        10000c70:   30 00 9f fa     std     r20,48(r31)
+        10000c74:   38 00 bf fa     std     r21,56(r31)
+    
+    To:
+    
+      expected_result = arg1/16;
+        10000be8:   49 00 1f f4     lxv     vs32,64(r31)
+        10000bec:   10 00 20 39     li      r9,16
+        10000bf0:   00 00 40 39     li      r10,0
+        10000bf4:   67 4b 2a 7c     mtvsrdd vs33,r10,r9
+        10000bf8:   0b 09 00 10     vdivsq  v0,v0,v1       <---
+        10000bfc:   3d 00 1f f4     stxv    vs32,48(r31)
+    
+    The patch has been tested on Power10LE with no regressions.
+    
+    gcc/testsuite/
+            * gcc.target/powerpc/int_128bit-runnable.c: Update expected
+            instruction counts.
+
+diff --git a/gcc/testsuite/gcc.target/powerpc/int_128bit-runnable.c b/gcc/testsuite/gcc.target/powerpc/int_128bit-runnable.c
+index 68217c62325..756142d1bc6 100644
+--- a/gcc/testsuite/gcc.target/powerpc/int_128bit-runnable.c
++++ b/gcc/testsuite/gcc.target/powerpc/int_128bit-runnable.c
+@@ -4,7 +4,7 @@
+ 
+ /* Check that the expected 128-bit instructions are generated if the processor
+    supports the 128-bit integer instructions. */
+-/* { dg-final { scan-assembler-times {\mvextsd2q\M} 6 } } */
++/* { dg-final { scan-assembler-times {\mvextsd2q\M} 4 } } */
+ /* { dg-final { scan-assembler-times {\mvslq\M} 2 } } */
+ /* { dg-final { scan-assembler-times {\mvsrq\M} 2 } } */
+ /* { dg-final { scan-assembler-times {\mvsraq\M} 2 } } */
+@@ -18,7 +18,7 @@
+ /* { dg-final { scan-assembler-times {\mvmulesd\M} 1 } } */
+ /* { dg-final { scan-assembler-times {\mvmulosd\M} 1 } } */
+ /* { dg-final { scan-assembler-times {\mvmulld\M} 1 } } */
+-/* { dg-final { scan-assembler-times {\mvdivsq\M} 1 } } */
++/* { dg-final { scan-assembler-times {\mvdivsq\M} 3 } } */
+ /* { dg-final { scan-assembler-times {\mvdivuq\M} 1 } } */
+ /* { dg-final { scan-assembler-times {\mvdivesq\M} 1 } } */
+ /* { dg-final { scan-assembler-times {\mvdiveuq\M} 1 } } */

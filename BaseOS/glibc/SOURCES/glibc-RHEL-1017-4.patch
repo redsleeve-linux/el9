@@ -1,0 +1,652 @@
+From 21841f0d562f0e944c4d267a28cc3ebd19c847e9 Mon Sep 17 00:00:00 2001
+From: Mahesh Bodapati <bmahi496@linux.ibm.com>
+Date: Tue, 1 Aug 2023 07:41:17 -0500
+Subject: PowerPC: Influence cpu/arch hwcap features via GLIBC_TUNABLES
+
+This patch enables the option to influence hwcaps used by PowerPC.
+The environment variable, GLIBC_TUNABLES=glibc.cpu.hwcaps=-xxx,yyy,-zzz....,
+can be used to enable CPU/ARCH feature yyy, disable CPU/ARCH feature xxx
+and zzz, where the feature name is case-sensitive and has to match the ones
+mentioned in the file{sysdeps/powerpc/dl-procinfo.c}.
+
+Note that the hwcap tunables only used in the IFUNC selection.
+Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+[rebased to c9s by DJ]
+
+diff -rupN a/manual/tunables.texi b/manual/tunables.texi
+--- a/manual/tunables.texi	2023-09-13 01:16:19.979884270 -0400
++++ b/manual/tunables.texi	2023-09-13 01:17:19.217179994 -0400
+@@ -476,7 +476,10 @@ On s390x, the supported HWCAP and STFLE
+ @code{sysdeps/s390/cpu-features.c}.  In addition the user can also set
+ a CPU arch-level like @code{z13} instead of single HWCAP and STFLE features.
+ 
+-This tunable is specific to i386, x86-64 and s390x.
++On powerpc, the supported HWCAP and HWCAP2 features can be found in
++@code{sysdeps/powerpc/dl-procinfo.c}.
++
++This tunable is specific to i386, x86-64, s390x and powerpc.
+ @end deftp
+ 
+ @deftp Tunable glibc.cpu.cached_memopt
+diff -rupN a/sysdeps/powerpc/cpu-features.c b/sysdeps/powerpc/cpu-features.c
+--- a/sysdeps/powerpc/cpu-features.c	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/powerpc/cpu-features.c	1969-12-31 19:00:00.000000000 -0500
+@@ -1,39 +0,0 @@
+-/* Initialize cpu feature data.  PowerPC version.
+-   Copyright (C) 2017-2021 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-#include <stdint.h>
+-#include <cpu-features.h>
+-
+-#if HAVE_TUNABLES
+-# include <elf/dl-tunables.h>
+-#endif
+-
+-static inline void
+-init_cpu_features (struct cpu_features *cpu_features)
+-{
+-  /* Default is to use aligned memory access on optimized function unless
+-     tunables is enable, since for this case user can explicit disable
+-     unaligned optimizations.  */
+-#if HAVE_TUNABLES
+-  int32_t cached_memfunc = TUNABLE_GET (glibc, cpu, cached_memopt, int32_t,
+-					NULL);
+-  cpu_features->use_cached_memopt = (cached_memfunc > 0);
+-#else
+-  cpu_features->use_cached_memopt = false;
+-#endif
+-}
+diff -rupN a/sysdeps/powerpc/cpu-features.h b/sysdeps/powerpc/cpu-features.h
+--- a/sysdeps/powerpc/cpu-features.h	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/powerpc/cpu-features.h	1969-12-31 19:00:00.000000000 -0500
+@@ -1,28 +0,0 @@
+-/* Initialize cpu feature data.  PowerPC version.
+-   Copyright (C) 2017-2021 Free Software Foundation, Inc.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-#ifndef __CPU_FEATURES_POWERPC_H
+-# define __CPU_FEATURES_POWERPC_H
+-
+-#include <stdbool.h>
+-
+-struct cpu_features
+-{
+-  bool use_cached_memopt;
+-};
+-
+-#endif /* __CPU_FEATURES_H  */
+diff -rupN a/sysdeps/powerpc/dl-tunables.list b/sysdeps/powerpc/dl-tunables.list
+--- a/sysdeps/powerpc/dl-tunables.list	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/powerpc/dl-tunables.list	2023-09-13 01:17:19.226180343 -0400
+@@ -24,5 +24,8 @@ glibc {
+       maxval: 1
+       default: 0
+     }
++    hwcaps {
++      type: STRING
++    }
+   }
+ }
+diff -rupN a/sysdeps/powerpc/hwcapinfo.c b/sysdeps/powerpc/hwcapinfo.c
+--- a/sysdeps/powerpc/hwcapinfo.c	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/powerpc/hwcapinfo.c	2023-09-13 01:17:19.229180459 -0400
+@@ -19,6 +19,7 @@
+ #include <unistd.h>
+ #include <shlib-compat.h>
+ #include <dl-procinfo.h>
++#include <cpu-features.c>
+ 
+ uint64_t __tcb_hwcap __attribute__ ((visibility ("hidden")));
+ uint32_t __tcb_platform __attribute__ ((visibility ("hidden")));
+@@ -64,6 +65,9 @@ __tcb_parse_hwcap_and_convert_at_platfor
+   else if (h1 & PPC_FEATURE_POWER5)
+     h1 |= PPC_FEATURE_POWER4;
+ 
++  uint64_t array_hwcaps[] = { h1, h2 };
++  init_cpu_features (&GLRO(dl_powerpc_cpu_features), array_hwcaps);
++
+   /* Consolidate both HWCAP and HWCAP2 into a single doubleword so that
+      we can read both in a single load later.  */
+   __tcb_hwcap = h2;
+diff -rupN a/sysdeps/powerpc/powerpc32/power4/multiarch/ifunc-impl-list.c b/sysdeps/powerpc/powerpc32/power4/multiarch/ifunc-impl-list.c
+--- a/sysdeps/powerpc/powerpc32/power4/multiarch/ifunc-impl-list.c	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/powerpc/powerpc32/power4/multiarch/ifunc-impl-list.c	2023-09-13 01:17:19.232180575 -0400
+@@ -21,6 +21,7 @@
+ #include <wchar.h>
+ #include <ldsodefs.h>
+ #include <ifunc-impl-list.h>
++#include <cpu-features.h>
+ 
+ /* Maximum number of IFUNC implementations.  */
+ #define MAX_IFUNC	6
+@@ -33,7 +34,8 @@ __libc_ifunc_impl_list (const char *name
+ 
+   size_t i = 0;
+ 
+-  unsigned long int hwcap = GLRO(dl_hwcap);
++  const struct cpu_features *features = &GLRO(dl_powerpc_cpu_features);
++  unsigned long int hwcap = features->hwcap;
+   /* hwcap contains only the latest supported ISA, the code checks which is
+      and fills the previous supported ones.  */
+   if (hwcap & PPC_FEATURE_ARCH_2_06)
+diff -rupN a/sysdeps/powerpc/powerpc32/power4/multiarch/init-arch.h b/sysdeps/powerpc/powerpc32/power4/multiarch/init-arch.h
+--- a/sysdeps/powerpc/powerpc32/power4/multiarch/init-arch.h	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/powerpc/powerpc32/power4/multiarch/init-arch.h	2023-09-13 01:17:19.232180575 -0400
+@@ -16,6 +16,7 @@
+    <https://www.gnu.org/licenses/>.  */
+ 
+ #include <ldsodefs.h>
++#include <cpu-features.h>
+ 
+ /* The code checks if _rtld_global_ro was realocated before trying to access
+    the dl_hwcap field. The assembly is to make the compiler not optimize the
+@@ -32,11 +33,12 @@
+ # define __GLRO(value)  GLRO(value)
+ #endif
+ 
+-/* dl_hwcap contains only the latest supported ISA, the macro checks which is
+-   and fills the previous ones.  */
++/* Get the hardware information post the tunables set, the macro checks
++   it and fills the previous ones.  */
+ #define INIT_ARCH() \
+-  unsigned long int hwcap = __GLRO(dl_hwcap); 			\
+-  unsigned long int __attribute__((unused)) hwcap2 = __GLRO(dl_hwcap2); \
++  const struct cpu_features *features = &GLRO(dl_powerpc_cpu_features);	\
++  unsigned long int hwcap = features->hwcap;				\
++  unsigned long int __attribute__((unused)) hwcap2 = features->hwcap2; \
+   bool __attribute__((unused)) use_cached_memopt =		\
+     __GLRO(dl_powerpc_cpu_features.use_cached_memopt);		\
+   if (hwcap & PPC_FEATURE_ARCH_2_06)				\
+diff -rupN a/sysdeps/powerpc/powerpc64/dl-machine.h b/sysdeps/powerpc/powerpc64/dl-machine.h
+--- a/sysdeps/powerpc/powerpc64/dl-machine.h	2023-09-13 01:16:17.582791395 -0400
++++ b/sysdeps/powerpc/powerpc64/dl-machine.h	2023-09-13 01:17:19.236180730 -0400
+@@ -27,7 +27,6 @@
+ #include <dl-tls.h>
+ #include <sysdep.h>
+ #include <hwcapinfo.h>
+-#include <cpu-features.c>
+ #include <dl-static-tls.h>
+ #include <dl-funcdesc.h>
+ #include <dl-machine-rel.h>
+@@ -293,7 +292,6 @@ static inline void __attribute__ ((unuse
+ dl_platform_init (void)
+ {
+   __tcb_parse_hwcap_and_convert_at_platform ();
+-  init_cpu_features (&GLRO(dl_powerpc_cpu_features));
+ }
+ #endif
+ 
+diff -rupN a/sysdeps/powerpc/powerpc64/multiarch/ifunc-impl-list.c b/sysdeps/powerpc/powerpc64/multiarch/ifunc-impl-list.c
+--- a/sysdeps/powerpc/powerpc64/multiarch/ifunc-impl-list.c	2023-09-13 01:16:20.219893569 -0400
++++ b/sysdeps/powerpc/powerpc64/multiarch/ifunc-impl-list.c	2023-09-13 01:19:17.169756083 -0400
+@@ -17,6 +17,7 @@
+    <https://www.gnu.org/licenses/>.  */
+ 
+ #include <assert.h>
++#include <cpu-features.h>
+ #include <string.h>
+ #include <wchar.h>
+ #include <ldsodefs.h>
+@@ -32,9 +33,9 @@ __libc_ifunc_impl_list (const char *name
+   assert (max >= MAX_IFUNC);
+ 
+   size_t i = 0;
+-
+-  unsigned long int hwcap = GLRO(dl_hwcap);
+-  unsigned long int hwcap2 = GLRO(dl_hwcap2);
++  const struct cpu_features *features = &GLRO(dl_powerpc_cpu_features);
++  unsigned long int hwcap = features->hwcap;
++  unsigned long int hwcap2 = features->hwcap2;
+ #ifdef SHARED
+   int cacheline_size = GLRO(dl_cache_line_size);
+ #endif
+diff -rupN a/sysdeps/unix/sysv/linux/powerpc/Makefile b/sysdeps/unix/sysv/linux/powerpc/Makefile
+--- a/sysdeps/unix/sysv/linux/powerpc/Makefile	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/powerpc/Makefile	2023-09-13 01:17:19.243181002 -0400
+@@ -21,7 +21,12 @@ ifeq ($(subdir),misc)
+ sysdep_headers += bits/ppc.h
+ sysdep_routines += get_timebase_freq
+ tests-static += test-gettimebasefreq-static
+-tests += $(tests-static)
+-tests += test-gettimebasefreq
+-tests += test-powerpc-linux-sysconf
++tests += \
++  $(tests-static) \
++  test-gettimebasefreq \
++  test-powerpc-linux-sysconf \
++  tst-hwcap-tunables \
++  # tests
++
++tst-hwcap-tunables-ARGS = -- $(host-test-program-cmd)
+ endif
+diff -rupN a/sysdeps/unix/sysv/linux/powerpc/cpu-features.c b/sysdeps/unix/sysv/linux/powerpc/cpu-features.c
+--- a/sysdeps/unix/sysv/linux/powerpc/cpu-features.c	1969-12-31 19:00:00.000000000 -0500
++++ b/sysdeps/unix/sysv/linux/powerpc/cpu-features.c	2023-09-13 01:17:19.247181157 -0400
+@@ -0,0 +1,124 @@
++/* Initialize cpu feature data.  PowerPC version.
++   Copyright (C) 2017-2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <array_length.h>
++#include <stdint.h>
++#include <cpu-features.h>
++#include <elf/dl-tunables.h>
++#include <unistd.h>
++#include <string.h>
++
++static void
++TUNABLE_CALLBACK (set_hwcaps) (tunable_val_t *valp)
++{
++  /* The current IFUNC selection is always using the most recent
++     features which are available via AT_HWCAP or AT_HWCAP2.  But in
++     some scenarios it is useful to adjust this selection.
++
++     The environment variable:
++
++     GLIBC_TUNABLES=glibc.cpu.hwcaps=-xxx,yyy,....
++
++     Can be used to enable HWCAP/HWCAP2 feature yyy, disable HWCAP/HWCAP2
++     feature xxx, where the feature name is case-sensitive and has to match
++     the ones mentioned in the file{sysdeps/powerpc/dl-procinfo.c}. */
++
++  /* Copy the features from dl_powerpc_cpu_features, which contains the
++     features provided by AT_HWCAP and AT_HWCAP2.  */
++  struct cpu_features *cpu_features = &GLRO(dl_powerpc_cpu_features);
++  unsigned long int tcbv_hwcap = cpu_features->hwcap;
++  unsigned long int tcbv_hwcap2 = cpu_features->hwcap2;
++  const char *token = valp->strval;
++  do
++    {
++      const char *token_end, *feature;
++      bool disable;
++      size_t token_len, i, feature_len, offset = 0;
++      /* Find token separator or end of string.  */
++      for (token_end = token; *token_end != ','; token_end++)
++	if (*token_end == '\0')
++	  break;
++
++      /* Determine feature.  */
++      token_len = token_end - token;
++      if (*token == '-')
++	{
++	  disable = true;
++	  feature = token + 1;
++	  feature_len = token_len - 1;
++	}
++      else
++	{
++	  disable = false;
++	  feature = token;
++	  feature_len = token_len;
++	}
++      for (i = 0; i < array_length (hwcap_tunables); ++i)
++	{
++	  const char *hwcap_name = hwcap_names + offset;
++	  size_t hwcap_name_len = strlen (hwcap_name);
++	  /* Check the tunable name on the supported list.  */
++	  if (hwcap_name_len == feature_len
++	      && memcmp (feature, hwcap_name, feature_len) == 0)
++	    {
++	      /* Update the hwcap and hwcap2 bits.  */
++	      if (disable)
++		{
++		  /* Id is 1 for hwcap2 tunable.  */
++		  if (hwcap_tunables[i].id)
++		    cpu_features->hwcap2 &= ~(hwcap_tunables[i].mask);
++		  else
++		    cpu_features->hwcap &= ~(hwcap_tunables[i].mask);
++		}
++	      else
++		{
++		  /* Enable the features and also check that no unsupported
++		     features were enabled by user.  */
++		  if (hwcap_tunables[i].id)
++		    cpu_features->hwcap2 |= (tcbv_hwcap2 & hwcap_tunables[i].mask);
++		  else
++		    cpu_features->hwcap |= (tcbv_hwcap & hwcap_tunables[i].mask);
++		}
++	      break;
++	    }
++	  offset += hwcap_name_len + 1;
++	}
++	token += token_len;
++	/* ... and skip token separator for next round.  */
++	if (*token == ',')
++	  token++;
++    }
++  while (*token != '\0');
++}
++
++static inline void
++init_cpu_features (struct cpu_features *cpu_features, uint64_t hwcaps[])
++{
++  /* Fill the cpu_features with the supported hwcaps
++     which are set by __tcb_parse_hwcap_and_convert_at_platform.  */
++  cpu_features->hwcap = hwcaps[0];
++  cpu_features->hwcap2 = hwcaps[1];
++  /* Default is to use aligned memory access on optimized function unless
++     tunables is enable, since for this case user can explicit disable
++     unaligned optimizations.  */
++  int32_t cached_memfunc = TUNABLE_GET (glibc, cpu, cached_memopt, int32_t,
++					NULL);
++  cpu_features->use_cached_memopt = (cached_memfunc > 0);
++  TUNABLE_GET (glibc, cpu, hwcaps, tunable_val_t *,
++	       TUNABLE_CALLBACK (set_hwcaps));
++}
+diff -rupN a/sysdeps/unix/sysv/linux/powerpc/cpu-features.h b/sysdeps/unix/sysv/linux/powerpc/cpu-features.h
+--- a/sysdeps/unix/sysv/linux/powerpc/cpu-features.h	1969-12-31 19:00:00.000000000 -0500
++++ b/sysdeps/unix/sysv/linux/powerpc/cpu-features.h	2023-09-13 01:17:19.251181312 -0400
+@@ -0,0 +1,130 @@
++/* Initialize cpu feature data.  PowerPC version.
++   Copyright (C) 2017-2023 Free Software Foundation, Inc.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef __CPU_FEATURES_POWERPC_H
++# define __CPU_FEATURES_POWERPC_H
++
++#include <stdbool.h>
++#include <sys/auxv.h>
++
++struct cpu_features
++{
++  bool use_cached_memopt;
++  unsigned long int hwcap;
++  unsigned long int hwcap2;
++};
++
++static const char hwcap_names[] = {
++  "4xxmac\0"
++  "altivec\0"
++  "arch_2_05\0"
++  "arch_2_06\0"
++  "archpmu\0"
++  "booke\0"
++  "cellbe\0"
++  "dfp\0"
++  "efpdouble\0"
++  "efpsingle\0"
++  "fpu\0"
++  "ic_snoop\0"
++  "mmu\0"
++  "notb\0"
++  "pa6t\0"
++  "power4\0"
++  "power5\0"
++  "power5+\0"
++  "power6x\0"
++  "ppc32\0"
++  "ppc601\0"
++  "ppc64\0"
++  "ppcle\0"
++  "smt\0"
++  "spe\0"
++  "true_le\0"
++  "ucache\0"
++  "vsx\0"
++  "arch_2_07\0"
++  "dscr\0"
++  "ebb\0"
++  "htm\0"
++  "htm-nosc\0"
++  "htm-no-suspend\0"
++  "isel\0"
++  "tar\0"
++  "vcrypto\0"
++  "arch_3_00\0"
++  "ieee128\0"
++  "darn\0"
++  "scv\0"
++  "arch_3_1\0"
++  "mma\0"
++};
++
++static const struct
++{
++  unsigned int mask;
++  bool id;
++} hwcap_tunables[] = {
++   /* AT_HWCAP tunable masks.  */
++   { PPC_FEATURE_HAS_4xxMAC,                 0 },
++   { PPC_FEATURE_HAS_ALTIVEC,                0 },
++   { PPC_FEATURE_ARCH_2_05,                  0 },
++   { PPC_FEATURE_ARCH_2_06,                  0 },
++   { PPC_FEATURE_PSERIES_PERFMON_COMPAT,     0 },
++   { PPC_FEATURE_BOOKE,                      0 },
++   { PPC_FEATURE_CELL_BE,                    0 },
++   { PPC_FEATURE_HAS_DFP,                    0 },
++   { PPC_FEATURE_HAS_EFP_DOUBLE,             0 },
++   { PPC_FEATURE_HAS_EFP_SINGLE,             0 },
++   { PPC_FEATURE_HAS_FPU,                    0 },
++   { PPC_FEATURE_ICACHE_SNOOP,               0 },
++   { PPC_FEATURE_HAS_MMU,                    0 },
++   { PPC_FEATURE_NO_TB,                      0 },
++   { PPC_FEATURE_PA6T,                       0 },
++   { PPC_FEATURE_POWER4,                     0 },
++   { PPC_FEATURE_POWER5,                     0 },
++   { PPC_FEATURE_POWER5_PLUS,                0 },
++   { PPC_FEATURE_POWER6_EXT,                 0 },
++   { PPC_FEATURE_32,                         0 },
++   { PPC_FEATURE_601_INSTR,                  0 },
++   { PPC_FEATURE_64,                         0 },
++   { PPC_FEATURE_PPC_LE,                     0 },
++   { PPC_FEATURE_SMT,                        0 },
++   { PPC_FEATURE_HAS_SPE,                    0 },
++   { PPC_FEATURE_TRUE_LE,                    0 },
++   { PPC_FEATURE_UNIFIED_CACHE,              0 },
++   { PPC_FEATURE_HAS_VSX,                    0 },
++
++   /* AT_HWCAP2 tunable masks.  */
++   { PPC_FEATURE2_ARCH_2_07,                 1 },
++   { PPC_FEATURE2_HAS_DSCR,                  1 },
++   { PPC_FEATURE2_HAS_EBB,                   1 },
++   { PPC_FEATURE2_HAS_HTM,                   1 },
++   { PPC_FEATURE2_HTM_NOSC,                  1 },
++   { PPC_FEATURE2_HTM_NO_SUSPEND,            1 },
++   { PPC_FEATURE2_HAS_ISEL,                  1 },
++   { PPC_FEATURE2_HAS_TAR,                   1 },
++   { PPC_FEATURE2_HAS_VEC_CRYPTO,            1 },
++   { PPC_FEATURE2_ARCH_3_00,                 1 },
++   { PPC_FEATURE2_HAS_IEEE128,               1 },
++   { PPC_FEATURE2_DARN,                      1 },
++   { PPC_FEATURE2_SCV,                       1 },
++   { PPC_FEATURE2_ARCH_3_1,                  1 },
++   { PPC_FEATURE2_MMA,                       1 },
++};
++
++#endif /* __CPU_FEATURES_H  */
+diff -rupN a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/dl-tunables.list b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/dl-tunables.list
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/dl-tunables.list	2023-09-13 01:16:19.989884657 -0400
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/dl-tunables.list	2023-09-13 01:17:19.254181428 -0400
+@@ -28,3 +28,4 @@
+ @order glibc.malloc.check
+ @order glibc.gmon.minarcs
+ @order glibc.gmon.maxarcs
++@order glibc.cpu.hwcaps
+diff -rupN a/sysdeps/unix/sysv/linux/powerpc/tst-hwcap-tunables.c b/sysdeps/unix/sysv/linux/powerpc/tst-hwcap-tunables.c
+--- a/sysdeps/unix/sysv/linux/powerpc/tst-hwcap-tunables.c	1969-12-31 19:00:00.000000000 -0500
++++ b/sysdeps/unix/sysv/linux/powerpc/tst-hwcap-tunables.c	2023-09-13 01:17:19.258181583 -0400
+@@ -0,0 +1,128 @@
++/* Tests for powerpc GLIBC_TUNABLES=glibc.cpu.hwcaps filter.
++   Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <http://www.gnu.org/licenses/>.  */
++
++#include <array_length.h>
++#include <getopt.h>
++#include <ifunc-impl-list.h>
++#include <spawn.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <support/check.h>
++#include <support/support.h>
++#include <support/xunistd.h>
++#include <sys/auxv.h>
++#include <sys/wait.h>
++
++/* Nonzero if the program gets called via `exec'.  */
++#define CMDLINE_OPTIONS \
++  { "restart", no_argument, &restart, 1 },
++static int restart;
++
++/* Hold the four initial argument used to respawn the process, plus the extra
++   '--direct', '--restart', and the function to check  */
++static char *spargs[8];
++static int fc;
++
++/* Called on process re-execution.  */
++_Noreturn static void
++handle_restart (int argc, char *argv[])
++{
++  TEST_VERIFY_EXIT (argc == 1);
++  const char *funcname = argv[0];
++
++  struct libc_ifunc_impl impls[32];
++  int cnt = __libc_ifunc_impl_list ("memcpy", impls, array_length (impls));
++  if (cnt == 0)
++    _exit (EXIT_SUCCESS);
++  TEST_VERIFY_EXIT (cnt >= 1);
++  for (int i = 0; i < cnt; i++) {
++    if (strcmp (impls[i].name, funcname) == 0)
++      {
++	TEST_COMPARE (impls[i].usable, false);
++	break;
++      }
++  }
++
++  _exit (EXIT_SUCCESS);
++}
++
++static void
++run_test (const char *filter, const char *funcname)
++{
++  printf ("info: checking filter %s (expect %s ifunc selection to be removed)\n",
++	  filter, funcname);
++  char *tunable = xasprintf ("GLIBC_TUNABLES=glibc.cpu.hwcaps=%s", filter);
++  char *const newenvs[] = { (char*) tunable, NULL };
++  spargs[fc] = (char *) funcname;
++
++  pid_t pid;
++  TEST_COMPARE (posix_spawn (&pid, spargs[0], NULL, NULL, spargs, newenvs), 0);
++  int status;
++  TEST_COMPARE (xwaitpid (pid, &status, 0), pid);
++  TEST_VERIFY (WIFEXITED (status));
++  TEST_VERIFY (!WIFSIGNALED (status));
++  TEST_COMPARE (WEXITSTATUS (status), 0);
++
++  free (tunable);
++}
++
++static int
++do_test (int argc, char *argv[])
++{
++  if (restart)
++    handle_restart (argc - 1, &argv[1]);
++
++  TEST_VERIFY_EXIT (argc == 2 || argc == 5);
++
++  int i;
++  for (i = 0; i < argc - 1; i++)
++    spargs[i] = argv[i + 1];
++  spargs[i++] = (char *) "--direct";
++  spargs[i++] = (char *) "--restart";
++  fc = i++;
++  spargs[i] = NULL;
++
++  unsigned long int hwcap = getauxval (AT_HWCAP);
++  unsigned long int hwcap2 = getauxval (AT_HWCAP2);
++  if (__WORDSIZE == 64)
++    {
++      if (hwcap2 & PPC_FEATURE2_ARCH_3_1)
++	run_test ("-arch_3_1", "__memcpy_power10");
++      if (hwcap2 & PPC_FEATURE2_ARCH_2_07)
++	run_test ("-arch_2_07", "__memcpy_power8_cached");
++      if (hwcap & PPC_FEATURE_ARCH_2_06)
++	run_test ("-arch_2_06", "__memcpy_power7");
++      if (hwcap & PPC_FEATURE_ARCH_2_05)
++	run_test ("-arch_2_06,-arch_2_05","__memcpy_power6");
++      run_test ("-arch_2_06,-arch_2_05,-power5+,-power5,-power4", "__memcpy_power4");
++    }
++  else
++    {
++      if (hwcap & PPC_FEATURE_HAS_VSX)
++	run_test ("-vsx", "__memcpy_power7");
++      if (hwcap & PPC_FEATURE_ARCH_2_06)
++	run_test ("-arch_2_06", "__memcpy_a2");
++      if (hwcap & PPC_FEATURE_ARCH_2_05)
++	run_test ("-arch_2_05", "__memcpy_power6");
++    }
++  return 0;
++}
++
++#define TEST_FUNCTION_ARGV do_test
++#include <support/test-driver.c>

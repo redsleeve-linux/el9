@@ -29,7 +29,7 @@
 # Define GOROOT macros
 %global goroot          %{_prefix}/lib/%{name}
 %global gopath          %{_datadir}/gocode
-%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
+%global golang_arches   x86_64 aarch64 ppc64le s390x
 %global golibdir        %{_libdir}/%{name}
 
 # Golang build options.
@@ -70,11 +70,8 @@
 %endif
 
 # Pre build std lib with -race enabled
-%ifarch x86_64
-%global race 1
-%else
+# Disabled due to 1.20 new cache usage, see 1.20 upstream release notes
 %global race 0
-%endif
 
 %ifarch x86_64
 %global gohostarch  amd64
@@ -95,118 +92,121 @@
 %global gohostarch  s390x
 %endif
 
-%global go_api 1.19
-%global go_version 1.19.13
+%global go_api 1.20
+%global go_version 1.20.10
 %global version %{go_version}
-%global pkg_release 2
+%global pkg_release 1
 
-Name:           golang
-Version:        %{version}
-Release:        1%{?dist}.redsleeve
-Summary:        The Go Programming Language
+Name: golang
+Version: %{version}
+Release: 1%{?dist}.0.1
+Summary: The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
-License:        BSD and Public Domain
-URL:            http://golang.org/
-Source0:        https://github.com/golang/go/archive/refs/tags/go%{version}.tar.gz
+License: BSD and Public Domain
+URL: http://golang.org/
+Source0: https://github.com/golang/go/archive/refs/tags/go%{version}.tar.gz
 # Go's FIPS mode bindings are now provided as a standalone
 # module instead of in tree.  This makes it easier to see
 # the actual changes vs upstream Go.  The module source is
 # located at https://github.com/golang-fips/openssl-fips,
 # And pre-genetated patches to set up the module for a given
 # Go release are located at https://github.com/golang-fips/go.
-Source1:	https://github.com/golang-fips/go/archive/refs/tags/go%{version}-%{pkg_release}-openssl-fips.tar.gz
+Source1: https://github.com/golang-fips/go/archive/refs/tags/go%{version}-%{pkg_release}-openssl-fips.tar.gz
 # make possible to override default traceback level at build time by setting build tag rpm_crashtraceback
-Source2:        fedora.go
+Source2: fedora.go
 
 # The compiler is written in Go. Needs go(1.4+) compiler for build.
 # Actual Go based bootstrap compiler provided by above source.
 %if !%{golang_bootstrap}
-BuildRequires:  gcc-go >= 5
+BuildRequires: gcc-go >= 5
 %else
-BuildRequires:  golang
+BuildRequires: golang
 %endif
 %if 0%{?rhel} > 6 || 0%{?fedora} > 0
-BuildRequires:  hostname
+BuildRequires: hostname
 %else
-BuildRequires:  net-tools
+BuildRequires: net-tools
 %endif
 # For OpenSSL FIPS
-BuildRequires:  openssl-devel
+BuildRequires: openssl-devel
 # for tests
-BuildRequires:  pcre-devel, glibc-static, perl
+BuildRequires: pcre-devel, glibc-static, perl
 
-Provides:       go = %{version}-%{release}
-Requires:       %{name}-bin = %{version}-%{release}
-Requires:       %{name}-src = %{version}-%{release}
-Requires:       openssl-devel
-Requires:       diffutils
+Provides: go = %{version}-%{release}
+Requires: %{name}-bin = %{version}-%{release}
+Requires: %{name}-src = %{version}-%{release}
+Requires: openssl-devel
+Requires: diffutils
 
 
 # Proposed patch by jcajka https://golang.org/cl/86541
-Patch221:       fix_TestScript_list_std.patch
+Patch221: fix_TestScript_list_std.patch
 
-Patch1939923:   skip_test_rhbz1939923.patch
+Patch1939923: skip_test_rhbz1939923.patch
 
 # Disables libc static linking tests which
 # are incompatible with dlopen in golang-fips
-Patch2: 	disable_static_tests_part1.patch
-Patch3: 	disable_static_tests_part2.patch
+Patch2: disable_static_tests_part1.patch
+Patch3: disable_static_tests_part2.patch
 
 # Having documentation separate was broken
-Obsoletes:      %{name}-docs < 1.1-4
+Obsoletes: %{name}-docs < 1.1-4
 
 # RPM can't handle symlink -> dir with subpackages, so merge back
-Obsoletes:      %{name}-data < 1.1.1-4
+Obsoletes: %{name}-data < 1.1.1-4
+
+# We don't build golang-race anymore, rhbz#2230705
+Obsoletes: golang-race < 1.20.0
 
 # These are the only RHEL/Fedora architectures that we compile this package for
-ExclusiveArch:  %{golang_arches}
+ExclusiveArch: %{golang_arches}
 
-Source100:      golang-gdbinit
-Source101:      golang-prelink.conf
+Source100: golang-gdbinit
+Source101: golang-prelink.conf
 
 %description
 %{summary}.
 
 %package       docs
-Summary:       Golang compiler docs
-Requires:      %{name} = %{version}-%{release}
-BuildArch:     noarch
-Obsoletes:     %{name}-docs < 1.1-4
+Summary: Golang compiler docs
+Requires: %{name} = %{version}-%{release}
+BuildArch: noarch
+Obsoletes: %{name}-docs < 1.1-4
 
 %description   docs
 %{summary}.
 
 %package       misc
-Summary:       Golang compiler miscellaneous sources
-Requires:      %{name} = %{version}-%{release}
-BuildArch:     noarch
+Summary: Golang compiler miscellaneous sources
+Requires: %{name} = %{version}-%{release}
+BuildArch: noarch
 
 %description   misc
 %{summary}.
 
 %package       tests
-Summary:       Golang compiler tests for stdlib
-Requires:      %{name} = %{version}-%{release}
-BuildArch:     noarch
+Summary: Golang compiler tests for stdlib
+Requires: %{name} = %{version}-%{release}
+BuildArch: noarch
 
 %description   tests
 %{summary}.
 
 %package        src
-Summary:        Golang compiler source tree
-BuildArch:      noarch
+Summary: Golang compiler source tree
+BuildArch: noarch
 
 %description    src
 %{summary}
 
 %package        bin
-Summary:        Golang core compiler tools
-Requires:       %{name} = %{version}-%{release}
+Summary: Golang core compiler tools
+Requires: %{name} = %{version}-%{release}
 
 # We strip the meta dependency, but go does require glibc.
 # This is an odd issue, still looking for a better fix.
-Requires:       glibc
-Requires:       /usr/bin/gcc
+Requires: glibc
+Requires: /usr/bin/gcc
 %description    bin
 %{summary}
 
@@ -222,7 +222,7 @@ end
 
 %if %{shared}
 %package        shared
-Summary:        Golang shared object libraries
+Summary: Golang shared object libraries
 
 %description    shared
 %{summary}.
@@ -230,13 +230,23 @@ Summary:        Golang shared object libraries
 
 %if %{race}
 %package        race
-Summary:        Golang std library with -race enabled
+Summary: Golang std library with -race enabled
 
-Requires:       %{name} = %{version}-%{release}
+Requires: %{name} = %{version}-%{release}
 
 %description    race
 %{summary}
 %endif
+
+%package -n go-toolset
+Summary: Package that installs go-toolset
+Requires: %{name} = %{version}-%{release}
+%ifarch x86_64
+Requires: delve
+%endif
+
+%description -n go-toolset
+This is the main package for go-toolset.
 
 %prep
 %setup -q -n go-go%{version}
@@ -247,7 +257,7 @@ popd
 patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/000-initial-setup.patch
 patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/001-initial-openssl-for-fips.patch
 patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/002-strict-fips-runtime-detection.patch
-patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/003-h2-bundle-fix-CVE-2023-39325.patch
+
 
 # Configure crypto tests
 pushd ../go-go%{version}-%{pkg_release}-openssl-fips
@@ -255,12 +265,7 @@ ln -s ../go-go%{version} go
 ./scripts/configure-crypto-tests.sh
 popd
 
-%patch2 -p1
-%patch3 -p1
-
-%patch221 -p1
-
-%patch1939923 -p1
+%autopatch -p1
 
 cp %{SOURCE2} ./src/runtime/
 
@@ -344,12 +349,11 @@ cwd=$(pwd)
 src_list=$cwd/go-src.list
 pkg_list=$cwd/go-pkg.list
 shared_list=$cwd/go-shared.list
-race_list=$cwd/go-race.list
 misc_list=$cwd/go-misc.list
 docs_list=$cwd/go-docs.list
 tests_list=$cwd/go-tests.list
-rm -f $src_list $pkg_list $docs_list $misc_list $tests_list $shared_list $race_list
-touch $src_list $pkg_list $docs_list $misc_list $tests_list $shared_list $race_list
+rm -f $src_list $pkg_list $docs_list $misc_list $tests_list $shared_list
+touch $src_list $pkg_list $docs_list $misc_list $tests_list $shared_list
 pushd $RPM_BUILD_ROOT%{goroot}
     find src/ -type d -a \( ! -name testdata -a ! -ipath '*/testdata/*' \) -printf '%%%dir %{goroot}/%p\n' >> $src_list
     find src/ ! -type d -a \( ! -ipath '*/testdata/*' -a ! -name '*_test*.go' \) -printf '%{goroot}/%p\n' >> $src_list
@@ -378,13 +382,6 @@ pushd $RPM_BUILD_ROOT%{goroot}
 
     find pkg/*_dynlink/ -type d -printf '%%%dir %{goroot}/%p\n' >> $shared_list
     find pkg/*_dynlink/ ! -type d -printf '%{goroot}/%p\n' >> $shared_list
-%endif
-
-%if %{race}
-
-    find pkg/*_race/ -type d -printf '%%%dir %{goroot}/%p\n' >> $race_list
-    find pkg/*_race/ ! -type d -printf '%{goroot}/%p\n' >> $race_list
-
 %endif
 
     find test/ -type d -printf '%%%dir %{goroot}/%p\n' >> $tests_list
@@ -447,7 +444,7 @@ export CGO_ENABLED=0
 %endif
 
 # make sure to not timeout
-export GO_TEST_TIMEOUT_SCALE=20
+export GO_TEST_TIMEOUT_SCALE=2
 
 export GO_TEST_RUN=""
 %ifarch aarch64
@@ -463,9 +460,9 @@ export GOLANG_FIPS=1
 export OPENSSL_FORCE_FIPS_MODE=1
 pushd crypto
   # Run all crypto tests but skip TLS, we will run FIPS specific TLS tests later
-  go test $(go list ./... | grep -v tls) -v
+  go test -timeout 50m $(go list ./... | grep -v tls) -v
   # Check that signature functions have parity between boring and notboring
-  CGO_ENABLED=0 go test $(go list ./... | grep -v tls) -v
+  CGO_ENABLED=0 go test -timeout 50m $(go list ./... | grep -v tls) -v
 popd
 # Run all FIPS specific TLS tests
 pushd crypto/tls
@@ -527,43 +524,46 @@ cd ..
 %files -f go-shared.list shared
 %endif
 
-%if %{race}
-%files -f go-race.list race
-%endif
+%files -n go-toolset
 
 %changelog
-* Thu Nov 02 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.19.13-1.redsleeve
-- added arm to golang_arches
-
-* Thu Oct 12 2023 Derek Parker <deparker@redhat.com> - 1.19.13-1
+* Fri Oct 13 2023 David Benoit <dbenoit@redhat.com> - 1.20.10-1
+- Update to Go 1.20.10
 - Fix CVE-2023-39325
-- Resolves: RHEL-12622
+- Midstream patches
+- Resolves: RHEL-12623
 
-* Wed Sep 13 2023 Archana Ravindar <aravinda@redhat.com> - 1.19.12-2
-- Add strict fips runtime detection patch
-- Related: rhbz#2223637
+* Wed Sep 27 2023 Alejandro Sáez <asm@redhat.com> - 1.20.8-1
+- Rebase to Go 1.20.8
+- Remove fix-memory-leak-evp-sign-verify.patch as it is already included in the source
+- Resolves: RHEL-2775
 
-* Fri Sep 1 2023 Archana Ravindar <aravinda@redhat.com> - 1.19.12-1
-- Update to Go 1.19.12
-- Resolves: rhbz#2223637
+* Mon Aug 14 2023 Alejandro Sáez <asm@redhat.com> - 1.20.6-5
+- Retire golang-race package
+- Resolves: rhbz#2230705
 
-* Tue Jun 6 2023 David Benoit <dbenoit@redhat.com> - 1.19.10-1
-- Update to Go 1.19.10
-- Resolves: rhbz#2217626
-- Resolves: rhbz#2217612
-- Resolves: rhbz#2217584
+* Tue Jul 18 2023 Alejandro Sáez <asm@redhat.com> - 1.20.6-1
+- Rebase to Go 1.20.6
+- Change to autopatch
+- Resolves: rhbz#2222313
 
-* Tue May 23 2023 Alejandro Sáez <asm@redhat.com> - 1.19.9-2
-- Fix TestEncryptOAEP and TLS failures in FIPS mode
-- Resolves: rhbz#2204476
+* Fri Jun 23 2023 Alejandro Sáez <asm@redhat.com> - 1.20.4-3
+- Increase the timeout in the tests
+- Related: rhbz#2204477
 
-* Wed May 17 2023 Alejandro Sáez <asm@redhat.com> - 1.19.9-1
-- Rebase to Go 1.19.9
-- Resolves: rhbz#2204476
+* Fri Jun 09 2023 Carl George <carl@redhat.com> - 1.20.4-2
+- Add go-toolset subpackage to ensure golang and go-toolset are published together
+- Resolves: rhbz#2117248
 
-* Wed Mar 29 2023 David Benoit <dbenoit@redhat.com> - 1.19.6-2
-- Rebuild without changes
-- Related: rhbz#2175174
+* Mon May 29 2023 Alejandro Sáez <asm@redhat.com> - 1.20.4-1
+- Rebase to Go 1.20.4
+- Resolves: rhbz#2204477
+
+* Tue Apr 11 2023 David Benoit <dbenoit@redhat.com> - 1.20.3-1
+- Rebase to Go 1.20.3
+- Remove race archives
+- Update static test patches
+- Resolves: rhbz#2185259
 
 * Wed Mar 01 2023 David Benoit <dbenoit@redhat.com> - 1.19.6-1
 - Rebase to Go 1.19.6

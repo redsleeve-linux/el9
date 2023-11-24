@@ -8,11 +8,11 @@
 %global patches_touch_autotools %{nil}
 
 # The source directory.
-%global source_directory 1.14-stable
+%global source_directory 1.16-stable
 
 Name:           libnbd
-Version:        1.14.2
-Release:        1%{?dist}.redsleeve
+Version:        1.16.0
+Release:        1%{?dist}
 Summary:        NBD client library in userspace
 
 License:        LGPLv2+
@@ -29,7 +29,7 @@ Source2:       libguestfs.keyring
 Source3:        copy-patches.sh
 
 # Patches are stored in the upstream repository:
-# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.2/
+# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.3/
 
 # (no patches)
 
@@ -50,6 +50,12 @@ BuildRequires:  libxml2-devel
 
 # For nbdfuse.
 BuildRequires:  fuse3, fuse3-devel
+
+%if !0%{?rhel}
+# For nbdublk
+BuildRequires:  liburing-devel >= 2.2
+BuildRequires:  ubdsrv-devel >= 1.0-3.rc6
+%endif
 
 # For the Python 3 bindings.
 BuildRequires:  python3-devel
@@ -80,7 +86,7 @@ BuildRequires:  util-linux
 # nbdkit for i686.  These are only needed for the test suite so make
 # them optional.  This reduces our test exposure on 32 bit platforms,
 # although there is still Fedora/armv7 and some upstream testing.
-%ifnarch %{ix86} %{arm}
+%ifnarch %{ix86}
 BuildRequires:  qemu-img
 BuildRequires:  nbdkit
 BuildRequires:  nbdkit-data-plugin
@@ -169,6 +175,21 @@ Recommends:     fuse3
 This package contains FUSE support for %{name}.
 
 
+%if !0%{?rhel}
+%package -n nbdublk
+Summary:        Userspace NBD block device
+License:        LGPLv2+
+Requires:       %{name}%{?_isa} = %{version}-%{release}
+Recommends:     kernel >= 6.0.0
+Recommends:     %{_sbindir}/ublk
+
+
+%description -n nbdublk
+This package contains a userspace NBD block device
+based on %{name}.
+%endif
+
+
 %package bash-completion
 Summary:       Bash tab-completion for %{name}
 BuildArch:     noarch
@@ -214,6 +235,11 @@ find $RPM_BUILD_ROOT -name '*.la' -delete
 
 # Delete the golang man page since we're not distributing the bindings.
 rm $RPM_BUILD_ROOT%{_mandir}/man3/libnbd-golang.3*
+
+%if 0%{?rhel}
+# Delete nbdublk on RHEL.
+rm $RPM_BUILD_ROOT%{_datadir}/bash-completion/completions/nbdublk
+%endif
 
 
 %check
@@ -318,6 +344,13 @@ make %{?_smp_mflags} check || {
 %{_mandir}/man1/nbdfuse.1*
 
 
+%if !0%{?rhel}
+%files -n nbdublk
+%{_bindir}/nbdublk
+%{_mandir}/man1/nbdublk.1*
+%endif
+
+
 %files bash-completion
 %dir %{_datadir}/bash-completion/completions
 %{_datadir}/bash-completion/completions/nbdcopy
@@ -325,11 +358,15 @@ make %{?_smp_mflags} check || {
 %{_datadir}/bash-completion/completions/nbdfuse
 %{_datadir}/bash-completion/completions/nbdinfo
 %{_datadir}/bash-completion/completions/nbdsh
+%if !0%{?rhel}
+%{_datadir}/bash-completion/completions/nbdublk
+%endif
 
 
 %changelog
-* Vri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.14.2-1.redsleeve
-- fixed builddeps for arm
+* Tue Apr 18 2023 Richard W.M. Jones <rjones@redhat.com> - 1.16.0-1
+- Rebase to 1.16.0
+  resolves: rhbz#2168628
 
 * Tue Jan 03 2023 Richard W.M. Jones <rjones@redhat.com> - 1.14.2-1
 - Rebase to new stable branch version 1.14.2

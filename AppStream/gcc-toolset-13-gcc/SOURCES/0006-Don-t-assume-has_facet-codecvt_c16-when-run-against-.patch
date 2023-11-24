@@ -1,0 +1,118 @@
+From 59388ee3dac5c737086ed1f83f552a44481a2213 Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Tue, 31 Aug 2021 16:08:57 -0400
+Subject: [PATCH 06/17] Don't assume has_facet<codecvt_c16> when run against
+ system libstdc++
+
+Upstream commit 2019-02-19:
+  P0482R5 char8_t: Standard library support
+    https://gcc.gnu.org/git/?p=gcc.git;a=commitdiff;h=c124af936b6b225eb548ccdd7f01400511d784dc
+added new locale facets for char8_t.
+
+has_facet<codecvt_c16> returns false, as it is using the std::locale the system libstdc++:
+
+$ eu-readelf -s char16_t-char8_t.exe |c++filt |grep UNDEF|grep locale
+    3: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::locale::classic()@GLIBCXX_3.4 (2)
+    8: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::locale::locale(std::locale const&)@GLIBCXX_3.4 (2)
+   13: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::locale::id::_M_id() const@GLIBCXX_3.4 (2)
+   22: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::locale::~locale()@GLIBCXX_3.4 (2)
+   64: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::locale::classic()@@GLIBCXX_3.4
+   76: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::locale::locale(std::locale const&)@@GLIBCXX_3.4
+   89: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::locale::id::_M_id() const@@GLIBCXX_3.4
+  108: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::locale::~locale()@@GLIBCXX_3.4
+
+Hence this patch tweaks tests so that they bail out if run against an older std::locale.
+---
+ libstdc++-v3/testsuite/22_locale/codecvt/char16_t-char8_t.cc | 3 ++-
+ libstdc++-v3/testsuite/22_locale/codecvt/char16_t.cc         | 3 ++-
+ libstdc++-v3/testsuite/22_locale/codecvt/char32_t-char8_t.cc | 3 ++-
+ libstdc++-v3/testsuite/22_locale/codecvt/char32_t.cc         | 3 ++-
+ libstdc++-v3/testsuite/22_locale/codecvt/utf8-char8_t.cc     | 2 ++
+ libstdc++-v3/testsuite/22_locale/codecvt/utf8.cc             | 2 ++
+ 6 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/libstdc++-v3/testsuite/22_locale/codecvt/char16_t-char8_t.cc b/libstdc++-v3/testsuite/22_locale/codecvt/char16_t-char8_t.cc
+index 71a23bef4..d4aa519a2 100644
+--- a/libstdc++-v3/testsuite/22_locale/codecvt/char16_t-char8_t.cc
++++ b/libstdc++-v3/testsuite/22_locale/codecvt/char16_t-char8_t.cc
+@@ -31,7 +31,8 @@ test01()
+   using namespace std;
+   typedef codecvt<char16_t, char8_t, mbstate_t> codecvt_c16;
+   locale loc_c = locale::classic();
+-  VERIFY(has_facet<codecvt_c16>(loc_c));
++  if (!has_facet<codecvt_c16>(loc_c))
++    return;
+   const codecvt_c16* const cvt = &use_facet<codecvt_c16>(loc_c);
+ 
+   VERIFY(!cvt->always_noconv());
+diff --git a/libstdc++-v3/testsuite/22_locale/codecvt/char16_t.cc b/libstdc++-v3/testsuite/22_locale/codecvt/char16_t.cc
+index 7b5ce126d..05c77b2b1 100644
+--- a/libstdc++-v3/testsuite/22_locale/codecvt/char16_t.cc
++++ b/libstdc++-v3/testsuite/22_locale/codecvt/char16_t.cc
+@@ -29,7 +29,8 @@ test01()
+   using namespace std;
+   typedef codecvt<char16_t, char, mbstate_t> codecvt_c16;
+   locale loc_c = locale::classic();
+-  VERIFY(has_facet<codecvt_c16>(loc_c));
++  if (!has_facet<codecvt_c16>(loc_c))
++    return;
+   const codecvt_c16* const cvt = &use_facet<codecvt_c16>(loc_c);
+ 
+   VERIFY(!cvt->always_noconv());
+diff --git a/libstdc++-v3/testsuite/22_locale/codecvt/char32_t-char8_t.cc b/libstdc++-v3/testsuite/22_locale/codecvt/char32_t-char8_t.cc
+index f30ae22e9..281969e9b 100644
+--- a/libstdc++-v3/testsuite/22_locale/codecvt/char32_t-char8_t.cc
++++ b/libstdc++-v3/testsuite/22_locale/codecvt/char32_t-char8_t.cc
+@@ -33,7 +33,8 @@ test01()
+   using namespace std;
+   typedef codecvt<char32_t, char8_t, mbstate_t> codecvt_c32;
+   locale loc_c = locale::classic();
+-  VERIFY(has_facet<codecvt_c32>(loc_c));
++  if (!has_facet<codecvt_c32>(loc_c))
++    return;
+   const codecvt_c32* const cvt = &use_facet<codecvt_c32>(loc_c);
+ 
+   VERIFY(!cvt->always_noconv());
+diff --git a/libstdc++-v3/testsuite/22_locale/codecvt/char32_t.cc b/libstdc++-v3/testsuite/22_locale/codecvt/char32_t.cc
+index 558ba9145..82980b702 100644
+--- a/libstdc++-v3/testsuite/22_locale/codecvt/char32_t.cc
++++ b/libstdc++-v3/testsuite/22_locale/codecvt/char32_t.cc
+@@ -31,7 +31,8 @@ test01()
+   using namespace std;
+   typedef codecvt<char32_t, char, mbstate_t> codecvt_c32;
+   locale loc_c = locale::classic();
+-  VERIFY(has_facet<codecvt_c32>(loc_c));
++  if (!has_facet<codecvt_c32>(loc_c))
++    return;
+   const codecvt_c32* const cvt = &use_facet<codecvt_c32>(loc_c);
+ 
+   VERIFY(!cvt->always_noconv());
+diff --git a/libstdc++-v3/testsuite/22_locale/codecvt/utf8-char8_t.cc b/libstdc++-v3/testsuite/22_locale/codecvt/utf8-char8_t.cc
+index 5eab05ba2..d6f663ce6 100644
+--- a/libstdc++-v3/testsuite/22_locale/codecvt/utf8-char8_t.cc
++++ b/libstdc++-v3/testsuite/22_locale/codecvt/utf8-char8_t.cc
+@@ -34,6 +34,8 @@ void test(const C* from)
+   std::mbstate_t state{};
+   char8_t buf[16] = { };
+   using test_type = std::codecvt<C, char8_t, std::mbstate_t>;
++  if (!std::has_facet<test_type>(std::locale::classic()))
++    return;
+   const test_type& cvt = std::use_facet<test_type>(std::locale::classic());
+   auto from_end = from + len;
+   auto from_next = from;
+diff --git a/libstdc++-v3/testsuite/22_locale/codecvt/utf8.cc b/libstdc++-v3/testsuite/22_locale/codecvt/utf8.cc
+index b1b3cff31..167bc0ca3 100644
+--- a/libstdc++-v3/testsuite/22_locale/codecvt/utf8.cc
++++ b/libstdc++-v3/testsuite/22_locale/codecvt/utf8.cc
+@@ -32,6 +32,8 @@ void test(const C* from)
+   std::mbstate_t state{};
+   char buf[16] = { };
+   using test_type = std::codecvt<C, char, std::mbstate_t>;
++  if (!std::has_facet<test_type>(std::locale::classic()))
++    return;
+   const test_type& cvt = std::use_facet<test_type>(std::locale::classic());
+   auto from_end = from + len;
+   auto from_next = from;
+-- 
+2.31.1
+

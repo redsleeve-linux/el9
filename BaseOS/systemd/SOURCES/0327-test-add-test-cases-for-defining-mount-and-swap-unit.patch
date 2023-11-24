@@ -1,0 +1,412 @@
+From 329afb79232d9206d8e64fc9cfa3a0e71dda532f Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 12 May 2023 03:55:46 +0900
+Subject: [PATCH] test: add test cases for defining mount and swap units from
+ kernel cmdline
+
+(cherry picked from commit 93ec924c41cece471c9b530cfddcc7cbfd536969)
+
+Related: #2190226
+---
+ test/test-fstab-generator.sh                  | 20 ++++++++++++++++++-
+ .../hoge-without_fstype.mount                 | 11 ++++++++++
+ .../hoge-without_options.mount                | 11 ++++++++++
+ .../hoge-withx20space.mount                   | 12 +++++++++++
+ .../50-root-device.conf                       |  5 +++++
+ .../sysroot.mount                             |  1 +
+ .../sysroot.mount                             |  1 +
+ .../hoge-without_fstype.mount                 |  1 +
+ .../hoge-without_options.mount                |  1 +
+ .../hoge-withx20space.mount                   |  1 +
+ .../sysroot.mount                             | 11 ++++++++++
+ .../test-19-mounts-from-cmdline.input         |  5 +++++
+ .../sysroot.mount                             |  0
+ .../dev-sdy1.swap                             |  9 +++++++++
+ .../dev-sdy2.swap                             | 10 ++++++++++
+ .../systemd-mkswap@dev-sdy2.service           |  1 +
+ .../dev-sdy3.swap                             | 10 ++++++++++
+ .../systemd-mkswap@dev-sdy3.service           |  1 +
+ .../dev-sdy4.swap                             |  9 +++++++++
+ .../sysroot.mount                             |  0
+ .../swap.target.requires/dev-sdy1.swap        |  1 +
+ .../swap.target.requires/dev-sdy2.swap        |  1 +
+ .../swap.target.requires/dev-sdy3.swap        |  1 +
+ .../swap.target.requires/dev-sdy4.swap        |  1 +
+ .../systemd-mkswap@dev-sdy2.service           | 18 +++++++++++++++++
+ .../systemd-mkswap@dev-sdy3.service           | 18 +++++++++++++++++
+ .../test-20-swap-from-cmdline.input           |  4 ++++
+ 27 files changed, 163 insertions(+), 1 deletion(-)
+ create mode 100644 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_fstype.mount
+ create mode 100644 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_options.mount
+ create mode 100644 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-withx20space.mount
+ create mode 100644 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-root-device.target.d/50-root-device.conf
+ create mode 120000 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-root-fs.target.requires/sysroot.mount
+ create mode 120000 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-usr-fs.target.requires/sysroot.mount
+ create mode 120000 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/local-fs.target.requires/hoge-without_fstype.mount
+ create mode 120000 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/local-fs.target.requires/hoge-without_options.mount
+ create mode 120000 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/remote-fs.target.requires/hoge-withx20space.mount
+ create mode 100644 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot.mount
+ create mode 100644 test/test-fstab-generator/test-19-mounts-from-cmdline.input
+ create mode 100644 test/test-fstab-generator/test-20-swap-from-cmdline.expected.container/initrd-usr-fs.target.requires/sysroot.mount
+ create mode 100644 test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy1.swap
+ create mode 100644 test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy2.swap
+ create mode 120000 test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy2.swap.requires/systemd-mkswap@dev-sdy2.service
+ create mode 100644 test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy3.swap
+ create mode 120000 test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy3.swap.requires/systemd-mkswap@dev-sdy3.service
+ create mode 100644 test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy4.swap
+ create mode 100644 test/test-fstab-generator/test-20-swap-from-cmdline.expected/initrd-usr-fs.target.requires/sysroot.mount
+ create mode 120000 test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy1.swap
+ create mode 120000 test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy2.swap
+ create mode 120000 test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy3.swap
+ create mode 120000 test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy4.swap
+ create mode 100644 test/test-fstab-generator/test-20-swap-from-cmdline.expected/systemd-mkswap@dev-sdy2.service
+ create mode 100644 test/test-fstab-generator/test-20-swap-from-cmdline.expected/systemd-mkswap@dev-sdy3.service
+ create mode 100644 test/test-fstab-generator/test-20-swap-from-cmdline.input
+
+diff --git a/test/test-fstab-generator.sh b/test/test-fstab-generator.sh
+index 7df67ce305..68c9d0631e 100755
+--- a/test/test-fstab-generator.sh
++++ b/test/test-fstab-generator.sh
+@@ -28,11 +28,14 @@ for f in "$src"/test-*.input; do
+         trap "rm -rf '$out'" EXIT INT QUIT PIPE
+ 
+         exp="${f%.input}.expected"
++        if [[ "${f##*/}" =~ swap ]] && systemd-detect-virt --container >/dev/null; then
++            exp="${exp}.container"
++        fi
+ 
+         if [[ "${f##*/}" =~ \.fstab\.input ]]; then
+             SYSTEMD_LOG_LEVEL=debug SYSTEMD_IN_INITRD=yes SYSTEMD_SYSFS_CHECK=no SYSTEMD_PROC_CMDLINE="fstab=yes root=fstab" SYSTEMD_FSTAB="$f" SYSTEMD_SYSROOT_FSTAB="/dev/null" $generator "$out" "$out" "$out"
+         else
+-            SYSTEMD_LOG_LEVEL=debug SYSTEMD_IN_INITRD=yes SYSTEMD_PROC_CMDLINE="fstab=no $(cat "$f")" $generator "$out" "$out" "$out"
++            SYSTEMD_LOG_LEVEL=debug SYSTEMD_IN_INITRD=yes SYSTEMD_SYSFS_CHECK=no SYSTEMD_PROC_CMDLINE="fstab=no $(cat "$f")" $generator "$out" "$out" "$out"
+         fi
+ 
+         # The option x-systemd.growfs creates symlink to system's systemd-growfs@.service in .mount.wants directory.
+@@ -55,6 +58,21 @@ for f in "$src"/test-*.input; do
+             done
+         fi
+ 
++        # .deb packager seems to dislike files named with backslash. So, as a workaround, we store files
++        # without backslash in .expected.
++        for i in "$out"/**/*\\*.{mount,swap}; do
++            k="${i//\\/}"
++            if [[ "$i" != "$k" ]]; then
++                if [[ -f "$i" ]]; then
++                    mv "$i" "$k"
++                elif [[ -L "$i" ]]; then
++                    dest=$(readlink "$i")
++                    rm "$i"
++                    ln -s "${dest//\\/}" "$k"
++                fi
++            fi
++        done
++
+         # We store empty files rather than dead symlinks, so that they don't get pruned when packaged up, so compare
+         # the list of filenames rather than their content
+         if ! diff -u <(find "$out" -printf '%P\n' | sort) <(find "$exp" -printf '%P\n' | sort); then
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_fstype.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_fstype.mount
+new file mode 100644
+index 0000000000..4d7d975cc0
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_fstype.mount
+@@ -0,0 +1,11 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Documentation=man:fstab(5) man:systemd-fstab-generator(8)
++SourcePath=/proc/cmdline
++Before=local-fs.target
++After=blockdev@dev-sdx3.target
++
++[Mount]
++What=/dev/sdx3
++Where=/hoge/without_fstype
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_options.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_options.mount
+new file mode 100644
+index 0000000000..4f16d2e40b
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_options.mount
+@@ -0,0 +1,11 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Documentation=man:fstab(5) man:systemd-fstab-generator(8)
++SourcePath=/proc/cmdline
++Before=local-fs.target
++After=blockdev@dev-sdx2.target
++
++[Mount]
++What=/dev/sdx2
++Where=/hoge/without_options
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-withx20space.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-withx20space.mount
+new file mode 100644
+index 0000000000..e9ffb4bbd9
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-withx20space.mount
+@@ -0,0 +1,12 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Documentation=man:fstab(5) man:systemd-fstab-generator(8)
++SourcePath=/proc/cmdline
++Before=remote-fs.target
++
++[Mount]
++What=//foo￾bar
++Where=/hoge/with space
++Type=cifs
++Options=rw
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-root-device.target.d/50-root-device.conf b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-root-device.target.d/50-root-device.conf
+new file mode 100644
+index 0000000000..47c4232223
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-root-device.target.d/50-root-device.conf
+@@ -0,0 +1,5 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Requires=dev-sdx1.device
++After=dev-sdx1.device
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-root-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-root-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-root-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-usr-fs.target.requires/sysroot.mount
+new file mode 120000
+index 0000000000..0c969cdbd4
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/initrd-usr-fs.target.requires/sysroot.mount
+@@ -0,0 +1 @@
++../sysroot.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/local-fs.target.requires/hoge-without_fstype.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/local-fs.target.requires/hoge-without_fstype.mount
+new file mode 120000
+index 0000000000..d46cee354e
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/local-fs.target.requires/hoge-without_fstype.mount
+@@ -0,0 +1 @@
++../hoge-without_fstype.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/local-fs.target.requires/hoge-without_options.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/local-fs.target.requires/hoge-without_options.mount
+new file mode 120000
+index 0000000000..9c790fb248
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/local-fs.target.requires/hoge-without_options.mount
+@@ -0,0 +1 @@
++../hoge-without_options.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/remote-fs.target.requires/hoge-withx20space.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/remote-fs.target.requires/hoge-withx20space.mount
+new file mode 120000
+index 0000000000..2404d7619f
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/remote-fs.target.requires/hoge-withx20space.mount
+@@ -0,0 +1 @@
++../hoge-withx20space.mount
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot.mount
+new file mode 100644
+index 0000000000..c8547fa539
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot.mount
+@@ -0,0 +1,11 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Documentation=man:fstab(5) man:systemd-fstab-generator(8)
++SourcePath=/proc/cmdline
++Before=initrd-root-fs.target
++After=blockdev@dev-sdx1.target
++
++[Mount]
++What=/dev/sdx1
++Where=/sysroot
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.input b/test/test-fstab-generator/test-19-mounts-from-cmdline.input
+new file mode 100644
+index 0000000000..4312d01e52
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.input
+@@ -0,0 +1,5 @@
++systemd.mount-extra=/dev/sdx1:/sysroot:auto:defaults
++systemd.mount-extra=/dev/sdx2:/hoge/without_options:auto
++systemd.mount-extra=/dev/sdx3:/hoge/without_fstype
++systemd.mount-extra=/dev/sdx4
++systemd.mount-extra=//foo\ufffebar:/hoge/with\x20space:cifs:rw,seclabel
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected.container/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-20-swap-from-cmdline.expected.container/initrd-usr-fs.target.requires/sysroot.mount
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy1.swap b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy1.swap
+new file mode 100644
+index 0000000000..f515bc149e
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy1.swap
+@@ -0,0 +1,9 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Documentation=man:fstab(5) man:systemd-fstab-generator(8)
++SourcePath=/proc/cmdline
++After=blockdev@dev-sdy1.target
++
++[Swap]
++What=/dev/sdy1
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy2.swap b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy2.swap
+new file mode 100644
+index 0000000000..104260a60d
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy2.swap
+@@ -0,0 +1,10 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Documentation=man:fstab(5) man:systemd-fstab-generator(8)
++SourcePath=/proc/cmdline
++After=blockdev@dev-sdy2.target
++
++[Swap]
++What=/dev/sdy2
++Options=x-systemd.makefs
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy2.swap.requires/systemd-mkswap@dev-sdy2.service b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy2.swap.requires/systemd-mkswap@dev-sdy2.service
+new file mode 120000
+index 0000000000..5248a5f8b7
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy2.swap.requires/systemd-mkswap@dev-sdy2.service
+@@ -0,0 +1 @@
++../systemd-mkswap@dev-sdy2.service
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy3.swap b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy3.swap
+new file mode 100644
+index 0000000000..3b6563d216
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy3.swap
+@@ -0,0 +1,10 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Documentation=man:fstab(5) man:systemd-fstab-generator(8)
++SourcePath=/proc/cmdline
++After=blockdev@dev-sdy3.target
++
++[Swap]
++What=/dev/sdy3
++Options=x-systemd.makefs
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy3.swap.requires/systemd-mkswap@dev-sdy3.service b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy3.swap.requires/systemd-mkswap@dev-sdy3.service
+new file mode 120000
+index 0000000000..e41d758141
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy3.swap.requires/systemd-mkswap@dev-sdy3.service
+@@ -0,0 +1 @@
++../systemd-mkswap@dev-sdy3.service
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy4.swap b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy4.swap
+new file mode 100644
+index 0000000000..37d90f7b64
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/dev-sdy4.swap
+@@ -0,0 +1,9 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Documentation=man:fstab(5) man:systemd-fstab-generator(8)
++SourcePath=/proc/cmdline
++After=blockdev@dev-sdy4.target
++
++[Swap]
++What=/dev/sdy4
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/initrd-usr-fs.target.requires/sysroot.mount b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/initrd-usr-fs.target.requires/sysroot.mount
+new file mode 100644
+index 0000000000..e69de29bb2
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy1.swap b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy1.swap
+new file mode 120000
+index 0000000000..a899ff84c0
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy1.swap
+@@ -0,0 +1 @@
++../dev-sdy1.swap
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy2.swap b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy2.swap
+new file mode 120000
+index 0000000000..14df9d6acc
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy2.swap
+@@ -0,0 +1 @@
++../dev-sdy2.swap
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy3.swap b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy3.swap
+new file mode 120000
+index 0000000000..19663fe046
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy3.swap
+@@ -0,0 +1 @@
++../dev-sdy3.swap
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy4.swap b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy4.swap
+new file mode 120000
+index 0000000000..9bfd9d8316
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/swap.target.requires/dev-sdy4.swap
+@@ -0,0 +1 @@
++../dev-sdy4.swap
+\ No newline at end of file
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/systemd-mkswap@dev-sdy2.service b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/systemd-mkswap@dev-sdy2.service
+new file mode 100644
+index 0000000000..0911f03f62
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/systemd-mkswap@dev-sdy2.service
+@@ -0,0 +1,18 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Description=Make Swap on %f
++Documentation=man:systemd-mkswap@.service(8)
++
++DefaultDependencies=no
++BindsTo=%i.device
++After=%i.device
++Before=dev-sdy2.swap
++Conflicts=shutdown.target
++Before=shutdown.target
++
++[Service]
++Type=oneshot
++RemainAfterExit=yes
++ExecStart=/usr/lib/systemd/systemd-makefs swap /dev/sdy2
++TimeoutSec=0
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.expected/systemd-mkswap@dev-sdy3.service b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/systemd-mkswap@dev-sdy3.service
+new file mode 100644
+index 0000000000..6201fec86b
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.expected/systemd-mkswap@dev-sdy3.service
+@@ -0,0 +1,18 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Description=Make Swap on %f
++Documentation=man:systemd-mkswap@.service(8)
++
++DefaultDependencies=no
++BindsTo=%i.device
++After=%i.device
++Before=dev-sdy3.swap
++Conflicts=shutdown.target
++Before=shutdown.target
++
++[Service]
++Type=oneshot
++RemainAfterExit=yes
++ExecStart=/usr/lib/systemd/systemd-makefs swap /dev/sdy3
++TimeoutSec=0
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.input b/test/test-fstab-generator/test-20-swap-from-cmdline.input
+new file mode 100644
+index 0000000000..953c09ff10
+--- /dev/null
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.input
+@@ -0,0 +1,4 @@
++systemd.mount-extra=/dev/sdy1:none:swap
++systemd.mount-extra=/dev/sdy2:none:swap:x-systemd.makefs
++systemd.swap-extra=/dev/sdy3:x-systemd.makefs,nofail
++systemd.swap-extra=/dev/sdy4

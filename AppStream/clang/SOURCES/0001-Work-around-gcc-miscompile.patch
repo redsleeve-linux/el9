@@ -1,0 +1,33 @@
+From 0f97b7209eed4a428171af6044fe7e0aaf81ee2a Mon Sep 17 00:00:00 2001
+From: Nikita Popov <npopov@redhat.com>
+Date: Thu, 3 Feb 2022 10:34:44 +0100
+Subject: [PATCH] Work around gcc miscompile
+
+This works around https://gcc.gnu.org/bugzilla/show_bug.cgi?id=104334,
+which miscompiles clang on s390x and ppc64le. The issue is already
+fixed on the gcc side, but including this as a temporary workaround
+to get a working build.
+---
+ clang/lib/Sema/DeclSpec.cpp | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/clang/lib/Sema/DeclSpec.cpp b/clang/lib/Sema/DeclSpec.cpp
+index d4dc790c008a..77a1e6c32c6f 100644
+--- a/clang/lib/Sema/DeclSpec.cpp
++++ b/clang/lib/Sema/DeclSpec.cpp
+@@ -1203,8 +1203,9 @@ void DeclSpec::Finish(Sema &S, const PrintingPolicy &Policy) {
+     } else if (TypeSpecType == TST_double) {
+       // vector long double and vector long long double are never allowed.
+       // vector double is OK for Power7 and later, and ZVector.
+-      if (getTypeSpecWidth() == TypeSpecifierWidth::Long ||
+-          getTypeSpecWidth() == TypeSpecifierWidth::LongLong)
++      TypeSpecifierWidth TypeSpecWidth = getTypeSpecWidth();
++      if (TypeSpecWidth == TypeSpecifierWidth::Long ||
++          TypeSpecWidth == TypeSpecifierWidth::LongLong)
+         S.Diag(TSWRange.getBegin(),
+                diag::err_invalid_vector_long_double_decl_spec);
+       else if (!S.Context.getTargetInfo().hasFeature("vsx") &&
+--
+2.34.1
+
+

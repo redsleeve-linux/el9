@@ -1,8 +1,9 @@
 %global toolchain gcc
 
-%global maj_ver 15
-%global libomp_version %{maj_ver}.0.7
-%global libomp_srcdir openmp-%{libomp_version}.src
+%global maj_ver 16
+%global libomp_version %{maj_ver}.0.6
+%global libomp_srcdir openmp-%{libomp_version}%{?rc_ver:rc%{rc_ver}}.src
+%global cmake_srcdir cmake-%{libomp_version}%{?rc_ver:rc%{rc_ver}}.src
 
 
 %ifarch ppc64le
@@ -13,7 +14,7 @@
 
 Name: libomp
 Version: %{libomp_version}
-Release: 1%{?dist}.redsleeve
+Release: 1%{?dist}
 Summary: OpenMP runtime for clang
 
 License: NCSA
@@ -23,6 +24,8 @@ Source1: https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp
 Source2: release-keys.asc
 Source3: run-lit-tests
 Source4: lit.fedora.cfg.py
+Source5:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz
+Source6:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz.sig
 
 BuildRequires: clang
 # For clang-offload-packager
@@ -70,6 +73,12 @@ OpenMP regression tests
 
 %prep
 %{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
+%{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE6}' --data='%{SOURCE5}'
+%setup -T -q -b 5 -n %{cmake_srcdir}
+# TODO: It would be more elegant to set -DLLVM_COMMON_CMAKE_UTILS=%{_builddir}/%{cmake_srcdir},
+# but this is not a CACHED variable, so we can't actually set it externally :(
+cd ..
+mv %{cmake_srcdir} cmake
 %autosetup -n %{libomp_srcdir} -p2
 
 %build
@@ -83,7 +92,7 @@ OpenMP regression tests
 	-DLIBOMP_INSTALL_ALIASES=OFF \
 	-DCMAKE_MODULE_PATH=%{_libdir}/cmake/llvm \
 	-DLLVM_DIR=%{_libdir}/cmake/llvm \
-	-DCMAKE_INSTALL_INCLUDEDIR=%{_libdir}/clang/%{libomp_version}/include \
+	-DCMAKE_INSTALL_INCLUDEDIR=%{_libdir}/clang/%{maj_ver}/include \
 %if 0%{?__isa_bits} == 64
 	-DOPENMP_LIBDIR_SUFFIX=64 \
 %else
@@ -130,42 +139,51 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %files
 %license LICENSE.TXT
 %{_libdir}/libomp.so
-%ifnarch %{arm}
 %{_libdir}/libompd.so
+%ifnarch %{arm}
 %{_libdir}/libarcher.so
 %endif
 %ifnarch %{ix86} %{arm}
 %{_libdir}/libomptarget.rtl.amdgpu.so.%{maj_ver}
+%{_libdir}/libomptarget.rtl.amdgpu.nextgen.so.%{maj_ver}
 %{_libdir}/libomptarget.rtl.cuda.so.%{maj_ver}
+%{_libdir}/libomptarget.rtl.cuda.nextgen.so.%{maj_ver}
 %{_libdir}/libomptarget.rtl.%{libomp_arch}.so.%{maj_ver}
-%endif
+%{_libdir}/libomptarget.rtl.%{libomp_arch}.nextgen.so.%{maj_ver}
 %{_libdir}/libomptarget.so.%{maj_ver}
+%endif
 
 %files devel
-%{_libdir}/clang/%{libomp_version}/include/omp.h
+%{_libdir}/clang/%{maj_ver}/include/omp.h
 %{_libdir}/cmake/openmp/FindOpenMPTarget.cmake
 %ifnarch %{arm}
-%{_libdir}/clang/%{libomp_version}/include/omp-tools.h
-%{_libdir}/clang/%{libomp_version}/include/ompt.h
-%{_libdir}/clang/%{libomp_version}/include/ompt-multiplex.h
+%{_libdir}/clang/%{maj_ver}/include/omp-tools.h
+%{_libdir}/clang/%{maj_ver}/include/ompt.h
+%{_libdir}/clang/%{maj_ver}/include/ompt-multiplex.h
 %endif
 %ifnarch %{ix86} %{arm}
 %{_libdir}/libomptarget.rtl.amdgpu.so
+%{_libdir}/libomptarget.rtl.amdgpu.nextgen.so
 %{_libdir}/libomptarget.rtl.cuda.so
+%{_libdir}/libomptarget.rtl.cuda.nextgen.so
 %{_libdir}/libomptarget.rtl.%{libomp_arch}.so
+%{_libdir}/libomptarget.rtl.%{libomp_arch}.nextgen.so
 %{_libdir}/libomptarget.devicertl.a
 %{_libdir}/libomptarget-amdgpu-*.bc
 %{_libdir}/libomptarget-nvptx-*.bc
-%endif
 %{_libdir}/libomptarget.so
+%endif
 
 %files test
 %{_datadir}/libomp
 %{_libexecdir}/tests/libomp/
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jaccor@redsleeve.org> - 15.0.7-1.redsleeve
-- disabled libompd.so for arm
+* Wed Jul 05 2023 Nikita Popov <npopov@redhat.com> - 16.0.6-1
+- Update to LLVM 16.0.6
+
+* Wed Apr 19 2023 Nikita Popov <npopov@redhat.com> - 16.0.1-1
+- Update to LLVM 16.0.1
 
 * Mon Jan 16 2023 Konrad Kleine <kkleine@redhat.com> - 15.0.7-1
 - Update to LLVM 15.0.7

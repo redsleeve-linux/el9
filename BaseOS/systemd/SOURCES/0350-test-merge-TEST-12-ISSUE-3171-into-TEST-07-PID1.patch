@@ -1,0 +1,172 @@
+From 4fcfb4f333470be69b0929a787509e64ebe96b33 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 10 May 2023 13:58:13 +0200
+Subject: [PATCH] test: merge TEST-12-ISSUE-3171 into TEST-07-PID1
+
+(cherry picked from commit 51b6dbf75ad48a816e6a1503fd5d7c4b9ba2b1d6)
+
+Related: #2213521
+---
+ test/TEST-12-ISSUE-3171/Makefile      |  1 -
+ test/TEST-12-ISSUE-3171/test.sh       | 11 ------
+ test/units/testsuite-07.issue-3171.sh | 50 +++++++++++++++++++++++++++
+ test/units/testsuite-12.service       |  9 -----
+ test/units/testsuite-12.sh            | 49 --------------------------
+ 5 files changed, 50 insertions(+), 70 deletions(-)
+ delete mode 120000 test/TEST-12-ISSUE-3171/Makefile
+ delete mode 100755 test/TEST-12-ISSUE-3171/test.sh
+ create mode 100755 test/units/testsuite-07.issue-3171.sh
+ delete mode 100644 test/units/testsuite-12.service
+ delete mode 100755 test/units/testsuite-12.sh
+
+diff --git a/test/TEST-12-ISSUE-3171/Makefile b/test/TEST-12-ISSUE-3171/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-12-ISSUE-3171/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-12-ISSUE-3171/test.sh b/test/TEST-12-ISSUE-3171/test.sh
+deleted file mode 100755
+index 977e04ee3f..0000000000
+--- a/test/TEST-12-ISSUE-3171/test.sh
++++ /dev/null
+@@ -1,11 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/3171"
+-TEST_NO_QEMU=1
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-do_test "$@"
+diff --git a/test/units/testsuite-07.issue-3171.sh b/test/units/testsuite-07.issue-3171.sh
+new file mode 100755
+index 0000000000..db17c25f90
+--- /dev/null
++++ b/test/units/testsuite-07.issue-3171.sh
+@@ -0,0 +1,50 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++# SocketGroup lost on daemon-reload with unit moving away temporarily
++# Issue: https://github.com/systemd/systemd/issues/3171
++
++echo "g adm - - -" | systemd-sysusers -
++
++U=/run/systemd/system/issue-3171.socket
++cat >$U <<EOF
++[Unit]
++Description=Test 12 socket
++[Socket]
++Accept=yes
++ListenStream=/run/issue-3171.socket
++SocketGroup=adm
++SocketMode=0660
++EOF
++
++cat >/run/systemd/system/issue-3171@.service <<EOF
++[Unit]
++Description=Test service
++[Service]
++StandardInput=socket
++ExecStart=/bin/sh -x -c cat
++EOF
++
++systemctl start issue-3171.socket
++systemctl is-active issue-3171.socket
++[[ "$(stat --format='%G' /run/issue-3171.socket)" == adm ]]
++echo A | nc -w1 -U /run/issue-3171.socket
++
++mv $U ${U}.disabled
++systemctl daemon-reload
++systemctl is-active issue-3171.socket
++[[ "$(stat --format='%G' /run/issue-3171.socket)" == adm ]]
++echo B | nc -w1 -U /run/issue-3171.socket && exit 1
++
++mv ${U}.disabled $U
++systemctl daemon-reload
++systemctl is-active issue-3171.socket
++echo C | nc -w1 -U /run/issue-3171.socket && exit 1
++[[ "$(stat --format='%G' /run/issue-3171.socket)" == adm ]]
++
++systemctl restart issue-3171.socket
++systemctl is-active issue-3171.socket
++echo D | nc -w1 -U /run/issue-3171.socket
++[[ "$(stat --format='%G' /run/issue-3171.socket)" == adm ]]
+diff --git a/test/units/testsuite-12.service b/test/units/testsuite-12.service
+deleted file mode 100644
+index b26cfa575d..0000000000
+--- a/test/units/testsuite-12.service
++++ /dev/null
+@@ -1,9 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-12-ISSUE-3171
+-After=multi-user.target
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-Type=oneshot
+diff --git a/test/units/testsuite-12.sh b/test/units/testsuite-12.sh
+deleted file mode 100755
+index 8c22a8b031..0000000000
+--- a/test/units/testsuite-12.sh
++++ /dev/null
+@@ -1,49 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -eux
+-set -o pipefail
+-
+-echo "g adm - - -" | systemd-sysusers -
+-
+-U=/run/systemd/system/test12.socket
+-cat >$U <<EOF
+-[Unit]
+-Description=Test 12 socket
+-[Socket]
+-Accept=yes
+-ListenStream=/run/test12.socket
+-SocketGroup=adm
+-SocketMode=0660
+-EOF
+-
+-cat >/run/systemd/system/test12@.service <<EOF
+-[Unit]
+-Description=Test service
+-[Service]
+-StandardInput=socket
+-ExecStart=/bin/sh -x -c cat
+-EOF
+-
+-systemctl start test12.socket
+-systemctl is-active test12.socket
+-[[ "$(stat --format='%G' /run/test12.socket)" == adm ]]
+-echo A | nc -w1 -U /run/test12.socket
+-
+-mv $U ${U}.disabled
+-systemctl daemon-reload
+-systemctl is-active test12.socket
+-[[ "$(stat --format='%G' /run/test12.socket)" == adm ]]
+-echo B | nc -w1 -U /run/test12.socket && exit 1
+-
+-mv ${U}.disabled $U
+-systemctl daemon-reload
+-systemctl is-active test12.socket
+-echo C | nc -w1 -U /run/test12.socket && exit 1
+-[[ "$(stat --format='%G' /run/test12.socket)" == adm ]]
+-
+-systemctl restart test12.socket
+-systemctl is-active test12.socket
+-echo D | nc -w1 -U /run/test12.socket
+-[[ "$(stat --format='%G' /run/test12.socket)" == adm ]]
+-
+-touch /testok

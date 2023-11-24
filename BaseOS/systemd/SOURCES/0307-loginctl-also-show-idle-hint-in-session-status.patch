@@ -1,0 +1,78 @@
+From e9d8b5a3d251007444f7722e34cd43ca4c1d628b Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Tue, 23 May 2023 18:54:30 +0800
+Subject: [PATCH] loginctl: also show idle hint in session-status
+
+(cherry picked from commit 82449055af97cf92466dbe132a89c9d889440c3d)
+
+Related: #2209912
+---
+ src/login/loginctl.c | 48 ++++++++++++++++++++++++++------------------
+ 1 file changed, 29 insertions(+), 19 deletions(-)
+
+diff --git a/src/login/loginctl.c b/src/login/loginctl.c
+index 98bb87bd87..e2eda66da7 100644
+--- a/src/login/loginctl.c
++++ b/src/login/loginctl.c
+@@ -469,25 +469,27 @@ static int prop_map_sessions_strv(sd_bus *bus, const char *member, sd_bus_messag
+ static int print_session_status_info(sd_bus *bus, const char *path, bool *new_line) {
+ 
+         static const struct bus_properties_map map[] = {
+-                { "Id",                  "s",    NULL,                     offsetof(SessionStatusInfo, id)                  },
+-                { "Name",                "s",    NULL,                     offsetof(SessionStatusInfo, name)                },
+-                { "TTY",                 "s",    NULL,                     offsetof(SessionStatusInfo, tty)                 },
+-                { "Display",             "s",    NULL,                     offsetof(SessionStatusInfo, display)             },
+-                { "RemoteHost",          "s",    NULL,                     offsetof(SessionStatusInfo, remote_host)         },
+-                { "RemoteUser",          "s",    NULL,                     offsetof(SessionStatusInfo, remote_user)         },
+-                { "Service",             "s",    NULL,                     offsetof(SessionStatusInfo, service)             },
+-                { "Desktop",             "s",    NULL,                     offsetof(SessionStatusInfo, desktop)             },
+-                { "Type",                "s",    NULL,                     offsetof(SessionStatusInfo, type)                },
+-                { "Class",               "s",    NULL,                     offsetof(SessionStatusInfo, class)               },
+-                { "Scope",               "s",    NULL,                     offsetof(SessionStatusInfo, scope)               },
+-                { "State",               "s",    NULL,                     offsetof(SessionStatusInfo, state)               },
+-                { "VTNr",                "u",    NULL,                     offsetof(SessionStatusInfo, vtnr)                },
+-                { "Leader",              "u",    NULL,                     offsetof(SessionStatusInfo, leader)              },
+-                { "Remote",              "b",    NULL,                     offsetof(SessionStatusInfo, remote)              },
+-                { "Timestamp",           "t",    NULL,                     offsetof(SessionStatusInfo, timestamp.realtime)  },
+-                { "TimestampMonotonic",  "t",    NULL,                     offsetof(SessionStatusInfo, timestamp.monotonic) },
+-                { "User",                "(uo)", prop_map_first_of_struct, offsetof(SessionStatusInfo, uid)                 },
+-                { "Seat",                "(so)", prop_map_first_of_struct, offsetof(SessionStatusInfo, seat)                },
++                { "Id",                 "s",    NULL,                     offsetof(SessionStatusInfo, id)                  },
++                { "Name",               "s",    NULL,                     offsetof(SessionStatusInfo, name)                },
++                { "TTY",                "s",    NULL,                     offsetof(SessionStatusInfo, tty)                 },
++                { "Display",            "s",    NULL,                     offsetof(SessionStatusInfo, display)             },
++                { "RemoteHost",         "s",    NULL,                     offsetof(SessionStatusInfo, remote_host)         },
++                { "RemoteUser",         "s",    NULL,                     offsetof(SessionStatusInfo, remote_user)         },
++                { "Service",            "s",    NULL,                     offsetof(SessionStatusInfo, service)             },
++                { "Desktop",            "s",    NULL,                     offsetof(SessionStatusInfo, desktop)             },
++                { "Type",               "s",    NULL,                     offsetof(SessionStatusInfo, type)                },
++                { "Class",              "s",    NULL,                     offsetof(SessionStatusInfo, class)               },
++                { "Scope",              "s",    NULL,                     offsetof(SessionStatusInfo, scope)               },
++                { "State",              "s",    NULL,                     offsetof(SessionStatusInfo, state)               },
++                { "VTNr",               "u",    NULL,                     offsetof(SessionStatusInfo, vtnr)                },
++                { "Leader",             "u",    NULL,                     offsetof(SessionStatusInfo, leader)              },
++                { "Remote",             "b",    NULL,                     offsetof(SessionStatusInfo, remote)              },
++                { "Timestamp",          "t",    NULL,                     offsetof(SessionStatusInfo, timestamp.realtime)  },
++                { "TimestampMonotonic", "t",    NULL,                     offsetof(SessionStatusInfo, timestamp.monotonic) },
++                { "IdleHint",           "b",    NULL,                     offsetof(SessionStatusInfo, idle_hint)           },
++                { "IdleSinceHint",      "t",    NULL,                     offsetof(SessionStatusInfo, idle_hint_timestamp) },
++                { "User",               "(uo)", prop_map_first_of_struct, offsetof(SessionStatusInfo, uid)                 },
++                { "Seat",               "(so)", prop_map_first_of_struct, offsetof(SessionStatusInfo, seat)                },
+                 {}
+         };
+ 
+@@ -578,6 +580,14 @@ static int print_session_status_info(sd_bus *bus, const char *path, bool *new_li
+         if (i.state)
+                 printf("\t   State: %s\n", i.state);
+ 
++        if (i.idle_hint && timestamp_is_set(i.idle_hint_timestamp))
++                printf("\t    Idle: %s since %s (%s)\n",
++                       yes_no(i.idle_hint),
++                       FORMAT_TIMESTAMP(i.idle_hint_timestamp),
++                       FORMAT_TIMESTAMP_RELATIVE(i.idle_hint_timestamp));
++        else
++                printf("\t    Idle: %s\n", yes_no(i.idle_hint));
++
+         if (i.scope) {
+                 printf("\t    Unit: %s\n", i.scope);
+                 show_unit_cgroup(bus, "org.freedesktop.systemd1.Scope", i.scope, i.leader);

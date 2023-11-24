@@ -1,0 +1,46 @@
+From 87e554ca8567647afef3ba79f75bc98d67716fdb Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Tue, 23 May 2023 16:24:47 +0200
+Subject: [PATCH] core/timer: Always use inactive_exit_timestamp if it is set
+
+If we're doing a daemon-reload, we'll be going from TIMER_DEAD => TIMER_WAITING,
+so we won't use inactive_exit_timestamp because TIMER_DEAD != UNIT_ACTIVE, even
+though inactive_exit_timestamp is serialized/deserialized and will be valid after
+the daemon-reload.
+
+This issue can lead to timers never firing as we'll always calculate the next
+elapse based on the current realtime on daemon-reload, so if daemon-reload happens
+often enough, the elapse interval will be moved into the future every time, which
+means the timer will never trigger.
+
+To fix the issue, let's always use inactive_exit_timestamp if it is set, and only
+fall back to the current realtime if it is not set.
+
+(cherry picked from commit 6546045fa0bf84737bd8b2e1e8bf7dd3941d8352)
+
+Resolves: #2211065
+---
+ src/core/timer.c | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/src/core/timer.c b/src/core/timer.c
+index b6810c8599..711500313d 100644
+--- a/src/core/timer.c
++++ b/src/core/timer.c
+@@ -401,12 +401,10 @@ static void timer_enter_waiting(Timer *t, bool time_change) {
+ 
+                         if (t->last_trigger.realtime > 0)
+                                 b = t->last_trigger.realtime;
+-                        else {
+-                                if (state_translation_table[t->state] == UNIT_ACTIVE)
+-                                        b = UNIT(t)->inactive_exit_timestamp.realtime;
+-                                else
+-                                        b = ts.realtime;
+-                        }
++                        else if (dual_timestamp_is_set(&UNIT(t)->inactive_exit_timestamp))
++                                b = UNIT(t)->inactive_exit_timestamp.realtime;
++                        else
++                                b = ts.realtime;
+ 
+                         r = calendar_spec_next_usec(v->calendar_spec, b, &v->next_elapse);
+                         if (r < 0)

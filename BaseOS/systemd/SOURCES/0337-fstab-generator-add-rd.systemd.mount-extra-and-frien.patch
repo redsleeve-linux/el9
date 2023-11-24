@@ -1,0 +1,201 @@
+From a1b1037640e6b01116ad637bbc7abe8612d6e0f4 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 26 Jul 2023 04:17:27 +0900
+Subject: [PATCH] fstab-generator: add rd.systemd.mount-extra= and friends
+
+Previously, mounts specified in systemd.mount-extra= are equally handled
+both in initrd and the main system. So, the mounts for the main system
+are also mounted in initrd.
+
+This introduces rd.systemd.mount-extra=, which specifies mounts in initrd.
+Then, mounts specified in systemd.mount-extra= are still mounted both in
+initrd and the main system, but prefixed with /sysroot/ when running in
+initrd.
+
+Fixes #28516.
+
+(cherry picked from commit 45c535ddb009d89f2740bdf3a5c88594962759fb)
+
+Related: #2190226
+---
+ man/systemd-fstab-generator.xml               | 11 +++++--
+ src/fstab-generator/fstab-generator.c         | 31 +++++++++++++------
+ .../test-19-mounts-from-cmdline.input         | 10 +++---
+ .../test-20-swap-from-cmdline.input           |  8 ++---
+ 4 files changed, 39 insertions(+), 21 deletions(-)
+
+diff --git a/man/systemd-fstab-generator.xml b/man/systemd-fstab-generator.xml
+index b29022fab7..66289d6be3 100644
+--- a/man/systemd-fstab-generator.xml
++++ b/man/systemd-fstab-generator.xml
+@@ -242,11 +242,15 @@
+ 
+       <varlistentry>
+         <term><varname>systemd.mount-extra=<replaceable>WHAT</replaceable>:<replaceable>WHERE</replaceable>[:<replaceable>FSTYPE</replaceable>[:<replaceable>OPTIONS</replaceable>]]</varname></term>
++        <term><varname>rd.systemd.mount-extra=<replaceable>WHAT</replaceable>:<replaceable>WHERE</replaceable>[:<replaceable>FSTYPE</replaceable>[:<replaceable>OPTIONS</replaceable>]]</varname></term>
+ 
+         <listitem>
+           <para>Specifies the mount unit. Takes at least two and at most four fields separated with a colon
+           (<literal>:</literal>). Each field is handled as the corresponding fstab field. This option can be
+-          specified multiple times.</para>
++          specified multiple times. <varname>rd.systemd.mount-extra=</varname> is honored only in the initrd,
++          while <varname>systemd.mount-extra=</varname> is honored by both the main system and the initrd.
++          In the initrd, the mount point (and also source path if the mount is bind mount) specified in
++          <varname>systemd.mount-extra=</varname> is prefixed with <filename>/sysroot/</filename>.</para>
+           <para>Example:
+           <programlisting>
+ systemd.mount-extra=/dev/sda1:/mount-point:ext4:rw,noatime</programlisting>
+@@ -256,10 +260,13 @@ systemd.mount-extra=/dev/sda1:/mount-point:ext4:rw,noatime</programlisting>
+ 
+       <varlistentry>
+         <term><varname>systemd.swap-extra=<replaceable>WHAT</replaceable>[:<replaceable>OPTIONS</replaceable>]</varname></term>
++        <term><varname>rd.systemd.swap-extra=<replaceable>WHAT</replaceable>[:<replaceable>OPTIONS</replaceable>]</varname></term>
+ 
+         <listitem>
+           <para>Specifies the swap unit. Takes the block device to be used as a swap device, and optionally
+-          takes mount options followed by a colon (<literal>:</literal>).</para>
++          takes mount options followed by a colon (<literal>:</literal>). This option can be specified
++          multiple times. <varname>rd.systemd.swap-extra=</varname> is honored only in the initrd, while
++          <varname>systemd.swap-extra=</varname> is honored by both the main system and the initrd.</para>
+           <para>Example:
+           <programlisting>
+ systemd.swap=/dev/sda2:x-systemd.makefs</programlisting>
+diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
+index a7c34cfdf7..f91a863a1d 100644
+--- a/src/fstab-generator/fstab-generator.c
++++ b/src/fstab-generator/fstab-generator.c
+@@ -45,6 +45,7 @@ typedef enum MountPointFlags {
+ } MountPointFlags;
+ 
+ typedef struct Mount {
++        bool for_initrd;
+         char *what;
+         char *where;
+         char *fstype;
+@@ -97,7 +98,13 @@ static void mount_array_free(Mount *mounts, size_t n) {
+         free(mounts);
+ }
+ 
+-static int mount_array_add_internal(char *in_what, char *in_where, const char *in_fstype, const char *in_options) {
++static int mount_array_add_internal(
++                bool for_initrd,
++                char *in_what,
++                char *in_where,
++                const char *in_fstype,
++                const char *in_options) {
++
+         _cleanup_free_ char *what = NULL, *where = NULL, *fstype = NULL, *options = NULL;
+         int r;
+ 
+@@ -130,6 +137,7 @@ static int mount_array_add_internal(char *in_what, char *in_where, const char *i
+                 return -ENOMEM;
+ 
+         arg_mounts[arg_n_mounts++] = (Mount) {
++                .for_initrd = for_initrd,
+                 .what = TAKE_PTR(what),
+                 .where = TAKE_PTR(where),
+                 .fstype = TAKE_PTR(fstype),
+@@ -139,7 +147,7 @@ static int mount_array_add_internal(char *in_what, char *in_where, const char *i
+         return 0;
+ }
+ 
+-static int mount_array_add(const char *str) {
++static int mount_array_add(bool for_initrd, const char *str) {
+         _cleanup_free_ char *what = NULL, *where = NULL, *fstype = NULL, *options = NULL;
+         int r;
+ 
+@@ -154,10 +162,10 @@ static int mount_array_add(const char *str) {
+         if (!isempty(str))
+                 return -EINVAL;
+ 
+-        return mount_array_add_internal(TAKE_PTR(what), TAKE_PTR(where), fstype, options);
++        return mount_array_add_internal(for_initrd, TAKE_PTR(what), TAKE_PTR(where), fstype, options);
+ }
+ 
+-static int mount_array_add_swap(const char *str) {
++static int mount_array_add_swap(bool for_initrd, const char *str) {
+         _cleanup_free_ char *what = NULL, *options = NULL;
+         int r;
+ 
+@@ -172,7 +180,7 @@ static int mount_array_add_swap(const char *str) {
+         if (!isempty(str))
+                 return -EINVAL;
+ 
+-        return mount_array_add_internal(TAKE_PTR(what), NULL, "swap", options);
++        return mount_array_add_internal(for_initrd, TAKE_PTR(what), NULL, "swap", options);
+ }
+ 
+ static int write_options(FILE *f, const char *options) {
+@@ -1267,6 +1275,9 @@ static int add_mounts_from_cmdline(void) {
+         /* Handle each entries found in cmdline as a fstab entry. */
+ 
+         FOREACH_ARRAY(m, arg_mounts, arg_n_mounts) {
++                if (m->for_initrd && !in_initrd())
++                        continue;
++
+                 r = parse_fstab_one(
+                               "/proc/cmdline",
+                               m->what,
+@@ -1274,7 +1285,7 @@ static int add_mounts_from_cmdline(void) {
+                               m->fstype,
+                               m->options,
+                               /* passno = */ 0,
+-                              /* prefix_sysroot = */ false,
++                              /* prefix_sysroot = */ !m->for_initrd && in_initrd(),
+                               /* use_swap_enabled = */ false);
+                 if (r < 0 && ret >= 0)
+                         ret = r;
+@@ -1380,21 +1391,21 @@ static int parse_proc_cmdline_item(const char *key, const char *value, void *dat
+                 else
+                         arg_swap_enabled = r;
+ 
+-        } else if (streq(key, "systemd.mount-extra")) {
++        } else if (STR_IN_SET(key, "systemd.mount-extra", "rd.systemd.mount-extra")) {
+ 
+                 if (proc_cmdline_value_missing(key, value))
+                         return 0;
+ 
+-                r = mount_array_add(value);
++                r = mount_array_add(startswith(key, "rd."), value);
+                 if (r < 0)
+                         log_warning("Failed to parse systemd.mount-extra= option, ignoring: %s", value);
+ 
+-        } else if (streq(key, "systemd.swap-extra")) {
++        } else if (STR_IN_SET(key, "systemd.swap-extra", "rd.systemd.swap-extra")) {
+ 
+                 if (proc_cmdline_value_missing(key, value))
+                         return 0;
+ 
+-                r = mount_array_add_swap(value);
++                r = mount_array_add_swap(startswith(key, "rd."), value);
+                 if (r < 0)
+                         log_warning("Failed to parse systemd.swap-extra= option, ignoring: %s", value);
+         }
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.input b/test/test-fstab-generator/test-19-mounts-from-cmdline.input
+index 4312d01e52..f2cc6fc075 100644
+--- a/test/test-fstab-generator/test-19-mounts-from-cmdline.input
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.input
+@@ -1,5 +1,5 @@
+-systemd.mount-extra=/dev/sdx1:/sysroot:auto:defaults
+-systemd.mount-extra=/dev/sdx2:/hoge/without_options:auto
+-systemd.mount-extra=/dev/sdx3:/hoge/without_fstype
+-systemd.mount-extra=/dev/sdx4
+-systemd.mount-extra=//foo\ufffebar:/hoge/with\x20space:cifs:rw,seclabel
++rd.systemd.mount-extra=/dev/sdx1:/sysroot:auto:defaults
++rd.systemd.mount-extra=/dev/sdx2:/hoge/without_options:auto
++rd.systemd.mount-extra=/dev/sdx3:/hoge/without_fstype
++rd.systemd.mount-extra=/dev/sdx4
++rd.systemd.mount-extra=//foo\ufffebar:/hoge/with\x20space:cifs:rw,seclabel
+diff --git a/test/test-fstab-generator/test-20-swap-from-cmdline.input b/test/test-fstab-generator/test-20-swap-from-cmdline.input
+index 953c09ff10..d92c5300e2 100644
+--- a/test/test-fstab-generator/test-20-swap-from-cmdline.input
++++ b/test/test-fstab-generator/test-20-swap-from-cmdline.input
+@@ -1,4 +1,4 @@
+-systemd.mount-extra=/dev/sdy1:none:swap
+-systemd.mount-extra=/dev/sdy2:none:swap:x-systemd.makefs
+-systemd.swap-extra=/dev/sdy3:x-systemd.makefs,nofail
+-systemd.swap-extra=/dev/sdy4
++rd.systemd.mount-extra=/dev/sdy1:none:swap
++rd.systemd.mount-extra=/dev/sdy2:none:swap:x-systemd.makefs
++rd.systemd.swap-extra=/dev/sdy3:x-systemd.makefs,nofail
++rd.systemd.swap-extra=/dev/sdy4

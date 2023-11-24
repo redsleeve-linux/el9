@@ -1,0 +1,91 @@
+commit ef5f7b89bbc352255595069eb870d6f30f1f9134
+Author: Andreas Krebbel <krebbel@linux.ibm.com>
+Date:   Wed Feb 1 08:59:41 2023 +0100
+
+    New reg note REG_CFA_NORESTORE
+    
+    This patch introduces a new reg note which can be used to tell the CFI
+    verification in dwarf2cfi that a register is stored without intending
+    to restore from it.
+    
+    This is useful when storing e.g. register contents to the stack and
+    generate CFI for it although the register is not really supposed to be
+    restored.
+    
+    gcc/ChangeLog:
+    
+            * dwarf2cfi.c (dwarf2out_frame_debug_cfa_restore): Add
+            EMIT_CFI parameter.
+            (dwarf2out_frame_debug): Add case for REG_CFA_NORESTORE.
+            * reg-notes.def (REG_CFA_NOTE): New reg note definition.
+
+--- a/gcc/dwarf2cfi.c
++++ b/gcc/dwarf2cfi.c
+@@ -1496,10 +1496,12 @@ dwarf2out_frame_debug_cfa_val_expression (rtx set)
+   update_row_reg_save (cur_row, dwf_regno (dest), cfi);
+ }
+ 
+-/* A subroutine of dwarf2out_frame_debug, process a REG_CFA_RESTORE note.  */
++/* A subroutine of dwarf2out_frame_debug, process a REG_CFA_RESTORE
++   note. When called with EMIT_CFI set to false emitting a CFI
++   statement is suppressed.  */
+ 
+ static void
+-dwarf2out_frame_debug_cfa_restore (rtx reg)
++dwarf2out_frame_debug_cfa_restore (rtx reg, bool emit_cfi)
+ {
+   gcc_assert (REG_P (reg));
+ 
+@@ -1507,7 +1509,8 @@ dwarf2out_frame_debug_cfa_restore (rtx reg)
+   if (!span)
+     {
+       unsigned int regno = dwf_regno (reg);
+-      add_cfi_restore (regno);
++      if (emit_cfi)
++	add_cfi_restore (regno);
+       update_row_reg_save (cur_row, regno, NULL);
+     }
+   else
+@@ -1522,7 +1525,8 @@ dwarf2out_frame_debug_cfa_restore (rtx reg)
+ 	  reg = XVECEXP (span, 0, par_index);
+ 	  gcc_assert (REG_P (reg));
+ 	  unsigned int regno = dwf_regno (reg);
+-	  add_cfi_restore (regno);
++	  if (emit_cfi)
++	    add_cfi_restore (regno);
+ 	  update_row_reg_save (cur_row, regno, NULL);
+ 	}
+     }
+@@ -2309,6 +2313,7 @@ dwarf2out_frame_debug (rtx_insn *insn)
+ 	break;
+ 
+       case REG_CFA_RESTORE:
++      case REG_CFA_NO_RESTORE:
+ 	n = XEXP (note, 0);
+ 	if (n == NULL)
+ 	  {
+@@ -2317,7 +2322,7 @@ dwarf2out_frame_debug (rtx_insn *insn)
+ 	      n = XVECEXP (n, 0, 0);
+ 	    n = XEXP (n, 0);
+ 	  }
+-	dwarf2out_frame_debug_cfa_restore (n);
++	dwarf2out_frame_debug_cfa_restore (n, REG_NOTE_KIND (note) == REG_CFA_RESTORE);
+ 	handled_one = true;
+ 	break;
+ 
+diff --git a/gcc/reg-notes.def b/gcc/reg-notes.def
+index 23de1f13ee9..1f74a605b3e 100644
+--- a/gcc/reg-notes.def
++++ b/gcc/reg-notes.def
+@@ -157,6 +157,11 @@ REG_CFA_NOTE (CFA_VAL_EXPRESSION)
+    first pattern is the register to be restored.  */
+ REG_CFA_NOTE (CFA_RESTORE)
+ 
++/* Like CFA_RESTORE but without actually emitting CFI.  This can be
++   used to tell the verification infrastructure that a register is
++   saved without intending to restore it.  */
++REG_CFA_NOTE (CFA_NO_RESTORE)
++
+ /* Attached to insns that are RTX_FRAME_RELATED_P, marks insn that sets
+    vDRAP from DRAP.  If vDRAP is a register, vdrap_reg is initalized
+    to the argument, if it is a MEM, it is ignored.  */

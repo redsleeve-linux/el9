@@ -1,0 +1,75 @@
+From 1d569167f70a59d4e1b44378fc29f282e98f9148 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 17 Jan 2023 20:12:30 +0100
+Subject: [PATCH] blockdev-util: add simple wrapper around BLKSSZGET
+
+Just adds some typesafety and generates an error if the field is not
+initialized in the block device yet.
+
+(cherry picked from commit 65046b92dcdc017f34e170a0e0f46ffc80b1dcdc)
+
+Related: #2170883
+---
+ src/shared/blockdev-util.c | 15 +++++++++++++++
+ src/shared/blockdev-util.h |  2 ++
+ src/shared/loop-util.c     | 12 ++++++------
+ 3 files changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/src/shared/blockdev-util.c b/src/shared/blockdev-util.c
+index 72fad160ed..27d3d075d9 100644
+--- a/src/shared/blockdev-util.c
++++ b/src/shared/blockdev-util.c
+@@ -788,3 +788,18 @@ int blockdev_reread_partition_table(sd_device *dev) {
+ 
+         return 0;
+ }
++
++int blockdev_get_sector_size(int fd, uint32_t *ret) {
++        int ssz = 0;
++
++        assert(fd >= 0);
++        assert(ret);
++
++        if (ioctl(fd, BLKSSZGET, &ssz) < 0)
++                return -errno;
++        if (ssz <= 0) /* make sure the field is initialized */
++                return log_debug_errno(SYNTHETIC_ERRNO(EIO), "Block device reported invalid sector size %i.", ssz);
++
++        *ret = ssz;
++        return 0;
++}
+diff --git a/src/shared/blockdev-util.h b/src/shared/blockdev-util.h
+index b2c14102ae..5b27d23e8a 100644
+--- a/src/shared/blockdev-util.h
++++ b/src/shared/blockdev-util.h
+@@ -54,3 +54,5 @@ int partition_enumerator_new(sd_device *dev, sd_device_enumerator **ret);
+ int block_device_remove_all_partitions(sd_device *dev, int fd);
+ int block_device_has_partitions(sd_device *dev);
+ int blockdev_reread_partition_table(sd_device *dev);
++
++int blockdev_get_sector_size(int fd, uint32_t *ret);
+diff --git a/src/shared/loop-util.c b/src/shared/loop-util.c
+index fb7e80b1b5..1c66fb779d 100644
+--- a/src/shared/loop-util.c
++++ b/src/shared/loop-util.c
+@@ -124,14 +124,14 @@ static int loop_configure_verify(int fd, const struct loop_config *c) {
+         assert(c);
+ 
+         if (c->block_size != 0) {
+-                int z;
++                uint32_t ssz;
+ 
+-                if (ioctl(fd, BLKSSZGET, &z) < 0)
+-                        return -errno;
++                r = blockdev_get_sector_size(fd, &ssz);
++                if (r < 0)
++                        return r;
+ 
+-                assert(z >= 0);
+-                if ((uint32_t) z != c->block_size)
+-                        log_debug("LOOP_CONFIGURE didn't honour requested block size %u, got %i instead. Ignoring.", c->block_size, z);
++                if (ssz != c->block_size)
++                        log_debug("LOOP_CONFIGURE didn't honour requested block size %" PRIu32 ", got %" PRIu32 " instead. Ignoring.", c->block_size, ssz);
+         }
+ 
+         if (c->info.lo_sizelimit != 0) {

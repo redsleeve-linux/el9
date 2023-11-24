@@ -25,7 +25,7 @@ function check_rhl {
 }
 
 function check_rhel {
-    egrep -q "(Enterprise|Advanced|CentOS)" $RELEASEFILE && echo $DISTNUM
+    egrep -q "(Enterprise|Advanced|CentOS|Rocky)" $RELEASEFILE && echo $DISTNUM
 }
 
 function check_fedora {

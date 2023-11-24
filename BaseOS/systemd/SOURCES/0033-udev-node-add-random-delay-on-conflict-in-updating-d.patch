@@ -1,0 +1,59 @@
+From 75275ae07233e213fe03a1a33870efe10dbb2b39 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 1 Sep 2021 04:34:48 +0900
+Subject: [PATCH] udev-node: add random delay on conflict in updating device
+ node symlink
+
+To make multiple workers not update the same device node symlink
+simultaneously.
+
+(cherry picked from commit 0063fa23a1384dd4385d03b568dc629916b7e72a)
+
+Related: #2005024
+---
+ src/udev/udev-node.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/udev/udev-node.c b/src/udev/udev-node.c
+index 2e7df899e4..675e6ce313 100644
+--- a/src/udev/udev-node.c
++++ b/src/udev/udev-node.c
+@@ -20,12 +20,14 @@
+ #include "mkdir.h"
+ #include "parse-util.h"
+ #include "path-util.h"
++#include "random-util.h"
+ #include "selinux-util.h"
+ #include "smack-util.h"
+ #include "stat-util.h"
+ #include "stdio-util.h"
+ #include "string-util.h"
+ #include "strxcpyx.h"
++#include "time-util.h"
+ #include "udev-node.h"
+ #include "user-util.h"
+ 
+@@ -33,6 +35,8 @@
+ #define LINK_UPDATE_MAX_RETRIES        128
+ #define CREATE_STACK_LINK_MAX_RETRIES  128
+ #define UPDATE_TIMESTAMP_MAX_RETRIES   128
++#define MAX_RANDOM_DELAY (250 * USEC_PER_MSEC)
++#define MIN_RANDOM_DELAY ( 50 * USEC_PER_MSEC)
+ #define UDEV_NODE_HASH_KEY SD_ID128_MAKE(b9,6a,f1,ce,40,31,44,1a,9e,19,ec,8b,ae,f3,e3,2f)
+ 
+ static int create_symlink(const char *target, const char *slink) {
+@@ -447,6 +451,14 @@ static int link_update(sd_device *dev, const char *slink_in, bool add) {
+                 _cleanup_free_ char *target = NULL;
+                 struct stat st1 = {}, st2 = {};
+ 
++                if (i > 0) {
++                        usec_t delay = MIN_RANDOM_DELAY + random_u64_range(MAX_RANDOM_DELAY - MIN_RANDOM_DELAY);
++
++                        log_device_debug(dev, "Directory %s was updated, retrying to update devlink %s after %s.",
++                                         dirname, slink, FORMAT_TIMESPAN(delay, USEC_PER_MSEC));
++                        (void) usleep(delay);
++                }
++
+                 if (stat(dirname, &st1) < 0 && errno != ENOENT)
+                         return log_device_debug_errno(dev, errno, "Failed to stat %s: %m", dirname);
+ 

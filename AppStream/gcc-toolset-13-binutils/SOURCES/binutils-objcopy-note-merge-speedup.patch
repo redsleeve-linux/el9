@@ -1,0 +1,44 @@
+--- binutils.orig/binutils/objcopy.c	2023-01-16 12:15:46.405649346 +0000
++++ binutils-2.39/binutils/objcopy.c	2023-01-16 12:16:48.892667868 +0000
+@@ -2383,6 +2383,8 @@ merge_gnu_build_notes (bfd *          ab
+ 	    other note then if they are both of the same type (open
+ 	    or func) then they can be merged and one deleted.  If
+ 	    they are of different types then they cannot be merged.  */
++  objcopy_internal_note * prev_note = NULL;
++
+   for (pnote = pnotes; pnote < pnotes_end; pnote ++)
+     {
+       /* Skip already deleted notes.
+@@ -2404,7 +2406,9 @@ merge_gnu_build_notes (bfd *          ab
+       objcopy_internal_note * back;
+ 
+       /* Rule 2: Check to see if there is an identical previous note.  */
+-      for (iter = 0, back = pnote - 1; back >= pnotes; back --)
++      for (iter = 0, back = prev_note ? prev_note : pnote - 1;
++	   back >= pnotes;
++	   back --)
+ 	{
+ 	  if (is_deleted_note (back))
+ 	    continue;
+@@ -2466,11 +2470,18 @@ merge_gnu_build_notes (bfd *          ab
+ 	      break;
+ 	    }
+ 	}
+-#if DEBUG_MERGE
++
++
+       if (! is_deleted_note (pnote))
+-	merge_debug ("Unable to do anything with note at %#08lx\n",
+-		     (pnote->note.namedata - (char *) contents) - 12);
++	{
++	  /* Keep a pointer to this note, so that we can
++	     start the next search for rule 2 matches here.  */
++	  prev_note = pnote;
++#if DEBUG_MERGE
++	  merge_debug ("Unable to do anything with note at %#08lx\n",
++		       (pnote->note.namedata - (char *) contents) - 12);
+ #endif
++	}
+     }
+ 
+   /* Resort the notes.  */

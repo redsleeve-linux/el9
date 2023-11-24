@@ -1,0 +1,40 @@
+commit 7f875e435b23dfb439bc7784cade4aebbd5d4a69
+Author: Jakub Jelinek <jakub@redhat.com>
+Date:   Fri Jun 9 09:10:29 2023 +0200
+
+    fortran: Fix ICE on pr96024.f90 on big-endian hosts [PR96024]
+    
+    The pr96024.f90 testcase ICEs on big-endian hosts.  The problem is
+    that length->val.integer is accessed after checking
+    length->expr_type == EXPR_CONSTANT, but it is a CHARACTER constant
+    which uses length->val.character union member instead and on big-endian
+    we end up reading constant 0x100000000 rather than some small number
+    on little-endian and if target doesn't have enough memory for 4 times
+    that (i.e. 16GB allocation), it ICEs.
+    
+    2023-06-09  Jakub Jelinek  <jakub@redhat.com>
+    
+            PR fortran/96024
+            * primary.c (gfc_convert_to_structure_constructor): Only do
+            constant string ctor length verification and truncation/padding
+            if constant length has INTEGER type.
+    
+    (cherry picked from commit 4cf6e322adc19f927859e0a5edfa93cec4b8c844)
+
+diff --git a/gcc/fortran/primary.c b/gcc/fortran/primary.c
+index 1b93f96367f..5cad2d2682b 100644
+--- a/gcc/fortran/primary.c
++++ b/gcc/fortran/primary.c
+@@ -3188,10 +3188,11 @@ gfc_convert_to_structure_constructor (gfc_expr *e, gfc_symbol *sym, gfc_expr **c
+ 	goto cleanup;
+ 
+       /* For a constant string constructor, make sure the length is
+-	 correct; truncate of fill with blanks if needed.  */
++	 correct; truncate or fill with blanks if needed.  */
+       if (this_comp->ts.type == BT_CHARACTER && !this_comp->attr.allocatable
+ 	  && this_comp->ts.u.cl && this_comp->ts.u.cl->length
+ 	  && this_comp->ts.u.cl->length->expr_type == EXPR_CONSTANT
++	  && this_comp->ts.u.cl->length->ts.type == BT_INTEGER
+ 	  && actual->expr->ts.type == BT_CHARACTER
+ 	  && actual->expr->expr_type == EXPR_CONSTANT)
+ 	{

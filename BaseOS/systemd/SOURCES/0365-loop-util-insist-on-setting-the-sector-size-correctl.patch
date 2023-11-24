@@ -1,0 +1,62 @@
+From 7c3d3404ded062e3bff9384cf2c009dcc71d2dba Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 17 Jan 2023 15:49:31 +0100
+Subject: [PATCH] loop-util: insist on setting the sector size correctly
+
+If we attach a disk image to a loopback device the sector size of the
+image must match the one of the loopback device, hence be more careful
+here.
+
+(cherry picked from commit 1163ddb386ef46f63942171e6eab0ca64eb818e4)
+
+Related: #2170883
+---
+ src/shared/loop-util.c | 20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/src/shared/loop-util.c b/src/shared/loop-util.c
+index 1c66fb779d..4e0b06ad83 100644
+--- a/src/shared/loop-util.c
++++ b/src/shared/loop-util.c
+@@ -130,8 +130,10 @@ static int loop_configure_verify(int fd, const struct loop_config *c) {
+                 if (r < 0)
+                         return r;
+ 
+-                if (ssz != c->block_size)
++                if (ssz != c->block_size) {
+                         log_debug("LOOP_CONFIGURE didn't honour requested block size %" PRIu32 ", got %" PRIu32 " instead. Ignoring.", c->block_size, ssz);
++                        broken = true;
++                }
+         }
+ 
+         if (c->info.lo_sizelimit != 0) {
+@@ -172,6 +174,7 @@ static int loop_configure_verify(int fd, const struct loop_config *c) {
+ 
+ static int loop_configure_fallback(int fd, const struct loop_config *c) {
+         struct loop_info64 info_copy;
++        int r;
+ 
+         assert(fd >= 0);
+         assert(c);
+@@ -219,6 +222,21 @@ static int loop_configure_fallback(int fd, const struct loop_config *c) {
+                 if (ioctl(fd, BLKFLSBUF, 0) < 0)
+                         log_debug_errno(errno, "Failed to issue BLKFLSBUF ioctl, ignoring: %m");
+ 
++        /* If a block size is requested then try to configure it. If that doesn't work, ignore errors, but
++         * afterwards, let's validate what is in effect, and if it doesn't match what we want, fail */
++        if (c->block_size != 0) {
++                uint32_t ssz;
++
++                if (ioctl(fd, LOOP_SET_BLOCK_SIZE, (unsigned long) c->block_size) < 0)
++                        log_debug_errno(errno, "Failed to set sector size, ignoring: %m");
++
++                r = blockdev_get_sector_size(fd, &ssz);
++                if (r < 0)
++                        return log_debug_errno(r, "Failed to read sector size: %m");
++                if (ssz != c->block_size)
++                        return log_debug_errno(SYNTHETIC_ERRNO(EIO), "Sector size of loopback device doesn't match what we requested, refusing.");
++        }
++
+         /* LO_FLAGS_DIRECT_IO is a flags we need to configure via explicit ioctls. */
+         if (FLAGS_SET(c->info.lo_flags, LO_FLAGS_DIRECT_IO))
+                 if (ioctl(fd, LOOP_SET_DIRECT_IO, 1UL) < 0)

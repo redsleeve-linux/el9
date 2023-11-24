@@ -1,0 +1,41 @@
+From 02fb24d24bd705822254133fa82c007ab3487af8 Mon Sep 17 00:00:00 2001
+From: Selvin Xavier <selvin.xavier@broadcom.com>
+Date: Sun, 16 Jan 2022 11:10:08 -0800
+Subject: [PATCH] bnxt_re/lib: Check pointer validity while freeing queue
+ pointers
+
+qp->jrqq can be NULL in SRQ case or when accessed from error path.
+Avoid segfault by adding check before accessing qp->jrqq and qp->jsqq.
+
+Fixes: f92837e29fd4 ("bnxt_re/lib: consolidate hwque and swque in common structure")
+Signed-off-by: Selvin Xavier <selvin.xavier@broadcom.com>
+---
+ providers/bnxt_re/verbs.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/providers/bnxt_re/verbs.c b/providers/bnxt_re/verbs.c
+index 14fb58b7..ca113537 100644
+--- a/providers/bnxt_re/verbs.c
++++ b/providers/bnxt_re/verbs.c
+@@ -820,10 +820,14 @@ static int bnxt_re_check_qp_limits(struct bnxt_re_context *cntx,
+ 
+ static void bnxt_re_free_queue_ptr(struct bnxt_re_qp *qp)
+ {
+-	free(qp->jrqq->hwque);
+-	free(qp->jrqq);
+-	free(qp->jsqq->hwque);
+-	free(qp->jsqq);
++	if (qp->jrqq) {
++		free(qp->jrqq->hwque);
++		free(qp->jrqq);
++	}
++	if (qp->jsqq) {
++		free(qp->jsqq->hwque);
++		free(qp->jsqq);
++	}
+ }
+ 
+ static int bnxt_re_alloc_queue_ptr(struct bnxt_re_qp *qp,
+-- 
+2.31.1
+

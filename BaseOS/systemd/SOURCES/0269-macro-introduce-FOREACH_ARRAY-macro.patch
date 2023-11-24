@@ -1,0 +1,94 @@
+From b9f50b820804113811bcf291f586793de434fcdc Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 5 Mar 2023 14:56:15 +0900
+Subject: [PATCH] macro: introduce FOREACH_ARRAY() macro
+
+The pattern that runs all array element is quite common.
+But, sometimes, the number of element may be in a signed integer, or the
+array may be NULL.
+
+(cherry picked from commit 5716c27e1f52d2aba9dd02916c01d6271d9d0b16)
+
+Related: #2182632
+---
+ src/basic/macro.h     |  7 ++++++
+ src/test/test-macro.c | 50 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 57 insertions(+)
+
+diff --git a/src/basic/macro.h b/src/basic/macro.h
+index 237117db12..b977730e54 100644
+--- a/src/basic/macro.h
++++ b/src/basic/macro.h
+@@ -329,6 +329,13 @@ static inline int __coverity_check_and_return__(int condition) {
+ #endif
+ #endif
+ 
++#define _FOREACH_ARRAY(i, array, num, m, s)                             \
++        for (typeof(num) m = (num); m > 0; m = 0)                       \
++                for (typeof(array[0]) *s = (array), *i = s; s && i < s + m; i++)
++
++#define FOREACH_ARRAY(i, array, num)                                    \
++        _FOREACH_ARRAY(i, array, num, UNIQ_T(m, UNIQ), UNIQ_T(s, UNIQ))
++
+ #define DEFINE_TRIVIAL_DESTRUCTOR(name, type, func)             \
+         static inline void name(type *p) {                      \
+                 func(p);                                        \
+diff --git a/src/test/test-macro.c b/src/test/test-macro.c
+index 049ea2c14e..6a5f4bbeb7 100644
+--- a/src/test/test-macro.c
++++ b/src/test/test-macro.c
+@@ -521,4 +521,54 @@ TEST(ISPOWEROF2) {
+         assert_se(!ISPOWEROF2(u));
+ }
+ 
++TEST(FOREACH_ARRAY) {
++        int a[10] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
++        int b[10] = { 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
++        int x, n;
++
++        x = n = 0;
++        FOREACH_ARRAY(i, a, 10) {
++                x += *i;
++                n++;
++        }
++        assert_se(x == 45);
++        assert_se(n == 10);
++
++        x = n = 0;
++        FOREACH_ARRAY(i, a, 10)
++                FOREACH_ARRAY(j, b, 10) {
++                        x += (*i) * (*j);
++                        n++;
++                }
++        assert_se(x == 45 * 45);
++        assert_se(n == 10 * 10);
++
++        x = n = 0;
++        FOREACH_ARRAY(i, a, 5)
++                FOREACH_ARRAY(j, b, 5) {
++                        x += (*i) * (*j);
++                        n++;
++                }
++        assert_se(x == 10 * 35);
++        assert_se(n == 5 * 5);
++
++        x = n = 0;
++        FOREACH_ARRAY(i, a, 0)
++                FOREACH_ARRAY(j, b, 0) {
++                        x += (*i) * (*j);
++                        n++;
++                }
++        assert_se(x == 0);
++        assert_se(n == 0);
++
++        x = n = 0;
++        FOREACH_ARRAY(i, a, -1)
++                FOREACH_ARRAY(j, b, -1) {
++                        x += (*i) * (*j);
++                        n++;
++                }
++        assert_se(x == 0);
++        assert_se(n == 0);
++}
++
+ DEFINE_TEST_MAIN(LOG_INFO);

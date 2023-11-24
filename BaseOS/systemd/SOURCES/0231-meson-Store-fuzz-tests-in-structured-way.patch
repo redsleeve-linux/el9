@@ -1,0 +1,161 @@
+From d2bab1cb6c0d7242dbaca55d507f886f7ec0fa6c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Michal=20Koutn=C3=BD?= <mkoutny@suse.com>
+Date: Thu, 6 Oct 2022 19:06:08 +0200
+Subject: [PATCH] meson: Store fuzz tests in structured way
+
+Put fuzzer tests into dictionary that maps `fuzzer->list of inputs`
+instead of the flat list.
+This is just refactoring with no intentional .
+
+(cherry picked from commit 7db5761ddaa53eba197b5abc485e3290f47c661f)
+
+Related: #2176918
+---
+ meson.build           | 69 ++++++++++++++++++-------------------------
+ test/fuzz/meson.build | 22 ++++++++++----
+ 2 files changed, 45 insertions(+), 46 deletions(-)
+
+diff --git a/meson.build b/meson.build
+index 35704947e3..dc7388cfe3 100644
+--- a/meson.build
++++ b/meson.build
+@@ -4013,19 +4013,14 @@ foreach tuple : fuzzers
+                 build_by_default : fuzzer_build)
+         fuzzer_exes += exe
+ 
+-        if want_tests != 'false'
++        if want_tests != 'false' and name in fuzz_regression_tests
+                 # Run the fuzz regression tests without any sanitizers enabled.
+                 # Additional invocations with sanitizers may be added below.
+-                foreach p : fuzz_regression_tests
+-                        b = p.split('/')[-2]
+-                        c = p.split('/')[-1]
+-
+-                        if b == name
+-                                test('@0@_@1@'.format(b, c),
+-                                     exe,
+-                                     suite : 'fuzzers',
+-                                     args : [project_source_root / p])
+-                        endif
++                foreach fuzz_in : fuzz_regression_tests[name]
++                        test('@0@_@1@'.format(name, fuzz_in),
++                             exe,
++                             suite : 'fuzzers',
++                             args : [project_source_root / fuzz_testsdir / name / fuzz_in])
+                 endforeach
+         endif
+ endforeach
+@@ -4128,45 +4123,39 @@ endif
+ ############################################################
+ 
+ # Enable tests for all supported sanitizers
+-foreach tuple : sanitizers
++foreach tuple : fuzz_sanitizers
+         sanitizer = tuple[0]
+         build = tuple[1]
+ 
+         if cc.has_link_argument('-fsanitize=@0@'.format(sanitizer))
+-                prev = ''
+-                foreach p : fuzz_regression_tests
+-                        b = p.split('/')[-2]
+-                        c = p.split('/')[-1]
+-
+-                        name = '@0@:@1@'.format(b, sanitizer)
+-
+-                        if name != prev
+-                                if want_tests == 'false'
+-                                        message('Not compiling @0@ because tests is set to false'.format(name))
+-                                elif fuzz_tests
+-                                        exe = custom_target(
+-                                                name,
+-                                                output : name,
+-                                                depends : build,
+-                                                command : [ln, '-fs',
+-                                                           build.full_path() / b,
+-                                                           '@OUTPUT@'],
+-                                                build_by_default : true)
+-                                else
+-                                        message('Not compiling @0@ because fuzz-tests is set to false'.format(name))
+-                                endif
++                foreach fuzzer, fuzz_ins : fuzz_regression_tests
++                        name = '@0@:@1@'.format(fuzzer, sanitizer)
++                        if want_tests == 'false'
++                                message('Not compiling @0@ because tests is set to false'.format(name))
++                                continue
+                         endif
+-                        prev = name
+-
+-                        if fuzz_tests
+-                                test('@0@_@1@_@2@'.format(b, c, sanitizer),
++                        if not fuzz_tests
++                                message('Not compiling @0@ because fuzz-tests is set to false'.format(name))
++                                continue
++                        endif
++                        exe = custom_target(
++                                name,
++                                output : name,
++                                depends : build,
++                                command : [ln, '-fs',
++                                           build.full_path() / fuzzer,
++                                           '@OUTPUT@'],
++                                build_by_default : true)
++
++                        foreach fuzz_in : fuzz_ins
++                                test('@0@_@1@_@2@'.format(fuzzer, fuzz_in, sanitizer),
+                                      env,
+                                      suite : 'fuzz+san',
+                                      env : ['UBSAN_OPTIONS=print_stacktrace=1:print_summary=1:halt_on_error=1'],
+                                      timeout : 60,
+                                      args : [exe.full_path(),
+-                                             project_source_root / p])
+-                        endif
++                                             project_source_root / fuzz_testsdir / fuzzer / fuzz_in])
++                        endforeach
+                 endforeach
+         endif
+ endforeach
+diff --git a/test/fuzz/meson.build b/test/fuzz/meson.build
+index 80362d4154..82738fd1b7 100644
+--- a/test/fuzz/meson.build
++++ b/test/fuzz/meson.build
+@@ -16,24 +16,34 @@ sanitize_address_undefined = custom_target(
+                    ' '.join(cc.cmd_array()),
+                    cxx_cmd])
+ 
+-sanitizers = [['address,undefined', sanitize_address_undefined]]
++fuzz_sanitizers = [['address,undefined', sanitize_address_undefined]]
++fuzz_testsdir = 'test/fuzz'
+ 
+ if git.found() and fs.exists(project_source_root / '.git')
+         out = run_command(env, '-u', 'GIT_WORK_TREE',
+                           git, '--git-dir=@0@/.git'.format(project_source_root),
+-                          'ls-files', ':/test/fuzz/*/*',
++                          'ls-files', ':/@0@/*/*'.format(fuzz_testsdir),
+                           check: true)
+ else
+-        out = run_command(sh, '-c', 'cd "@0@"; echo test/fuzz/*/*'.format(project_source_root), check: true)
++        out = run_command(sh, '-c', 'cd "@0@"; echo @1@/*/*'.format(project_source_root, fuzz_testsdir), check: true)
+ endif
+ 
+-fuzz_regression_tests = []
++fuzz_regression_tests = {}
+ foreach p : out.stdout().split()
+         # Remove the last entry which is ''.
+         #
+         # Also, backslashes get mangled, so skip test. See
+         # https://github.com/mesonbuild/meson/issues/1564.
+-        if not p.contains('\\')
+-                fuzz_regression_tests += p
++        if p.contains('\\')
++                continue
+         endif
++        fuzzer = p.split('/')[-2]
++        fuzz_in = p.split('/')[-1]
++        if fuzzer not in fuzz_regression_tests
++                fuzz_regression_tests += {fuzzer: []}
++        endif
++        # Meson parser provision for: fuzz_regression_tests[fuzzer] += [fuzz_in]
++        l = fuzz_regression_tests[fuzzer]
++        l += [fuzz_in]
++        fuzz_regression_tests += {fuzzer: l}
+ endforeach

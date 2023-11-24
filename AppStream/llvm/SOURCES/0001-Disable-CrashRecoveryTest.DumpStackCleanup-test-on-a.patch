@@ -1,0 +1,35 @@
+From 3df079ae29426b4bee3ca11681a41958d72b983a Mon Sep 17 00:00:00 2001
+From: Nikita Popov <npopov@redhat.com>
+Date: Mon, 31 Jan 2022 10:33:27 +0100
+Subject: [PATCH] Disable CrashRecoveryTest.DumpStackCleanup test on aarch64
+
+Produces a non-reproducible failure on aarch64:
+https://bugzilla.redhat.com/show_bug.cgi?id=2048440
+---
+ llvm/unittests/Support/CrashRecoveryTest.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/llvm/unittests/Support/CrashRecoveryTest.cpp b/llvm/unittests/Support/CrashRecoveryTest.cpp
+index e95513eb2841..afb1d3a1f6a2 100644
+--- a/llvm/unittests/Support/CrashRecoveryTest.cpp
++++ b/llvm/unittests/Support/CrashRecoveryTest.cpp
+@@ -76,6 +76,7 @@ TEST(CrashRecoveryTest, Cleanup) {
+   llvm::CrashRecoveryContext::Disable();
+ }
+
++#ifndef __aarch64__
+ TEST(CrashRecoveryTest, DumpStackCleanup) {
+   SmallString<128> Filename;
+   std::error_code EC = sys::fs::createTemporaryFile("crash", "test", Filename);
+@@ -101,6 +102,7 @@ TEST(CrashRecoveryTest, DumpStackCleanup) {
+   EXPECT_EQ(GlobalInt, 1);
+   llvm::CrashRecoveryContext::Disable();
+ }
++#endif
+
+ TEST(CrashRecoveryTest, LimitedStackTrace) {
+   std::string Res;
+--
+2.34.1
+
+

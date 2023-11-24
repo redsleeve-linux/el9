@@ -1,0 +1,32 @@
+commit 3edc4ff2ceff4a59587ebecb94148d3bcfa1df62
+Author: Paul Eggert <eggert@cs.ucla.edu>
+Date:   Wed Jul 19 14:09:26 2023 -0700
+
+    make ‘struct pthread’ a complete type
+    
+    * nptl/descr.h (struct pthread): Remove end_padding member, which
+    made this type incomplete.
+    (PTHREAD_STRUCT_END_PADDING): Stop using end_padding.
+    
+    Reviewed-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+
+diff --git a/nptl/descr.h b/nptl/descr.h
+index dfef9c4bda075d13..c487846c171f9434 100644
+--- a/nptl/descr.h
++++ b/nptl/descr.h
+@@ -412,11 +412,11 @@ struct pthread
+   /* rseq area registered with the kernel.  */
+   struct rseq rseq_area;
+ 
+-  /* This member must be last.  */
+-  char end_padding[];
+-
++  /* Amount of end padding, if any, in this structure.
++     This definition relies on rseq_area being last.  */
+ #define PTHREAD_STRUCT_END_PADDING \
+-  (sizeof (struct pthread) - offsetof (struct pthread, end_padding))
++  (sizeof (struct pthread) - offsetof (struct pthread, rseq_area) \
++   + sizeof (struct rseq))
+ } __attribute ((aligned (TCB_ALIGNMENT)));
+ 
+ static inline bool

@@ -1,4 +1,9 @@
 
+
+%{?scl_package:%global scl gcc-toolset-12}
+%global scl_prefix gcc-toolset-12-
+BuildRequires: scl-utils-build
+
 %global __python /usr/bin/python3
 %{?scl:%scl_package binutils}
 
@@ -42,7 +47,7 @@
 Summary: A GNU collection of binary utilities
 Name: %{?scl_prefix}%{?cross}binutils%{?_with_debug:-debug}
 Version: 2.38
-Release: 17%{?dist}.1.redsleeve
+Release: 19%{?dist}
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -308,8 +313,6 @@ Patch23: binutils-indirect-symbols.patch
 # Lifetime: Fixed in 2.39
 Patch24: binutils-bfd-DWARF-improvements.patch
 
-Patch1000: binutils-armv6.patch
-
 #----------------------------------------------------------------------------
 
 Provides: bundled(libiberty)
@@ -323,11 +326,12 @@ BuildRequires: automake
 BuildRequires: %{?scl_prefix}gcc
 BuildRequires: %{?scl_prefix}gcc-c++
 BuildRequires: %{?scl_prefix}annobin-plugin-gcc
+BuildRequires: %{?scl_prefix}gcc-plugin-annobin
 %define gcc_for_libraries %{?_scl_root}/usr/bin/gcc
 %define gxx_for_libraries %{?_scl_root}/usr/bin/g++
 # Note - during GTS bootstrap it may be necessary to build the binutils without
 # annobin annotations.
-# %%undefine _annotated_build
+%undefine _annotated_build
 
 # Can be dropped once binutils-ld-read-only-script.patch is removed
 BuildRequires: bison
@@ -956,8 +960,11 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
-* Sat Aug 05 2023 Jacco Ligthart <jacco@redsleeve.org> 2.38-17.1.redsleeve
-- minor adjustments for armv6
+* Thu Aug 17 2023 Nick Clifton  <nickc@redhat.comn> - 2.38-19
+- Add a build requirement on gcc-plugin-annobin.  (#2216456)
+
+* Tue Aug 15 2023 Nick Clifton  <nickc@redhat.comn> - 2.38-18
+- Use z-stream NVR: Fix the Provides fields of the binutils-gold and binutils-devel subpackages.  (#2216456)
 
 * Thu Jul 20 2023 Nick Clifton  <nickc@redhat.comn> - 2.38-17.1
 - Use z-stream NVR: Fix the Provides fields of the binutils-gold and binutils-devel subpackages.  (#2220917)

@@ -1,0 +1,81 @@
+From 90c66a0982b41c38cfd027a2bb3e6b33d0744e68 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 12 May 2023 16:08:32 +0900
+Subject: [PATCH] fstab-generator: call add_swap() earlier
+
+As 'where' field will be ignored for swap entry.
+
+(cherry picked from commit 256604ccddd41a16de329ff792c5f49d6750e510)
+
+Related: #2190226
+---
+ src/fstab-generator/fstab-generator.c | 21 +++++++++++++++------
+ 1 file changed, 15 insertions(+), 6 deletions(-)
+
+diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
+index 4ea95f29eb..742a84b485 100644
+--- a/src/fstab-generator/fstab-generator.c
++++ b/src/fstab-generator/fstab-generator.c
+@@ -128,6 +128,11 @@ static int add_swap(
+                 return true;
+         }
+ 
++        log_debug("Found swap entry what=%s makefs=%s growfs=%s noauto=%s nofail=%s",
++                  what,
++                  yes_no(flags & MOUNT_MAKEFS), yes_no(flags & MOUNT_GROWFS),
++                  yes_no(flags & MOUNT_NOAUTO), yes_no(flags & MOUNT_NOFAIL));
++
+         r = unit_name_from_path(what, ".swap", &name);
+         if (r < 0)
+                 return log_error_errno(r, "Failed to generate unit name: %m");
+@@ -691,16 +696,18 @@ static int parse_fstab_one(
+ 
+         _cleanup_free_ char *what = NULL, *where = NULL, *canonical_where = NULL;
+         MountPointFlags flags;
++        bool is_swap;
+         int r;
+ 
+         assert(what_original);
+-        assert(where_original);
+         assert(fstype);
+         assert(options);
+ 
+         if (initrd && !mount_in_initrd(where_original, options))
+                 return 0;
+ 
++        is_swap = streq_ptr(fstype, "swap");
++
+         what = fstab_node_to_udev_node(what_original);
+         if (!what)
+                 return log_oom();
+@@ -712,6 +719,13 @@ static int parse_fstab_one(
+                 return 0;
+         }
+ 
++        flags = fstab_options_to_flags(options, is_swap);
++
++        if (is_swap)
++                return add_swap(source, what, options, flags);
++
++        assert(where_original); /* 'where' is not necessary for swap entry. */
++
+         where = strdup(where_original);
+         if (!where)
+                 return log_oom();
+@@ -746,16 +760,11 @@ static int parse_fstab_one(
+                         log_debug("Canonicalized what=%s where=%s to %s", what, where, canonical_where);
+         }
+ 
+-        flags = fstab_options_to_flags(options, streq_ptr(fstype, "swap"));
+-
+         log_debug("Found entry what=%s where=%s type=%s makefs=%s growfs=%s noauto=%s nofail=%s",
+                   what, where, strna(fstype),
+                   yes_no(flags & MOUNT_MAKEFS), yes_no(flags & MOUNT_GROWFS),
+                   yes_no(flags & MOUNT_NOAUTO), yes_no(flags & MOUNT_NOFAIL));
+ 
+-        if (streq_ptr(fstype, "swap"))
+-                return add_swap(source, what, options, flags);
+-
+         bool is_sysroot = in_initrd() && path_equal(where, "/sysroot");
+         /* See comment from add_sysroot_usr_mount() about the need for extra indirection in case /usr needs
+          * to be mounted in order for the root fs to be synthesized based on configuration included in /usr/,

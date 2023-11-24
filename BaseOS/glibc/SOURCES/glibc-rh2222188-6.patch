@@ -1,0 +1,36 @@
+commit c8126360dfa98024cc40bce915e126309993cdf9
+Author: Joseph Myers <joseph@codesourcery.com>
+Date:   Mon Aug 23 16:18:42 2021 +0000
+
+    Fix iconv build with GCC mainline
+    
+    Current GCC mainline produces -Wstringop-overflow errors building some
+    iconv converters, as discussed at
+    <https://gcc.gnu.org/pipermail/gcc/2021-July/236943.html>.  Add an
+    __builtin_unreachable call as suggested so that GCC can see the case
+    that would involve a buffer overflow is unreachable; because the
+    unreachability depends on valid conversion state being passed into the
+    function from previous conversion steps, it's not something the
+    compiler can reasonably deduce on its own.
+    
+    Tested with build-many-glibcs.py that, together with
+    <https://sourceware.org/pipermail/libc-alpha/2021-August/130244.html>,
+    it restores the glibc build for powerpc-linux-gnu.
+
+diff --git a/iconv/loop.c b/iconv/loop.c
+index 062cc1b868c1efa5..560a5f6394e8faf6 100644
+--- a/iconv/loop.c
++++ b/iconv/loop.c
+@@ -436,6 +436,12 @@ SINGLE(LOOPFCT) (struct __gconv_step *step,
+     return __GCONV_FULL_OUTPUT;
+ 
+   /*  Now add characters from the normal input buffer.  */
++  if (inlen >= MAX_NEEDED_INPUT)
++    /* Avoid a -Wstringop-overflow= warning when this loop is
++       unrolled.  The compiler cannot otherwise see that this is
++       unreachable because it depends on (state->__count & 7) not
++       being too large after a previous conversion step.  */
++    __builtin_unreachable ();
+   do
+     bytebuf[inlen++] = *inptr++;
+   while (inlen < MAX_NEEDED_INPUT && inptr < inend);

@@ -1,0 +1,370 @@
+From 108dd8030923d241ebc3ac9a58099a020996f911 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 17 Jan 2023 18:50:59 +0100
+Subject: [PATCH] loop-util: always tell kernel explicitly about loopback
+ sector size
+
+Let's not leave the sector size unspecified: either set a user supplied
+value, or auto-detect the right size by probing the disk image
+accordingly.
+
+(cherry picked from commit 22ee78a8987f29e7f837efab86ed090ab78c1170)
+
+Related: #2170883
+---
+ src/core/namespace.c        |  1 +
+ src/dissect/dissect.c       |  1 +
+ src/home/homework-luks.c    | 20 +++++++++++--
+ src/nspawn/nspawn.c         |  1 +
+ src/portable/portable.c     |  2 +-
+ src/shared/discover-image.c |  2 +-
+ src/shared/dissect-image.c  | 15 +++++++++-
+ src/shared/dissect-image.h  |  2 ++
+ src/shared/loop-util.c      | 60 +++++++++++++++++++++++++++++++++----
+ src/shared/loop-util.h      |  5 ++--
+ src/sysext/sysext.c         |  1 +
+ 11 files changed, 98 insertions(+), 12 deletions(-)
+
+diff --git a/src/core/namespace.c b/src/core/namespace.c
+index 96b05303eb..8fd7ed0269 100644
+--- a/src/core/namespace.c
++++ b/src/core/namespace.c
+@@ -2093,6 +2093,7 @@ int setup_namespace(
+                 r = loop_device_make_by_path(
+                                 root_image,
+                                 FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_DEVICE_READ_ONLY) ? O_RDONLY : -1 /* < 0 means writable if possible, read-only as fallback */,
++                                /* sector_size= */ UINT32_MAX,
+                                 FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
+                                 LOCK_SH,
+                                 &loop_device);
+diff --git a/src/dissect/dissect.c b/src/dissect/dissect.c
+index c1d731dc82..b7c47561bc 100644
+--- a/src/dissect/dissect.c
++++ b/src/dissect/dissect.c
+@@ -931,6 +931,7 @@ static int run(int argc, char *argv[]) {
+         r = loop_device_make_by_path(
+                         arg_image,
+                         FLAGS_SET(arg_flags, DISSECT_IMAGE_DEVICE_READ_ONLY) ? O_RDONLY : O_RDWR,
++                        /* sector_size= */ UINT32_MAX,
+                         FLAGS_SET(arg_flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
+                         LOCK_SH,
+                         &d);
+diff --git a/src/home/homework-luks.c b/src/home/homework-luks.c
+index 5e1d5bbd65..53fa61b103 100644
+--- a/src/home/homework-luks.c
++++ b/src/home/homework-luks.c
+@@ -1378,7 +1378,15 @@ int home_setup_luks(
+                                 return r;
+                 }
+ 
+-                r = loop_device_make(setup->image_fd, O_RDWR, offset, size, user_record_luks_sector_size(h), 0, LOCK_UN, &setup->loop);
++                r = loop_device_make(
++                                setup->image_fd,
++                                O_RDWR,
++                                offset,
++                                size,
++                                h->luks_sector_size == UINT64_MAX ? UINT32_MAX : user_record_luks_sector_size(h), /* if sector size is not specified, select UINT32_MAX, i.e. auto-probe */
++                                /* loop_flags= */ 0,
++                                LOCK_UN,
++                                &setup->loop);
+                 if (r == -ENOENT) {
+                         log_error_errno(r, "Loopback block device support is not available on this system.");
+                         return -ENOLINK; /* make recognizable */
+@@ -2302,7 +2310,15 @@ int home_create_luks(
+ 
+         log_info("Writing of partition table completed.");
+ 
+-        r = loop_device_make(setup->image_fd, O_RDWR, partition_offset, partition_size, user_record_luks_sector_size(h), 0, LOCK_EX, &setup->loop);
++        r = loop_device_make(
++                        setup->image_fd,
++                        O_RDWR,
++                        partition_offset,
++                        partition_size,
++                        user_record_luks_sector_size(h),
++                        0,
++                        LOCK_EX,
++                        &setup->loop);
+         if (r < 0) {
+                 if (r == -ENOENT) { /* this means /dev/loop-control doesn't exist, i.e. we are in a container
+                                      * or similar and loopback bock devices are not available, return a
+diff --git a/src/nspawn/nspawn.c b/src/nspawn/nspawn.c
+index 57723aa3cf..cdebe8e5c4 100644
+--- a/src/nspawn/nspawn.c
++++ b/src/nspawn/nspawn.c
+@@ -5737,6 +5737,7 @@ static int run(int argc, char *argv[]) {
+                 r = loop_device_make_by_path(
+                                 arg_image,
+                                 arg_read_only ? O_RDONLY : O_RDWR,
++                                /* sector_size= */ UINT32_MAX,
+                                 FLAGS_SET(dissect_image_flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
+                                 LOCK_SH,
+                                 &loop);
+diff --git a/src/portable/portable.c b/src/portable/portable.c
+index 570751f05b..8a989ed526 100644
+--- a/src/portable/portable.c
++++ b/src/portable/portable.c
+@@ -335,7 +335,7 @@ static int portable_extract_by_path(
+ 
+         assert(path);
+ 
+-        r = loop_device_make_by_path(path, O_RDONLY, LO_FLAGS_PARTSCAN, LOCK_SH, &d);
++        r = loop_device_make_by_path(path, O_RDONLY, /* sector_size= */ UINT32_MAX, LO_FLAGS_PARTSCAN, LOCK_SH, &d);
+         if (r == -EISDIR) {
+                 _cleanup_free_ char *image_name = NULL;
+ 
+diff --git a/src/shared/discover-image.c b/src/shared/discover-image.c
+index 5d740de266..0488e215fd 100644
+--- a/src/shared/discover-image.c
++++ b/src/shared/discover-image.c
+@@ -1192,7 +1192,7 @@ int image_read_metadata(Image *i) {
+                 _cleanup_(loop_device_unrefp) LoopDevice *d = NULL;
+                 _cleanup_(dissected_image_unrefp) DissectedImage *m = NULL;
+ 
+-                r = loop_device_make_by_path(i->path, O_RDONLY, LO_FLAGS_PARTSCAN, LOCK_SH, &d);
++                r = loop_device_make_by_path(i->path, O_RDONLY, /* sector_size= */ UINT32_MAX, LO_FLAGS_PARTSCAN, LOCK_SH, &d);
+                 if (r < 0)
+                         return r;
+ 
+diff --git a/src/shared/dissect-image.c b/src/shared/dissect-image.c
+index 5c7d26d6cf..d2abd5a087 100644
+--- a/src/shared/dissect-image.c
++++ b/src/shared/dissect-image.c
+@@ -443,6 +443,7 @@ static int dissect_image(
+         assert(!verity || verity->root_hash_sig || verity->root_hash_sig_size == 0);
+         assert(!verity || (verity->root_hash || !verity->root_hash_sig));
+         assert(!((flags & DISSECT_IMAGE_GPT_ONLY) && (flags & DISSECT_IMAGE_NO_PARTITION_TABLE)));
++        assert(m->sector_size > 0);
+ 
+         /* Probes a disk image, and returns information about what it found in *ret.
+          *
+@@ -489,6 +490,11 @@ static int dissect_image(
+         if (r != 0)
+                 return errno_or_else(ENOMEM);
+ 
++        errno = 0;
++        r = blkid_probe_set_sectorsize(b, m->sector_size);
++        if (r != 0)
++                return errno_or_else(EIO);
++
+         if ((flags & DISSECT_IMAGE_GPT_ONLY) == 0) {
+                 /* Look for file system superblocks, unless we only shall look for GPT partition tables */
+                 blkid_probe_enable_superblocks(b, 1);
+@@ -1328,6 +1334,10 @@ int dissect_image_file(
+         if (r < 0)
+                 return r;
+ 
++        r = probe_sector_size(fd, &m->sector_size);
++        if (r < 0)
++                return r;
++
+         r = dissect_image(m, fd, path, verity, mount_options, flags);
+         if (r < 0)
+                 return r;
+@@ -3116,6 +3126,7 @@ int dissect_loop_device(
+                 return r;
+ 
+         m->loop = loop_device_ref(loop);
++        m->sector_size = m->loop->sector_size;
+ 
+         r = dissect_image(m, loop->fd, loop->node, verity, mount_options, flags);
+         if (r < 0)
+@@ -3295,6 +3306,7 @@ int mount_image_privately_interactively(
+         r = loop_device_make_by_path(
+                         image,
+                         FLAGS_SET(flags, DISSECT_IMAGE_DEVICE_READ_ONLY) ? O_RDONLY : O_RDWR,
++                        /* sector_size= */ UINT32_MAX,
+                         FLAGS_SET(flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
+                         LOCK_SH,
+                         &d);
+@@ -3414,7 +3426,8 @@ int verity_dissect_and_mount(
+          * accepted by LOOP_CONFIGURE, so just let loop_device_make_by_path reopen it as a regular FD. */
+         r = loop_device_make_by_path(
+                         src_fd >= 0 ? FORMAT_PROC_FD_PATH(src_fd) : src,
+-                        -1,
++                        /* open_flags= */ -1,
++                        /* sector_size= */ UINT32_MAX,
+                         verity.data_path ? 0 : LO_FLAGS_PARTSCAN,
+                         LOCK_SH,
+                         &loop_device);
+diff --git a/src/shared/dissect-image.h b/src/shared/dissect-image.h
+index 2c7b84f15b..becd69c26e 100644
+--- a/src/shared/dissect-image.h
++++ b/src/shared/dissect-image.h
+@@ -231,6 +231,8 @@ struct DissectedImage {
+         DissectedPartition partitions[_PARTITION_DESIGNATOR_MAX];
+         DecryptedImage *decrypted_image;
+ 
++        uint32_t sector_size;
++
+         /* Meta information extracted from /etc/os-release and similar */
+         char *image_name;
+         char *hostname;
+diff --git a/src/shared/loop-util.c b/src/shared/loop-util.c
+index 4e0b06ad83..468ef7a40a 100644
+--- a/src/shared/loop-util.c
++++ b/src/shared/loop-util.c
+@@ -19,6 +19,7 @@
+ #include "blockdev-util.h"
+ #include "device-util.h"
+ #include "devnum-util.h"
++#include "dissect-image.h"
+ #include "env-util.h"
+ #include "errno-util.h"
+ #include "fd-util.h"
+@@ -408,6 +409,7 @@ static int loop_configure(
+                 .diskseq = diskseq,
+                 .uevent_seqnum_not_before = seqnum,
+                 .timestamp_not_before = timestamp,
++                .sector_size = c->block_size,
+         };
+ 
+         *ret = TAKE_PTR(d);
+@@ -420,7 +422,7 @@ static int loop_device_make_internal(
+                 int open_flags,
+                 uint64_t offset,
+                 uint64_t size,
+-                uint32_t block_size,
++                uint32_t sector_size,
+                 uint32_t loop_flags,
+                 int lock_op,
+                 LoopDevice **ret) {
+@@ -491,9 +493,50 @@ static int loop_device_make_internal(
+         if (control < 0)
+                 return -errno;
+ 
++        if (sector_size == 0)
++                /* If no sector size is specified, default to the classic default */
++                sector_size = 512;
++        else if (sector_size == UINT32_MAX) {
++
++                if (S_ISBLK(st.st_mode))
++                        /* If the sector size is specified as UINT32_MAX we'll propagate the sector size of
++                         * the underlying block device. */
++                        r = blockdev_get_sector_size(fd, &sector_size);
++                else {
++                        _cleanup_close_ int non_direct_io_fd = -1;
++                        int probe_fd;
++
++                        assert(S_ISREG(st.st_mode));
++
++                        /* If sector size is specified as UINT32_MAX, we'll try to probe the right sector
++                         * size of the image in question by looking for the GPT partition header at various
++                         * offsets. This of course only works if the image already has a disk label.
++                         *
++                         * So here we actually want to read the file contents ourselves. This is quite likely
++                         * not going to work if we managed to enable O_DIRECT, because in such a case there
++                         * are some pretty strict alignment requirements to offset, size and target, but
++                         * there's no way to query what alignment specifically is actually required. Hence,
++                         * let's avoid the mess, and temporarily open an fd without O_DIRECT for the probing
++                         * logic. */
++
++                        if (FLAGS_SET(loop_flags, LO_FLAGS_DIRECT_IO)) {
++                                non_direct_io_fd = fd_reopen(fd, O_RDONLY|O_CLOEXEC|O_NONBLOCK);
++                                if (non_direct_io_fd < 0)
++                                        return non_direct_io_fd;
++
++                                probe_fd = non_direct_io_fd;
++                        } else
++                                probe_fd = fd;
++
++                        r = probe_sector_size(probe_fd, &sector_size);
++                }
++                if (r < 0)
++                        return r;
++        }
++
+         config = (struct loop_config) {
+                 .fd = fd,
+-                .block_size = block_size,
++                .block_size = sector_size,
+                 .info = {
+                         /* Use the specified flags, but configure the read-only flag from the open flags, and force autoclear */
+                         .lo_flags = (loop_flags & ~LO_FLAGS_READ_ONLY) | ((open_flags & O_ACCMODE) == O_RDONLY ? LO_FLAGS_READ_ONLY : 0) | LO_FLAGS_AUTOCLEAR,
+@@ -577,7 +620,7 @@ int loop_device_make(
+                 int open_flags,
+                 uint64_t offset,
+                 uint64_t size,
+-                uint32_t block_size,
++                uint32_t sector_size,
+                 uint32_t loop_flags,
+                 int lock_op,
+                 LoopDevice **ret) {
+@@ -591,7 +634,7 @@ int loop_device_make(
+                         open_flags,
+                         offset,
+                         size,
+-                        block_size,
++                        sector_size,
+                         loop_flags_mangle(loop_flags),
+                         lock_op,
+                         ret);
+@@ -600,6 +643,7 @@ int loop_device_make(
+ int loop_device_make_by_path(
+                 const char *path,
+                 int open_flags,
++                uint32_t sector_size,
+                 uint32_t loop_flags,
+                 int lock_op,
+                 LoopDevice **ret) {
+@@ -655,7 +699,7 @@ int loop_device_make_by_path(
+                   direct ? "enabled" : "disabled",
+                   direct != (direct_flags != 0) ? " (O_DIRECT was requested but not supported)" : "");
+ 
+-        return loop_device_make_internal(path, fd, open_flags, 0, 0, 0, loop_flags, lock_op, ret);
++        return loop_device_make_internal(path, fd, open_flags, 0, 0, sector_size, loop_flags, lock_op, ret);
+ }
+ 
+ static LoopDevice* loop_device_free(LoopDevice *d) {
+@@ -797,6 +841,11 @@ int loop_device_open(
+         if (r < 0 && r != -EOPNOTSUPP)
+                 return r;
+ 
++        uint32_t sector_size;
++        r = blockdev_get_sector_size(fd, &sector_size);
++        if (r < 0)
++                return r;
++
+         r = sd_device_get_devnum(dev, &devnum);
+         if (r < 0)
+                 return r;
+@@ -826,6 +875,7 @@ int loop_device_open(
+                 .diskseq = diskseq,
+                 .uevent_seqnum_not_before = UINT64_MAX,
+                 .timestamp_not_before = USEC_INFINITY,
++                .sector_size = sector_size,
+         };
+ 
+         *ret = d;
+diff --git a/src/shared/loop-util.h b/src/shared/loop-util.h
+index e466a5abbd..6e838cef0b 100644
+--- a/src/shared/loop-util.h
++++ b/src/shared/loop-util.h
+@@ -23,13 +23,14 @@ struct LoopDevice {
+         uint64_t diskseq; /* Block device sequence number, monothonically incremented by the kernel on create/attach, or 0 if we don't know */
+         uint64_t uevent_seqnum_not_before; /* uevent sequm right before we attached the loopback device, or UINT64_MAX if we don't know */
+         usec_t timestamp_not_before; /* CLOCK_MONOTONIC timestamp taken immediately before attaching the loopback device, or USEC_INFINITY if we don't know */
++        uint32_t sector_size;
+ };
+ 
+ /* Returns true if LoopDevice object is not actually a loopback device but some other block device we just wrap */
+ #define LOOP_DEVICE_IS_FOREIGN(d) ((d)->nr < 0)
+ 
+-int loop_device_make(int fd, int open_flags, uint64_t offset, uint64_t size, uint32_t block_size, uint32_t loop_flags, int lock_op, LoopDevice **ret);
+-int loop_device_make_by_path(const char *path, int open_flags, uint32_t loop_flags, int lock_op, LoopDevice **ret);
++int loop_device_make(int fd, int open_flags, uint64_t offset, uint64_t size, uint32_t sector_size, uint32_t loop_flags, int lock_op, LoopDevice **ret);
++int loop_device_make_by_path(const char *path, int open_flags, uint32_t sector_size, uint32_t loop_flags, int lock_op, LoopDevice **ret);
+ int loop_device_open(sd_device *dev, int open_flags, int lock_op, LoopDevice **ret);
+ int loop_device_open_from_fd(int fd, int open_flags, int lock_op, LoopDevice **ret);
+ int loop_device_open_from_path(const char *path, int open_flags, int lock_op, LoopDevice **ret);
+diff --git a/src/sysext/sysext.c b/src/sysext/sysext.c
+index c57293b0e5..e1bf627528 100644
+--- a/src/sysext/sysext.c
++++ b/src/sysext/sysext.c
+@@ -534,6 +534,7 @@ static int merge_subprocess(Hashmap *images, const char *workspace) {
+                         r = loop_device_make_by_path(
+                                         img->path,
+                                         O_RDONLY,
++                                        /* sector_size= */ UINT32_MAX,
+                                         FLAGS_SET(flags, DISSECT_IMAGE_NO_PARTITION_TABLE) ? 0 : LO_FLAGS_PARTSCAN,
+                                         LOCK_SH,
+                                         &d);

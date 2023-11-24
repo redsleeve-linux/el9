@@ -1,0 +1,67 @@
+From 4cbaa23f1f4a3510176a1f38489834203f71b2b6 Mon Sep 17 00:00:00 2001
+From: Sebastian Keller <skeller@gnome.org>
+Date: Thu, 16 Mar 2023 22:35:49 +0100
+Subject: [PATCH] function: Always initialize callback return value
+
+When callback_closure() exits early, for example due to being called
+during GC, the return value would not be initialized. This value is
+often non-zero. If the callback is a source func of an idle or a timeout
+this would then get interpreted as G_SOURCE_CONTINUE and the same would
+repeat in the next iteration. If this happens fast enough, this results
+in the entire process being seemingly frozen while spamming the log with
+error messages.
+
+To fix this always initialize the return value to 0 or a comparable
+neutral value.
+
+Related: https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/1868
+---
+ gi/function.cpp | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/gi/function.cpp b/gi/function.cpp
+index 7c0064c8..5d69ed8a 100644
+--- a/gi/function.cpp
++++ b/gi/function.cpp
+@@ -308,6 +308,15 @@ void GjsCallbackTrampoline::callback_closure(GIArgument** args, void* result) {
+     JSContext *context;
+     GITypeInfo ret_type;
+ 
++    g_callable_info_load_return_type(m_info, &ret_type);
++
++    // Fill in the result with some hopefully neutral value
++    if (g_type_info_get_tag(&ret_type) != GI_TYPE_TAG_VOID) {
++        GIArgument argument = {};
++        gjs_gi_argument_init_default(&ret_type, &argument);
++        set_return_ffi_arg_from_giargument(&ret_type, result, &argument);
++    }
++
+     if (G_UNLIKELY(!gjs_closure_is_valid(m_js_function))) {
+         warn_about_illegal_js_callback(
+             "during shutdown",
+@@ -382,7 +391,6 @@ void GjsCallbackTrampoline::callback_closure(GIArgument** args, void* result) {
+ 
+     JS::RootedValue rval(context);
+ 
+-    g_callable_info_load_return_type(m_info, &ret_type);
+     GIArgument* error_argument = nullptr;
+ 
+     if (g_callable_info_can_throw_gerror(m_info))
+@@ -406,14 +414,6 @@ void GjsCallbackTrampoline::callback_closure(GIArgument** args, void* result) {
+                     m_info.ns(), m_info.name());
+         }
+ 
+-        // Fill in the result with some hopefully neutral value
+-        if (g_type_info_get_tag(&ret_type) != GI_TYPE_TAG_VOID) {
+-            GIArgument argument = {};
+-            g_callable_info_load_return_type(m_info, &ret_type);
+-            gjs_gi_argument_init_default(&ret_type, &argument);
+-            set_return_ffi_arg_from_giargument(&ret_type, result, &argument);
+-        }
+-
+         // If the callback has a GError** argument and invoking the closure
+         // returned an error, try to make a GError from it
+         if (error_argument && rval.isObject()) {
+-- 
+2.35.1
+

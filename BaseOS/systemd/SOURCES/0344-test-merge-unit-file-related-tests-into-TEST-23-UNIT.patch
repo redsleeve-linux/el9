@@ -1,0 +1,1009 @@
+From c2e66d6e79bd840c63fae87f0656faae1c3ea2b4 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Mon, 8 May 2023 22:38:34 +0200
+Subject: [PATCH] test: merge unit file related tests into TEST-23-UNIT-FILE
+
+Rename TEST-23-TYPE-EXEC to TEST-23-UNIT-FILE and merge it with
+following tests:
+  - TEST-37-RUNTIMEDIRECTORYPRESERV
+  - TEST-40-EXEC-COMMAND-EX
+  - TEST-41-ONESHOT-RESTART
+  - TEST-42-EXECSTOPPOST
+  - TEST-57-ONSUCCESS-UPHOLD
+
+(cherry picked from commit 539af5c4413efbcdb57713b7ad563440217b28a5)
+
+Related: #2213521
+---
+ .../Makefile                                  |  0
+ .../test.sh                                   |  2 +-
+ .../TEST-37-RUNTIMEDIRECTORYPRESERVE/Makefile |  1 -
+ test/TEST-37-RUNTIMEDIRECTORYPRESERVE/test.sh | 12 ---
+ test/TEST-39-EXECRELOAD/Makefile              |  1 -
+ test/TEST-39-EXECRELOAD/test.sh               | 10 --
+ test/TEST-40-EXEC-COMMAND-EX/Makefile         |  1 -
+ .../deny-list-ubuntu-ci-arm64                 |  0
+ test/TEST-40-EXEC-COMMAND-EX/test.sh          | 10 --
+ test/TEST-41-ONESHOT-RESTART/Makefile         |  1 -
+ test/TEST-41-ONESHOT-RESTART/test.sh          | 10 --
+ test/TEST-42-EXECSTOPPOST/Makefile            |  1 -
+ test/TEST-42-EXECSTOPPOST/test.sh             | 10 --
+ test/TEST-57-ONSUCCESS-UPHOLD/Makefile        |  1 -
+ test/TEST-57-ONSUCCESS-UPHOLD/test.sh         |  9 --
+ ....service => testsuite-23-binds-to.service} |  6 +-
+ ....service => testsuite-23-bound-by.service} |  0
+ ...fail.service => testsuite-23-fail.service} |  2 +-
+ test/units/testsuite-23-prop-stop-one.service | 10 ++
+ ...ice => testsuite-23-prop-stop-two.service} |  0
+ ...rvice => testsuite-23-short-lived.service} |  2 +-
+ test/units/testsuite-23-short-lived.sh        | 18 ++++
+ ...s.service => testsuite-23-success.service} |  2 +-
+ ...ld.service => testsuite-23-uphold.service} |  2 +-
+ ...suite-39.sh => testsuite-23.ExecReload.sh} |  6 +-
+ ...ite-42.sh => testsuite-23.ExecStopPost.sh} |  6 +-
+ ... testsuite-23.RuntimeDirectoryPreserve.sh} |  6 +-
+ test/units/testsuite-23.Upholds.sh            | 69 +++++++++++++
+ ...-40.sh => testsuite-23.exec-command-ex.sh} |  6 +-
+ ...-41.sh => testsuite-23.oneshot-restart.sh} | 18 ++--
+ test/units/testsuite-23.sh                    | 97 ++++++++++---------
+ test/units/testsuite-23.type-exec.sh          | 63 ++++++++++++
+ test/units/testsuite-37.service               |  8 --
+ test/units/testsuite-39.service               |  8 --
+ test/units/testsuite-40.service               |  8 --
+ test/units/testsuite-41.service               |  8 --
+ test/units/testsuite-42.service               | 10 --
+ test/units/testsuite-57-prop-stop-one.service | 10 --
+ test/units/testsuite-57-short-lived.sh        | 18 ----
+ test/units/testsuite-57.service               |  8 --
+ test/units/testsuite-57.sh                    | 69 -------------
+ 41 files changed, 233 insertions(+), 296 deletions(-)
+ rename test/{TEST-23-TYPE-EXEC => TEST-23-UNIT-FILE}/Makefile (100%)
+ rename test/{TEST-23-TYPE-EXEC => TEST-23-UNIT-FILE}/test.sh (74%)
+ delete mode 120000 test/TEST-37-RUNTIMEDIRECTORYPRESERVE/Makefile
+ delete mode 100755 test/TEST-37-RUNTIMEDIRECTORYPRESERVE/test.sh
+ delete mode 120000 test/TEST-39-EXECRELOAD/Makefile
+ delete mode 100755 test/TEST-39-EXECRELOAD/test.sh
+ delete mode 120000 test/TEST-40-EXEC-COMMAND-EX/Makefile
+ delete mode 100644 test/TEST-40-EXEC-COMMAND-EX/deny-list-ubuntu-ci-arm64
+ delete mode 100755 test/TEST-40-EXEC-COMMAND-EX/test.sh
+ delete mode 120000 test/TEST-41-ONESHOT-RESTART/Makefile
+ delete mode 100755 test/TEST-41-ONESHOT-RESTART/test.sh
+ delete mode 120000 test/TEST-42-EXECSTOPPOST/Makefile
+ delete mode 100755 test/TEST-42-EXECSTOPPOST/test.sh
+ delete mode 120000 test/TEST-57-ONSUCCESS-UPHOLD/Makefile
+ delete mode 100755 test/TEST-57-ONSUCCESS-UPHOLD/test.sh
+ rename test/units/{testsuite-57-binds-to.service => testsuite-23-binds-to.service} (74%)
+ rename test/units/{testsuite-57-bound-by.service => testsuite-23-bound-by.service} (100%)
+ rename test/units/{testsuite-57-fail.service => testsuite-23-fail.service} (74%)
+ create mode 100644 test/units/testsuite-23-prop-stop-one.service
+ rename test/units/{testsuite-57-prop-stop-two.service => testsuite-23-prop-stop-two.service} (100%)
+ rename test/units/{testsuite-57-short-lived.service => testsuite-23-short-lived.service} (79%)
+ create mode 100755 test/units/testsuite-23-short-lived.sh
+ rename test/units/{testsuite-57-success.service => testsuite-23-success.service} (75%)
+ rename test/units/{testsuite-57-uphold.service => testsuite-23-uphold.service} (74%)
+ rename test/units/{testsuite-39.sh => testsuite-23.ExecReload.sh} (98%)
+ rename test/units/{testsuite-42.sh => testsuite-23.ExecStopPost.sh} (98%)
+ rename test/units/{testsuite-37.sh => testsuite-23.RuntimeDirectoryPreserve.sh} (92%)
+ create mode 100755 test/units/testsuite-23.Upholds.sh
+ rename test/units/{testsuite-40.sh => testsuite-23.exec-command-ex.sh} (97%)
+ rename test/units/{testsuite-41.sh => testsuite-23.oneshot-restart.sh} (76%)
+ create mode 100755 test/units/testsuite-23.type-exec.sh
+ delete mode 100644 test/units/testsuite-37.service
+ delete mode 100644 test/units/testsuite-39.service
+ delete mode 100644 test/units/testsuite-40.service
+ delete mode 100644 test/units/testsuite-41.service
+ delete mode 100644 test/units/testsuite-42.service
+ delete mode 100644 test/units/testsuite-57-prop-stop-one.service
+ delete mode 100755 test/units/testsuite-57-short-lived.sh
+ delete mode 100644 test/units/testsuite-57.service
+ delete mode 100755 test/units/testsuite-57.sh
+
+diff --git a/test/TEST-23-TYPE-EXEC/Makefile b/test/TEST-23-UNIT-FILE/Makefile
+similarity index 100%
+rename from test/TEST-23-TYPE-EXEC/Makefile
+rename to test/TEST-23-UNIT-FILE/Makefile
+diff --git a/test/TEST-23-TYPE-EXEC/test.sh b/test/TEST-23-UNIT-FILE/test.sh
+similarity index 74%
+rename from test/TEST-23-TYPE-EXEC/test.sh
+rename to test/TEST-23-UNIT-FILE/test.sh
+index 7268cde837..335f2fdd2b 100755
+--- a/test/TEST-23-TYPE-EXEC/test.sh
++++ b/test/TEST-23-UNIT-FILE/test.sh
+@@ -2,7 +2,7 @@
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ set -e
+ 
+-TEST_DESCRIPTION="test Type=exec"
++TEST_DESCRIPTION="Tests for various unit file settings"
+ 
+ # shellcheck source=test/test-functions
+ . "${TEST_BASE_DIR:?}/test-functions"
+diff --git a/test/TEST-37-RUNTIMEDIRECTORYPRESERVE/Makefile b/test/TEST-37-RUNTIMEDIRECTORYPRESERVE/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-37-RUNTIMEDIRECTORYPRESERVE/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-37-RUNTIMEDIRECTORYPRESERVE/test.sh b/test/TEST-37-RUNTIMEDIRECTORYPRESERVE/test.sh
+deleted file mode 100755
+index 2f65908515..0000000000
+--- a/test/TEST-37-RUNTIMEDIRECTORYPRESERVE/test.sh
++++ /dev/null
+@@ -1,12 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-# -*- mode: shell-script; indent-tabs-mode: nil; sh-basic-offset: 4; -*-
+-# ex: ts=8 sw=4 sts=4 et filetype=sh
+-set -e
+-
+-TEST_DESCRIPTION="test RuntimeDirectoryPreserve=yes"
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-do_test "$@"
+diff --git a/test/TEST-39-EXECRELOAD/Makefile b/test/TEST-39-EXECRELOAD/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-39-EXECRELOAD/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-39-EXECRELOAD/test.sh b/test/TEST-39-EXECRELOAD/test.sh
+deleted file mode 100755
+index c7565c6488..0000000000
+--- a/test/TEST-39-EXECRELOAD/test.sh
++++ /dev/null
+@@ -1,10 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="Test ExecReload= (PR #13098)"
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-do_test "$@"
+diff --git a/test/TEST-40-EXEC-COMMAND-EX/Makefile b/test/TEST-40-EXEC-COMMAND-EX/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-40-EXEC-COMMAND-EX/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-40-EXEC-COMMAND-EX/deny-list-ubuntu-ci-arm64 b/test/TEST-40-EXEC-COMMAND-EX/deny-list-ubuntu-ci-arm64
+deleted file mode 100644
+index e69de29bb2..0000000000
+diff --git a/test/TEST-40-EXEC-COMMAND-EX/test.sh b/test/TEST-40-EXEC-COMMAND-EX/test.sh
+deleted file mode 100755
+index 6101f2ccf5..0000000000
+--- a/test/TEST-40-EXEC-COMMAND-EX/test.sh
++++ /dev/null
+@@ -1,10 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="test ExecXYZEx= service unit dbus hookups"
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-do_test "$@"
+diff --git a/test/TEST-41-ONESHOT-RESTART/Makefile b/test/TEST-41-ONESHOT-RESTART/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-41-ONESHOT-RESTART/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-41-ONESHOT-RESTART/test.sh b/test/TEST-41-ONESHOT-RESTART/test.sh
+deleted file mode 100755
+index 2e1879a7cb..0000000000
+--- a/test/TEST-41-ONESHOT-RESTART/test.sh
++++ /dev/null
+@@ -1,10 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="Test oneshot unit restart on failure"
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-do_test "$@"
+diff --git a/test/TEST-42-EXECSTOPPOST/Makefile b/test/TEST-42-EXECSTOPPOST/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-42-EXECSTOPPOST/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-42-EXECSTOPPOST/test.sh b/test/TEST-42-EXECSTOPPOST/test.sh
+deleted file mode 100755
+index 9d75bac2b6..0000000000
+--- a/test/TEST-42-EXECSTOPPOST/test.sh
++++ /dev/null
+@@ -1,10 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="test that ExecStopPost= is always run"
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-do_test "$@"
+diff --git a/test/TEST-57-ONSUCCESS-UPHOLD/Makefile b/test/TEST-57-ONSUCCESS-UPHOLD/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-57-ONSUCCESS-UPHOLD/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-57-ONSUCCESS-UPHOLD/test.sh b/test/TEST-57-ONSUCCESS-UPHOLD/test.sh
+deleted file mode 100755
+index 8181ac508f..0000000000
+--- a/test/TEST-57-ONSUCCESS-UPHOLD/test.sh
++++ /dev/null
+@@ -1,9 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="test OnSuccess= + Uphold= + PropagatesStopTo= + BindsTo="
+-# shellcheck source=test/test-functions
+-. "$TEST_BASE_DIR/test-functions"
+-
+-do_test "$@" 57
+diff --git a/test/units/testsuite-57-binds-to.service b/test/units/testsuite-23-binds-to.service
+similarity index 74%
+rename from test/units/testsuite-57-binds-to.service
+rename to test/units/testsuite-23-binds-to.service
+index c542896d94..d81676a8c3 100644
+--- a/test/units/testsuite-57-binds-to.service
++++ b/test/units/testsuite-23-binds-to.service
+@@ -1,10 +1,10 @@
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ [Unit]
+ Description=Unit with BindsTo=
+-BindsTo=testsuite-57-bound-by.service
+-After=testsuite-57-bound-by.service
++BindsTo=testsuite-23-bound-by.service
++After=testsuite-23-bound-by.service
+ 
+ [Service]
+ ExecStart=/bin/sleep infinity
+ # --kill-who= (no 'm') to check that the short form is accepted
+-ExecStopPost=systemctl kill --kill-who=main -sRTMIN+1 testsuite-57.service
++ExecStopPost=systemctl kill --kill-who=main -sRTMIN+1 testsuite-23.service
+diff --git a/test/units/testsuite-57-bound-by.service b/test/units/testsuite-23-bound-by.service
+similarity index 100%
+rename from test/units/testsuite-57-bound-by.service
+rename to test/units/testsuite-23-bound-by.service
+diff --git a/test/units/testsuite-57-fail.service b/test/units/testsuite-23-fail.service
+similarity index 74%
+rename from test/units/testsuite-57-fail.service
+rename to test/units/testsuite-23-fail.service
+index 54d2330742..36f8baa6ba 100644
+--- a/test/units/testsuite-57-fail.service
++++ b/test/units/testsuite-23-fail.service
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ [Unit]
+ Description=Failing unit
+-OnFailure=testsuite-57-uphold.service
++OnFailure=testsuite-23-uphold.service
+ 
+ [Service]
+ ExecStart=/bin/false
+diff --git a/test/units/testsuite-23-prop-stop-one.service b/test/units/testsuite-23-prop-stop-one.service
+new file mode 100644
+index 0000000000..f068daf2b3
+--- /dev/null
++++ b/test/units/testsuite-23-prop-stop-one.service
+@@ -0,0 +1,10 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++[Unit]
++Description=Stop Propagation Receiver
++Wants=testsuite-23-prop-stop-two.service
++After=testsuite-23-prop-stop-two.service
++StopPropagatedFrom=testsuite-23-prop-stop-two.service
++
++[Service]
++ExecStart=/bin/sleep infinity
++ExecStopPost=systemctl kill --kill-whom=main -sUSR2 testsuite-23.service
+diff --git a/test/units/testsuite-57-prop-stop-two.service b/test/units/testsuite-23-prop-stop-two.service
+similarity index 100%
+rename from test/units/testsuite-57-prop-stop-two.service
+rename to test/units/testsuite-23-prop-stop-two.service
+diff --git a/test/units/testsuite-57-short-lived.service b/test/units/testsuite-23-short-lived.service
+similarity index 79%
+rename from test/units/testsuite-57-short-lived.service
+rename to test/units/testsuite-23-short-lived.service
+index cd8b51477f..2dcb2ae228 100644
+--- a/test/units/testsuite-57-short-lived.service
++++ b/test/units/testsuite-23-short-lived.service
+@@ -8,4 +8,4 @@ StartLimitBurst=15
+ StartLimitIntervalSec=1h
+ 
+ [Service]
+-ExecStart=/usr/lib/systemd/tests/testdata/units/testsuite-57-short-lived.sh
++ExecStart=/usr/lib/systemd/tests/testdata/units/testsuite-23-short-lived.sh
+diff --git a/test/units/testsuite-23-short-lived.sh b/test/units/testsuite-23-short-lived.sh
+new file mode 100755
+index 0000000000..4a12c7f498
+--- /dev/null
++++ b/test/units/testsuite-23-short-lived.sh
+@@ -0,0 +1,18 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -ex
++
++if [ -f /tmp/testsuite-23.counter ] ; then
++    read -r counter < /tmp/testsuite-23.counter
++    counter=$((counter + 1))
++else
++    counter=0
++fi
++
++echo "$counter" >/tmp/testsuite-23.counter
++
++if [ "$counter" -eq 5 ] ; then
++    systemctl kill --kill-whom=main -sUSR1 testsuite-23.service
++fi
++
++exec sleep 1.5
+diff --git a/test/units/testsuite-57-success.service b/test/units/testsuite-23-success.service
+similarity index 75%
+rename from test/units/testsuite-57-success.service
+rename to test/units/testsuite-23-success.service
+index ae1f46f30c..410d4f83c3 100644
+--- a/test/units/testsuite-57-success.service
++++ b/test/units/testsuite-23-success.service
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ [Unit]
+ Description=Succeeding unit
+-OnSuccess=testsuite-57-fail.service
++OnSuccess=testsuite-23-fail.service
+ 
+ [Service]
+ ExecStart=/bin/true
+diff --git a/test/units/testsuite-57-uphold.service b/test/units/testsuite-23-uphold.service
+similarity index 74%
+rename from test/units/testsuite-57-uphold.service
+rename to test/units/testsuite-23-uphold.service
+index eba97f509d..3549d6a8f5 100644
+--- a/test/units/testsuite-57-uphold.service
++++ b/test/units/testsuite-23-uphold.service
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ [Unit]
+ Description=Upholding Unit
+-Upholds=testsuite-57-short-lived.service
++Upholds=testsuite-23-short-lived.service
+ 
+ [Service]
+ ExecStart=/bin/sleep infinity
+diff --git a/test/units/testsuite-39.sh b/test/units/testsuite-23.ExecReload.sh
+similarity index 98%
+rename from test/units/testsuite-39.sh
+rename to test/units/testsuite-23.ExecReload.sh
+index 5b77bbbaf1..c890bd7fb5 100755
+--- a/test/units/testsuite-39.sh
++++ b/test/units/testsuite-23.ExecReload.sh
+@@ -3,6 +3,8 @@
+ set -eux
+ set -o pipefail
+ 
++# Test ExecReload= (PR #13098)
++
+ systemd-analyze log-level debug
+ 
+ export SYSTEMD_PAGER=
+@@ -57,7 +59,3 @@ systemctl status "$SERVICE_NAME"
+ systemctl stop "$SERVICE_NAME"
+ 
+ systemd-analyze log-level info
+-
+-echo OK >/testok
+-
+-exit 0
+diff --git a/test/units/testsuite-42.sh b/test/units/testsuite-23.ExecStopPost.sh
+similarity index 98%
+rename from test/units/testsuite-42.sh
+rename to test/units/testsuite-23.ExecStopPost.sh
+index 9476df86dd..1464f6c1b5 100755
+--- a/test/units/testsuite-42.sh
++++ b/test/units/testsuite-23.ExecStopPost.sh
+@@ -2,6 +2,8 @@
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ set -eux
+ 
++# Test that ExecStopPost= is always run
++
+ systemd-analyze log-level debug
+ 
+ systemd-run --unit=simple1.service --wait -p StandardOutput=tty -p StandardError=tty -p Type=simple -p ExecStopPost='/bin/touch /run/simple1' true
+@@ -94,7 +96,3 @@ systemd-run --unit=idle2.service --wait -p StandardOutput=tty -p StandardError=t
+ test -f /run/idle2
+ 
+ systemd-analyze log-level info
+-
+-echo OK >/testok
+-
+-exit 0
+diff --git a/test/units/testsuite-37.sh b/test/units/testsuite-23.RuntimeDirectoryPreserve.sh
+similarity index 92%
+rename from test/units/testsuite-37.sh
+rename to test/units/testsuite-23.RuntimeDirectoryPreserve.sh
+index 1aec383c0c..b60b612d82 100755
+--- a/test/units/testsuite-37.sh
++++ b/test/units/testsuite-23.RuntimeDirectoryPreserve.sh
+@@ -5,6 +5,8 @@
+ set -eux
+ set -o pipefail
+ 
++# Test RuntimeDirectoryPreserve=yes
++
+ systemd-mount -p RuntimeDirectory=hoge -p RuntimeDirectoryPreserve=yes -t tmpfs tmpfs /tmp/aaa
+ 
+ touch /run/hoge/foo
+@@ -14,7 +16,3 @@ systemctl restart tmp-aaa.mount
+ 
+ test -e /run/hoge/foo
+ test ! -e /tmp/aaa/bbb
+-
+-echo OK >/testok
+-
+-exit 0
+diff --git a/test/units/testsuite-23.Upholds.sh b/test/units/testsuite-23.Upholds.sh
+new file mode 100755
+index 0000000000..bcc2400ae7
+--- /dev/null
++++ b/test/units/testsuite-23.Upholds.sh
+@@ -0,0 +1,69 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++
++set -eux
++set -o pipefail
++
++# Test OnSuccess= + Uphold= + PropagatesStopTo= + BindsTo=
++
++systemd-analyze log-level debug
++systemd-analyze log-target journal
++
++# Idea is this:
++#    1. we start testsuite-23-success.service
++#    2. which through OnSuccess= starts testsuite-23-fail.service,
++#    3. which through OnFailure= starts testsuite-23-uphold.service,
++#    4. which through Uphold= starts/keeps testsuite-23-short-lived.service running,
++#    5. which will sleep 1s when invoked, and on the 5th invocation send us a SIGUSR1
++#    6. once we got that we finish cleanly
++
++sigusr1=0
++trap sigusr1=1 SIGUSR1
++
++trap -p SIGUSR1
++
++systemctl start testsuite-23-success.service
++
++while [ "$sigusr1" -eq 0 ] ; do
++    sleep .5
++done
++
++systemctl stop testsuite-23-uphold.service
++
++# Idea is this:
++#    1. we start testsuite-23-prop-stop-one.service
++#    2. which through Wants=/After= pulls in testsuite-23-prop-stop-two.service as well
++#    3. testsuite-23-prop-stop-one.service then sleeps indefinitely
++#    4. testsuite-23-prop-stop-two.service sleeps a short time and exits
++#    5. the StopPropagatedFrom= dependency between the two should ensure *both* will exit as result
++#    6. an ExecStopPost= line on testsuite-23-prop-stop-one.service will send us a SIGUSR2
++#    7. once we got that we finish cleanly
++
++sigusr2=0
++trap sigusr2=1 SIGUSR2
++
++systemctl start testsuite-23-prop-stop-one.service
++
++while [ "$sigusr2" -eq 0 ] ; do
++    sleep .5
++done
++
++
++# Idea is this:
++#    1. we start testsuite-23-binds-to.service
++#    2. which through BindsTo=/After= pulls in testsuite-23-bound-by.service as well
++#    3. testsuite-23-bound-by.service suddenly dies
++#    4. testsuite-23-binds-to.service should then also be pulled down (it otherwise just hangs)
++#    6. an ExecStopPost= line on testsuite-23-binds-to.service will send us a SIGRTMIN1+1
++#    7. once we got that we finish cleanly
++
++sigrtmin1=0
++trap sigrtmin1=1 SIGRTMIN+1
++
++systemctl start testsuite-23-binds-to.service
++
++while [ "$sigrtmin1" -eq 0 ] ; do
++    sleep .5
++done
++
++systemd-analyze log-level info
+diff --git a/test/units/testsuite-40.sh b/test/units/testsuite-23.exec-command-ex.sh
+similarity index 97%
+rename from test/units/testsuite-40.sh
+rename to test/units/testsuite-23.exec-command-ex.sh
+index cec1fd3a7a..f926e7dea8 100755
+--- a/test/units/testsuite-40.sh
++++ b/test/units/testsuite-23.exec-command-ex.sh
+@@ -3,6 +3,8 @@
+ set -eux
+ set -o pipefail
+ 
++# Test ExecXYZEx= service unit dbus hookups
++
+ systemd-analyze log-level debug
+ 
+ declare -A property
+@@ -40,7 +42,3 @@ for c in "${!property_ex[@]}"; do
+ done
+ 
+ systemd-analyze log-level info
+-
+-echo OK >/testok
+-
+-exit 0
+diff --git a/test/units/testsuite-41.sh b/test/units/testsuite-23.oneshot-restart.sh
+similarity index 76%
+rename from test/units/testsuite-41.sh
+rename to test/units/testsuite-23.oneshot-restart.sh
+index 13bc684c2d..f643891037 100755
+--- a/test/units/testsuite-41.sh
++++ b/test/units/testsuite-23.oneshot-restart.sh
+@@ -3,21 +3,23 @@
+ set -eux
+ set -o pipefail
+ 
++# Test oneshot unit restart on failure
++
+ # wait this many secs for each test service to succeed in what is being tested
+ MAX_SECS=60
+ 
+ systemd-analyze log-level debug
+ 
+ # test one: Restart=on-failure should restart the service
+-systemd-run --unit=one -p Type=oneshot -p Restart=on-failure /bin/bash -c "exit 1" \
++systemd-run --unit=oneshot-restart-one -p Type=oneshot -p Restart=on-failure /bin/bash -c "exit 1" \
+     && { echo 'unexpected success'; exit 1; }
+ 
+ for ((secs = 0; secs < MAX_SECS; secs++)); do
+-  [[ "$(systemctl show one.service -P NRestarts)" -le 0 ]] || break
+-  sleep 1
++    [[ "$(systemctl show oneshot-restart-one.service -P NRestarts)" -le 0 ]] || break
++    sleep 1
+ done
+-if [[ "$(systemctl show one.service -P NRestarts)" -le 0 ]]; then
+-  exit 1
++if [[ "$(systemctl show oneshot-restart-one.service -P NRestarts)" -le 0 ]]; then
++    exit 1
+ fi
+ 
+ TMP_FILE="/tmp/test-41-oneshot-restart-test"
+@@ -26,7 +28,7 @@ TMP_FILE="/tmp/test-41-oneshot-restart-test"
+ 
+ # test two: make sure StartLimitBurst correctly limits the number of restarts
+ # and restarts execution of the unit from the first ExecStart=
+-systemd-run --unit=two \
++systemd-run --unit=oneshot-restart-two \
+             -p StartLimitIntervalSec=120 \
+             -p StartLimitBurst=3 \
+             -p Type=oneshot \
+@@ -50,7 +52,3 @@ if [[ $(cat $TMP_FILE) != "aaa" ]]; then
+ fi
+ 
+ systemd-analyze log-level info
+-
+-echo OK >/testok
+-
+-exit 0
+diff --git a/test/units/testsuite-23.sh b/test/units/testsuite-23.sh
+index e8f99ff60d..a6b8da34c9 100755
+--- a/test/units/testsuite-23.sh
++++ b/test/units/testsuite-23.sh
+@@ -3,63 +3,64 @@
+ set -eux
+ set -o pipefail
+ 
+-systemd-analyze log-level debug
++: >/failed
+ 
+-# Create a binary for which execve() will fail
+-touch /tmp/brokenbinary
+-chmod +x /tmp/brokenbinary
++declare -i CHILD_PID=0
+ 
+-# These three commands should succeed.
+-systemd-run --unit=one -p Type=simple /bin/sleep infinity
+-systemd-run --unit=two -p Type=simple -p User=idontexist /bin/sleep infinity
+-systemd-run --unit=three -p Type=simple /tmp/brokenbinary
++# Note: all the signal shenanigans are necessary for the Upholds= tests
+ 
+-# And now, do the same with Type=exec, where the latter two should fail
+-systemd-run --unit=four -p Type=exec /bin/sleep infinity
+-systemd-run --unit=five -p Type=exec -p User=idontexist /bin/sleep infinity && { echo 'unexpected success'; exit 1; }
+-systemd-run --unit=six -p Type=exec /tmp/brokenbinary && { echo 'unexpected success'; exit 1; }
++# Like trap, but passes the signal name as the first argument
++trap_with_sig() {
++    local fun="${1:?}"
++    local sig
++    shift
+ 
+-systemd-run --unit=seven -p KillSignal=SIGTERM -p RestartKillSignal=SIGINT -p Type=exec /bin/sleep infinity
+-# Both TERM and SIGINT happen to have the same number on all architectures
+-test "$(systemctl show --value -p KillSignal seven.service)" -eq 15
+-test "$(systemctl show --value -p RestartKillSignal seven.service)" -eq 2
++    for sig in "$@"; do
++        # shellcheck disable=SC2064
++        trap "$fun $sig" "$sig"
++    done
++}
+ 
+-systemctl restart seven.service
+-systemctl stop seven.service
++# Propagate the caught signal to the current child process
++handle_signal() {
++    local sig="${1:?}"
+ 
+-# For issue #20933
++    if [[ $CHILD_PID -gt 0 ]]; then
++        echo "Propagating signal $sig to child process $CHILD_PID"
++        kill -s "$sig" "$CHILD_PID"
++    fi
++}
+ 
+-# Should work normally
+-busctl call \
+-  org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+-  org.freedesktop.systemd1.Manager StartTransientUnit \
+-  "ssa(sv)a(sa(sv))" test-20933-ok.service replace 1 \
+-    ExecStart "a(sasb)" 1 \
+-      /usr/bin/sleep 2 /usr/bin/sleep 1 true \
+-  0
++# In order to make the handle_signal() stuff above work, we have to execute
++# each script asynchronously, since bash won't execute traps until the currently
++# executed command finishes. This, however, introduces another issue regarding
++# how bash's wait works. Quoting:
++#
++#   When bash is waiting for an asynchronous command via the wait builtin,
++#   the reception of a signal for which a trap has been set will cause the wait
++#   builtin to return immediately with an exit status greater than 128,
++#   immediately after which the trap is executed.
++#
++# In other words - every time we propagate a signal, wait returns with
++# 128+signal, so we have to wait again - repeat until the process dies.
++wait_harder() {
++    local pid="${1:?}"
+ 
+-# DBus call should fail but not crash systemd
+-busctl call \
+-  org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+-  org.freedesktop.systemd1.Manager StartTransientUnit \
+-  "ssa(sv)a(sa(sv))" test-20933-bad.service replace 1 \
+-    ExecStart "a(sasb)" 1 \
+-      /usr/bin/sleep 0 true \
+-  0 && { echo 'unexpected success'; exit 1; }
++    while kill -0 "$pid"; do
++        wait "$pid" || :
++    done
+ 
+-# Same but with the empty argv in the middle
+-busctl call \
+-  org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+-  org.freedesktop.systemd1.Manager StartTransientUnit \
+-  "ssa(sv)a(sa(sv))" test-20933-bad-middle.service replace 1 \
+-    ExecStart "a(sasb)" 3 \
+-      /usr/bin/sleep 2 /usr/bin/sleep 1 true \
+-      /usr/bin/sleep 0                  true \
+-      /usr/bin/sleep 2 /usr/bin/sleep 1 true \
+-  0 && { echo 'unexpected success'; exit 1; }
++    wait "$pid"
++}
+ 
+-systemd-analyze log-level info
++trap_with_sig handle_signal SIGUSR1 SIGUSR2 SIGRTMIN+1
+ 
+-echo OK >/testok
++for script in "${0%.sh}".*.sh; do
++    echo "Running $script"
++    "./$script" &
++    CHILD_PID=$!
++    wait_harder "$CHILD_PID"
++done
+ 
+-exit 0
++touch /testok
++rm /failed
+diff --git a/test/units/testsuite-23.type-exec.sh b/test/units/testsuite-23.type-exec.sh
+new file mode 100755
+index 0000000000..87f32ccb58
+--- /dev/null
++++ b/test/units/testsuite-23.type-exec.sh
+@@ -0,0 +1,63 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++# Test Type=exec
++
++systemd-analyze log-level debug
++
++# Create a binary for which execve() will fail
++touch /tmp/brokenbinary
++chmod +x /tmp/brokenbinary
++
++# These three commands should succeed.
++systemd-run --unit=exec-one -p Type=simple /bin/sleep infinity
++systemd-run --unit=exec-two -p Type=simple -p User=idontexist /bin/sleep infinity
++systemd-run --unit=exec-three -p Type=simple /tmp/brokenbinary
++
++# And now, do the same with Type=exec, where the latter two should fail
++systemd-run --unit=exec-four -p Type=exec /bin/sleep infinity
++(! systemd-run --unit=exec-five -p Type=exec -p User=idontexist /bin/sleep infinity)
++(! systemd-run --unit=exec-six -p Type=exec /tmp/brokenbinary)
++
++systemd-run --unit=exec-seven -p KillSignal=SIGTERM -p RestartKillSignal=SIGINT -p Type=exec /bin/sleep infinity
++# Both TERM and SIGINT happen to have the same number on all architectures
++test "$(systemctl show --value -p KillSignal exec-seven.service)" -eq 15
++test "$(systemctl show --value -p RestartKillSignal exec-seven.service)" -eq 2
++
++systemctl restart exec-seven.service
++systemctl stop exec-seven.service
++
++# For issue #20933
++
++# Should work normally
++busctl call \
++    org.freedesktop.systemd1 /org/freedesktop/systemd1 \
++    org.freedesktop.systemd1.Manager StartTransientUnit \
++    "ssa(sv)a(sa(sv))" test-20933-ok.service replace 1 \
++      ExecStart "a(sasb)" 1 \
++        /usr/bin/sleep 2 /usr/bin/sleep 1 true \
++    0
++
++# DBus call should fail but not crash systemd
++(! busctl call \
++    org.freedesktop.systemd1 /org/freedesktop/systemd1 \
++    org.freedesktop.systemd1.Manager StartTransientUnit \
++    "ssa(sv)a(sa(sv))" test-20933-bad.service replace 1 \
++      ExecStart "a(sasb)" 1 \
++        /usr/bin/sleep 0 true \
++    0)
++
++# Same but with the empty argv in the middle
++(! busctl call \
++    org.freedesktop.systemd1 /org/freedesktop/systemd1 \
++    org.freedesktop.systemd1.Manager StartTransientUnit \
++    "ssa(sv)a(sa(sv))" test-20933-bad-middle.service replace 1 \
++      ExecStart "a(sasb)" 3 \
++        /usr/bin/sleep 2 /usr/bin/sleep 1 true \
++        /usr/bin/sleep 0                  true \
++        /usr/bin/sleep 2 /usr/bin/sleep 1 true \
++    0)
++
++systemd-analyze log-level info
+diff --git a/test/units/testsuite-37.service b/test/units/testsuite-37.service
+deleted file mode 100644
+index ccad5e2d31..0000000000
+--- a/test/units/testsuite-37.service
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-37-RUNTIMEDIRECTORYPRESERVE
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-Type=oneshot
+diff --git a/test/units/testsuite-39.service b/test/units/testsuite-39.service
+deleted file mode 100644
+index 1567dfaa08..0000000000
+--- a/test/units/testsuite-39.service
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-39-EXECRELOAD
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-Type=oneshot
+diff --git a/test/units/testsuite-40.service b/test/units/testsuite-40.service
+deleted file mode 100644
+index eec4ddc99a..0000000000
+--- a/test/units/testsuite-40.service
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-40-EXEC-COMMAND-EX
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-Type=oneshot
+diff --git a/test/units/testsuite-41.service b/test/units/testsuite-41.service
+deleted file mode 100644
+index bbd8a72d7c..0000000000
+--- a/test/units/testsuite-41.service
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-41-ONESHOT-RESTART
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-Type=oneshot
+diff --git a/test/units/testsuite-42.service b/test/units/testsuite-42.service
+deleted file mode 100644
+index f57e616466..0000000000
+--- a/test/units/testsuite-42.service
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-42-EXECSTOPPOST
+-Before=getty-pre.target
+-Wants=getty-pre.target
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-Type=oneshot
+diff --git a/test/units/testsuite-57-prop-stop-one.service b/test/units/testsuite-57-prop-stop-one.service
+deleted file mode 100644
+index a942b529e3..0000000000
+--- a/test/units/testsuite-57-prop-stop-one.service
++++ /dev/null
+@@ -1,10 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=Stop Propagation Receiver
+-Wants=testsuite-57-prop-stop-two.service
+-After=testsuite-57-prop-stop-two.service
+-StopPropagatedFrom=testsuite-57-prop-stop-two.service
+-
+-[Service]
+-ExecStart=/bin/sleep infinity
+-ExecStopPost=systemctl kill --kill-whom=main -sUSR2 testsuite-57.service
+diff --git a/test/units/testsuite-57-short-lived.sh b/test/units/testsuite-57-short-lived.sh
+deleted file mode 100755
+index cd797a16e1..0000000000
+--- a/test/units/testsuite-57-short-lived.sh
++++ /dev/null
+@@ -1,18 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -ex
+-
+-if [ -f /tmp/testsuite-57.counter ] ; then
+-    read -r counter < /tmp/testsuite-57.counter
+-    counter=$(("$counter" + 1))
+-else
+-    counter=0
+-fi
+-
+-echo "$counter" > /tmp/testsuite-57.counter
+-
+-if [ "$counter" -eq 5 ] ; then
+-    systemctl kill --kill-whom=main -sUSR1 testsuite-57.service
+-fi
+-
+-exec sleep 1.5
+diff --git a/test/units/testsuite-57.service b/test/units/testsuite-57.service
+deleted file mode 100644
+index d3ec955d4d..0000000000
+--- a/test/units/testsuite-57.service
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-57-ONSUCCESS-UPHOLD
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-Type=oneshot
+diff --git a/test/units/testsuite-57.sh b/test/units/testsuite-57.sh
+deleted file mode 100755
+index 66d946bebc..0000000000
+--- a/test/units/testsuite-57.sh
++++ /dev/null
+@@ -1,69 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-
+-set -eux
+-set -o pipefail
+-
+-systemd-analyze log-level debug
+-systemd-analyze log-target journal
+-
+-# Idea is this:
+-#    1. we start testsuite-57-success.service
+-#    2. which through OnSuccess= starts testsuite-57-fail.service,
+-#    3. which through OnFailure= starts testsuite-57-uphold.service,
+-#    4. which through Uphold= starts/keeps testsuite-57-short-lived.service running,
+-#    5. which will sleep 1s when invoked, and on the 5th invocation send us a SIGUSR1
+-#    6. once we got that we finish cleanly
+-
+-sigusr1=0
+-trap sigusr1=1 SIGUSR1
+-
+-systemctl start testsuite-57-success.service
+-
+-while [ "$sigusr1" -eq 0 ] ; do
+-    sleep .5
+-done
+-
+-systemctl stop testsuite-57-uphold.service
+-
+-# Idea is this:
+-#    1. we start testsuite-57-prop-stop-one.service
+-#    2. which through Wants=/After= pulls in testsuite-57-prop-stop-two.service as well
+-#    3. testsuite-57-prop-stop-one.service then sleeps indefinitely
+-#    4. testsuite-57-prop-stop-two.service sleeps a short time and exits
+-#    5. the StopPropagatedFrom= dependency between the two should ensure *both* will exit as result
+-#    6. an ExecStopPost= line on testsuite-57-prop-stop-one.service will send us a SIGUSR2
+-#    7. once we got that we finish cleanly
+-
+-sigusr2=0
+-trap sigusr2=1 SIGUSR2
+-
+-systemctl start testsuite-57-prop-stop-one.service
+-
+-while [ "$sigusr2" -eq 0 ] ; do
+-    sleep .5
+-done
+-
+-
+-# Idea is this:
+-#    1. we start testsuite-57-binds-to.service
+-#    2. which through BindsTo=/After= pulls in testsuite-57-bound-by.service as well
+-#    3. testsuite-57-bound-by.service suddenly dies
+-#    4. testsuite-57-binds-to.service should then also be pulled down (it otherwise just hangs)
+-#    6. an ExecStopPost= line on testsuite-57-binds-to.service will send us a SIGRTMIN1+1
+-#    7. once we got that we finish cleanly
+-
+-sigrtmin1=0
+-trap sigrtmin1=1 SIGRTMIN+1
+-
+-systemctl start testsuite-57-binds-to.service
+-
+-while [ "$sigrtmin1" -eq 0 ] ; do
+-    sleep .5
+-done
+-
+-systemd-analyze log-level info
+-
+-echo OK >/testok
+-
+-exit 0

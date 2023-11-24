@@ -1,0 +1,206 @@
+From accb88b9c080f1da1f9543921ae25b5f0296ec2a Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 28 Jul 2023 06:07:17 +0900
+Subject: [PATCH] fstab-generator: enable fsck for block device mounts
+ specified in systemd.mount-extra=
+
+Like we do for root= or so.
+
+Another possible option is adding support of fifth (sixth?) field in
+systemd.mount-extra=. But that may be overkill, hence let's do that
+later if someone request that.
+
+Fixes fsck part of issue #28541.
+
+(cherry picked from commit 239cce3870438aab69b2495ccb980a9d90140217)
+
+Related: #2190226
+---
+ src/fstab-generator/fstab-generator.c           |  5 ++++-
+ .../foo-also_in_initrd.mount                    |  2 ++
+ .../foo-not_in_initrd.mount                     |  2 ++
+ .../usr.mount                                   |  2 ++
+ .../hoge-without_fstype.mount                   |  2 ++
+ .../hoge-without_options.mount                  |  2 ++
+ .../sysroot-foo-also_in_initrd.mount            |  2 ++
+ .../sysroot.mount                               |  2 ++
+ .../systemd-fsck-root.service                   | 17 +++++++++++++++++
+ .../systemd-fsck-usr.service                    | 17 +++++++++++++++++
+ .../sysusr-usr.mount                            |  2 ++
+ 11 files changed, 54 insertions(+), 1 deletion(-)
+ create mode 100644 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/systemd-fsck-root.service
+ create mode 100644 test/test-fstab-generator/test-19-mounts-from-cmdline.expected/systemd-fsck-usr.service
+
+diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
+index cf3ff4f598..c3fe285344 100644
+--- a/src/fstab-generator/fstab-generator.c
++++ b/src/fstab-generator/fstab-generator.c
+@@ -880,6 +880,9 @@ static int parse_fstab_one(
+         if (is_swap)
+                 return add_swap(source, what, options, flags);
+ 
++        if (passno < 0)
++                passno = is_device_path(what);
++
+         assert(where_original); /* 'where' is not necessary for swap entry. */
+ 
+         if (!is_path(where_original)) {
+@@ -1287,7 +1290,7 @@ static int add_mounts_from_cmdline(void) {
+                               m->where,
+                               m->fstype,
+                               m->options,
+-                              /* passno = */ 0,
++                              /* passno = */ -1,
+                               /* prefix_sysroot = */ !m->for_initrd && in_initrd(),
+                               /* accept_root = */ true,
+                               /* use_swap_enabled = */ false);
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/foo-also_in_initrd.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/foo-also_in_initrd.mount
+index 8cc17c5d92..ed72fb283f 100644
+--- a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/foo-also_in_initrd.mount
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/foo-also_in_initrd.mount
+@@ -4,6 +4,8 @@
+ Documentation=man:fstab(5) man:systemd-fstab-generator(8)
+ SourcePath=/proc/cmdline
+ Before=local-fs.target
++Requires=systemd-fsck@dev-sdx6.service
++After=systemd-fsck@dev-sdx6.service
+ After=blockdev@dev-sdx6.target
+ 
+ [Mount]
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/foo-not_in_initrd.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/foo-not_in_initrd.mount
+index 8a5e28ebbf..11b52788df 100644
+--- a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/foo-not_in_initrd.mount
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/foo-not_in_initrd.mount
+@@ -4,6 +4,8 @@
+ Documentation=man:fstab(5) man:systemd-fstab-generator(8)
+ SourcePath=/proc/cmdline
+ Before=local-fs.target
++Requires=systemd-fsck@dev-sdx7.service
++After=systemd-fsck@dev-sdx7.service
+ After=blockdev@dev-sdx7.target
+ 
+ [Mount]
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/usr.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/usr.mount
+index ff01ec4fde..bfdede543a 100644
+--- a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/usr.mount
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected.sysroot/usr.mount
+@@ -4,6 +4,8 @@
+ Documentation=man:fstab(5) man:systemd-fstab-generator(8)
+ SourcePath=/proc/cmdline
+ Before=local-fs.target
++Wants=systemd-fsck@dev-sdx5.service
++After=systemd-fsck@dev-sdx5.service
+ After=blockdev@dev-sdx5.target
+ 
+ [Mount]
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_fstype.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_fstype.mount
+index 4d7d975cc0..a7c6ee9913 100644
+--- a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_fstype.mount
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_fstype.mount
+@@ -4,6 +4,8 @@
+ Documentation=man:fstab(5) man:systemd-fstab-generator(8)
+ SourcePath=/proc/cmdline
+ Before=local-fs.target
++Requires=systemd-fsck@dev-sdx3.service
++After=systemd-fsck@dev-sdx3.service
+ After=blockdev@dev-sdx3.target
+ 
+ [Mount]
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_options.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_options.mount
+index 4f16d2e40b..157ae2b6a4 100644
+--- a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_options.mount
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/hoge-without_options.mount
+@@ -4,6 +4,8 @@
+ Documentation=man:fstab(5) man:systemd-fstab-generator(8)
+ SourcePath=/proc/cmdline
+ Before=local-fs.target
++Requires=systemd-fsck@dev-sdx2.service
++After=systemd-fsck@dev-sdx2.service
+ After=blockdev@dev-sdx2.target
+ 
+ [Mount]
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot-foo-also_in_initrd.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot-foo-also_in_initrd.mount
+index 8baf1568b1..098961dc9e 100644
+--- a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot-foo-also_in_initrd.mount
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot-foo-also_in_initrd.mount
+@@ -4,6 +4,8 @@
+ Documentation=man:fstab(5) man:systemd-fstab-generator(8)
+ SourcePath=/proc/cmdline
+ Before=initrd-fs.target
++Requires=systemd-fsck@dev-sdx6.service
++After=systemd-fsck@dev-sdx6.service
+ After=blockdev@dev-sdx6.target
+ 
+ [Mount]
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot.mount
+index c8547fa539..f46b71a1f0 100644
+--- a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot.mount
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysroot.mount
+@@ -4,6 +4,8 @@
+ Documentation=man:fstab(5) man:systemd-fstab-generator(8)
+ SourcePath=/proc/cmdline
+ Before=initrd-root-fs.target
++Requires=systemd-fsck-root.service
++After=systemd-fsck-root.service
+ After=blockdev@dev-sdx1.target
+ 
+ [Mount]
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/systemd-fsck-root.service b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/systemd-fsck-root.service
+new file mode 100644
+index 0000000000..147348899d
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/systemd-fsck-root.service
+@@ -0,0 +1,17 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Description=File System Check on /dev/sdx1
++Documentation=man:systemd-fsck-root.service(8)
++
++DefaultDependencies=no
++BindsTo=dev-sdx1.device
++Conflicts=shutdown.target
++After=initrd-root-device.target local-fs-pre.target dev-sdx1.device
++Before=shutdown.target
++
++[Service]
++Type=oneshot
++RemainAfterExit=yes
++ExecStart=/usr/lib/systemd/systemd-fsck /dev/sdx1
++TimeoutSec=infinity
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/systemd-fsck-usr.service b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/systemd-fsck-usr.service
+new file mode 100644
+index 0000000000..512e7b1636
+--- /dev/null
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/systemd-fsck-usr.service
+@@ -0,0 +1,17 @@
++# Automatically generated by systemd-fstab-generator
++
++[Unit]
++Description=File System Check on /dev/sdx5
++Documentation=man:systemd-fsck-usr.service(8)
++
++DefaultDependencies=no
++BindsTo=dev-sdx5.device
++Conflicts=shutdown.target
++After=local-fs-pre.target dev-sdx5.device
++Before=shutdown.target
++
++[Service]
++Type=oneshot
++RemainAfterExit=yes
++ExecStart=/usr/lib/systemd/systemd-fsck /dev/sdx5
++TimeoutSec=infinity
+diff --git a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysusr-usr.mount b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysusr-usr.mount
+index f1fedb3775..bfee6a4ff7 100644
+--- a/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysusr-usr.mount
++++ b/test/test-fstab-generator/test-19-mounts-from-cmdline.expected/sysusr-usr.mount
+@@ -4,6 +4,8 @@
+ Documentation=man:fstab(5) man:systemd-fstab-generator(8)
+ SourcePath=/proc/cmdline
+ Before=initrd-usr-fs.target
++Requires=systemd-fsck-usr.service
++After=systemd-fsck-usr.service
+ After=blockdev@dev-sdx5.target
+ 
+ [Mount]

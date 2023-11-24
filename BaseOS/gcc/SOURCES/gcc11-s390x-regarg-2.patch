@@ -1,0 +1,92 @@
+commit 36ffb2e0293d1bbef30e3553a431679de00549b9
+Author: Andreas Krebbel <krebbel@linux.ibm.com>
+Date:   Wed Feb 1 08:59:42 2023 +0100
+
+    IBM zSystems: Make stack_tie to work with hard frame pointer
+    
+    With this patch a scheduling barrier is created to prevent the insn
+    setting up the frame-pointer and instructions which save GPRs to the
+    stack to be swapped.  Otherwise broken CFI information would be
+    generated since the stack save insns would use a base register which
+    is not currently declared as holding the CFA.
+    
+    Without -mpreserve-args this did not happen because the store multiple
+    we used for saving the GPRs would also cover the frame-pointer
+    register and therefore creates a dependency on the frame-pointer
+    hardreg. However, with this patch the stack_tie is emitted regardless
+    of -mpreserve-args since this in general appears to be the safer
+    approach.
+    
+            * config/s390/s390.c (save_gprs): Use gen_frame_mem.
+            (restore_gprs): Likewise.
+            (s390_emit_stack_tie): Make the stack_tie to be dependent on the
+            frame pointer if a frame-pointer is used.
+            (s390_emit_prologue): Emit stack_tie when frame-pointer is needed.
+            * config/s390/s390.md (stack_tie): Add a register operand and
+            rename to ...
+            (@stack_tie<mode>): ... this.
+
+--- a/gcc/config/s390/s390.c
++++ b/gcc/config/s390/s390.c
+@@ -10898,9 +10898,7 @@ save_gprs (rtx base, int offset, int first, int last)
+   int i;
+ 
+   addr = plus_constant (Pmode, base, offset);
+-  addr = gen_rtx_MEM (Pmode, addr);
+-
+-  set_mem_alias_set (addr, get_frame_alias_set ());
++  addr = gen_frame_mem (Pmode, addr);
+ 
+   /* Special-case single register.  */
+   if (first == last)
+@@ -11012,8 +11010,7 @@ restore_gprs (rtx base, int offset, int first, int last)
+   rtx addr, insn;
+ 
+   addr = plus_constant (Pmode, base, offset);
+-  addr = gen_rtx_MEM (Pmode, addr);
+-  set_mem_alias_set (addr, get_frame_alias_set ());
++  addr = gen_frame_mem (Pmode, addr);
+ 
+   /* Special-case single register.  */
+   if (first == last)
+@@ -11062,10 +11059,11 @@ s390_load_got (void)
+ static void
+ s390_emit_stack_tie (void)
+ {
+-  rtx mem = gen_frame_mem (BLKmode,
+-			   gen_rtx_REG (Pmode, STACK_POINTER_REGNUM));
+-
+-  emit_insn (gen_stack_tie (mem));
++  rtx mem = gen_frame_mem (BLKmode, stack_pointer_rtx);
++  if (frame_pointer_needed)
++    emit_insn (gen_stack_tie (Pmode, mem, hard_frame_pointer_rtx));
++  else
++    emit_insn (gen_stack_tie (Pmode, mem, stack_pointer_rtx));
+ }
+ 
+ /* Copy GPRS into FPR save slots.  */
+@@ -11676,6 +11674,7 @@ s390_emit_prologue (void)
+ 
+   if (frame_pointer_needed)
+     {
++      s390_emit_stack_tie ();
+       insn = emit_move_insn (hard_frame_pointer_rtx, stack_pointer_rtx);
+       RTX_FRAME_RELATED_P (insn) = 1;
+     }
+diff --git a/gcc/config/s390/s390.md b/gcc/config/s390/s390.md
+index 4828aa08be6..00d39608e1d 100644
+--- a/gcc/config/s390/s390.md
++++ b/gcc/config/s390/s390.md
+@@ -11590,9 +11590,10 @@ (define_insn "stack_protect_test<mode>"
+ ; This is used in s390_emit_prologue in order to prevent insns
+ ; adjusting the stack pointer to be moved over insns writing stack
+ ; slots using a copy of the stack pointer in a different register.
+-(define_insn "stack_tie"
++(define_insn "@stack_tie<mode>"
+   [(set (match_operand:BLK 0 "memory_operand" "+m")
+-        (unspec:BLK [(match_dup 0)] UNSPEC_TIE))]
++        (unspec:BLK [(match_dup 0)
++		     (match_operand:P 1 "register_operand" "r")] UNSPEC_TIE))]
+   ""
+   ""
+   [(set_attr "length" "0")])

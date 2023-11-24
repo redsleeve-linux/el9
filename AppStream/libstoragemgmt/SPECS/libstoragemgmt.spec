@@ -1,13 +1,13 @@
 %bcond_with     test
 
 Name:           libstoragemgmt
-Version:        1.9.5
-Release:        1%{?dist}.redsleeve
+Version:        1.9.7
+Release:        2%{?dist}
 Summary:        Storage array management library
 License:        LGPLv2+
 URL:            https://github.com/libstorage/libstoragemgmt
 Source0:        https://github.com/libstorage/libstoragemgmt/releases/download/%{version}/%{name}-%{version}.tar.gz
-Patch1:         0001-change-run-dir.patch
+Patch1:         0001-Correction-for-fips-error.patch
 Requires:       python3-%{name}%{_isa}
 
 # Packages that have been removed
@@ -32,7 +32,7 @@ BuildRequires:  python3-devel
 BuildRequires:  systemd systemd-devel
 
 BuildRequires:  chrpath
-#BuildRequires:  valgrind
+BuildRequires:  valgrind
 
 %description
 The libStorageMgmt library will provide a vendor agnostic open source storage
@@ -167,7 +167,7 @@ plugin selection for locally managed storage.
 %build
 ./autogen.sh
 
-%configure --with-python3 --disable-static --without-mem-leak-test
+%configure --with-python3 --disable-static
 %make_build
 
 %install
@@ -444,8 +444,11 @@ fi
 %{_mandir}/man1/local_lsmplugin.1*
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.9.5-1.redsleeve
-- removed valgrind dependency
+* Tue Apr 18 2023 Tony Asleson <tasleson@redhat.com> - 1.9.7-2
+- FIPS correction ref: https://issues.redhat.com/browse/RHEL-376
+
+* Wed Feb 22 2023 Tony Asleson <tasleson@redhat.com> - 1.9.7-1
+- Upgrade to 1.9.7
 
 * Thu Oct 27 2022 Tony Asleson <tasleson@redhat.com> - 1.9.5-1
 - Upgrade to 1.9.5

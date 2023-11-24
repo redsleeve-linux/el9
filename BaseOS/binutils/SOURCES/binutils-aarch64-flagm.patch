@@ -1,0 +1,152 @@
+diff -rup binutils.orig/gas/NEWS binutils-2.35.2/gas/NEWS
+--- binutils.orig/gas/NEWS	2023-04-26 11:29:49.525097847 +0100
++++ binutils-2.35.2/gas/NEWS	2023-04-26 11:30:59.811955065 +0100
+@@ -1,5 +1,7 @@
+ -*- text -*-
+ 
++* Add support for +flagm feature for -march in Armv8.4 AArch64.
++ 
+ * Add support for Intel AMX instructions.
+ 
+ * Add {disp16} pseudo prefix to x86 assembler.
+diff -rup binutils.orig/gas/config/tc-aarch64.c binutils-2.35.2/gas/config/tc-aarch64.c
+--- binutils.orig/gas/config/tc-aarch64.c	2023-04-26 11:29:48.944099025 +0100
++++ binutils-2.35.2/gas/config/tc-aarch64.c	2023-04-26 11:31:42.994864009 +0100
+@@ -9080,6 +9080,8 @@ static const struct aarch64_option_cpu_v
+ 			AARCH64_FEATURE (AARCH64_FEATURE_SVE, 0)},
+   {"f64mm",		AARCH64_FEATURE (AARCH64_FEATURE_F64MM, 0),
+ 			AARCH64_FEATURE (AARCH64_FEATURE_SVE, 0)},
++  {"flagm",		AARCH64_FEATURE (AARCH64_FEATURE_FLAGM, 0),
++			AARCH64_ARCH_NONE},
+   {NULL,		AARCH64_ARCH_NONE, AARCH64_ARCH_NONE},
+ };
+ 
+diff -rup binutils.orig/gas/doc/c-aarch64.texi binutils-2.35.2/gas/doc/c-aarch64.texi
+--- binutils.orig/gas/doc/c-aarch64.texi	2023-04-26 11:29:48.881099153 +0100
++++ binutils-2.35.2/gas/doc/c-aarch64.texi	2023-04-26 11:32:22.402780914 +0100
+@@ -222,6 +222,8 @@ automatically cause those extensions to
+  @code{pmullt} and @code{pmullb} instructions.
+ @item @code{sve2-sha3} @tab ARMv8-A @tab No
+  @tab Enable SVE2 SHA3 Extension.
++@item @code{flagm} @tab ARMv8-A @tab ARMv8.4-A or later
++ @tab Enable Flag Manipulation instructions.
+ @end multitable
+ 
+ @node AArch64 Syntax
+diff -rup binutils.orig/include/opcode/aarch64.h binutils-2.35.2/include/opcode/aarch64.h
+--- binutils.orig/include/opcode/aarch64.h	2023-04-26 11:29:48.702099517 +0100
++++ binutils-2.35.2/include/opcode/aarch64.h	2023-04-26 11:35:17.346412224 +0100
+@@ -69,7 +69,7 @@ typedef uint32_t aarch64_insn;
+ #define AARCH64_FEATURE_AES	     (1ULL << 35) /* AES instructions.  */
+ #define AARCH64_FEATURE_F16_FML      (1ULL << 36) /* v8.2 FP16FML ins.  */
+ #define AARCH64_FEATURE_V8_5	     (1ULL << 37) /* ARMv8.5 processors.  */
+-#define AARCH64_FEATURE_FLAGMANIP    (1ULL << 38) /* Flag Manipulation insns.  */
++#define AARCH64_FEATURE_FLAGMANIP    (1ULL << 38) /* v8.5 Flag Manipulation version 2.  */
+ #define AARCH64_FEATURE_FRINTTS      (1ULL << 39) /* FRINT[32,64][Z,X] insns.  */
+ #define AARCH64_FEATURE_SB	     (1ULL << 40) /* SB instruction.  */
+ #define AARCH64_FEATURE_PREDRES      (1ULL << 41) /* Execution and Data Prediction Restriction instructions.  */
+@@ -84,6 +84,7 @@ typedef uint32_t aarch64_insn;
+ #define AARCH64_FEATURE_I8MM	     (1ULL << 52) /* Matrix Multiply instructions.  */
+ #define AARCH64_FEATURE_F32MM	     (1ULL << 53)
+ #define AARCH64_FEATURE_F64MM	     (1ULL << 54)
++#define AARCH64_FEATURE_FLAGM	     (1ULL << 55) /* v8.4 Flag Manipulation.  */
+ 
+ /* Crypto instructions are the combination of AES and SHA2.  */
+ #define AARCH64_FEATURE_CRYPTO	(AARCH64_FEATURE_SHA2 | AARCH64_FEATURE_AES)
+@@ -109,6 +110,7 @@ typedef uint32_t aarch64_insn;
+ #define AARCH64_ARCH_V8_4	AARCH64_FEATURE (AARCH64_ARCH_V8_3,	\
+ 						 AARCH64_FEATURE_V8_4   \
+ 						 | AARCH64_FEATURE_DOTPROD \
++						 | AARCH64_FEATURE_FLAGM \
+ 						 | AARCH64_FEATURE_F16_FML)
+ #define AARCH64_ARCH_V8_5	AARCH64_FEATURE (AARCH64_ARCH_V8_4,	\
+ 						 AARCH64_FEATURE_V8_5   \
+diff -rup binutils.orig/opcodes/aarch64-tbl.h binutils-2.35.2/opcodes/aarch64-tbl.h
+--- binutils.orig/opcodes/aarch64-tbl.h	2023-04-26 11:29:48.705099511 +0100
++++ binutils-2.35.2/opcodes/aarch64-tbl.h	2023-04-26 11:37:27.299161621 +0100
+@@ -2406,6 +2406,8 @@ static const aarch64_feature_set aarch64
+ static const aarch64_feature_set aarch64_feature_f64mm_sve =
+   AARCH64_FEATURE (AARCH64_FEATURE_V8_2 | AARCH64_FEATURE_F64MM
+        | AARCH64_FEATURE_SVE, 0);
++static const aarch64_feature_set aarch64_feature_flagm =
++  AARCH64_FEATURE (AARCH64_FEATURE_FLAGM, 0);
+ 
+ 
+ #define CORE		&aarch64_feature_v8
+@@ -2450,6 +2452,7 @@ static const aarch64_feature_set aarch64
+ #define F32MM_SVE     &aarch64_feature_f32mm_sve
+ #define F64MM_SVE     &aarch64_feature_f64mm_sve
+ #define I8MM      &aarch64_feature_i8mm
++#define FLAGM	  &aarch64_feature_flagm
+ 
+ #define CORE_INSN(NAME,OPCODE,MASK,CLASS,OP,OPS,QUALS,FLAGS) \
+   { NAME, OPCODE, MASK, CLASS, OP, CORE, OPS, QUALS, FLAGS, 0, 0, NULL }
+@@ -2553,6 +2556,8 @@ static const aarch64_feature_set aarch64
+   { NAME, OPCODE, MASK, CLASS, 0, F64MM_SVE, OPS, QUALS, FLAGS, CONSTRAINTS, TIED, NULL }
+ #define F32MATMUL_SVE_INSNC(NAME,OPCODE,MASK,CLASS,OPS,QUALS,FLAGS, CONSTRAINTS, TIED) \
+   { NAME, OPCODE, MASK, CLASS, 0, F32MM_SVE, OPS, QUALS, FLAGS, CONSTRAINTS, TIED, NULL }
++#define FLAGM_INSN(NAME,OPCODE,MASK,CLASS,OPS,QUALS,FLAGS) \
++  { NAME, OPCODE, MASK, CLASS, 0, FLAGM, OPS, QUALS, FLAGS, 0, 0, NULL }
+ 
+ struct aarch64_opcode aarch64_opcode_table[] =
+ {
+@@ -3865,7 +3870,7 @@ struct aarch64_opcode aarch64_opcode_tab
+      potentially alias with too many instructions and so the tree can't be constructed.   As a work
+      around we just place cfinv before msr.  This means the order between these two shouldn't be
+      changed.  */
+-  V8_4_INSN ("cfinv",  0xd500401f, 0xffffffff, ic_system, OP0 (), {}, 0),
++  FLAGM_INSN ("cfinv",  0xd500401f, 0xffffffff, ic_system, OP0 (), {}, 0),
+   CORE_INSN ("msr", 0xd5000000, 0xffe00000, ic_system, 0, OP2 (SYSREG, Rt), QL_SRC_X, F_SYS_WRITE),
+   CORE_INSN ("sysl",0xd5280000, 0xfff80000, ic_system, 0, OP5 (Rt, UIMM3_OP1, CRn, CRm, UIMM3_OP2), QL_SYSL, 0),
+   CORE_INSN ("mrs", 0xd5200000, 0xffe00000, ic_system, 0, OP2 (Rt, SYSREG), QL_DST_X, F_SYS_READ),
+@@ -5043,9 +5048,9 @@ struct aarch64_opcode aarch64_opcode_tab
+   FP16_V8_2_INSN ("fmlal2", 0x6f808000, 0xffc0f400, asimdelem, OP3 (Vd, Vn, Em16), QL_V2FML4S, 0),
+   FP16_V8_2_INSN ("fmlsl2", 0x6f80c000, 0xffc0f400, asimdelem, OP3 (Vd, Vn, Em16), QL_V2FML4S, 0),
+   /* System extensions ARMv8.4-a.  */
+-  V8_4_INSN ("rmif",   0xba000400, 0xffe07c10, ic_system, OP3 (Rn, IMM_2, MASK), QL_RMIF, 0),
+-  V8_4_INSN ("setf8",  0x3a00080d, 0xfffffc1f, ic_system, OP1 (Rn), QL_SETF, 0),
+-  V8_4_INSN ("setf16", 0x3a00480d, 0xfffffc1f, ic_system, OP1 (Rn), QL_SETF, 0),
++  FLAGM_INSN ("rmif",   0xba000400, 0xffe07c10, ic_system, OP3 (Rn, IMM_2, MASK), QL_RMIF, 0),
++  FLAGM_INSN ("setf8",  0x3a00080d, 0xfffffc1f, ic_system, OP1 (Rn), QL_SETF, 0),
++  FLAGM_INSN ("setf16", 0x3a00480d, 0xfffffc1f, ic_system, OP1 (Rn), QL_SETF, 0),
+   /* Memory access instructions ARMv8.4-a.  */
+   V8_4_INSN ("stlurb" ,  0x19000000, 0xffe00c00, ldst_unscaled, OP2 (Rt, ADDR_OFFSET), QL_STLW, 0),
+   V8_4_INSN ("ldapurb",  0x19400000, 0xffe00c00, ldst_unscaled, OP2 (Rt, ADDR_OFFSET), QL_STLW, 0),
+--- /dev/null	2023-04-26 09:16:03.694889721 +0100
++++ binutils-2.35.2/gas/testsuite/gas/aarch64/flagm.d	2023-04-26 11:33:08.910682842 +0100
+@@ -0,0 +1,16 @@
++#name: FLAGM (Condition flag manipulation) feature
++#objdump: -dr
++
++.*:     file format .*
++
++Disassembly of section \.text:
++
++0+ <.*>:
++.*:	d500401f 	cfinv
++.*:	ba0407cf 	rmif	x30, #8, #15
++.*:	3a00080d 	setf8	w0
++.*:	3a00480d 	setf16	w0
++.*:	d500401f 	cfinv
++.*:	ba0407cf 	rmif	x30, #8, #15
++.*:	3a00080d 	setf8	w0
++.*:	3a00480d 	setf16	w0
+--- /dev/null	2023-04-26 09:16:03.694889721 +0100
++++ binutils-2.35.2/gas/testsuite/gas/aarch64/flagm.s	2023-04-26 11:39:10.597962432 +0100
+@@ -0,0 +1,16 @@
++/* FLAGM (Condition flag manipulation) feature from Armv8.4-A.  */
++.arch armv8.4-a
++
++	cfinv
++	rmif    x30, #8, #15
++	setf8   w0
++	setf16  w0
++
++
++/* FLAGM feature enabled with +flagm.  */
++.arch armv8-a+flagm
++
++	cfinv
++	rmif    x30, #8, #15
++	setf8   w0
++	setf16  w0

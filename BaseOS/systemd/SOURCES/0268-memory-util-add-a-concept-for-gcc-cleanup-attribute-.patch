@@ -1,0 +1,133 @@
+From f49fbc3ebbb026f87b974c11c40808cc777bd277 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 22 Feb 2023 23:10:25 +0100
+Subject: [PATCH] memory-util: add a concept for gcc cleanup attribute based
+ array destruction
+
+(cherry picked from commit ff3f1464ec2dd40c9d8eb92e1474cb4d1c8c676b)
+
+Related: #2182632
+---
+ src/basic/alloc-util.h      |  1 +
+ src/basic/memory-util.h     | 34 +++++++++++++++++++++++++++++
+ src/test/meson.build        |  2 ++
+ src/test/test-memory-util.c | 43 +++++++++++++++++++++++++++++++++++++
+ 4 files changed, 80 insertions(+)
+ create mode 100644 src/test/test-memory-util.c
+
+diff --git a/src/basic/alloc-util.h b/src/basic/alloc-util.h
+index b38db7d473..e4c8b71a2b 100644
+--- a/src/basic/alloc-util.h
++++ b/src/basic/alloc-util.h
+@@ -14,6 +14,7 @@
+ 
+ typedef void (*free_func_t)(void *p);
+ typedef void* (*mfree_func_t)(void *p);
++typedef void (*free_array_func_t)(void *p, size_t n);
+ 
+ /* If for some reason more than 4M are allocated on the stack, let's abort immediately. It's better than
+  * proceeding and smashing the stack limits. Note that by default RLIMIT_STACK is 8M on Linux. */
+diff --git a/src/basic/memory-util.h b/src/basic/memory-util.h
+index 6e3280b9df..8d75befed5 100644
+--- a/src/basic/memory-util.h
++++ b/src/basic/memory-util.h
+@@ -121,3 +121,37 @@ static inline void erase_and_freep(void *p) {
+ static inline void erase_char(char *p) {
+         explicit_bzero_safe(p, sizeof(char));
+ }
++
++/* An automatic _cleanup_-like logic for destroy arrays (i.e. pointers + size) when leaving scope */
++struct ArrayCleanup {
++        void **parray;
++        size_t *pn;
++        free_array_func_t pfunc;
++};
++
++static inline void array_cleanup(struct ArrayCleanup *c) {
++        assert(c);
++
++        assert(!c->parray == !c->pn);
++
++        if (!c->parray)
++                return;
++
++        if (*c->parray) {
++                assert(c->pfunc);
++                c->pfunc(*c->parray, *c->pn);
++                *c->parray = NULL;
++        }
++
++        *c->pn = 0;
++}
++
++#define CLEANUP_ARRAY(array, n, func)                                   \
++        _cleanup_(array_cleanup) _unused_ struct ArrayCleanup CONCATENATE(_cleanup_array_, UNIQ) = { \
++                .parray = (void**) &(array),                            \
++                .pn = &(n),                                             \
++                .pfunc = (free_array_func_t) ({                         \
++                                void (*_f)(typeof(array[0]) *a, size_t b) = func; \
++                                _f;                                     \
++                        }),                                             \
++        }
+diff --git a/src/test/meson.build b/src/test/meson.build
+index 2a4dfe26db..536ab08652 100644
+--- a/src/test/meson.build
++++ b/src/test/meson.build
+@@ -213,6 +213,8 @@ tests += [
+          [],
+          [libm]],
+ 
++        [files('test-memory-util.c')],
++
+         [files('test-mkdir.c')],
+ 
+         [files('test-json.c'),
+diff --git a/src/test/test-memory-util.c b/src/test/test-memory-util.c
+new file mode 100644
+index 0000000000..a81b0e0120
+--- /dev/null
++++ b/src/test/test-memory-util.c
+@@ -0,0 +1,43 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++
++#include "memory-util.h"
++#include "tests.h"
++
++static void my_destructor(struct iovec *iov, size_t n) {
++        /* not really a destructor, just something we can use to check if the destruction worked */
++        memset(iov, 'y', sizeof(struct iovec) * n);
++}
++
++TEST(cleanup_array) {
++        struct iovec *iov, *saved_iov;
++        size_t n, saved_n;
++
++        n = 7;
++        iov = new(struct iovec, n);
++        assert_se(iov);
++
++        memset(iov, 'x', sizeof(struct iovec) * n);
++
++        saved_iov = iov;
++        saved_n = n;
++
++        {
++                assert_se(memeqbyte('x', saved_iov, sizeof(struct iovec) * saved_n));
++                assert_se(iov);
++                assert_se(n > 0);
++
++                CLEANUP_ARRAY(iov, n, my_destructor);
++
++                assert_se(memeqbyte('x', saved_iov, sizeof(struct iovec) * saved_n));
++                assert_se(iov);
++                assert_se(n > 0);
++        }
++
++        assert_se(memeqbyte('y', saved_iov, sizeof(struct iovec) * saved_n));
++        assert_se(!iov);
++        assert_se(n == 0);
++
++        free(saved_iov);
++}
++
++DEFINE_TEST_MAIN(LOG_INFO);

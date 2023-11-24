@@ -1,0 +1,116 @@
+From 0baa19a28f07328fa4357efc97a522bc0e29f74e Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 19 May 2023 11:45:11 +0200
+Subject: [PATCH] test: build the SELinux test module on the host
+
+Let's save some time and build the SELinux test module on the host
+instead of a possibly unaccelerated VM. This brings the runtime of
+TEST-06-SELINUX from ~12 minutes down to a ~1 minute.
+
+(cherry picked from commit 038efe6df154b04a4c2a1d9da7263e5f49d2a1b0)
+
+Related: #2170883
+---
+ test/TEST-06-SELINUX/test.sh                  | 68 ++++++++++---------
+ .../load-systemd-test-module.service          |  2 +-
+ 2 files changed, 36 insertions(+), 34 deletions(-)
+
+diff --git a/test/TEST-06-SELINUX/test.sh b/test/TEST-06-SELINUX/test.sh
+index a867dea4b7..5d72638ec6 100755
+--- a/test/TEST-06-SELINUX/test.sh
++++ b/test/TEST-06-SELINUX/test.sh
+@@ -7,7 +7,6 @@ IMAGE_NAME="selinux"
+ TEST_NO_NSPAWN=1
+ 
+ # Requirements:
+-# Fedora 23
+ # selinux-policy-targeted
+ # selinux-policy-devel
+ 
+@@ -21,38 +20,41 @@ SETUP_SELINUX=yes
+ KERNEL_APPEND="${KERNEL_APPEND:=} selinux=1 security=selinux"
+ 
+ test_append_files() {
+-    (
+-        local workspace="${1:?}"
+-        local policy_headers_dir=/usr/share/selinux/devel
+-        local modules_dir=/var/lib/selinux
+-
+-        setup_selinux
+-        # Make sure we never expand this to "/..."
+-        rm -rf "${workspace:?}/$modules_dir"
+-
+-        if ! cp -ar "$modules_dir" "$workspace/$modules_dir"; then
+-            dfatal "Failed to copy $modules_dir"
+-            exit 1
+-        fi
+-
+-        rm -rf "${workspace:?}/$policy_headers_dir"
+-        inst_dir /usr/share/selinux
+-
+-        if ! cp -ar "$policy_headers_dir" "$workspace/$policy_headers_dir"; then
+-            dfatal "Failed to copy $policy_headers_dir"
+-            exit 1
+-        fi
+-
+-        mkdir "$workspace/systemd-test-module"
+-        cp systemd_test.te "$workspace/systemd-test-module"
+-        cp systemd_test.if "$workspace/systemd-test-module"
+-        cp systemd_test.fc "$workspace/systemd-test-module"
+-        image_install -o sesearch
+-        image_install runcon
+-        image_install checkmodule semodule semodule_package m4 make load_policy sefcontext_compile
+-        image_install -o /usr/libexec/selinux/hll/pp # Fedora/RHEL/...
+-        image_install -o /usr/lib/selinux/hll/pp     # Debian/Ubuntu/...
+-    )
++    local workspace="${1:?}"
++    local policy_headers_dir=/usr/share/selinux/devel
++    local modules_dir=/var/lib/selinux
++
++    setup_selinux
++    # Make sure we never expand this to "/..."
++    rm -rf "${workspace:?}/$modules_dir"
++
++    if ! cp -ar "$modules_dir" "$workspace/$modules_dir"; then
++        dfatal "Failed to copy $modules_dir"
++        exit 1
++    fi
++
++    rm -rf "${workspace:?}/$policy_headers_dir"
++    inst_dir /usr/share/selinux
++
++    if ! cp -ar "$policy_headers_dir" "$workspace/$policy_headers_dir"; then
++        dfatal "Failed to copy $policy_headers_dir"
++        exit 1
++    fi
++
++    mkdir "$workspace/systemd-test-module"
++    cp systemd_test.te "$workspace/systemd-test-module"
++    cp systemd_test.if "$workspace/systemd-test-module"
++    cp systemd_test.fc "$workspace/systemd-test-module"
++    image_install -o sesearch
++    image_install runcon
++    image_install checkmodule semodule semodule_package m4 make load_policy sefcontext_compile
++    image_install -o /usr/libexec/selinux/hll/pp # Fedora/RHEL/...
++    image_install -o /usr/lib/selinux/hll/pp     # Debian/Ubuntu/...
++
++    if ! chroot "$workspace" make -C /systemd-test-module -f /usr/share/selinux/devel/Makefile clean systemd_test.pp; then
++        dfatal "Failed to build the systemd test module"
++        exit 1
++    fi
+ }
+ 
+ do_test "$@"
+diff --git a/test/testsuite-06.units/load-systemd-test-module.service b/test/testsuite-06.units/load-systemd-test-module.service
+index 3a22c15b25..2d15a62715 100644
+--- a/test/testsuite-06.units/load-systemd-test-module.service
++++ b/test/testsuite-06.units/load-systemd-test-module.service
+@@ -9,7 +9,7 @@ Before=sysinit.target shutdown.target autorelabel.service
+ ConditionSecurity=selinux
+ 
+ [Service]
+-ExecStart=sh -x -c 'echo 0 >/sys/fs/selinux/enforce && cd /systemd-test-module && make -f /usr/share/selinux/devel/Makefile clean load'
++ExecStart=sh -x -c 'echo 0 >/sys/fs/selinux/enforce && make -C /systemd-test-module -f /usr/share/selinux/devel/Makefile load'
+ Type=oneshot
+ TimeoutSec=0
+ RemainAfterExit=yes

@@ -1,0 +1,340 @@
+From e7ab823a5f3f57e843069d43033a16165809723a Mon Sep 17 00:00:00 2001
+From: serge-sans-paille <sguelton@redhat.com>
+Date: Thu, 4 Nov 2021 11:11:53 +0100
+Subject: [PATCH 2/3] Misleading bidirectional detection
+
+Differential Revision: https://reviews.llvm.org/D112913
+---
+ clang-tools-extra/clang-tidy/misc/CMakeLists.txt   |   1 +
+ .../clang-tidy/misc/MiscTidyModule.cpp             |   3 +
+ .../clang-tidy/misc/MisleadingBidirectional.cpp    | 131 +++++++++++++++++++++
+ .../clang-tidy/misc/MisleadingBidirectional.h      |  38 ++++++
+ clang-tools-extra/docs/ReleaseNotes.rst            |   5 +
+ clang-tools-extra/docs/clang-tidy/checks/list.rst  |   3 +-
+ .../checks/misc-misleading-bidirectional.rst       |  21 ++++
+ .../checkers/misc-misleading-bidirectional.cpp     |  31 +++++
+ 8 files changed, 232 insertions(+), 1 deletion(-)
+ create mode 100644 clang-tools-extra/clang-tidy/misc/MisleadingBidirectional.cpp
+ create mode 100644 clang-tools-extra/clang-tidy/misc/MisleadingBidirectional.h
+ create mode 100644 clang-tools-extra/docs/clang-tidy/checks/misc-misleading-bidirectional.rst
+ create mode 100644 clang-tools-extra/test/clang-tidy/checkers/misc-misleading-bidirectional.cpp
+
+diff --git a/clang-tools-extra/clang-tidy/misc/CMakeLists.txt b/clang-tools-extra/clang-tidy/misc/CMakeLists.txt
+index 7cafe54..e6abac8 100644
+--- a/clang-tools-extra/clang-tidy/misc/CMakeLists.txt
++++ b/clang-tools-extra/clang-tidy/misc/CMakeLists.txt
+@@ -16,6 +16,7 @@ add_clang_library(clangTidyMiscModule
+   DefinitionsInHeadersCheck.cpp
+   Homoglyph.cpp
+   MiscTidyModule.cpp
++  MisleadingBidirectional.cpp
+   MisplacedConstCheck.cpp
+   NewDeleteOverloadsCheck.cpp
+   NoRecursionCheck.cpp
+diff --git a/clang-tools-extra/clang-tidy/misc/MiscTidyModule.cpp b/clang-tools-extra/clang-tidy/misc/MiscTidyModule.cpp
+index 5c7bd0c..bb5fde2 100644
+--- a/clang-tools-extra/clang-tidy/misc/MiscTidyModule.cpp
++++ b/clang-tools-extra/clang-tidy/misc/MiscTidyModule.cpp
+@@ -11,6 +11,7 @@
+ #include "../ClangTidyModuleRegistry.h"
+ #include "DefinitionsInHeadersCheck.h"
+ #include "Homoglyph.h"
++#include "MisleadingBidirectional.h"
+ #include "MisplacedConstCheck.h"
+ #include "NewDeleteOverloadsCheck.h"
+ #include "NoRecursionCheck.h"
+@@ -35,6 +36,8 @@ public:
+     CheckFactories.registerCheck<DefinitionsInHeadersCheck>(
+         "misc-definitions-in-headers");
+     CheckFactories.registerCheck<Homoglyph>("misc-homoglyph");
++    CheckFactories.registerCheck<MisleadingBidirectionalCheck>(
++        "misc-misleading-bidirectional");
+     CheckFactories.registerCheck<MisplacedConstCheck>("misc-misplaced-const");
+     CheckFactories.registerCheck<NewDeleteOverloadsCheck>(
+         "misc-new-delete-overloads");
+diff --git a/clang-tools-extra/clang-tidy/misc/MisleadingBidirectional.cpp b/clang-tools-extra/clang-tidy/misc/MisleadingBidirectional.cpp
+new file mode 100644
+index 0000000..7a2f06b
+--- /dev/null
++++ b/clang-tools-extra/clang-tidy/misc/MisleadingBidirectional.cpp
+@@ -0,0 +1,139 @@
++//===--- MisleadingBidirectional.cpp - clang-tidy -------------------------===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++
++#include "MisleadingBidirectional.h"
++
++#include "clang/Frontend/CompilerInstance.h"
++#include "clang/Lex/Preprocessor.h"
++#include "llvm/Support/ConvertUTF.h"
++
++using namespace clang;
++using namespace clang::tidy::misc;
++
++static bool containsMisleadingBidi(StringRef Buffer,
++                                   bool HonorLineBreaks = true) {
++  const char *CurPtr = Buffer.begin();
++
++  enum BidiChar {
++    PS = 0x2029,
++    RLO = 0x202E,
++    RLE = 0x202B,
++    LRO = 0x202D,
++    LRE = 0x202A,
++    PDF = 0x202C,
++    RLI = 0x2067,
++    LRI = 0x2066,
++    FSI = 0x2068,
++    PDI = 0x2069
++  };
++
++  SmallVector<BidiChar> BidiContexts;
++
++  // Scan each character while maintaining a stack of opened bidi context.
++  // RLO/RLE/LRO/LRE all are closed by PDF while RLI LRI and FSI are closed by
++  // PDI. New lines reset the context count. Extra PDF / PDI are ignored.
++  //
++  // Warn if we end up with an unclosed context.
++  while (CurPtr < Buffer.end()) {
++    unsigned char C = *CurPtr;
++    if (isASCII(C)) {
++      ++CurPtr;
++      bool IsParagrapSep =
++          (C == 0xA || C == 0xD || (0x1C <= C && C <= 0x1E) || C == 0x85);
++      bool IsSegmentSep = (C == 0x9 || C == 0xB || C == 0x1F);
++      if (IsParagrapSep || IsSegmentSep)
++        BidiContexts.clear();
++      continue;
++    }
++    llvm::UTF32 CodePoint;
++    llvm::ConversionResult Result = llvm::convertUTF8Sequence(
++        (const llvm::UTF8 **)&CurPtr, (const llvm::UTF8 *)Buffer.end(),
++        &CodePoint, llvm::strictConversion);
++
++    // If conversion fails, utf-8 is designed so that we can just try next char.
++    if (Result != llvm::conversionOK) {
++      ++CurPtr;
++      continue;
++    }
++
++    // Open a PDF context.
++    if (CodePoint == RLO || CodePoint == RLE || CodePoint == LRO ||
++        CodePoint == LRE)
++      BidiContexts.push_back(PDF);
++    // Close PDF Context.
++    else if (CodePoint == PDF) {
++      if (!BidiContexts.empty() && BidiContexts.back() == PDF)
++        BidiContexts.pop_back();
++    }
++    // Open a PDI Context.
++    else if (CodePoint == RLI || CodePoint == LRI || CodePoint == FSI)
++      BidiContexts.push_back(PDI);
++    // Close a PDI Context.
++    else if (CodePoint == PDI) {
++      auto R = std::find(BidiContexts.rbegin(), BidiContexts.rend(), PDI);
++      if (R != BidiContexts.rend())
++        BidiContexts.resize(BidiContexts.rend() - R - 1);
++    }
++    // Line break or equivalent
++    else if (CodePoint == PS)
++      BidiContexts.clear();
++  }
++  return !BidiContexts.empty();
++}
++
++class MisleadingBidirectionalCheck::MisleadingBidirectionalHandler
++    : public CommentHandler {
++public:
++  MisleadingBidirectionalHandler(MisleadingBidirectionalCheck &Check,
++                                 llvm::Optional<std::string> User)
++      : Check(Check) {}
++
++  bool HandleComment(Preprocessor &PP, SourceRange Range) override {
++    // FIXME: check that we are in a /* */ comment
++    StringRef Text =
++        Lexer::getSourceText(CharSourceRange::getCharRange(Range),
++                             PP.getSourceManager(), PP.getLangOpts());
++
++    if (containsMisleadingBidi(Text, true))
++      Check.diag(
++          Range.getBegin(),
++          "comment contains misleading bidirectional Unicode characters");
++    return false;
++  }
++
++private:
++  MisleadingBidirectionalCheck &Check;
++};
++
++MisleadingBidirectionalCheck::MisleadingBidirectionalCheck(
++    StringRef Name, ClangTidyContext *Context)
++    : ClangTidyCheck(Name, Context),
++      Handler(std::make_unique<MisleadingBidirectionalHandler>(
++          *this, Context->getOptions().User)) {}
++
++MisleadingBidirectionalCheck::~MisleadingBidirectionalCheck() = default;
++
++void MisleadingBidirectionalCheck::registerPPCallbacks(
++    const SourceManager &SM, Preprocessor *PP, Preprocessor *ModuleExpanderPP) {
++  PP->addCommentHandler(Handler.get());
++}
++
++void MisleadingBidirectionalCheck::check(
++    const ast_matchers::MatchFinder::MatchResult &Result) {
++  if (const auto *SL = Result.Nodes.getNodeAs<StringLiteral>("strlit")) {
++    StringRef Literal = SL->getBytes();
++    if (containsMisleadingBidi(Literal, false))
++      diag(SL->getBeginLoc(), "string literal contains misleading "
++                              "bidirectional Unicode characters");
++  }
++}
++
++void MisleadingBidirectionalCheck::registerMatchers(
++    ast_matchers::MatchFinder *Finder) {
++  Finder->addMatcher(ast_matchers::stringLiteral().bind("strlit"), this);
++}
+diff --git a/clang-tools-extra/clang-tidy/misc/MisleadingBidirectional.h b/clang-tools-extra/clang-tidy/misc/MisleadingBidirectional.h
+new file mode 100644
+index 0000000..18e7060
+--- /dev/null
++++ b/clang-tools-extra/clang-tidy/misc/MisleadingBidirectional.h
+@@ -0,0 +1,38 @@
++//===--- MisleadingBidirectionalCheck.h - clang-tidy ------------*- C++ -*-===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++
++#ifndef LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_MISC_MISLEADINGBIDIRECTIONALCHECK_H
++#define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_MISC_MISLEADINGBIDIRECTIONALCHECK_H
++
++#include "../ClangTidyCheck.h"
++
++namespace clang {
++namespace tidy {
++namespace misc {
++
++class MisleadingBidirectionalCheck : public ClangTidyCheck {
++public:
++  MisleadingBidirectionalCheck(StringRef Name, ClangTidyContext *Context);
++  ~MisleadingBidirectionalCheck();
++
++  void registerPPCallbacks(const SourceManager &SM, Preprocessor *PP,
++                           Preprocessor *ModuleExpanderPP) override;
++
++  void registerMatchers(ast_matchers::MatchFinder *Finder) override;
++  void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
++
++private:
++  class MisleadingBidirectionalHandler;
++  std::unique_ptr<MisleadingBidirectionalHandler> Handler;
++};
++
++} // namespace misc
++} // namespace tidy
++} // namespace clang
++
++#endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_MISC_MISLEADINGBIDIRECTIONALCHECK_H
+diff --git a/clang-tools-extra/docs/ReleaseNotes.rst b/clang-tools-extra/docs/ReleaseNotes.rst
+index 37a717e..1eec7db 100644
+--- a/clang-tools-extra/docs/ReleaseNotes.rst
++++ b/clang-tools-extra/docs/ReleaseNotes.rst
+@@ -218,6 +218,11 @@ New checks
+ 
+   Detects confusable unicode identifiers.
+ 
++- New :doc:`misc-misleading-bidirectional <clang-tidy/checks/misc-misleading-bidirectional>` check.
++
++  Inspect string literal and comments for unterminated bidirectional Unicode
++  characters.
++
+ New check aliases
+ ^^^^^^^^^^^^^^^^^
+ 
+diff --git a/clang-tools-extra/docs/clang-tidy/checks/list.rst b/clang-tools-extra/docs/clang-tidy/checks/list.rst
+index df9a95c..b118639 100644
+--- a/clang-tools-extra/docs/clang-tidy/checks/list.rst
++++ b/clang-tools-extra/docs/clang-tidy/checks/list.rst
+@@ -207,7 +207,8 @@ Clang-Tidy Checks
+    `llvmlibc-implementation-in-namespace <llvmlibc-implementation-in-namespace.html>`_,
+    `llvmlibc-restrict-system-libc-headers <llvmlibc-restrict-system-libc-headers.html>`_, "Yes"
+    `misc-definitions-in-headers <misc-definitions-in-headers.html>`_, "Yes"
+-   `misc-homoglyph <misc-homoglyph.html>`_, "Yes"
++   `misc-homoglyph <misc-homoglyph.html>`_,
++   `misc-misleading-bidirectional <misc-misleading-bidirectional.html>`_,
+    `misc-misplaced-const <misc-misplaced-const.html>`_,
+    `misc-new-delete-overloads <misc-new-delete-overloads.html>`_,
+    `misc-no-recursion <misc-no-recursion.html>`_,
+diff --git a/clang-tools-extra/docs/clang-tidy/checks/misc-misleading-bidirectional.rst b/clang-tools-extra/docs/clang-tidy/checks/misc-misleading-bidirectional.rst
+new file mode 100644
+index 0000000..16ffc97
+--- /dev/null
++++ b/clang-tools-extra/docs/clang-tidy/checks/misc-misleading-bidirectional.rst
+@@ -0,0 +1,21 @@
++.. title:: clang-tidy - misc-misleading-bidirectional
++
++misc-misleading-bidirectional
++=============================
++
++Warn about unterminated bidirectional unicode sequence, detecting potential attack
++as described in the `Trojan Source <https://www.trojansource.codes>`_ attack.
++
++Example:
++
++.. code-block:: c++
++
++    #include <iostream>
++
++    int main() {
++        bool isAdmin = false;
++        /*‮ } ⁦if (isAdmin)⁩ ⁦ begin admins only */
++            std::cout << "You are an admin.\n";
++        /* end admins only ‮ { ⁦*/
++        return 0;
++    }
+diff --git a/clang-tools-extra/test/clang-tidy/checkers/misc-misleading-bidirectional.cpp b/clang-tools-extra/test/clang-tidy/checkers/misc-misleading-bidirectional.cpp
+new file mode 100644
+index 0000000..7a1746d
+--- /dev/null
++++ b/clang-tools-extra/test/clang-tidy/checkers/misc-misleading-bidirectional.cpp
+@@ -0,0 +1,31 @@
++// RUN: %check_clang_tidy %s misc-misleading-bidirectional %t
++
++void func(void) {
++  int admin = 0;
++  /*‮ }⁦if(admin)⁩ ⁦ begin*/
++  // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: comment contains misleading bidirectional Unicode characters [misc-misleading-bidirectional]
++  const char msg[] = "‮⁦if(admin)⁩ ⁦tes";
++  // CHECK-MESSAGES: :[[@LINE-1]]:22: warning: string literal contains misleading bidirectional Unicode characters [misc-misleading-bidirectional]
++}
++
++void all_fine(void) {
++  char valid[] = "some‮valid‬sequence";
++  /* EOL ends bidi‮ sequence
++   * end it's fine to do so.
++   * EOL ends ⁧isolate too
++   */
++}
++
++int invalid_utf_8(void) {
++  bool isAdmin = false;
++
++  // the comment below contains an invalid utf8 character, but should still be
++  // processed.
++
++  // CHECK-MESSAGES: :[[@LINE+1]]:3: warning: comment contains misleading bidirectional Unicode characters [misc-misleading-bidirectional]
++  /*‮ } ⁦if (isAdmin)⁩ ⁦ begin admins only */
++  return 1;
++  /* end admins only ‮ { ⁦*/
++  // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: comment contains misleading bidirectional Unicode characters [misc-misleading-bidirectional]
++  return 0;
++}
+-- 
+1.8.3.1
+

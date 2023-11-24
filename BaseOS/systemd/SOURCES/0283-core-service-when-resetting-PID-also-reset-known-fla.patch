@@ -1,0 +1,43 @@
+From 14d3ca976102d1c013b4b634586a365aadcd94c4 Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekleta@redhat.com>
+Date: Mon, 22 May 2023 17:44:30 +0200
+Subject: [PATCH] core/service: when resetting PID also reset known flag
+
+Re-watching pids on cgroup v1 (needed because of unreliability of cgroup
+empty notifications in containers) is handled bellow at the end of
+service_sigchld_event() and depends on value main_pid_known flag.
+
+In CentOS Stream 8 container on cgroup v1 the stop action would get stuck
+indefinitely on unit like this,
+
+$ cat /run/systemd/system/foo.service
+[Service]
+ExecStart=/bin/bash -c 'trap "nohup sleep 1 & exit 0" TERM;  sleep infinity'
+ExecStop=/bin/bash -c 'kill -s TERM $MAINPID'
+TimeoutSec=0
+
+However, upstream works "fine" because in upstream version of systemd we
+actually never wait on processes killed in containers and proceed
+immediately to sending SIGKILL hence re-watching of pids in the cgroup
+is not necessary. But for the sake of correctness we should merge the
+patch also upstream.
+
+(cherry picked from commit ff32060f2ed37b68dc26256b05e2e69013b0ecfe)
+
+Resolves: #2210237
+---
+ src/core/service.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/core/service.c b/src/core/service.c
+index 1e14cdc6ca..e5127a4ccf 100644
+--- a/src/core/service.c
++++ b/src/core/service.c
+@@ -3507,6 +3507,7 @@ static void service_sigchld_event(Unit *u, pid_t pid, int code, int status) {
+                         return;
+ 
+                 s->main_pid = 0;
++                s->main_pid_known = false;
+                 exec_status_exit(&s->main_exec_status, &s->exec_context, pid, code, status);
+ 
+                 if (s->main_command) {

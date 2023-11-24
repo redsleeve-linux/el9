@@ -1,0 +1,79 @@
+From c22461b748ca92c3d2bdb799f0b7cd26ce72b03c Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 26 Jul 2023 09:39:23 +0900
+Subject: [PATCH] fstab-generator: add a flag to accept entry for "/" in initrd
+
+When both prefix_sysroot and accept_root is true, the entry for "/" will
+be accepted and converted to "/sysroot/".
+
+Why? If the entry is read from the main system's fstab, then we already
+mounted /sysroot/, hence it is not and should not re-add the .mount unit
+for /sysroot/. However, if we want to specify the root mount through the
+kernel command line or credential, without this change, we need to
+specify the same entry in the two options. E.g.
+===
+systemd.mount-extra=/dev/sda1:/:auto:defaults
+rd.systemd.mount-extra=/dev/sda1:/sysroot:auto:defaults
+===
+That's inconvenient. Of course, we can dedup that by using traditional
+options, but cannot when defined in credential.
+
+(cherry picked from commit 22f5a825e40ad9c8eeae18b763676759d24bb434)
+
+Related: #2190226
+---
+ src/fstab-generator/fstab-generator.c | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
+index f91a863a1d..cf3ff4f598 100644
+--- a/src/fstab-generator/fstab-generator.c
++++ b/src/fstab-generator/fstab-generator.c
+@@ -307,9 +307,9 @@ static bool mount_is_network(const char *fstype, const char *options) {
+                 (fstype && fstype_is_network(fstype));
+ }
+ 
+-static bool mount_in_initrd(const char *where, const char *options) {
++static bool mount_in_initrd(const char *where, const char *options, bool accept_root) {
+         return fstab_test_option(options, "x-initrd.mount\0") ||
+-                (where && path_equal(where, "/usr"));
++                (where && PATH_IN_SET(where, "/usr", accept_root ? "/" : NULL));
+ }
+ 
+ static int write_timeout(
+@@ -843,6 +843,7 @@ static int parse_fstab_one(
+                 const char *options,
+                 int passno,
+                 bool prefix_sysroot,
++                bool accept_root, /* This takes an effect only when prefix_sysroot is true. */
+                 bool use_swap_enabled) {
+ 
+         _cleanup_free_ char *what = NULL, *where = NULL;
+@@ -854,7 +855,7 @@ static int parse_fstab_one(
+         assert(fstype);
+         assert(options);
+ 
+-        if (prefix_sysroot && !mount_in_initrd(where_original, options))
++        if (prefix_sysroot && !mount_in_initrd(where_original, options, accept_root))
+                 return 0;
+ 
+         is_swap = streq_ptr(fstype, "swap");
+@@ -975,7 +976,9 @@ static int parse_fstab(bool prefix_sysroot) {
+         while ((me = getmntent(f))) {
+                 r = parse_fstab_one(fstab,
+                                     me->mnt_fsname, me->mnt_dir, me->mnt_type, me->mnt_opts, me->mnt_passno,
+-                                    prefix_sysroot, /* use_swap_enabled = */ true);
++                                    prefix_sysroot,
++                                    /* accept_root = */ false,
++                                    /* use_swap_enabled = */ true);
+                 if (r < 0 && ret >= 0)
+                         ret = r;
+                 if (arg_sysroot_check && r > 0)
+@@ -1286,6 +1289,7 @@ static int add_mounts_from_cmdline(void) {
+                               m->options,
+                               /* passno = */ 0,
+                               /* prefix_sysroot = */ !m->for_initrd && in_initrd(),
++                              /* accept_root = */ true,
+                               /* use_swap_enabled = */ false);
+                 if (r < 0 && ret >= 0)
+                         ret = r;

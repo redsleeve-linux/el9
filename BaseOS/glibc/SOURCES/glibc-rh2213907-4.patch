@@ -1,0 +1,178 @@
+From 180897c161a171d8ef0faee1c6c9fd6b57d8b13b Mon Sep 17 00:00:00 2001
+From: Noah Goldstein <goldstein.w.n@gmail.com>
+Date: Wed, 7 Jun 2023 13:18:03 -0500
+Subject: [PATCH] x86: Make the divisor in setting `non_temporal_threshold` cpu
+ specific
+Content-type: text/plain; charset=UTF-8
+
+Different systems prefer a different divisors.
+
+From benchmarks[1] so far the following divisors have been found:
+    ICX     : 2
+    SKX     : 2
+    BWD     : 8
+
+For Intel, we are generalizing that BWD and older prefers 8 as a
+divisor, and SKL and newer prefers 2. This number can be further tuned
+as benchmarks are run.
+
+[1]: https://github.com/goldsteinn/memcpy-nt-benchmarks
+Reviewed-by: DJ Delorie <dj@redhat.com>
+---
+ sysdeps/x86/cpu-features.c         | 31 ++++++++++++++++++++---------
+ sysdeps/x86/dl-cacheinfo.h         | 32 ++++++++++++++++++------------
+ sysdeps/x86/dl-diagnostics-cpu.c   | 11 ++++++----
+ sysdeps/x86/include/cpu-features.h |  3 +++
+ 4 files changed, 51 insertions(+), 26 deletions(-)
+
+[DJ - edited for ABI compatibility]
+
+diff -rup a/sysdeps/x86/cpu-features.c b/sysdeps/x86/cpu-features.c
+--- a/sysdeps/x86/cpu-features.c	2023-07-26 17:56:19.679300711 -0400
++++ b/sysdeps/x86/cpu-features.c	2023-07-28 15:27:00.336324265 -0400
+@@ -35,6 +35,9 @@ extern void TUNABLE_CALLBACK (set_x86_sh
+ # endif
+ #endif
+ 
++unsigned long int __rtld_global_ro_cachesize_non_temporal_divisor
++  attribute_hidden;
++
+ #if CET_ENABLED
+ # include <dl-cet.h>
+ #endif
+@@ -614,6 +617,7 @@ init_cpu_features (struct cpu_features *
+   unsigned int stepping = 0;
+   enum cpu_features_kind kind;
+ 
++  __rtld_global_ro_cachesize_non_temporal_divisor = 4;
+ #if !HAS_CPUID
+   if (__get_cpuid_max (0, 0) == 0)
+     {
+@@ -694,13 +698,13 @@ init_cpu_features (struct cpu_features *
+ 
+ 	      /* Bigcore/Default Tuning.  */
+ 	    default:
++	    default_tuning:
+ 	      /* Unknown family 0x06 processors.  Assuming this is one
+ 		 of Core i3/i5/i7 processors if AVX is available.  */
+ 	      if (!CPU_FEATURES_CPU_P (cpu_features, AVX))
+ 		break;
+-	      /* Fall through.  */
+-	    case INTEL_BIGCORE_NEHALEM:
+-	    case INTEL_BIGCORE_WESTMERE:
++
++	    enable_modern_features:
+ 	      /* Rep string instructions, unaligned load, unaligned copy,
+ 		 and pminub are fast on Intel Core i3, i5 and i7.  */
+ 	      cpu_features->preferred[index_arch_Fast_Rep_String]
+@@ -710,12 +714,23 @@ init_cpu_features (struct cpu_features *
+ 		      | bit_arch_Prefer_PMINUB_for_stringop);
+ 	      break;
+ 
+-	   /*
+-	    Default tuned Bigcore microarch.
++	    case INTEL_BIGCORE_NEHALEM:
++	    case INTEL_BIGCORE_WESTMERE:
++	      /* Older CPUs prefer non-temporal stores at lower threshold.  */
++	      __rtld_global_ro_cachesize_non_temporal_divisor = 8;
++	      goto enable_modern_features;
++
++	      /* Older Bigcore microarch (smaller non-temporal store
++		 threshold).  */
+ 	    case INTEL_BIGCORE_SANDYBRIDGE:
+ 	    case INTEL_BIGCORE_IVYBRIDGE:
+ 	    case INTEL_BIGCORE_HASWELL:
+ 	    case INTEL_BIGCORE_BROADWELL:
++	      __rtld_global_ro_cachesize_non_temporal_divisor = 8;
++	      goto default_tuning;
++
++	      /* Newer Bigcore microarch (larger non-temporal store
++		 threshold).  */
+ 	    case INTEL_BIGCORE_SKYLAKE:
+ 	    case INTEL_BIGCORE_KABYLAKE:
+ 	    case INTEL_BIGCORE_COMETLAKE:
+@@ -731,13 +746,14 @@ init_cpu_features (struct cpu_features *
+ 	    case INTEL_BIGCORE_SAPPHIRERAPIDS:
+ 	    case INTEL_BIGCORE_EMERALDRAPIDS:
+ 	    case INTEL_BIGCORE_GRANITERAPIDS:
+-	    */
++	      __rtld_global_ro_cachesize_non_temporal_divisor = 2;
++	      goto default_tuning;
+ 
+-	   /*
+-	    Default tuned Mixed (bigcore + atom SOC).
++	      /* Default tuned Mixed (bigcore + atom SOC). */
+ 	    case INTEL_MIXED_LAKEFIELD:
+ 	    case INTEL_MIXED_ALDERLAKE:
+-	    */
++	      __rtld_global_ro_cachesize_non_temporal_divisor = 2;
++	      goto default_tuning;
+ 	    }
+ 
+ 	      /* Disable TSX on some processors to avoid TSX on kernels that
+diff -rup a/sysdeps/x86/dl-cacheinfo.h b/sysdeps/x86/dl-cacheinfo.h
+--- a/sysdeps/x86/dl-cacheinfo.h	2023-07-26 17:56:18.662261475 -0400
++++ b/sysdeps/x86/dl-cacheinfo.h	2023-07-26 17:56:20.756342261 -0400
+@@ -744,19 +744,25 @@ dl_init_cacheinfo (struct cpu_features *
+   cpu_features->level3_cache_linesize = level3_cache_linesize;
+   cpu_features->level4_cache_size = level4_cache_size;
+ 
+-  /* The default setting for the non_temporal threshold is 1/4 of size
+-     of the chip's cache. For most Intel and AMD processors with an
+-     initial release date between 2017 and 2023, a thread's typical
+-     share of the cache is from 18-64MB. Using the 1/4 L3 is meant to
+-     estimate the point where non-temporal stores begin out-competing
+-     REP MOVSB. As well the point where the fact that non-temporal
+-     stores are forced back to main memory would already occurred to the
+-     majority of the lines in the copy. Note, concerns about the
+-     entire L3 cache being evicted by the copy are mostly alleviated
+-     by the fact that modern HW detects streaming patterns and
+-     provides proper LRU hints so that the maximum thrashing
+-     capped at 1/associativity. */
+-  unsigned long int non_temporal_threshold = shared / 4;
++  unsigned long int cachesize_non_temporal_divisor
++      = __rtld_global_ro_cachesize_non_temporal_divisor;
++  if (cachesize_non_temporal_divisor <= 0)
++    cachesize_non_temporal_divisor = 4;
++
++  /* The default setting for the non_temporal threshold is [1/8, 1/2] of size
++     of the chip's cache (depending on `cachesize_non_temporal_divisor` which
++     is microarch specific. The defeault is 1/4). For most Intel and AMD
++     processors with an initial release date between 2017 and 2023, a thread's
++     typical share of the cache is from 18-64MB. Using a reasonable size
++     fraction of L3 is meant to estimate the point where non-temporal stores
++     begin out-competing REP MOVSB. As well the point where the fact that
++     non-temporal stores are forced back to main memory would already occurred
++     to the majority of the lines in the copy. Note, concerns about the entire
++     L3 cache being evicted by the copy are mostly alleviated by the fact that
++     modern HW detects streaming patterns and provides proper LRU hints so that
++     the maximum thrashing capped at 1/associativity. */
++  unsigned long int non_temporal_threshold
++      = shared / cachesize_non_temporal_divisor;
+   /* If no ERMS, we use the per-thread L3 chunking. Normal cacheable stores run
+      a higher risk of actually thrashing the cache as they don't have a HW LRU
+      hint. As well, their performance in highly parallel situations is
+diff -rup a/sysdeps/x86/dl-diagnostics-cpu.c b/sysdeps/x86/dl-diagnostics-cpu.c
+--- a/sysdeps/x86/dl-diagnostics-cpu.c	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/x86/dl-diagnostics-cpu.c	2023-07-26 17:56:20.761342454 -0400
+@@ -117,4 +117,6 @@ _dl_diagnostics_cpu (void)
+                   + sizeof (cpu_features->level4_cache_size)
+                   == sizeof (*cpu_features),
+                   "last cpu_features field has been printed");
++  print_cpu_features_value ("cachesize_non_temporal_divisor",
++			    __rtld_global_ro_cachesize_non_temporal_divisor);
+ }
+diff -rup a/sysdeps/x86/include/cpu-features.h b/sysdeps/x86/include/cpu-features.h
+--- a/sysdeps/x86/include/cpu-features.h	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/x86/include/cpu-features.h	2023-07-27 13:51:52.081494751 -0400
+@@ -919,6 +919,10 @@ struct cpu_features
+   unsigned long int level4_cache_size;
+ };
+ 
++/* When no user non_temporal_threshold is specified. We default to
++   cachesize / cachesize_non_temporal_divisor.  */
++extern unsigned long int __rtld_global_ro_cachesize_non_temporal_divisor;
++
+ /* Get a pointer to the CPU features structure.  */
+ extern const struct cpu_features *_dl_x86_get_cpu_features (void)
+      __attribute__ ((pure));

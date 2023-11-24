@@ -1,8 +1,8 @@
 
 Name:    annobin
 Summary: Annotate and examine compiled binary files
-Version: 11.05
-Release: 1%{?dist}.redsleeve
+Version: 12.12
+Release: 1%{?dist}
 License: GPLv3+
 # Maintainer: nickc@redhat.com
 # Web Page: https://sourceware.org/annobin/
@@ -248,11 +248,6 @@ CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" CXXFLAGS="$CFLAGS" %configure ${CONFIG_ARGS}
 export CLANG_TARGET_OPTIONS="-fcf-protection"
 %endif
 
-%ifarch armv6hl
-# FIXME: There should be a better way to do this.
-export CLANG_TARGET_OPTIONS="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
-%endif
-
 %make_build
 
 %if %{with plugin_rebuild}
@@ -371,8 +366,47 @@ exit $res
 #---------------------------------------------------------------------------------
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> - 11.05-1.redsleeve
-- added compiler flags for armv6
+* Wed Jun 14 2023 Nick Clifton  <nickc@redhat.com> - 12.12-1
+- Rebuild against LLVM-16.  (#2212739)
+- Annocheck: Check for string notes in separate debug info files.  (#2211694)
+- Annocheck: Add support for el10 and rhel-10 profiles.  (RHEL-526)
+- Annocheck: Suppress more tests for Rust binaries.
+
+* Wed Apr 26 2023 Nick Clifton  <nickc@redhat.com> - 12.09-1
+- Annocheck: Fix detection of missing plugin options.  (#2189492)
+- Fix generation of auto-generated files.
+- Fix covscan reported errors.
+
+* Mon Apr 24 2023 Nick Clifton  <nickc@redhat.com> - 12.07-1
+- Annocheck: Fix lto testing.  (#2177140)
+- gcc-plugin: generate warnings about misspelt -D_FORTIFY_SOURCE and/or -D_GLIBCXX_ASSERTIONS options.
+- gcc-plugin: use a bigger buffer for constructing notes.
+- llvm-plugin: Fix detection of optimization level.  Improve test.
+- clang-plugin: Improve test.
+- configure: More improvements.
+- annocheck: Fix seg-fault when checking for glibc components in string format notes.
+- configure: Simplify.
+- gcc plugin: Add filenames to string notes.  Allow use of ANNOBIN environment variable.
+- llvm plugin: Add workaround for building with LLVM-16.
+- clang plugin: Fix for building with Clang-16.
+- gcc plugin: Keep ELF notes at protocol version 3.
+- Protocol Version 4: String format notes.
+- Annocheck: Update message for LTO tests.  (#2177140)
+
+* Thu Mar 09 2023 Nick Clifton  <nickc@redhat.com> - 11.13-1
+- Annocheck: Add more code to handle another glibc function built without LTO.
+
+* Mon Mar 06 2023 Nick Clifton  <nickc@redhat.com> - 11.12-1
+- Annocheck: Add code to handle another glibc function built without LTO.
+- GCC Plugin: Do not run if other plugins are active.  (#2175768)
+- Annocheck: Add code to handle glibc functions built without LTO.
+- Libannocheck: Fix thinko in debugging code.
+- Annocheck: Fix LTO test.
+- Notes: Display notes held in separate dbeuginfo files.
+- Annocheck: Fix atexit test.  Fix recording of version numbers.  (#2165528)
+- LLVM & Clang Plugins: Build with branch protection on AArch64.  (#2164364)
+- Libannocheck: Fix bug causing infinite looping when running tests.
+- Annocheck: Fix handling of file built by multiple versions of gcc.  (#2160700)
 
 * Mon Jan 09 2023 Nick Clifton  <nickc@redhat.com> - 11.05-1
 - Annocheck: Fix handling of empty files.  (#2159292)

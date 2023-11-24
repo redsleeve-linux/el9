@@ -1,7 +1,7 @@
 Name:		numactl
 Summary:	Library for tuning for Non Uniform Memory Access machines
-Version:	2.0.14
-Release:	9%{dist}.redsleeve
+Version:	2.0.16
+Release:	1%{dist}
 # libnuma is LGPLv2 and GPLv2
 # numactl binaries are GPLv2 only
 License:	GPLv2
@@ -11,7 +11,7 @@ Source0:	%{url}/releases/download/v%{version}/%{name}-%{version}.tar.gz
 BuildRequires: make
 BuildRequires:	libtool automake autoconf
 
-ExcludeArch: s390
+ExcludeArch: s390 %{arm}
 
 #START INSERT
 #
@@ -37,12 +37,6 @@ ExcludeArch: s390
 #
 # Patches 601 onward are generic patches
 #
-Patch601: 0001-libnuma-make-numa_police_memory-free-of-race.patch
-Patch602: 0002-shm.c-fix-memleak-in-dump_shm.patch
-Patch603: 0003-shm.c-fix-memleak-in-verify_shm.patch
-Patch604: 0004-sysfs.c-don-t-leak-fd-if-fail-in-sysfs_read.patch
-Patch605: 0005-sysfs.c-prevent-mem-leak-in-sysfs_node_read.patch
-Patch606: 0006-numactl.c-fix-use-after-free.patch
 
 
 %description
@@ -113,9 +107,6 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man3/*.3*
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org>  2.0.14-9.redsleeve
-- remove %{arm} from excludearchs
-
 * Wed Nov 23 2022 Pingfan Liu <piliu@redhat.com> - 2.0.14-9
 - Dummy release to get s390x binary in errata
 

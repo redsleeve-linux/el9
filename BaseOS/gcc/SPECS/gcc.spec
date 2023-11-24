@@ -1,10 +1,10 @@
-%global DATE 20221121
-%global gitrev 643e61c61b308f9c572da4ccd5f730fb
-%global gcc_version 11.3.1
+%global DATE 20230605
+%global gitrev 2c7f17ca0b642790d74cca6c798196e9053a4bcf
+%global gcc_version 11.4.1
 %global gcc_major 11
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 4
+%global gcc_release 2
 %global nvptx_tools_gitrev 5f6f343a302d620b0868edab376c00b15741e39e
 %global newlib_cygwin_gitrev 50e2a63b04bdd018484605fbb954fd1bd5147fa0
 %global _unpackaged_files_terminate_build 0
@@ -125,13 +125,13 @@
 %endif
 # TODO: Add ppc64le-redhat-linux s390x-redhat-linux later.
 %global cross_targets aarch64-redhat-linux
-Summary: Various compilers (C, C++, Objective-C, ...)
-Name: gcc
-Version: %{gcc_version}
-Release: %{gcc_release}.3%{?dist}.redsleeve
+Summary:              Various compilers (C, C++, Objective-C, ...)
+Name:                 gcc
+Version:              %{gcc_version}
+Release:              %{gcc_release}.1%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
-License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
+License:              GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
 # The source for this package was pulled from upstream's vcs.
 # %%{gitrev} is some commit from the
 # https://gcc.gnu.org/git/?p=gcc.git;h=refs/vendors/redhat/heads/gcc-%%{gcc_major}-branch
@@ -140,23 +140,23 @@ License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2
 # git --git-dir=gcc-dir.tmp/.git fetch --depth 1 origin %%{gitrev}
 # git --git-dir=gcc-dir.tmp/.git archive --prefix=%%{name}-%%{version}-%%{DATE}/ %%{gitrev} | xz -9e > %%{name}-%%{version}-%%{DATE}.tar.xz
 # rm -rf gcc-dir.tmp
-Source0: gcc-%{version}-%{DATE}.tar.xz
+Source0:              gcc-%{version}-%{DATE}.tar.xz
 # The source for nvptx-tools package was pulled from upstream's vcs.  Use the
 # following commands to generate the tarball:
 # git clone --depth 1 git://github.com/MentorEmbedded/nvptx-tools.git nvptx-tools-dir.tmp
 # git --git-dir=nvptx-tools-dir.tmp/.git fetch --depth 1 origin %%{nvptx_tools_gitrev}
 # git --git-dir=nvptx-tools-dir.tmp/.git archive --prefix=nvptx-tools-%%{nvptx_tools_gitrev}/ %%{nvptx_tools_gitrev} | xz -9e > nvptx-tools-%%{nvptx_tools_gitrev}.tar.xz
 # rm -rf nvptx-tools-dir.tmp
-Source1: nvptx-tools-%{nvptx_tools_gitrev}.tar.xz
+Source1:              nvptx-tools-%{nvptx_tools_gitrev}.tar.xz
 # The source for nvptx-newlib package was pulled from upstream's vcs.  Use the
 # following commands to generate the tarball:
 # git clone git://sourceware.org/git/newlib-cygwin.git newlib-cygwin-dir.tmp
 # git --git-dir=newlib-cygwin-dir.tmp/.git archive --prefix=newlib-cygwin-%%{newlib_cygwin_gitrev}/ %%{newlib_cygwin_gitrev} ":(exclude)newlib/libc/sys/linux/include/rpc/*.[hx]" | xz -9e > newlib-cygwin-%%{newlib_cygwin_gitrev}.tar.xz
 # rm -rf newlib-cygwin-dir.tmp
-Source2: newlib-cygwin-%{newlib_cygwin_gitrev}.tar.xz
+Source2:              newlib-cygwin-%{newlib_cygwin_gitrev}.tar.xz
 %global isl_version 0.18
-Source3: https://gcc.gnu.org/pub/gcc/infrastructure/isl-%{isl_version}.tar.bz2
-URL: http://gcc.gnu.org
+Source3:              https://gcc.gnu.org/pub/gcc/infrastructure/isl-%{isl_version}.tar.bz2
+URL:                  http://gcc.gnu.org
 # Need binutils with -pie support >= 2.14.90.0.4-4
 # Need binutils which can omit dot symbols and overlap .opd on ppc64 >= 2.15.91.0.2-4
 # Need binutils which handle -msecure-plt on ppc >= 2.16.91.0.2-2
@@ -171,51 +171,51 @@ URL: http://gcc.gnu.org
 # Need binutils which support .loc view >= 2.30
 # Need binutils which support --generate-missing-build-notes=yes >= 2.31
 %if 0%{?fedora} >= 29 || 0%{?rhel} > 7
-BuildRequires: binutils >= 2.31
+BuildRequires:        binutils >= 2.31
 %else
-BuildRequires: binutils >= 2.24
+BuildRequires:        binutils >= 2.24
 %endif
 # While gcc doesn't include statically linked binaries, during testing
 # -static is used several times.
-BuildRequires: glibc-static
-BuildRequires: zlib-devel, gettext, dejagnu, bison, flex, sharutils
-BuildRequires: texinfo, texinfo-tex, /usr/bin/pod2man
-BuildRequires: systemtap-sdt-devel >= 1.3
-BuildRequires: gmp-devel >= 4.1.2-8, mpfr-devel >= 3.1.0, libmpc-devel >= 0.8.1
-BuildRequires: python3-devel, /usr/bin/python
-BuildRequires: gcc, gcc-c++, make
+BuildRequires:        glibc-static
+BuildRequires:        zlib-devel, gettext, dejagnu, bison, flex, sharutils
+BuildRequires:        texinfo, texinfo-tex, /usr/bin/pod2man
+BuildRequires:        systemtap-sdt-devel >= 1.3
+BuildRequires:        gmp-devel >= 4.1.2-8, mpfr-devel >= 3.1.0, libmpc-devel >= 0.8.1
+BuildRequires:        python3-devel, /usr/bin/python
+BuildRequires:        gcc, gcc-c++, make
 %if %{build_go}
-BuildRequires: hostname, procps
+BuildRequires:        hostname, procps
 %endif
 # For VTA guality testing
-BuildRequires: gdb
+BuildRequires:        gdb
 # Make sure pthread.h doesn't contain __thread tokens
 # Make sure glibc supports stack protector
 # Make sure glibc supports DT_GNU_HASH
-BuildRequires: glibc-devel >= 2.4.90-13
-BuildRequires: elfutils-devel >= 0.147
-BuildRequires: elfutils-libelf-devel >= 0.147
-BuildRequires: libzstd-devel
+BuildRequires:        glibc-devel >= 2.4.90-13
+BuildRequires:        elfutils-devel >= 0.147
+BuildRequires:        elfutils-libelf-devel >= 0.147
+BuildRequires:        libzstd-devel
 %ifarch ppc ppc64 ppc64le ppc64p7 s390 s390x sparc sparcv9 alpha
 # Make sure glibc supports TFmode long double
-BuildRequires: glibc >= 2.3.90-35
+BuildRequires:        glibc >= 2.3.90-35
 %endif
 %ifarch %{multilib_64_archs} sparcv9 ppc
 # Ensure glibc{,-devel} is installed for both multilib arches
-BuildRequires: /lib/libc.so.6 /usr/lib/libc.so /lib64/libc.so.6 /usr/lib64/libc.so
+BuildRequires:        /lib/libc.so.6 /usr/lib/libc.so /lib64/libc.so.6 /usr/lib64/libc.so
 %endif
 %if %{build_ada}
 # Ada requires Ada to build
-BuildRequires: gcc-gnat >= 3.1, libgnat >= 3.1
+BuildRequires:        gcc-gnat >= 3.1, libgnat >= 3.1
 %endif
 %ifarch ia64
-BuildRequires: libunwind >= 0.98
+BuildRequires:        libunwind >= 0.98
 %endif
 %if %{build_libstdcxx_docs}
-BuildRequires: doxygen >= 1.7.1
-BuildRequires: graphviz, dblatex, texlive-collection-latex, docbook5-style-xsl
+BuildRequires:        doxygen >= 1.7.1
+BuildRequires:        graphviz, dblatex, texlive-collection-latex, docbook5-style-xsl
 %endif
-Requires: cpp = %{version}-%{release}
+Requires:             cpp = %{version}-%{release}
 # Need .eh_frame ld optimizations
 # Need proper visibility support
 # Need -pie support
@@ -233,71 +233,77 @@ Requires: cpp = %{version}-%{release}
 # Need binutils that support .loc view >= 2.30
 # Need binutils which support --generate-missing-build-notes=yes >= 2.31
 %if 0%{?fedora} >= 29 || 0%{?rhel} > 7
-Requires: binutils >= 2.31
+Requires:             binutils >= 2.31
 %else
-Requires: binutils >= 2.24
+Requires:             binutils >= 2.24
 %endif
 # Make sure gdb will understand DW_FORM_strp
-Conflicts: gdb < 5.1-2
-Requires: glibc-devel >= 2.2.90-12
+Conflicts:            gdb < 5.1-2
+Requires:             glibc-devel >= 2.2.90-12
 %ifarch ppc ppc64 ppc64le ppc64p7 s390 s390x sparc sparcv9 alpha
 # Make sure glibc supports TFmode long double
-Requires: glibc >= 2.3.90-35
+Requires:             glibc >= 2.3.90-35
 %endif
 %if 0%{?fedora} >= 18 || 0%{?rhel} >= 7
 %ifarch %{arm}
-Requires: glibc >= 2.16
+Requires:             glibc >= 2.16
 %endif
 %endif
-Requires: libgcc >= %{version}-%{release}
-Requires: libgomp = %{version}-%{release}
+Requires:             libgcc >= %{version}-%{release}
+Requires:             libgomp = %{version}-%{release}
 # lto-wrapper invokes make
-Requires: make
+Requires:             make
 %if !%{build_ada}
-Obsoletes: gcc-gnat < %{version}-%{release}
+Obsoletes:            gcc-gnat < %{version}-%{release}
 %endif
-Obsoletes: gcc-java < %{version}-%{release}
-AutoReq: true
-Provides: bundled(libiberty)
-Provides: bundled(libbacktrace)
-Provides: bundled(libffi)
-Provides: gcc(major) = %{gcc_major}
+Obsoletes:            gcc-java < %{version}-%{release}
+AutoReq:              true
+Provides:             bundled(libiberty)
+Provides:             bundled(libbacktrace)
+Provides:             bundled(libffi)
+Provides:             gcc(major) = %{gcc_major}
 
-Patch0: gcc11-hack.patch
-Patch2: gcc11-sparc-config-detection.patch
-Patch3: gcc11-libgomp-omp_h-multilib.patch
-Patch4: gcc11-libtool-no-rpath.patch
-Patch5: gcc11-isl-dl.patch
-Patch6: gcc11-isl-dl2.patch
-Patch7: gcc11-libstdc++-docs.patch
-Patch8: gcc11-no-add-needed.patch
-Patch9: gcc11-foffload-default.patch
-Patch10: gcc11-Wno-format-security.patch
-Patch11: gcc11-rh1574936.patch
-Patch12: gcc11-d-shared-libphobos.patch
-Patch14: gcc11-libgcc-link.patch
-Patch15: gcc11-pr101786.patch
-Patch16: gcc11-stringify-__VA_OPT__.patch
-Patch17: gcc11-stringify-__VA_OPT__-2.patch
-Patch18: gcc11-Wbidi-chars.patch
-Patch19: gcc11-dg-ice-fixes.patch
-Patch20: gcc11-relocatable-pch.patch
-Patch21: gcc11-dejagnu-multiline.patch
-Patch23: gcc11-pie.patch
-Patch24: gcc11-bind-now.patch
-Patch25: gcc11-detect-sapphirerapids.patch
-Patch26: gcc11-Wmismatched-dealloc-doc.patch
+Patch0:               gcc11-hack.patch
+Patch2:               gcc11-sparc-config-detection.patch
+Patch3:               gcc11-libgomp-omp_h-multilib.patch
+Patch4:               gcc11-libtool-no-rpath.patch
+Patch5:               gcc11-isl-dl.patch
+Patch6:               gcc11-isl-dl2.patch
+Patch7:               gcc11-libstdc++-docs.patch
+Patch8:               gcc11-no-add-needed.patch
+Patch9:               gcc11-foffload-default.patch
+Patch10:              gcc11-Wno-format-security.patch
+Patch11:              gcc11-rh1574936.patch
+Patch12:              gcc11-d-shared-libphobos.patch
+Patch14:              gcc11-libgcc-link.patch
+Patch15:              gcc11-pr101786.patch
+Patch16:              gcc11-stringify-__VA_OPT__.patch
+Patch17:              gcc11-stringify-__VA_OPT__-2.patch
+Patch18:              gcc11-Wbidi-chars.patch
+Patch19:              gcc11-dg-ice-fixes.patch
+Patch20:              gcc11-relocatable-pch.patch
+Patch21:              gcc11-dejagnu-multiline.patch
+Patch23:              gcc11-pie.patch
+Patch24:              gcc11-bind-now.patch
+Patch25:              gcc11-detect-sapphirerapids.patch
+Patch26:              gcc11-Wmismatched-dealloc-doc.patch
+Patch27:              gcc11-s390x-regarg-1.patch
+Patch28:              gcc11-s390x-regarg-2.patch
+Patch29:              gcc11-s390x-regarg-3.patch
+Patch30:              gcc11-testsuite-fixes.patch
+Patch31:              gcc11-pr96024.patch
+Patch32:              gcc11-testsuite-fixes-2.patch
 
-Patch100: gcc11-fortran-fdec-duplicates.patch
-Patch101: gcc11-fortran-flogical-as-integer.patch
-Patch102: gcc11-fortran-fdec-ichar.patch
-Patch103: gcc11-fortran-fdec-non-integer-index.patch
-Patch104: gcc11-fortran-fdec-old-init.patch
-Patch105: gcc11-fortran-fdec-override-kind.patch
-Patch106: gcc11-fortran-fdec-non-logical-if.patch
-Patch107: gcc11-fortran-fdec-promotion.patch
-Patch108: gcc11-fortran-fdec-sequence.patch
-Patch109: gcc11-fortran-fdec-add-missing-indexes.patch
+Patch100:             gcc11-fortran-fdec-duplicates.patch
+Patch101:             gcc11-fortran-flogical-as-integer.patch
+Patch102:             gcc11-fortran-fdec-ichar.patch
+Patch103:             gcc11-fortran-fdec-non-integer-index.patch
+Patch104:             gcc11-fortran-fdec-old-init.patch
+Patch105:             gcc11-fortran-fdec-override-kind.patch
+Patch106:             gcc11-fortran-fdec-non-logical-if.patch
+Patch107:             gcc11-fortran-fdec-promotion.patch
+Patch108:             gcc11-fortran-fdec-sequence.patch
+Patch109:             gcc11-fortran-fdec-add-missing-indexes.patch
 
 # On ARM EABI systems, we do want -gnueabi to be part of the
 # target triple.
@@ -342,22 +348,22 @@ The gcc package contains the GNU Compiler Collection version 11.
 You'll need this package in order to compile C code.
 
 %package -n libgcc
-Summary: GCC version 11 shared support library
-Autoreq: false
+Summary:              GCC version 11 shared support library
+Autoreq:              false
 %if !%{build_ada}
-Obsoletes: libgnat < %{version}-%{release}
+Obsoletes:            libgnat < %{version}-%{release}
 %endif
-Obsoletes: libmudflap
-Obsoletes: libmudflap-devel
-Obsoletes: libmudflap-static
-Obsoletes: libgcj < %{version}-%{release}
-Obsoletes: libgcj-devel < %{version}-%{release}
-Obsoletes: libgcj-src < %{version}-%{release}
+Obsoletes:            libmudflap
+Obsoletes:            libmudflap-devel
+Obsoletes:            libmudflap-static
+Obsoletes:            libgcj < %{version}-%{release}
+Obsoletes:            libgcj-devel < %{version}-%{release}
+Obsoletes:            libgcj-src < %{version}-%{release}
 %ifarch %{ix86} x86_64
-Obsoletes: libcilkrts
-Obsoletes: libcilkrts-static
-Obsoletes: libmpx
-Obsoletes: libmpx-static
+Obsoletes:            libcilkrts
+Obsoletes:            libcilkrts-static
+Obsoletes:            libmpx
+Obsoletes:            libmpx-static
 %endif
 
 %description -n libgcc
@@ -365,13 +371,13 @@ This package contains GCC shared support library which is needed
 e.g. for exception handling support.
 
 %package c++
-Summary: C++ support for GCC
-Requires: gcc = %{version}-%{release}
-Requires: libstdc++ = %{version}-%{release}
-Requires: libstdc++-devel = %{version}-%{release}
-Provides: gcc-g++ = %{version}-%{release}
-Provides: g++ = %{version}-%{release}
-Autoreq: true
+Summary:              C++ support for GCC
+Requires:             gcc = %{version}-%{release}
+Requires:             libstdc++ = %{version}-%{release}
+Requires:             libstdc++-devel = %{version}-%{release}
+Provides:             gcc-g++ = %{version}-%{release}
+Provides:             g++ = %{version}-%{release}
+Autoreq:              true
 
 %description c++
 This package adds C++ support to the GNU Compiler Collection.
@@ -379,18 +385,18 @@ It includes support for most of the current C++ specification,
 including templates and exception handling.
 
 %package -n libstdc++
-Summary: GNU Standard C++ Library
-Autoreq: true
-Requires: glibc >= 2.10.90-7
+Summary:              GNU Standard C++ Library
+Autoreq:              true
+Requires:             glibc >= 2.10.90-7
 
 %description -n libstdc++
 The libstdc++ package contains a rewritten standard compliant GCC Standard
 C++ Library.
 
 %package -n libstdc++-devel
-Summary: Header files and libraries for C++ development
-Requires: libstdc++%{?_isa} = %{version}-%{release}
-Autoreq: true
+Summary:              Header files and libraries for C++ development
+Requires:             libstdc++%{?_isa} = %{version}-%{release}
+Autoreq:              true
 
 %description -n libstdc++-devel
 This is the GNU implementation of the standard C++ libraries.  This
@@ -398,26 +404,26 @@ package includes the header files and libraries needed for C++
 development. This includes rewritten implementation of STL.
 
 %package -n libstdc++-static
-Summary: Static libraries for the GNU standard C++ library
-Requires: libstdc++-devel = %{version}-%{release}
-Autoreq: true
+Summary:              Static libraries for the GNU standard C++ library
+Requires:             libstdc++-devel = %{version}-%{release}
+Autoreq:              true
 
 %description -n libstdc++-static
 Static libraries for the GNU standard C++ library.
 
 %package -n libstdc++-docs
-Summary: Documentation for the GNU standard C++ library
-Autoreq: true
+Summary:              Documentation for the GNU standard C++ library
+Autoreq:              true
 
 %description -n libstdc++-docs
 Manual, doxygen generated API information and Frequently Asked Questions
 for the GNU standard C++ library.
 
 %package objc
-Summary: Objective-C support for GCC
-Requires: gcc = %{version}-%{release}
-Requires: libobjc = %{version}-%{release}
-Autoreq: true
+Summary:              Objective-C support for GCC
+Requires:             gcc = %{version}-%{release}
+Requires:             libobjc = %{version}-%{release}
+Autoreq:              true
 
 %description objc
 gcc-objc provides Objective-C support for the GCC.
@@ -425,42 +431,42 @@ Mainly used on systems running NeXTSTEP, Objective-C is an
 object-oriented derivative of the C language.
 
 %package objc++
-Summary: Objective-C++ support for GCC
-Requires: gcc-c++ = %{version}-%{release}, gcc-objc = %{version}-%{release}
-Autoreq: true
+Summary:              Objective-C++ support for GCC
+Requires:             gcc-c++ = %{version}-%{release}, gcc-objc = %{version}-%{release}
+Autoreq:              true
 
 %description objc++
 gcc-objc++ package provides Objective-C++ support for the GCC.
 
 %package -n libobjc
-Summary: Objective-C runtime
-Autoreq: true
+Summary:              Objective-C runtime
+Autoreq:              true
 
 %description -n libobjc
 This package contains Objective-C shared library which is needed to run
 Objective-C dynamically linked programs.
 
 %package gfortran
-Summary: Fortran support
-Requires: gcc = %{version}-%{release}
-Requires: libgfortran = %{version}-%{release}
+Summary:              Fortran support
+Requires:             gcc = %{version}-%{release}
+Requires:             libgfortran = %{version}-%{release}
 %if %{build_libquadmath}
-Requires: libquadmath = %{version}-%{release}
-Requires: libquadmath-devel = %{version}-%{release}
+Requires:             libquadmath = %{version}-%{release}
+Requires:             libquadmath-devel = %{version}-%{release}
 %endif
-Provides: gcc-fortran = %{version}-%{release}
-Provides: gfortran = %{version}-%{release}
-Autoreq: true
+Provides:             gcc-fortran = %{version}-%{release}
+Provides:             gfortran = %{version}-%{release}
+Autoreq:              true
 
 %description gfortran
 The gcc-gfortran package provides support for compiling Fortran
 programs with the GNU Compiler Collection.
 
 %package -n libgfortran
-Summary: Fortran runtime
-Autoreq: true
+Summary:              Fortran runtime
+Autoreq:              true
 %if %{build_libquadmath}
-Requires: libquadmath = %{version}-%{release}
+Requires:             libquadmath = %{version}-%{release}
 %endif
 
 %description -n libgfortran
@@ -468,54 +474,54 @@ This package contains Fortran shared library which is needed to run
 Fortran dynamically linked programs.
 
 %package -n libgfortran-static
-Summary: Static Fortran libraries
-Requires: libgfortran = %{version}-%{release}
-Requires: gcc = %{version}-%{release}
+Summary:              Static Fortran libraries
+Requires:             libgfortran = %{version}-%{release}
+Requires:             gcc = %{version}-%{release}
 %if %{build_libquadmath}
-Requires: libquadmath-static = %{version}-%{release}
+Requires:             libquadmath-static = %{version}-%{release}
 %endif
 
 %description -n libgfortran-static
 This package contains static Fortran libraries.
 
 %package gdc
-Summary: D support
-Requires: gcc = %{version}-%{release}
-Requires: libgphobos = %{version}-%{release}
-Provides: gcc-d = %{version}-%{release}
-Provides: gdc = %{version}-%{release}
-Autoreq: true
+Summary:              D support
+Requires:             gcc = %{version}-%{release}
+Requires:             libgphobos = %{version}-%{release}
+Provides:             gcc-d = %{version}-%{release}
+Provides:             gdc = %{version}-%{release}
+Autoreq:              true
 
 %description gdc
 The gcc-gdc package provides support for compiling D
 programs with the GNU Compiler Collection.
 
 %package -n libgphobos
-Summary: D runtime
-Autoreq: true
+Summary:              D runtime
+Autoreq:              true
 
 %description -n libgphobos
 This package contains D shared library which is needed to run
 D dynamically linked programs.
 
 %package -n libgphobos-static
-Summary: Static D libraries
-Requires: libgphobos = %{version}-%{release}
-Requires: gcc-gdc = %{version}-%{release}
+Summary:              Static D libraries
+Requires:             libgphobos = %{version}-%{release}
+Requires:             gcc-gdc = %{version}-%{release}
 
 %description -n libgphobos-static
 This package contains static D libraries.
 
 %package -n libgomp
-Summary: GCC OpenMP v4.5 shared support library
+Summary:              GCC OpenMP v4.5 shared support library
 
 %description -n libgomp
 This package contains GCC shared support library which is needed
 for OpenMP v4.5 support.
 
 %package -n libgomp-offload-nvptx
-Summary: GCC OpenMP v4.5 plugin for offloading to NVPTX
-Requires: libgomp = %{version}-%{release}
+Summary:              GCC OpenMP v4.5 plugin for offloading to NVPTX
+Requires:             libgomp = %{version}-%{release}
 
 %description -n libgomp-offload-nvptx
 This package contains libgomp plugin for offloading to NVidia
@@ -523,80 +529,80 @@ PTX.  The plugin needs libcuda.so.1 shared library that has to be
 installed separately.
 
 %package gdb-plugin
-Summary: GCC plugin for GDB
-Requires: gcc = %{version}-%{release}
+Summary:              GCC plugin for GDB
+Requires:             gcc = %{version}-%{release}
 
 %description gdb-plugin
 This package contains GCC plugin for GDB C expression evaluation.
 
 %package -n libgccjit
-Summary: Library for embedding GCC inside programs and libraries
-Requires: gcc = %{version}-%{release}
+Summary:              Library for embedding GCC inside programs and libraries
+Requires:             gcc = %{version}-%{release}
 
 %description -n libgccjit
 This package contains shared library with GCC JIT front-end.
 
 %package -n libgccjit-devel
-Summary: Support for embedding GCC inside programs and libraries
+Summary:              Support for embedding GCC inside programs and libraries
 %if 0%{?fedora} > 27 || 0%{?rhel} > 7
-BuildRequires: python3-sphinx
+BuildRequires:        python3-sphinx
 %else
-BuildRequires: python-sphinx
+BuildRequires:        python-sphinx
 %endif
-Requires: libgccjit = %{version}-%{release}
+Requires:             libgccjit = %{version}-%{release}
 
 %description -n libgccjit-devel
 This package contains header files and documentation for GCC JIT front-end.
 
 %package -n libquadmath
-Summary: GCC __float128 shared support library
+Summary:              GCC __float128 shared support library
 
 %description -n libquadmath
 This package contains GCC shared support library which is needed
 for __float128 math support and for Fortran REAL*16 support.
 
 %package -n libquadmath-devel
-Summary: GCC __float128 support
-Requires: libquadmath = %{version}-%{release}
-Requires: gcc = %{version}-%{release}
+Summary:              GCC __float128 support
+Requires:             libquadmath = %{version}-%{release}
+Requires:             gcc = %{version}-%{release}
 
 %description -n libquadmath-devel
 This package contains headers for building Fortran programs using
 REAL*16 and programs using __float128 math.
 
 %package -n libquadmath-static
-Summary: Static libraries for __float128 support
-Requires: libquadmath-devel = %{version}-%{release}
+Summary:              Static libraries for __float128 support
+Requires:             libquadmath-devel = %{version}-%{release}
 
 %description -n libquadmath-static
 This package contains static libraries for building Fortran programs
 using REAL*16 and programs using __float128 math.
 
 %package -n libitm
-Summary: The GNU Transactional Memory library
+Summary:              The GNU Transactional Memory library
 
 %description -n libitm
 This package contains the GNU Transactional Memory library
 which is a GCC transactional memory support runtime library.
 
 %package -n libitm-devel
-Summary: The GNU Transactional Memory support
-Requires: libitm = %{version}-%{release}
-Requires: gcc = %{version}-%{release}
+Summary:              The GNU Transactional Memory support
+Requires:             libitm = %{version}-%{release}
+Requires:             gcc = %{version}-%{release}
 
 %description -n libitm-devel
 This package contains headers and support files for the
 GNU Transactional Memory library.
 
 %package -n libitm-static
-Summary: The GNU Transactional Memory static library
-Requires: libitm-devel = %{version}-%{release}
+Summary:              The GNU Transactional Memory static library
+Requires:             libitm-devel = %{version}-%{release}
 
 %description -n libitm-static
 This package contains GNU Transactional Memory static libraries.
 
 %package -n libatomic
-Summary: The GNU Atomic library
+Summary:              The GNU Atomic library
 
 %description -n libatomic
 This package contains the GNU Atomic library
@@ -604,73 +610,73 @@ which is a GCC support runtime library for atomic operations not supported
 by hardware.
 
 %package -n libatomic-static
-Summary: The GNU Atomic static library
-Requires: libatomic = %{version}-%{release}
+Summary:              The GNU Atomic static library
+Requires:             libatomic = %{version}-%{release}
 
 %description -n libatomic-static
 This package contains GNU Atomic static libraries.
 
 %package -n libasan
-Summary: The Address Sanitizer runtime library
+Summary:              The Address Sanitizer runtime library
 
 %description -n libasan
 This package contains the Address Sanitizer library
 which is used for -fsanitize=address instrumented programs.
 
 %package -n libasan-static
-Summary: The Address Sanitizer static library
-Requires: libasan = %{version}-%{release}
+Summary:              The Address Sanitizer static library
+Requires:             libasan = %{version}-%{release}
 
 %description -n libasan-static
 This package contains Address Sanitizer static runtime library.
 
 %package -n libtsan
-Summary: The Thread Sanitizer runtime library
+Summary:              The Thread Sanitizer runtime library
 
 %description -n libtsan
 This package contains the Thread Sanitizer library
 which is used for -fsanitize=thread instrumented programs.
 
 %package -n libtsan-static
-Summary: The Thread Sanitizer static library
-Requires: libtsan = %{version}-%{release}
+Summary:              The Thread Sanitizer static library
+Requires:             libtsan = %{version}-%{release}
 
 %description -n libtsan-static
 This package contains Thread Sanitizer static runtime library.
 
 %package -n libubsan
-Summary: The Undefined Behavior Sanitizer runtime library
+Summary:              The Undefined Behavior Sanitizer runtime library
 
 %description -n libubsan
 This package contains the Undefined Behavior Sanitizer library
 which is used for -fsanitize=undefined instrumented programs.
 
 %package -n libubsan-static
-Summary: The Undefined Behavior Sanitizer static library
-Requires: libubsan = %{version}-%{release}
+Summary:              The Undefined Behavior Sanitizer static library
+Requires:             libubsan = %{version}-%{release}
 
 %description -n libubsan-static
 This package contains Undefined Behavior Sanitizer static runtime library.
 
 %package -n liblsan
-Summary: The Leak Sanitizer runtime library
+Summary:              The Leak Sanitizer runtime library
 
 %description -n liblsan
 This package contains the Leak Sanitizer library
 which is used for -fsanitize=leak instrumented programs.
 
 %package -n liblsan-static
-Summary: The Leak Sanitizer static library
-Requires: liblsan = %{version}-%{release}
+Summary:              The Leak Sanitizer static library
+Requires:             liblsan = %{version}-%{release}
 
 %description -n liblsan-static
 This package contains Leak Sanitizer static runtime library.
 
 %package -n cpp
-Summary: The C Preprocessor
-Requires: filesystem >= 3
-Provides: /lib/cpp
-Autoreq: true
+Summary:              The C Preprocessor
+Requires:             filesystem >= 3
+Provides:             /lib/cpp
+Autoreq:              true
 
 %description -n cpp
 Cpp is the GNU C-Compatible Compiler Preprocessor.
@@ -695,83 +701,83 @@ You should install this package if you are a C programmer and you use
 macros.
 
 %package gnat
-Summary: Ada 83, 95, 2005 and 2012 support for GCC
-Requires: gcc = %{version}-%{release}
-Requires: libgnat = %{version}-%{release}, libgnat-devel = %{version}-%{release}
-Autoreq: true
+Summary:              Ada 83, 95, 2005 and 2012 support for GCC
+Requires:             gcc = %{version}-%{release}
+Requires:             libgnat = %{version}-%{release}, libgnat-devel = %{version}-%{release}
+Autoreq:              true
 
 %description gnat
 GNAT is a GNU Ada 83, 95, 2005 and 2012 front-end to GCC. This package includes
 development tools, the documents and Ada compiler.
 
 %package -n libgnat
-Summary: GNU Ada 83, 95, 2005 and 2012 runtime shared libraries
-Autoreq: true
+Summary:              GNU Ada 83, 95, 2005 and 2012 runtime shared libraries
+Autoreq:              true
 
 %description -n libgnat
 GNAT is a GNU Ada 83, 95, 2005 and 2012 front-end to GCC. This package includes
 shared libraries, which are required to run programs compiled with the GNAT.
 
 %package -n libgnat-devel
-Summary: GNU Ada 83, 95, 2005 and 2012 libraries
-Autoreq: true
+Summary:              GNU Ada 83, 95, 2005 and 2012 libraries
+Autoreq:              true
 
 %description -n libgnat-devel
 GNAT is a GNU Ada 83, 95, 2005 and 2012 front-end to GCC. This package includes
 libraries, which are required to compile with the GNAT.
 
 %package -n libgnat-static
-Summary: GNU Ada 83, 95, 2005 and 2012 static libraries
-Requires: libgnat-devel = %{version}-%{release}
-Autoreq: true
+Summary:              GNU Ada 83, 95, 2005 and 2012 static libraries
+Requires:             libgnat-devel = %{version}-%{release}
+Autoreq:              true
 
 %description -n libgnat-static
 GNAT is a GNU Ada 83, 95, 2005 and 2012 front-end to GCC. This package includes
 static libraries.
 
 %package go
-Summary: Go support
-Requires: gcc = %{version}-%{release}
-Requires: libgo = %{version}-%{release}
-Requires: libgo-devel = %{version}-%{release}
+Summary:              Go support
+Requires:             gcc = %{version}-%{release}
+Requires:             libgo = %{version}-%{release}
+Requires:             libgo-devel = %{version}-%{release}
 Requires(post): %{_sbindir}/update-alternatives
 Requires(postun): %{_sbindir}/update-alternatives
-Provides: gccgo = %{version}-%{release}
-Autoreq: true
+Provides:             gccgo = %{version}-%{release}
+Autoreq:              true
 
 %description go
 The gcc-go package provides support for compiling Go programs
 with the GNU Compiler Collection.
 
 %package -n libgo
-Summary: Go runtime
-Autoreq: true
+Summary:              Go runtime
+Autoreq:              true
 
 %description -n libgo
 This package contains Go shared library which is needed to run
 Go dynamically linked programs.
 
 %package -n libgo-devel
-Summary: Go development libraries
-Requires: libgo = %{version}-%{release}
-Autoreq: true
+Summary:              Go development libraries
+Requires:             libgo = %{version}-%{release}
+Autoreq:              true
 
 %description -n libgo-devel
 This package includes libraries and support files for compiling
 Go programs.
 
 %package -n libgo-static
-Summary: Static Go libraries
-Requires: libgo = %{version}-%{release}
-Requires: gcc = %{version}-%{release}
+Summary:              Static Go libraries
+Requires:             libgo = %{version}-%{release}
+Requires:             gcc = %{version}-%{release}
 
 %description -n libgo-static
 This package contains static Go libraries.
 
 %package plugin-devel
-Summary: Support for compiling GCC plugins
-Requires: gcc = %{version}-%{release}
-Requires: gmp-devel >= 4.1.2-8, mpfr-devel >= 3.1.0, libmpc-devel >= 0.8.1
+Summary:              Support for compiling GCC plugins
+Requires:             gcc = %{version}-%{release}
+Requires:             gmp-devel >= 4.1.2-8, mpfr-devel >= 3.1.0, libmpc-devel >= 0.8.1
 
 %description plugin-devel
 This package contains header files and other support files
@@ -779,9 +785,9 @@ for compiling GCC plugins.  The GCC plugin ABI is currently
 not stable, so plugins must be rebuilt any time GCC is updated.
 
 %package offload-nvptx
-Summary: Offloading compiler to NVPTX
-Requires: gcc = %{version}-%{release}
-Requires: libgomp-offload-nvptx = %{version}-%{release}
+Summary:              Offloading compiler to NVPTX
+Requires:             gcc = %{version}-%{release}
+Requires:             libgomp-offload-nvptx = %{version}-%{release}
 
 %description offload-nvptx
 The gcc-offload-nvptx package provides offloading support for
@@ -790,18 +796,18 @@ by default add PTX code into the binaries, which can be offloaded
 to NVidia PTX capable devices if available.
 
 %package plugin-annobin
-Summary: The annobin plugin for gcc, built by the installed version of gcc
-Requires: gcc = %{version}-%{release}
+Summary:              The annobin plugin for gcc, built by the installed version of gcc
+Requires:             gcc = %{version}-%{release}
 # Starting with release 10.01 annobin fixed a bug in its configure scripts
 # which prevented them from working with a built but not installed compiler
-BuildRequires: annobin >= 10.01
+BuildRequires:        annobin >= 10.01
 # Starting with release  9.93 annobin-plugin-gcc puts a copy of the sources
 # in /usr/src/annobin
 # FIXME: Currently the annobin-plugin-gcc subpackage only exists in Fedora.
 # For RHEL-9 the annobin package does everything.
 # BuildRequires: annobin-plugin-gcc
 # Needed in order to be able to decompress the annobin source tarball.
-BuildRequires: xz
+BuildRequires:        xz
 
 %description plugin-annobin
 This package adds a version of the annobin plugin for gcc.  This version
@@ -809,15 +815,15 @@ of the plugin is explicitly built by the same version of gcc that is installed
 so that there cannot be any synchronization problems.
 
 %package -n cross-gcc-aarch64
-Summary: Cross targeted AArch64 gcc for developer use.  Not intended for production.
-Provides: cross-gcc-aarch64 = %{version}-%{release}
+Summary:              Cross targeted AArch64 gcc for developer use.  Not intended for production.
+Provides:             cross-gcc-aarch64 = %{version}-%{release}
 %if %{build_cross}
-Requires: cross-binutils-aarch64 >= 2.35
-BuildRequires: sysroot-aarch64-el9-glibc >= 2.34
-BuildRequires: cross-binutils-aarch64 >= 2.35
+Requires:             cross-binutils-aarch64 >= 2.35
+BuildRequires:        sysroot-aarch64-el9-glibc >= 2.34
+BuildRequires:        cross-binutils-aarch64 >= 2.35
 %endif
 # Don't provide e.g. liblto_plugin.so()(64bit).
-AutoReqProv: no
+AutoReqProv:          no
 
 %description -n cross-gcc-aarch64
 This package contains a version of gcc that can compile code for AArch64
@@ -828,16 +834,16 @@ production.  Generated binary artifacts contain binary annotations that
 mark them as cross compiled.
 
 %package -n cross-gcc-c++-aarch64
-Summary: Cross targeted AArch64 gcc-c++ for developer use.  Not intended for production.
-Provides: cross-gcc-c++-aarch64 = %{version}-%{release}
+Summary:              Cross targeted AArch64 gcc-c++ for developer use.  Not intended for production.
+Provides:             cross-gcc-c++-aarch64 = %{version}-%{release}
 %if %{build_cross}
-Requires: cross-gcc-aarch64 = %{version}-%{release}
-BuildRequires: sysroot-aarch64-el9-glibc >= 2.34
-BuildRequires: cross-binutils-aarch64 >= 2.35
+Requires:             cross-gcc-aarch64 = %{version}-%{release}
+BuildRequires:        sysroot-aarch64-el9-glibc >= 2.34
+BuildRequires:        cross-binutils-aarch64 >= 2.35
 %endif
 # ??? Otherwise this subpackage couldn't be installed, depends on libm.so
 # and libgcc_s.so
-AutoReqProv: no
+AutoReqProv:          no
 
 %description -n cross-gcc-c++-aarch64
 This package contains a version of g++ that can compile code for AArch64
@@ -879,6 +885,12 @@ mark them as cross compiled.
 %patch24 -p1 -b .now~
 %patch25 -p1 -b .detect-spr~
 %patch26 -p1 -b .Wmismatched-dealloc-doc~
+%patch27 -p1 -b .s390x-regarg-1~
+%patch28 -p1 -b .s390x-regarg-2~
+%patch29 -p1 -b .s390x-regarg-3~
+%patch30 -p1 -b .testsuite~
+%patch31 -p1 -b .pr96024~
+%patch32 -p1 -b .testsuite2~
 
 %if 0%{?rhel} >= 9
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -988,7 +1000,7 @@ CC="$CC" CXX="$CXX" CFLAGS="$OPT_FLAGS" \
 	--target nvptx-none --enable-as-accelerator-for=%{gcc_target_platform} \
 	--enable-languages=c,c++,fortran,lto \
 	--prefix=%{_prefix} --mandir=%{_mandir} --infodir=%{_infodir} \
-	--with-bugurl=http://bugzilla.redhat.com/bugzilla \
+	--with-bugurl=https://bugs.rockylinux.org/ \
 	--enable-checking=release --with-system-zlib \
 	--with-gcc-major-version-only --without-isl --enable-host-pie --enable-host-bind-now
 make %{?_smp_mflags}
@@ -1053,7 +1065,7 @@ enableld=,d
 # used in the cross builds.
 CONFIGURE_OPTS_BASE="\
 	--prefix=%{_prefix} --mandir=%{_mandir} --infodir=%{_infodir} \
-	--with-bugurl=http://bugzilla.redhat.com/bugzilla \
+	--with-bugurl=https://bugs.rockylinux.org/ \
 	--enable-shared --enable-threads=posix --enable-checking=release \
 	--with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions \
 	--enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only \
@@ -1181,9 +1193,6 @@ CONFIGURE_OPTS_NATIVE="\
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
-%endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch mips mipsel
 	--with-arch=mips32r2 --with-fp-32=xx \
@@ -3575,8 +3584,68 @@ end
 %endif
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> 11.3.1-4.3.redsleeve
-- added config options for armv6hl
+* Fri Jun  9 2023 Marek Polacek <polacek@redhat.com> 11.4.1-2.1
+- fix ICE on pr96024.f90 on big-endian hosts (PR fortran/96024, #2213211)
+- use -fno-stack-protector to fix bit-field aarch64 tests (#2213221)
+
+* Mon Jun  5 2023 Marek Polacek <polacek@redhat.com> 11.4.1-2
+- update from releases/gcc-11-branch (#2193180)
+  - GCC 11.4 release
+  - PRs bootstrap/90543, c++/53932, c++/69410, c++/92752, c++/98056,
+	c++/98821, c++/100295, c++/100474, c++/101118, c++/101869,
+	c++/102780, c++/103871, c++/104527, c++/105406, c++/105996,
+	c++/106188, c++/106675, c++/106713, c++/106740, c++/107065,
+	c++/107163, c++/107179, c++/107558, c++/107579, c++/107864,
+	c++/108138, c++/108180, c++/108365, c++/108468, c++/108474,
+	c++/108607, c++/108975, c++/108998, c++/109096, c++/109164, c/107127,
+	c/107465, c/109151, d/107592, d/108050, d/108877, d/109108,
+	debug/106719, debug/108573, debug/108716, debug/108967, driver/106624,
+	fortran/85877, fortran/95107, fortran/96024, fortran/96025,
+	fortran/99036, fortran/103259, fortran/104332, fortran/106209,
+	fortran/106945, fortran/107576, fortran/107872, fortran/108131,
+	fortran/108349, fortran/108420, fortran/108421, fortran/108451,
+	fortran/108453, fortran/108501, fortran/108502, fortran/108527,
+	fortran/108529, fortran/108609, fortran/108937, fortran/109186,
+	fortran/109511, fortran/109846, ipa/105685, ipa/106124, ipa/107944,
+	libquadmath/87204, libquadmath/94756, libstdc++/91456,
+	libstdc++/103934, libstdc++/104866, libstdc++/104875,
+	libstdc++/105844, libstdc++/106183, libstdc++/107801,
+	libstdc++/107814, libstdc++/108030, libstdc++/108118,
+	libstdc++/108265, libstdc++/108636, libstdc++/108856,
+	libstdc++/108952, libstdc++/109064, libstdc++/109261,
+	libstdc++/109949, lto/109263, middle-end/104450, middle-end/104464,
+	middle-end/106190, middle-end/107317, middle-end/108237,
+	middle-end/108264, middle-end/108435, middle-end/108459,
+	middle-end/108546, middle-end/108625, middle-end/108685,
+	middle-end/108854, other/108560, other/109306,
+	rtl-optimization/106751, rtl-optimization/107482,
+	rtl-optimization/108193, rtl-optimization/108596,
+	rtl-optimization/109585, target/70243, target/90458, target/96373,
+	target/98776, target/100758, target/104871, target/104921,
+	target/105554, target/105599, target/106736, target/106875,
+	target/107568, target/107714, target/107863, target/108272,
+	target/108348, target/108589, target/108699, target/108807,
+	target/108812, target/108881, target/109067, target/109140,
+	target/109276, testsuite/47334, testsuite/103823, testsuite/108151,
+	testsuite/108973, testsuite/108985, tree-optimization/105484,
+	tree-optimization/106809, tree-optimization/107107,
+	tree-optimization/107212, tree-optimization/107254,
+	tree-optimization/107323, tree-optimization/107451,
+	tree-optimization/107554, tree-optimization/107898,
+	tree-optimization/107997, tree-optimization/108068,
+	tree-optimization/108076, tree-optimization/108095,
+	tree-optimization/108199, tree-optimization/108498,
+	tree-optimization/108688, tree-optimization/108692,
+	tree-optimization/108821, tree-optimization/108950,
+	tree-optimization/109176, tree-optimization/109410,
+	tree-optimization/109473, tree-optimization/109491,
+	tree-optimization/109502, tree-optimization/109573,
+	tree-optimization/109724, tree-optimization/109778
+  - PRs fortran/100607, libstdc++/109822, target/109954,
+	tree-optimization/109505
+
+* Wed Mar 29 2023 Marek Polacek <polacek@redhat.com> 11.3.1-4.4
+- s390x: add support for register arguments preserving (#2168204)
 
 * Wed Dec 21 2022 Marek Polacek <polacek@redhat.com> 11.3.1-4.3
 - compile the cross binaries as PIE/-z now (#2155452)

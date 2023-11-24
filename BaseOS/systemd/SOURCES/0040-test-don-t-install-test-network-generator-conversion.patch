@@ -1,0 +1,60 @@
+From 8efa0b5f989d977eca51617a314ec4fdc32fb3d1 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 20 Oct 2021 19:43:34 +0200
+Subject: [PATCH] test: don't install test-network-generator-conversion.sh w/o
+ networkd
+
+otherwise TEST-02 will fail:
+
+```
+=== Failed test log ===
+--- test-network-generator-conversion.sh begin ---
++ [[ -n '' ]]
++ [[ -x /usr/lib/systemd/systemd-network-generator ]]
++ [[ -x /lib/systemd/systemd-network-generator ]]
++ exit 1
+--- test-network-generator-conversion.sh end ---
+```
+
+Before:
+```
+$ meson build -Dnetworkd=false -Dinstall-tests=true
+$ ninja -C build
+$ DESTDIR=$PWD/test-install ninja -C build install
+$ find test-install/ -name test-network-generator-conversion.sh
+test-install/usr/lib/systemd/tests/test-network-generator-conversion.sh
+```
+
+After:
+```
+$ find test-install/ -name test-network-generator-conversion.sh
+<no output>
+```
+
+(cherry picked from commit 140557021ad1a3946319fff1a87831eb02d6a1a0)
+
+Related: #2017035
+---
+ test/meson.build | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/test/meson.build b/test/meson.build
+index 47c7f4d49a..27b37a9ae7 100644
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -98,9 +98,12 @@ if install_tests
+         install_data('run-unit-tests.py',
+                      install_mode : 'rwxr-xr-x',
+                      install_dir : testsdir)
+-        install_data('test-network-generator-conversion.sh',
+-                     install_mode : 'rwxr-xr-x',
+-                     install_dir : testsdir)
++
++        if conf.get('ENABLE_NETWORKD') == 1
++                install_data('test-network-generator-conversion.sh',
++                             install_mode : 'rwxr-xr-x',
++                             install_dir : testsdir)
++        endif
+ endif
+ 
+ ############################################################

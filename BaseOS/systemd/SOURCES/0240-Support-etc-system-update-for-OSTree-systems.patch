@@ -1,0 +1,205 @@
+From a986415fec990de0ed0c8919d64b1eb6b78c485a Mon Sep 17 00:00:00 2001
+From: Eric Curtin <ecurtin@redhat.com>
+Date: Mon, 17 Apr 2023 22:09:24 +0100
+Subject: [PATCH] Support /etc/system-update for OSTree systems
+
+(cherry picked from commit b9dac418372401742609bd600f05267ae3a724de)
+
+Resolves: #2203133
+---
+ man/systemd-system-update-generator.xml       |  2 +-
+ man/systemd.offline-updates.xml               | 46 +++++++++++--------
+ man/systemd.special.xml                       |  9 ++--
+ .../system-update-generator.c                 | 25 ++++++----
+ units/system-update-cleanup.service           |  4 +-
+ 5 files changed, 51 insertions(+), 35 deletions(-)
+
+diff --git a/man/systemd-system-update-generator.xml b/man/systemd-system-update-generator.xml
+index 8711be26e3..1611a71550 100644
+--- a/man/systemd-system-update-generator.xml
++++ b/man/systemd-system-update-generator.xml
+@@ -30,7 +30,7 @@
+     <para><filename>systemd-system-update-generator</filename> is a
+     generator that automatically redirects the boot process to
+     <filename>system-update.target</filename>, if
+-    <filename>/system-update</filename> exists. This is required to
++    <filename>/system-update</filename> or <filename>/etc/system-update</filename> exists. This is required to
+     implement the logic explained in the
+     <citerefentry><refentrytitle>systemd.offline-updates</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
+     </para>
+diff --git a/man/systemd.offline-updates.xml b/man/systemd.offline-updates.xml
+index 6706451766..7285f9e263 100644
+--- a/man/systemd.offline-updates.xml
++++ b/man/systemd.offline-updates.xml
+@@ -40,18 +40,20 @@
+       </listitem>
+ 
+       <listitem>
+-        <para>When the user OK'ed the update, the symlink <filename>/system-update</filename> is
+-        created that points to <filename index="false">/var/lib/system-update</filename> (or
+-        wherever the directory with the upgrade files is located) and the system is rebooted. This
+-        symlink is in the root directory, since we need to check for it very early at boot, at a
+-        time where <filename>/var/</filename> is not available yet.</para>
++        <para>When the user OK'ed the update, the symlink <filename>/system-update</filename> or
++        <filename>/etc/system-update</filename> is created that points to
++        <filename index="false">/var/lib/system-update</filename> (or wherever the directory with
++        the upgrade files is located) and the system is rebooted. This symlink is in the root
++        directory, since we need to check for it very early at boot, at a time where
++        <filename>/var/</filename> is not available yet.</para>
+       </listitem>
+ 
+       <listitem>
+         <para>Very early in the new boot
+         <citerefentry><refentrytitle>systemd-system-update-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+-        checks whether <filename>/system-update</filename> exists. If so, it (temporarily and for
+-        this boot only) redirects (i.e. symlinks) <filename>default.target</filename> to
++        checks whether <filename>/system-update</filename> or
++        <filename>/etc/system-update</filename> exists. If so, it (temporarily and for this boot
++        only) redirects (i.e. symlinks) <filename>default.target</filename> to
+         <filename>system-update.target</filename>, a special target that pulls in the base system
+         (i.e. <filename>sysinit.target</filename>, so that all file systems are mounted but little
+         else) and the system update units.</para>
+@@ -68,12 +70,13 @@
+ 
+       <listitem>
+         <para>As the first step, an update service should check if the
+-        <filename>/system-update</filename> symlink points to the location used by that update
+-        service. In case it does not exist or points to a different location, the service must exit
+-        without error. It is possible for multiple update services to be installed, and for multiple
+-        update services to be launched in parallel, and only the one that corresponds to the tool
+-        that <emphasis>created</emphasis> the symlink before reboot should perform any actions. It
+-        is unsafe to run multiple updates in parallel.</para>
++        <filename>/system-update</filename> or <filename>/etc/system-update</filename> symlink
++        points to the location used by that update service. In case it does not exist or points to a
++        different location, the service must exit without error. It is possible for multiple update
++        services to be installed, and for multiple update services to be launched in parallel, and
++        only the one that corresponds to the tool that <emphasis>created</emphasis> the symlink
++        before reboot should perform any actions. It is unsafe to run multiple updates in
++        parallel.</para>
+       </listitem>
+ 
+       <listitem>
+@@ -88,14 +91,16 @@
+         <para>The update scripts should exit only after the update is finished. It is expected
+         that the service which performs the update will cause the machine to reboot after it
+         is done. If the <filename>system-update.target</filename> is successfully reached, i.e.
+-        all update services have run, and the <filename>/system-update</filename> symlink still
+-        exists, it will be removed and the machine rebooted as a safety measure.</para>
++        all update services have run, and the <filename>/system-update</filename> or
++        <filename>/etc/system-update</filename> symlink still exists, it will be removed and
++        the machine rebooted as a safety measure.</para>
+       </listitem>
+ 
+       <listitem>
+-        <para>After a reboot, now that the <filename>/system-update</filename> symlink is gone,
+-        the generator won't redirect <filename>default.target</filename> anymore and the system
+-        now boots into the default target again.</para>
++        <para>After a reboot, now that the <filename>/system-update</filename> and
++        <filename>/etc/system-update</filename> symlink is gone, the generator won't redirect
++        <filename>default.target</filename> anymore and the system now boots into the default
++        target again.</para>
+       </listitem>
+     </orderedlist>
+   </refsect1>
+@@ -115,8 +120,9 @@
+       </listitem>
+ 
+       <listitem>
+-        <para>Make sure to remove the <filename>/system-update</filename> symlink as early as
+-        possible in the update script to avoid reboot loops in case the update fails.</para>
++        <para>Make sure to remove the <filename>/system-update</filename> and
++        <filename>/etc/system-update</filename> symlinks as early as possible in the update
++        script to avoid reboot loops in case the update fails.</para>
+       </listitem>
+ 
+       <listitem>
+diff --git a/man/systemd.special.xml b/man/systemd.special.xml
+index 85eb8ad076..1620895511 100644
+--- a/man/systemd.special.xml
++++ b/man/systemd.special.xml
+@@ -753,8 +753,8 @@
+           <listitem>
+             <para>A special target unit that is used for offline system updates.
+             <citerefentry><refentrytitle>systemd-system-update-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+-            will redirect the boot process to this target if <filename>/system-update</filename>
+-            exists. For more information see
++            will redirect the boot process to this target if <filename>/system-update</filename> or
++            <filename>/etc/system-update</filename> exists. For more information see
+             <citerefentry><refentrytitle>systemd.offline-updates</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
+             </para>
+ 
+@@ -764,9 +764,10 @@
+             <filename>system-update-pre.target</filename> but not pull it in. Services which want to
+             run during system updates only, but before the actual system update is executed should
+             order themselves before this unit and pull it in. As a safety measure, if this does not
+-            happen, and <filename>/system-update</filename> still exists after
++            happen, and <filename>/system-update</filename> or
++            <filename>/etc/system-update</filename> still exists after
+             <filename>system-update.target</filename> is reached,
+-            <filename>system-update-cleanup.service</filename> will remove this symlink and reboot
++            <filename>system-update-cleanup.service</filename> will remove the symlinks and reboot
+             the machine.</para>
+           </listitem>
+         </varlistentry>
+diff --git a/src/system-update-generator/system-update-generator.c b/src/system-update-generator/system-update-generator.c
+index fc5aaa9bac..08b357f356 100644
+--- a/src/system-update-generator/system-update-generator.c
++++ b/src/system-update-generator/system-update-generator.c
+@@ -6,6 +6,7 @@
+ #include "fs-util.h"
+ #include "generator.h"
+ #include "log.h"
++#include "path-util.h"
+ #include "proc-cmdline.h"
+ #include "special.h"
+ #include "string-util.h"
+@@ -19,19 +20,25 @@
+ static const char *arg_dest = NULL;
+ 
+ static int generate_symlink(void) {
+-        const char *p = NULL;
++        _cleanup_free_ char *j = NULL;
+ 
+-        if (laccess("/system-update", F_OK) < 0) {
+-                if (errno == ENOENT)
+-                        return 0;
++        FOREACH_STRING(p, "/system-update", "/etc/system-update") {
++                if (laccess(p, F_OK) >= 0)
++                        goto link_found;
+ 
+-                log_error_errno(errno, "Failed to check for system update: %m");
+-                return -EINVAL;
++                if (errno != ENOENT)
++                        log_warning_errno(errno, "Failed to check if %s symlink exists, ignoring: %m", p);
+         }
+ 
+-        p = strjoina(arg_dest, "/" SPECIAL_DEFAULT_TARGET);
+-        if (symlink(SYSTEM_DATA_UNIT_DIR "/system-update.target", p) < 0)
+-                return log_error_errno(errno, "Failed to create symlink %s: %m", p);
++        return 0;
++
++link_found:
++        j = path_join(arg_dest, SPECIAL_DEFAULT_TARGET);
++        if (!j)
++                return log_oom();
++
++        if (symlink(SYSTEM_DATA_UNIT_DIR "/system-update.target", j) < 0)
++                return log_error_errno(errno, "Failed to create symlink %s: %m", j);
+ 
+         return 1;
+ }
+diff --git a/units/system-update-cleanup.service b/units/system-update-cleanup.service
+index 5a5dd725a1..a54e74567e 100644
+--- a/units/system-update-cleanup.service
++++ b/units/system-update-cleanup.service
+@@ -29,7 +29,9 @@ SuccessAction=reboot
+ # reboot or some other action on its own.
+ ConditionPathExists=|/system-update
+ ConditionPathIsSymbolicLink=|/system-update
++ConditionPathExists=|/etc/system-update
++ConditionPathIsSymbolicLink=|/etc/system-update
+ 
+ [Service]
+ Type=oneshot
+-ExecStart=rm -fv /system-update
++ExecStart=rm -fv /system-update /etc/system-update

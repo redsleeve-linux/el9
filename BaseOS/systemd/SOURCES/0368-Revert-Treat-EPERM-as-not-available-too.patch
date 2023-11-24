@@ -1,0 +1,25 @@
+From 2f4fd9002d0f438f7643ec98368bed709cb49442 Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Tue, 14 Mar 2023 16:06:39 +0100
+Subject: [PATCH] Revert "Treat EPERM as "not available" too"
+
+This reverts commit 9e51ecd3ec0484d7ffefb0ceaf242e96b31195bb.
+
+Resolves: #2178222
+---
+ src/nspawn/nspawn.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/nspawn/nspawn.c b/src/nspawn/nspawn.c
+index cdebe8e5c4..df7b37ec4e 100644
+--- a/src/nspawn/nspawn.c
++++ b/src/nspawn/nspawn.c
+@@ -3806,7 +3806,7 @@ static int outer_child(
+             arg_uid_shift != 0) {
+ 
+                 r = remount_idmap(directory, arg_uid_shift, arg_uid_range, UID_INVALID, REMOUNT_IDMAPPING_HOST_ROOT);
+-                if (IN_SET(r, -EINVAL, -EPERM) || ERRNO_IS_NOT_SUPPORTED(r)) {
++                if (r == -EINVAL || ERRNO_IS_NOT_SUPPORTED(r)) {
+                         /* This might fail because the kernel or file system doesn't support idmapping. We
+                          * can't really distinguish this nicely, nor do we have any guarantees about the
+                          * error codes we see, could be EOPNOTSUPP or EINVAL. */

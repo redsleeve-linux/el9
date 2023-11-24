@@ -1,0 +1,61 @@
+From b4c71f09f1933324593aef453f70e986d0175b70 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 6 Apr 2023 12:28:14 +0200
+Subject: [PATCH] udev: restore compat symlink for nvme devices
+
+In 5118e8e71dda211d20e34ec8d3012186ba27d3d3, the rules were changed to add
+OPTIONS="string_escape=replace" to creation of
+ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}", so that "/" would be
+escaped. But this also changes how the symlink looks for devices that do not
+have "/". This adds back the old symlink for compat, except when a slash
+is present.
+
+In the meantime, we changed the symlink format to include ${ND_NSID}. Since
+the symlink with unescaped characters are older than that, for compat we
+only need to cover the older type. (Symlinks without escaping and with ${ND_NSID}
+were never created.)  This makes it slightly easier on users: the non-deprecated
+symlinks are with "_${ND_NSID}", so they are easier to distinguish.
+
+Fixes #27155.
+
+Mostly untested :(  I only have a boring nvme device with no special characters
+in the id, and the symlinks are unchanged for it by this patch.
+
+(cherry picked from commit d05e1be86e6b14bd22d57af17efcc3b8fb7ecd82)
+
+Related: #2172509
+
+[msekleta: it is not strictly necessary to include this commit in RHEL-9
+because the we never had the previous version of non-escaped symlinks in
+RHEL-9. However, by including it we are making a life a bit easier for
+folks that are doing in-place upgrade from RHEL-8.]
+---
+ rules.d/60-persistent-storage.rules | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/rules.d/60-persistent-storage.rules b/rules.d/60-persistent-storage.rules
+index f5178ed6bd..8269c3cfd9 100644
+--- a/rules.d/60-persistent-storage.rules
++++ b/rules.d/60-persistent-storage.rules
+@@ -38,6 +38,10 @@ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{wwid}=="?*", ENV{ID_WWN
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{model}=="?*", ENV{ID_MODEL}="$attr{model}"
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{firmware_rev}=="?*", ENV{ID_REVISION}="$attr{firmware_rev}"
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ATTRS{nsid}=="?*", ENV{ID_NSID}="$attr{nsid}"
++# obsolete symlink with non-escaped characters, kept for backward compatiblity
++KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*", \
++  ENV{ID_MODEL}!="*/*", ENV{ID_SERIAL_SHORT}!="*/*", \
++  ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}"
+ # obsolete symlink that might get overridden on adding a new nvme controller, kept for backward compatibility
+ KERNEL=="nvme*[0-9]n*[0-9]", ENV{DEVTYPE}=="disk", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*", \
+   OPTIONS="string_escape=replace", ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}"
+@@ -48,6 +52,10 @@ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{serial}=="?
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{model}=="?*", ENV{ID_MODEL}="$attr{model}"
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{firmware_rev}=="?*", ENV{ID_REVISION}="$attr{firmware_rev}"
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ATTRS{nsid}=="?*", ENV{ID_NSID}="$attr{nsid}"
++# obsolete symlink with non-escaped characters, kept for backward compatiblity
++KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*", \
++  ENV{ID_MODEL}!="*/*", ENV{ID_SERIAL_SHORT}!="*/*", \
++  ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}-part%n"
+ # obsolete symlink that might get overridden on adding a new nvme controller, kept for backward compatibility
+ KERNEL=="nvme*[0-9]n*[0-9]p*[0-9]", ENV{DEVTYPE}=="partition", ENV{ID_MODEL}=="?*", ENV{ID_SERIAL_SHORT}=="?*", \
+   OPTIONS="string_escape=replace", ENV{ID_SERIAL}="$env{ID_MODEL}_$env{ID_SERIAL_SHORT}", SYMLINK+="disk/by-id/nvme-$env{ID_SERIAL}-part%n"

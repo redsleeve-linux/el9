@@ -1,0 +1,59 @@
+From 0d6c4277b6841ad69e7aef6fff5c4c2b29357717 Mon Sep 17 00:00:00 2001
+From: Lily Foster <lily@lily.flowers>
+Date: Thu, 6 Jul 2023 16:13:53 -0400
+Subject: [PATCH] fstab-generator: unify initrd-root-device.target dependency
+ handling code
+
+This fixes a bug from #26038 where it would actually write generator
+stuff during sysroot check when it was only supposed to check for daemon
+reload.
+
+(cherry picked from commit 9cf2203524baad8d7ebd298d46633e900daad821)
+
+Related: #2190226
+---
+ src/fstab-generator/fstab-generator.c | 17 ++++++-----------
+ 1 file changed, 6 insertions(+), 11 deletions(-)
+
+diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
+index e403a4c096..6756885478 100644
+--- a/src/fstab-generator/fstab-generator.c
++++ b/src/fstab-generator/fstab-generator.c
+@@ -601,6 +601,12 @@ static int add_mount(
+         if (r < 0)
+                 return r;
+ 
++        if (in_initrd() && path_equal(where, "/sysroot") && is_device_path(what)) {
++                r = generator_write_initrd_root_device_deps(dest, what);
++                if (r < 0)
++                        return r;
++        }
++
+         r = write_mount_timeout(f, where, opts);
+         if (r < 0)
+                 return r;
+@@ -885,12 +891,6 @@ static int parse_fstab_one(
+                         mount_is_network(fstype, options) ? SPECIAL_REMOTE_FS_TARGET :
+                                                             SPECIAL_LOCAL_FS_TARGET;
+ 
+-        if (is_sysroot && is_device_path(what)) {
+-                r = generator_write_initrd_root_device_deps(arg_dest, what);
+-                if (r < 0)
+-                        return r;
+-        }
+-
+         r = add_mount(source,
+                       arg_dest,
+                       what,
+@@ -1077,11 +1077,6 @@ static int add_sysroot_mount(void) {
+ 
+         log_debug("Found entry what=%s where=/sysroot type=%s opts=%s", what, strna(arg_root_fstype), strempty(opts));
+ 
+-        if (is_device_path(what)) {
+-                r = generator_write_initrd_root_device_deps(arg_dest, what);
+-                if (r < 0)
+-                        return r;
+-        }
+ 
+         return add_mount("/proc/cmdline",
+                          arg_dest,

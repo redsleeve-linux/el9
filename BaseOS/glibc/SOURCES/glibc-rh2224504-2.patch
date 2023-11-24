@@ -1,0 +1,243 @@
+commit c437631485a85c3bd034e12f53dd1c8207f05940
+Author: Andreas Schwab <schwab@suse.de>
+Date:   Wed Jul 19 09:55:31 2023 +0200
+
+    Restore lookup of IPv4 mapped addresses in files database (bug 25457)
+
+    This was broken by commit 9c02d0784d ("nss_files: Remove RES_USE_INET6
+    from hosts processing"), which removed too much.
+
+Conflicts:
+	nss/Makefile
+	  (missing tst-nss-gai-actions downstream)
+
+diff --git a/nss/Makefile b/nss/Makefile
+index aa6d350f2f859d12..f01674a16e720b88 100644
+--- a/nss/Makefile
++++ b/nss/Makefile
+@@ -76,6 +76,7 @@ tests-container := \
+   tst-nss-db-endgrent \
+   tst-nss-db-endpwent \
+   tst-nss-files-hosts-long \
++  tst-nss-files-hosts-v4mapped \
+   tst-nss-test3 \
+   tst-reload1 \
+   tst-reload2 \
+diff --git a/nss/nss_files/files-hosts.c b/nss/nss_files/files-hosts.c
+index d54d91d038a03c18..f6f11fb18b43fa9f 100644
+--- a/nss/nss_files/files-hosts.c
++++ b/nss/nss_files/files-hosts.c
+@@ -27,6 +27,7 @@
+ #include <nss.h>
+ 
+ /* Get implementation for some internal functions.  */
++#include "../resolv/mapv4v6addr.h"
+ #include "../resolv/res_hconf.h"
+ 
+ 
+@@ -34,8 +35,8 @@
+ #define DATABASE	"hosts"
+ #define NEED_H_ERRNO
+ 
+-#define EXTRA_ARGS	 , af
+-#define EXTRA_ARGS_DECL	 , int af
++#define EXTRA_ARGS	 , af, flags
++#define EXTRA_ARGS_DECL	 , int af, int flags
+ 
+ #define ENTDATA hostent_data
+ struct hostent_data
+@@ -60,8 +61,12 @@ LINE_PARSER
+      af = af == AF_UNSPEC ? AF_INET : af;
+    else
+      {
+-       if (af == AF_INET
+-	   && __inet_pton (AF_INET6, addr, entdata->host_addr) > 0)
++       if (af == AF_INET6 && (flags & AI_V4MAPPED) != 0
++	   && __inet_pton (AF_INET, addr, entdata->host_addr) > 0)
++	 map_v4v6_address ((char *) entdata->host_addr,
++			   (char *) entdata->host_addr);
++       else if (af == AF_INET
++		&& __inet_pton (AF_INET6, addr, entdata->host_addr) > 0)
+ 	 {
+ 	   if (IN6_IS_ADDR_V4MAPPED (entdata->host_addr))
+ 	     memcpy (entdata->host_addr, entdata->host_addr + 12, INADDRSZ);
+@@ -94,13 +99,14 @@ LINE_PARSER
+    STRING_FIELD (result->h_name, isspace, 1);
+  })
+ 
+-#define EXTRA_ARGS_VALUE , AF_INET
++#define EXTRA_ARGS_VALUE , AF_INET, 0
+ #include "files-XXX.c"
+ #undef EXTRA_ARGS_VALUE
+ 
+ /* We only need to consider IPv4 mapped addresses if the input to the
+    gethostbyaddr() function is an IPv6 address.  */
+-#define EXTRA_ARGS_VALUE , af
++#define EXTRA_ARGS_VALUE \
++  , af, (len == IN6ADDRSZ ? AI_V4MAPPED : 0)
+ DB_LOOKUP (hostbyaddr, ,,,
+ 	   {
+ 	     if (result->h_length == (int) len
+@@ -152,7 +158,7 @@ gethostbyname3_multi (FILE * stream, const char *name, int af,
+   while (true)
+     {
+       status = internal_getent (stream, &tmp_result_buf, tmp_buffer.data,
+-				tmp_buffer.length, errnop, herrnop, af);
++				tmp_buffer.length, errnop, herrnop, af, 0);
+       /* Enlarge the buffer if necessary.  */
+       if (status == NSS_STATUS_TRYAGAIN && *herrnop == NETDB_INTERNAL
+ 	  && *errnop == ERANGE)
+@@ -337,7 +343,7 @@ _nss_files_gethostbyname3_r (const char *name, int af, struct hostent *result,
+   if (status == NSS_STATUS_SUCCESS)
+     {
+       while ((status = internal_getent (stream, result, buffer, buflen, errnop,
+-					herrnop, af))
++					herrnop, af, 0))
+ 	     == NSS_STATUS_SUCCESS)
+ 	{
+ 	  LOOKUP_NAME_CASE (h_name, h_aliases)
+@@ -402,7 +408,7 @@ _nss_files_gethostbyname4_r (const char *name, struct gaih_addrtuple **pat,
+ 
+ 	  struct hostent result;
+ 	  status = internal_getent (stream, &result, buffer, buflen, errnop,
+-				    herrnop, AF_UNSPEC);
++				    herrnop, AF_UNSPEC, 0);
+ 	  if (status != NSS_STATUS_SUCCESS)
+ 	    break;
+ 
+diff --git a/nss/tst-nss-files-hosts-v4mapped.c b/nss/tst-nss-files-hosts-v4mapped.c
+new file mode 100644
+index 0000000000000000..45582904e68adf29
+--- /dev/null
++++ b/nss/tst-nss-files-hosts-v4mapped.c
+@@ -0,0 +1,41 @@
++/* Test lookup of IPv4 mapped addresses in files database (bug 25457)
++
++   Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; see the file COPYING.LIB.  If
++   not, see <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <arpa/inet.h>
++#include <netdb.h>
++
++static int
++do_test (void)
++{
++  struct sockaddr_in6 s6 = { .sin6_family = AF_INET6 };
++  inet_pton (AF_INET6, "::ffff:192.168.0.1", &s6.sin6_addr);
++
++  char node[NI_MAXHOST];
++  int res = getnameinfo ((struct sockaddr *) &s6, sizeof (s6), node,
++			 sizeof (node), NULL, 0, NI_NAMEREQD);
++  if (res)
++    printf ("%d %s\n", res, gai_strerror (res));
++  else
++    printf ("node=%s\n", node);
++
++  return res != 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/nss/tst-nss-files-hosts-v4mapped.root/etc/hosts b/nss/tst-nss-files-hosts-v4mapped.root/etc/hosts
+new file mode 100644
+index 0000000000000000..609b25ad39a879b4
+--- /dev/null
++++ b/nss/tst-nss-files-hosts-v4mapped.root/etc/hosts
+@@ -0,0 +1 @@
++192.168.0.1 v4mapped
+diff --git a/nss/tst-nss-files-hosts-v4mapped.root/etc/nsswitch.conf b/nss/tst-nss-files-hosts-v4mapped.root/etc/nsswitch.conf
+new file mode 100644
+index 0000000000000000..5b0c6a419937a013
+--- /dev/null
++++ b/nss/tst-nss-files-hosts-v4mapped.root/etc/nsswitch.conf
+@@ -0,0 +1 @@
++hosts: files
+diff --git a/resolv/mapv4v6addr.h b/resolv/mapv4v6addr.h
+new file mode 100644
+index 0000000000000000..7f85f7d5e393ec5f
+--- /dev/null
++++ b/resolv/mapv4v6addr.h
+@@ -0,0 +1,69 @@
++/*
++ * ++Copyright++ 1985, 1988, 1993
++ * -
++ * Copyright (c) 1985, 1988, 1993
++ *    The Regents of the University of California.  All rights reserved.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ * 1. Redistributions of source code must retain the above copyright
++ *    notice, this list of conditions and the following disclaimer.
++ * 2. Redistributions in binary form must reproduce the above copyright
++ *    notice, this list of conditions and the following disclaimer in the
++ *    documentation and/or other materials provided with the distribution.
++ * 4. Neither the name of the University nor the names of its contributors
++ *    may be used to endorse or promote products derived from this software
++ *    without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
++ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
++ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
++ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
++ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
++ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
++ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
++ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
++ * SUCH DAMAGE.
++ * -
++ * Portions Copyright (c) 1993 by Digital Equipment Corporation.
++ *
++ * Permission to use, copy, modify, and distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies, and that
++ * the name of Digital Equipment Corporation not be used in advertising or
++ * publicity pertaining to distribution of the document or software without
++ * specific, written prior permission.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND DIGITAL EQUIPMENT CORP. DISCLAIMS ALL
++ * WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES
++ * OF MERCHANTABILITY AND FITNESS.   IN NO EVENT SHALL DIGITAL EQUIPMENT
++ * CORPORATION BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL
++ * DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR
++ * PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS
++ * ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS
++ * SOFTWARE.
++ * -
++ * --Copyright--
++ */
++
++#include <string.h>
++#include <arpa/nameser.h>
++
++static void
++map_v4v6_address (const char *src, char *dst)
++{
++  u_char *p = (u_char *) dst;
++  int i;
++
++  /* Move the IPv4 part to the right position.  */
++  memcpy (dst + 12, src, INADDRSZ);
++
++  /* Mark this ipv6 addr as a mapped ipv4. */
++  for (i = 0; i < 10; i++)
++    *p++ = 0x00;
++  *p++ = 0xff;
++  *p = 0xff;
++}

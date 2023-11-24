@@ -1,0 +1,273 @@
+From 77827462f17ba6de2c56c7e242d1468f9c112cb3 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 10 May 2023 20:17:19 +0200
+Subject: [PATCH] test: merge TEST-20-MAINPIDGAMES into TEST-07-PID1
+
+(cherry picked from commit 3a4b86264eef6bd51e880386388e8b3f95cbaa33)
+
+Related: #2213521
+---
+ test/TEST-20-MAINPIDGAMES/Makefile            |  1 -
+ test/TEST-20-MAINPIDGAMES/test.sh             | 10 ---
+ ...-20.sh => testsuite-07.main-PID-change.sh} | 90 +++++++++++--------
+ test/units/testsuite-07.service               |  1 +
+ test/units/testsuite-20.service               | 11 ---
+ 5 files changed, 52 insertions(+), 61 deletions(-)
+ delete mode 120000 test/TEST-20-MAINPIDGAMES/Makefile
+ delete mode 100755 test/TEST-20-MAINPIDGAMES/test.sh
+ rename test/units/{testsuite-20.sh => testsuite-07.main-PID-change.sh} (55%)
+ delete mode 100644 test/units/testsuite-20.service
+
+diff --git a/test/TEST-20-MAINPIDGAMES/Makefile b/test/TEST-20-MAINPIDGAMES/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-20-MAINPIDGAMES/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-20-MAINPIDGAMES/test.sh b/test/TEST-20-MAINPIDGAMES/test.sh
+deleted file mode 100755
+index b663201efb..0000000000
+--- a/test/TEST-20-MAINPIDGAMES/test.sh
++++ /dev/null
+@@ -1,10 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="test changing main PID"
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-do_test "$@"
+diff --git a/test/units/testsuite-20.sh b/test/units/testsuite-07.main-PID-change.sh
+similarity index 55%
+rename from test/units/testsuite-20.sh
+rename to test/units/testsuite-07.main-PID-change.sh
+index 338769aacc..be4631f10d 100755
+--- a/test/units/testsuite-20.sh
++++ b/test/units/testsuite-07.main-PID-change.sh
+@@ -3,9 +3,13 @@
+ set -eux
+ set -o pipefail
+ 
++# Test changing the main PID
++
+ systemd-analyze log-level debug
+ 
+-test "$(systemctl show -P MainPID testsuite-20.service)" -eq $$
++# The main service PID should be the parent bash process
++MAINPID="${PPID:?}"
++test "$(systemctl show -P MainPID testsuite-07.service)" -eq "$MAINPID"
+ 
+ # Start a test process inside of our own cgroup
+ sleep infinity &
+@@ -13,48 +17,48 @@ INTERNALPID=$!
+ disown
+ 
+ # Start a test process outside of our own cgroup
+-systemd-run -p DynamicUser=1 --unit=test20-sleep.service /bin/sleep infinity
+-EXTERNALPID="$(systemctl show -P MainPID test20-sleep.service)"
++systemd-run -p DynamicUser=1 --unit=test-sleep.service /bin/sleep infinity
++EXTERNALPID="$(systemctl show -P MainPID test-sleep.service)"
+ 
+ # Update our own main PID to the external test PID, this should work
+ systemd-notify MAINPID="$EXTERNALPID"
+-test "$(systemctl show -P MainPID testsuite-20.service)" -eq "$EXTERNALPID"
++test "$(systemctl show -P MainPID testsuite-07.service)" -eq "$EXTERNALPID"
+ 
+ # Update our own main PID to the internal test PID, this should work, too
+ systemd-notify MAINPID=$INTERNALPID
+-test "$(systemctl show -P MainPID testsuite-20.service)" -eq "$INTERNALPID"
++test "$(systemctl show -P MainPID testsuite-07.service)" -eq "$INTERNALPID"
+ 
+ # Update it back to our own PID, this should also work
+-systemd-notify MAINPID=$$
+-test "$(systemctl show -P MainPID testsuite-20.service)" -eq $$
++systemd-notify MAINPID="$MAINPID"
++test "$(systemctl show -P MainPID testsuite-07.service)" -eq "$MAINPID"
+ 
+ # Try to set it to PID 1, which it should ignore, because that's the manager
+ systemd-notify MAINPID=1
+-test "$(systemctl show -P MainPID testsuite-20.service)" -eq $$
++test "$(systemctl show -P MainPID testsuite-07.service)" -eq "$MAINPID"
+ 
+ # Try to set it to PID 0, which is invalid and should be ignored
+ systemd-notify MAINPID=0
+-test "$(systemctl show -P MainPID testsuite-20.service)" -eq $$
++test "$(systemctl show -P MainPID testsuite-07.service)" -eq "$MAINPID"
+ 
+ # Try to set it to a valid but non-existing PID, which should be ignored. (Note
+ # that we set the PID to a value well above any known /proc/sys/kernel/pid_max,
+ # which means we can be pretty sure it doesn't exist by coincidence)
+ systemd-notify MAINPID=1073741824
+-test "$(systemctl show -P MainPID testsuite-20.service)" -eq $$
++test "$(systemctl show -P MainPID testsuite-07.service)" -eq "$MAINPID"
+ 
+ # Change it again to the external PID, without privileges this time. This should be ignored, because the PID is from outside of our cgroup and we lack privileges.
+ systemd-notify --uid=1000 MAINPID="$EXTERNALPID"
+-test "$(systemctl show -P MainPID testsuite-20.service)" -eq $$
++test "$(systemctl show -P MainPID testsuite-07.service)" -eq "$MAINPID"
+ 
+ # Change it again to the internal PID, without privileges this time. This should work, as the process is on our cgroup, and that's enough even if we lack privileges.
+ systemd-notify --uid=1000 MAINPID="$INTERNALPID"
+-test "$(systemctl show -P MainPID testsuite-20.service)" -eq "$INTERNALPID"
++test "$(systemctl show -P MainPID testsuite-07.service)" -eq "$INTERNALPID"
+ 
+ # Update it back to our own PID, this should also work
+-systemd-notify --uid=1000 MAINPID=$$
+-test "$(systemctl show -P MainPID testsuite-20.service)" -eq $$
++systemd-notify --uid=1000 MAINPID="$MAINPID"
++test "$(systemctl show -P MainPID testsuite-07.service)" -eq "$MAINPID"
+ 
+-cat >/tmp/test20-mainpid.sh <<EOF
++cat >/tmp/test-mainpid.sh <<\EOF
+ #!/usr/bin/env bash
+ 
+ set -eux
+@@ -65,20 +69,26 @@ sleep infinity &
+ disown
+ 
+ sleep infinity &
+-MAINPID=\$!
++MAINPID=$!
+ disown
+ 
+ sleep infinity &
+ disown
+ 
+-echo \$MAINPID >/run/mainpidsh/pid
++echo $MAINPID >/run/mainpidsh/pid
+ EOF
+-chmod +x /tmp/test20-mainpid.sh
++chmod +x /tmp/test-mainpid.sh
+ 
+-systemd-run --unit=test20-mainpidsh.service -p StandardOutput=tty -p StandardError=tty -p Type=forking -p RuntimeDirectory=mainpidsh -p PIDFile=/run/mainpidsh/pid /tmp/test20-mainpid.sh
+-test "$(systemctl show -P MainPID test20-mainpidsh.service)" -eq "$(cat /run/mainpidsh/pid)"
++systemd-run --unit=test-mainpidsh.service \
++            -p StandardOutput=tty \
++            -p StandardError=tty \
++            -p Type=forking \
++            -p RuntimeDirectory=mainpidsh \
++            -p PIDFile=/run/mainpidsh/pid \
++            /tmp/test-mainpid.sh
++test "$(systemctl show -P MainPID test-mainpidsh.service)" -eq "$(cat /run/mainpidsh/pid)"
+ 
+-cat >/tmp/test20-mainpid2.sh <<EOF
++cat >/tmp/test-mainpid2.sh <<\EOF
+ #!/usr/bin/env bash
+ 
+ set -eux
+@@ -89,21 +99,27 @@ sleep infinity &
+ disown
+ 
+ sleep infinity &
+-MAINPID=\$!
++MAINPID=$!
+ disown
+ 
+ sleep infinity &
+ disown
+ 
+-echo \$MAINPID >/run/mainpidsh2/pid
++echo $MAINPID >/run/mainpidsh2/pid
+ chown 1001:1001 /run/mainpidsh2/pid
+ EOF
+-chmod +x /tmp/test20-mainpid2.sh
++chmod +x /tmp/test-mainpid2.sh
+ 
+-systemd-run --unit=test20-mainpidsh2.service -p StandardOutput=tty -p StandardError=tty -p Type=forking -p RuntimeDirectory=mainpidsh2 -p PIDFile=/run/mainpidsh2/pid /tmp/test20-mainpid2.sh
+-test "$(systemctl show -P MainPID test20-mainpidsh2.service)" -eq "$(cat /run/mainpidsh2/pid)"
++systemd-run --unit=test-mainpidsh2.service \
++            -p StandardOutput=tty \
++            -p StandardError=tty \
++            -p Type=forking \
++            -p RuntimeDirectory=mainpidsh2 \
++            -p PIDFile=/run/mainpidsh2/pid \
++            /tmp/test-mainpid2.sh
++test "$(systemctl show -P MainPID test-mainpidsh2.service)" -eq "$(cat /run/mainpidsh2/pid)"
+ 
+-cat >/dev/shm/test20-mainpid3.sh <<EOF
++cat >/dev/shm/test-mainpid3.sh <<EOF
+ #!/usr/bin/env bash
+ 
+ set -eux
+@@ -124,11 +140,11 @@ ln -s ../mainpidsh/pid /run/mainpidsh3/pid
+ # Quick assertion that the link isn't dead
+ test -f /run/mainpidsh3/pid
+ EOF
+-chmod 755 /dev/shm/test20-mainpid3.sh
++chmod 755 /dev/shm/test-mainpid3.sh
+ 
+ # This has to fail, as we shouldn't accept the dangerous PID file, and then
+ # inotify-wait on it to be corrected which we never do.
+-systemd-run --unit=test20-mainpidsh3.service \
++systemd-run --unit=test-mainpidsh3.service \
+             -p StandardOutput=tty \
+             -p StandardError=tty \
+             -p Type=forking \
+@@ -136,15 +152,15 @@ systemd-run --unit=test20-mainpidsh3.service \
+             -p PIDFile=/run/mainpidsh3/pid \
+             -p DynamicUser=1 \
+             -p TimeoutStartSec=2s \
+-            /dev/shm/test20-mainpid3.sh \
++            /dev/shm/test-mainpid3.sh \
+     && { echo 'unexpected success'; exit 1; }
+ 
+ # Test that this failed due to timeout, and not some other error
+-test "$(systemctl show -P Result test20-mainpidsh3.service)" = timeout
++test "$(systemctl show -P Result test-mainpidsh3.service)" = timeout
+ 
+ # Test that scope units work
+-systemd-run --scope --unit test20-true.scope /bin/true
+-test "$(systemctl show -P Result test20-true.scope)" = success
++systemd-run --scope --unit test-true.scope /bin/true
++test "$(systemctl show -P Result test-true.scope)" = success
+ 
+ # Test that user scope units work as well
+ 
+@@ -156,11 +172,7 @@ runas() {
+ }
+ 
+ systemctl start user@4711.service
+-runas testuser systemd-run --scope --user --unit test20-true.scope /bin/true
+-test "$(systemctl show -P Result test20-true.scope)" = success
++runas testuser systemd-run --scope --user --unit test-true.scope /bin/true
++test "$(systemctl show -P Result test-true.scope)" = success
+ 
+ systemd-analyze log-level info
+-
+-echo OK >/testok
+-
+-exit 0
+diff --git a/test/units/testsuite-07.service b/test/units/testsuite-07.service
+index f45b9c7c5b..cc0a747a88 100644
+--- a/test/units/testsuite-07.service
++++ b/test/units/testsuite-07.service
+@@ -6,6 +6,7 @@ Description=TEST-07-ISSUE-1981
+ Type=oneshot
+ ExecStartPre=rm -f /failed /testok
+ ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
++NotifyAccess=all
+ # Issue: https://github.com/systemd/systemd/issues/2691
+ ExecStop=sh -c 'kill -SEGV $$$$'
+ RemainAfterExit=yes
+diff --git a/test/units/testsuite-20.service b/test/units/testsuite-20.service
+deleted file mode 100644
+index 4228d0b875..0000000000
+--- a/test/units/testsuite-20.service
++++ /dev/null
+@@ -1,11 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-20-MAINPIDGAMES
+-Before=getty-pre.target
+-Wants=getty-pre.target
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-Type=oneshot
+-NotifyAccess=all

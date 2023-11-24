@@ -1,0 +1,41 @@
+From 992665eab6c48d6a4819f42509346d24b277485d Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Thu, 2 Sep 2021 16:17:29 -0400
+Subject: [PATCH 15/17] Conditionalize test for PR libstdc++/87135 on
+ __LIBSTDCXX_SO_VERSION >= 9
+
+This VERIFY was added upstream 2018-09-18 as part of:
+  re PR libstdc++/87135 ([C++17] unordered containers violate iterator validity requirements)
+    https://gcc.gnu.org/git/?p=gcc.git;a=commitdiff;h=a521e62615e439aea7502a52fd0f8a21eaa6304f
+
+but fails when run in DTS against a system libstdc++.so from an older GCC.
+
+In particular, rehash from the header is using
+  std::__detail::_Prime_rehash_policy::_M_next_bkt
+from the system .so:
+
+   12: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::__detail::_Prime_rehash_policy::_M_next_bkt(unsigned long) const@GLIBCXX_3.4.18 (5)
+  225: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::__detail::_Prime_rehash_policy::_M_next_bkt(unsigned long) const@@GLIBCXX_3.4.18
+---
+ .../23_containers/unordered_map/modifiers/reserve.cc          | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/libstdc++-v3/testsuite/23_containers/unordered_map/modifiers/reserve.cc b/libstdc++-v3/testsuite/23_containers/unordered_map/modifiers/reserve.cc
+index 58c8924b9..4c79ec2e6 100644
+--- a/libstdc++-v3/testsuite/23_containers/unordered_map/modifiers/reserve.cc
++++ b/libstdc++-v3/testsuite/23_containers/unordered_map/modifiers/reserve.cc
+@@ -46,7 +46,11 @@ void test01()
+ 
+ 	  // As long as we insert less than the reserved number of elements we
+ 	  // shouldn't experiment any rehash.
++
++	  // Fixed upstream in GCC 9
++#if __LIBSTDCXX_SO_VERSION >= 9
+ 	  VERIFY( m.bucket_count() == bkts );
++#endif
+ 
+ 	  VERIFY( m.load_factor() <= m.max_load_factor() );
+ 	}
+-- 
+2.31.1
+

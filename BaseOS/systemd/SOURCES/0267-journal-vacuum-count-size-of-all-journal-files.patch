@@ -1,0 +1,90 @@
+From 407e6bbb46a67200ea27a04c10c931dba9727cdd Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Wed, 22 Mar 2023 12:36:54 +0100
+Subject: [PATCH] journal-vacuum: count size of all journal files
+
+Currently, active journal files are excluded, which means that vacuuming
+may not remove anything even if *MaxUse= has been exceeded.
+
+(cherry picked from commit 9ea46af4f2368b41d57705bac09774778126507f)
+
+Resolves: #2182632
+---
+ src/libsystemd/sd-journal/journal-vacuum.c | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/src/libsystemd/sd-journal/journal-vacuum.c b/src/libsystemd/sd-journal/journal-vacuum.c
+index eac3500202..23497af28e 100644
+--- a/src/libsystemd/sd-journal/journal-vacuum.c
++++ b/src/libsystemd/sd-journal/journal-vacuum.c
+@@ -158,6 +158,8 @@ int journal_directory_vacuum(
+                 if (!S_ISREG(st.st_mode))
+                         continue;
+ 
++                size = 512UL * (uint64_t) st.st_blocks;
++
+                 q = strlen(de->d_name);
+ 
+                 if (endswith(de->d_name, ".journal")) {
+@@ -167,6 +169,7 @@ int journal_directory_vacuum(
+ 
+                         if (q < 1 + 32 + 1 + 16 + 1 + 16 + 8) {
+                                 n_active_files++;
++                                sum += size;
+                                 continue;
+                         }
+ 
+@@ -174,6 +177,7 @@ int journal_directory_vacuum(
+                             de->d_name[q-8-16-1-16-1] != '-' ||
+                             de->d_name[q-8-16-1-16-1-32-1] != '@') {
+                                 n_active_files++;
++                                sum += size;
+                                 continue;
+                         }
+ 
+@@ -186,11 +190,13 @@ int journal_directory_vacuum(
+                         de->d_name[q-8-16-1-16-1] = 0;
+                         if (sd_id128_from_string(de->d_name + q-8-16-1-16-1-32, &seqnum_id) < 0) {
+                                 n_active_files++;
++                                sum += size;
+                                 continue;
+                         }
+ 
+                         if (sscanf(de->d_name + q-8-16-1-16, "%16llx-%16llx.journal", &seqnum, &realtime) != 2) {
+                                 n_active_files++;
++                                sum += size;
+                                 continue;
+                         }
+ 
+@@ -206,12 +212,14 @@ int journal_directory_vacuum(
+ 
+                         if (q < 1 + 16 + 1 + 16 + 8 + 1) {
+                                 n_active_files++;
++                                sum += size;
+                                 continue;
+                         }
+ 
+                         if (de->d_name[q-1-8-16-1] != '-' ||
+                             de->d_name[q-1-8-16-1-16-1] != '@') {
+                                 n_active_files++;
++                                sum += size;
+                                 continue;
+                         }
+ 
+@@ -223,6 +231,7 @@ int journal_directory_vacuum(
+ 
+                         if (sscanf(de->d_name + q-1-8-16-1-16, "%16llx-%16llx.journal~", &realtime, &tmp) != 2) {
+                                 n_active_files++;
++                                sum += size;
+                                 continue;
+                         }
+ 
+@@ -233,8 +242,6 @@ int journal_directory_vacuum(
+                         continue;
+                 }
+ 
+-                size = 512UL * (uint64_t) st.st_blocks;
+-
+                 r = journal_file_empty(dirfd(d), p);
+                 if (r < 0) {
+                         log_debug_errno(r, "Failed check if %s is empty, ignoring: %m", p);

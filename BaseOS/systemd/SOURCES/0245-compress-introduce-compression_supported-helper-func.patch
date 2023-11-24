@@ -1,0 +1,55 @@
+From 2c755739d84e409a6331902f5c15943a192a40f4 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 4 Apr 2023 14:34:32 +0900
+Subject: [PATCH] compress: introduce compression_supported() helper function
+
+(cherry picked from commit 83f3d73da8d132773dd91aae0fa7babb74920774)
+
+Resolves: #2183546
+---
+ src/basic/compress.c | 10 ++++++++++
+ src/basic/compress.h |  3 +++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/src/basic/compress.c b/src/basic/compress.c
+index 1e94635397..dce0ebf222 100644
+--- a/src/basic/compress.c
++++ b/src/basic/compress.c
+@@ -66,6 +66,16 @@ static const char* const compression_table[_COMPRESSION_MAX] = {
+ 
+ DEFINE_STRING_TABLE_LOOKUP(compression, Compression);
+ 
++bool compression_supported(Compression c) {
++        static const unsigned supported =
++                (1U << COMPRESSION_NONE) |
++                (1U << COMPRESSION_XZ) * HAVE_XZ |
++                (1U << COMPRESSION_LZ4) * HAVE_LZ4 |
++                (1U << COMPRESSION_ZSTD) * HAVE_ZSTD;
++
++        return c >= 0 && c < _COMPRESSION_MAX && FLAGS_SET(supported, 1U << c);
++}
++
+ int compress_blob_xz(const void *src, uint64_t src_size,
+                      void *dst, size_t dst_alloc_size, size_t *dst_size) {
+ #if HAVE_XZ
+diff --git a/src/basic/compress.h b/src/basic/compress.h
+index 583b105c66..2201bca74c 100644
+--- a/src/basic/compress.h
++++ b/src/basic/compress.h
+@@ -2,6 +2,7 @@
+ #pragma once
+ 
+ #include <errno.h>
++#include <stdbool.h>
+ #include <stdint.h>
+ #include <unistd.h>
+ 
+@@ -17,6 +18,8 @@ typedef enum Compression {
+ const char* compression_to_string(Compression compression);
+ Compression compression_from_string(const char *compression);
+ 
++bool compression_supported(Compression c);
++
+ int compress_blob_xz(const void *src, uint64_t src_size,
+                      void *dst, size_t dst_alloc_size, size_t *dst_size);
+ int compress_blob_lz4(const void *src, uint64_t src_size,

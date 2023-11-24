@@ -1,0 +1,37 @@
+From 56464ba865b7df5bf3edb9be7dc3b6a0fbe21e21 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Micha=C5=82=20G=C3=B3rny?= <mgorny@gentoo.org>
+Date: Mon, 13 Mar 2023 18:22:31 +0100
+Subject: [PATCH] [lld] Use installed llvm_gtest in standalone builds
+
+Use the installed llvm_gtest library instead of rebuilding it locally
+when standalone builds are used.  This change is now required
+as otherwise the build fails due to duplicate llvm_gtest target.
+This is based on 82169103958583d3320b3a9a1e6542e8d32ef8da in clang.
+
+Differential Revision: https://reviews.llvm.org/D145964
+---
+ lld/CMakeLists.txt | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/lld/CMakeLists.txt b/lld/CMakeLists.txt
+index 3d6225646fe6..1e9e47393196 100644
+--- a/lld/CMakeLists.txt
++++ b/lld/CMakeLists.txt
+@@ -75,11 +75,9 @@ if(LLD_BUILT_STANDALONE)
+         set(LLVM_UTILS_PROVIDED ON)
+         set(LLD_TEST_DEPS FileCheck not)
+       endif()
+-      set(UNITTEST_DIR ${LLVM_THIRD_PARTY_DIR}/unittest)
+-      if(EXISTS ${UNITTEST_DIR}/googletest/include/gtest/gtest.h
+-          AND NOT EXISTS ${LLVM_LIBRARY_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX}
+-          AND EXISTS ${UNITTEST_DIR}/CMakeLists.txt)
+-        add_subdirectory(${UNITTEST_DIR} third-party/unittest)
++
++      if (NOT TARGET llvm_gtest)
++        message(FATAL_ERROR "llvm-gtest not found. Please install llvm-gtest or disable tests with -DLLVM_INCLUDE_TESTS=OFF")
+       endif()
+     else()
+       # Seek installed Lit.
+-- 
+2.39.2
+

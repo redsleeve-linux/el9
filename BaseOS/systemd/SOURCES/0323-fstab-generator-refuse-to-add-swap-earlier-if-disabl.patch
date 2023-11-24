@@ -1,0 +1,41 @@
+From 6858b1611dd198607c246b835d8840d15d8f09e5 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 24 May 2023 07:24:52 +0900
+Subject: [PATCH] fstab-generator: refuse to add swap earlier if disabled
+
+No functional change, preparation for later commits.
+
+(cherry picked from commit 9445623363fc47ee5a9265adeb9f4ca1a80ebfe4)
+
+Related: #2190226
+---
+ src/fstab-generator/fstab-generator.c | 9 ++++-----
+ 1 file changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
+index 742a84b485..2cd4de29f0 100644
+--- a/src/fstab-generator/fstab-generator.c
++++ b/src/fstab-generator/fstab-generator.c
+@@ -108,11 +108,6 @@ static int add_swap(
+ 
+         assert(what);
+ 
+-        if (!arg_swap_enabled) {
+-                log_info("Swap unit generation disabled on kernel command line, ignoring fstab swap entry for %s.", what);
+-                return 0;
+-        }
+-
+         if (access("/proc/swaps", F_OK) < 0) {
+                 log_info("Swap not supported, ignoring fstab swap entry for %s.", what);
+                 return 0;
+@@ -707,6 +702,10 @@ static int parse_fstab_one(
+                 return 0;
+ 
+         is_swap = streq_ptr(fstype, "swap");
++        if (is_swap && !arg_swap_enabled) {
++                log_info("Swap unit generation disabled on kernel command line, ignoring swap entry for %s.", what);
++                return 0;
++        }
+ 
+         what = fstab_node_to_udev_node(what_original);
+         if (!what)

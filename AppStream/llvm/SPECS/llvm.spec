@@ -1,10 +1,8 @@
-# Workaround for
-# Cannot handle 8-byte build ID
-%define debug_package %{nil}
-
 # We are building with clang for faster/lower memory LTO builds.
 # See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
 %global toolchain clang
+
+%global gts_version 13
 
 # Components enabled if supported by target architecture:
 %define gold_arches %{ix86} x86_64 %{arm} aarch64 %{power64} s390x
@@ -19,18 +17,20 @@
 %bcond_without check
 
 %if %{with bundle_compat_lib}
-%global compat_maj_ver 14
-%global compat_ver %{compat_maj_ver}.0.6
+%global compat_maj_ver 15
+%global compat_ver %{compat_maj_ver}.0.7
 %endif
 
 %global llvm_libdir %{_libdir}/%{name}
 %global build_llvm_libdir %{buildroot}%{llvm_libdir}
 #global rc_ver 3
-%global maj_ver 15
+%global maj_ver 16
 %global min_ver 0
-%global patch_ver 7
+%global patch_ver 6
 %global llvm_srcdir llvm-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
 %global cmake_srcdir cmake-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
+%global third_party_srcdir third-party-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_
+ver:rc%{rc_ver}}.src
 
 %if %{with compat_build}
 %global pkg_name llvm%{maj_ver}
@@ -69,10 +69,9 @@
 %ifarch %{arm}
 # koji overrides the _gnu variable to be gnu, which is not correct for clang, so
 # we need to hard-code the correct triple here.
-#global llvm_triple armv7l-redhat-linux-gnueabihf
-%global llvm_triple armv6l-redhat-linux-gnueabihf
+%global llvm_triple armv7l-redhat-linux-gnueabihf
 %else
-%global llvm_triple %{_host}
+%global llvm_triple %{_target_platform}
 %endif
 
 # https://fedoraproject.org/wiki/Changes/PythonSafePath#Opting_out
@@ -82,32 +81,33 @@
 
 Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}
-Release:	1%{?dist}.redsleeve
+Release:	4%{?dist}
 Summary:	The Low Level Virtual Machine
 
-License:	NCSA
+License:	Apache-2.0 WITH LLVM-exception OR NCSA
 URL:		http://llvm.org
 Source0:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{llvm_srcdir}.tar.xz
 Source1:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{llvm_srcdir}.tar.xz.sig
 Source2:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz
 Source3:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz.sig
-Source4:	release-keys.asc
+Source4:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{third_party_srcdir}.tar.xz
+Source5:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{third_party_srcdir}.tar.xz.sig
+Source6:	release-keys.asc
 
-%if %{without compat_build}
-Source5:	run-lit-tests
-Source6:	lit.fedora.cfg.py
-%endif
 %if %{with bundle_compat_lib}
 Source7:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{compat_ver}/llvm-%{compat_ver}.src.tar.xz
 Source8:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{compat_ver}/llvm-%{compat_ver}.src.tar.xz.sig
-Source9:	tstellar-gpg-key.asc
 %endif
 
-Patch2:		0003-XFAIL-missing-abstract-variable.ll-test-on-ppc64le.patch
+# Backported from LLVM 17
+Patch1:		0001-SystemZ-Improve-error-messages-for-unsupported-reloc.patch
+# See https://reviews.llvm.org/D137890 for the next two patches
+Patch2:		0001-llvm-Add-install-targets-for-gtest.patch
+# Backport of https://reviews.llvm.org/D156379 from LLVM 18.
+Patch3:		D156379.diff
 
-# Needed to export clang-tblgen during the clang build, needed by the flang docs build.
-# TODO: Can be dropped for LLVM 16, see https://reviews.llvm.org/D131282.
-Patch3:		0001-Install-clang-tblgen.patch
+# Patching third-party dir with a 200 offset in patch number
+Patch201:	0201-third-party-Add-install-targets-for-gtest.patch
 
 # RHEL-specific patches
 Patch101:	0001-Deactivate-markdown-doc.patch
@@ -142,7 +142,8 @@ BuildRequires:	python3-setuptools
 
 # For origin certification
 BuildRequires:	gnupg2
-
+# To handle LTO debuginfo
+BuildRequires:	gcc-toolset-%{gts_version}-gdb
 
 Requires:	%{name}-libs%{?_isa} = %{version}-%{release}
 
@@ -238,10 +239,11 @@ This is the main package for llvm-toolset.
 %endif
 
 %prep
-%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
-%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE3}' --data='%{SOURCE2}'
+%{gpgverify} --keyring='%{SOURCE6}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
+%{gpgverify} --keyring='%{SOURCE6}' --signature='%{SOURCE3}' --data='%{SOURCE2}'
+%{gpgverify} --keyring='%{SOURCE6}' --signature='%{SOURCE5}' --data='%{SOURCE4}'
 %if %{with bundle_compat_lib}
-%{gpgverify} --keyring='%{SOURCE9}' --signature='%{SOURCE8}' --data='%{SOURCE7}'
+%{gpgverify} --keyring='%{SOURCE6}' --signature='%{SOURCE8}' --data='%{SOURCE7}'
 %endif
 
 %setup -T -q -b 2 -n %{cmake_srcdir}
@@ -250,11 +252,17 @@ This is the main package for llvm-toolset.
 cd ..
 mv %{cmake_srcdir} cmake
 
+%setup -T -q -b 4 -n %{third_party_srcdir}
+%autopatch -m200 -p2
+cd ..
+mv %{third_party_srcdir} third-party
+
 %if %{with bundle_compat_lib}
 %setup -T -q -b 7 -n llvm-%{compat_ver}.src
 %endif
 
-%autosetup -n %{llvm_srcdir} -p2
+%setup -T -q -b 0 -n %{llvm_srcdir}
+%autopatch -M200 -p2
 
 %py3_shebang_fix \
 	test/BugPoint/compile-custom.ll.py \
@@ -263,12 +271,10 @@ mv %{cmake_srcdir} cmake
 
 %build
 
-#ifarch s390 s390x
-# Fails with "exceeded PCRE's backtracking limit"
+%ifarch %ix86
+# Linking libLLVM.so goes out of memory even with ThinLTO and a single link job.
 %global _lto_cflags %nil
-#else
-#global _lto_cflags -flto=thin
-#endif
+%endif
 
 %ifarch s390 s390x %{arm} %ix86
 # Decrease debuginfo verbosity to reduce memory consumption during final library linking
@@ -276,7 +282,7 @@ mv %{cmake_srcdir} cmake
 %endif
 
 # Copy CFLAGS into ASMFLAGS, so -fcf-protection is used when compiling assembly files.
-export ASMFLAGS=$CFLAGS
+export ASMFLAGS="%{build_cflags}"
 
 # force off shared libs as cmake macros turns it on.
 %cmake	-G Ninja \
@@ -314,6 +320,11 @@ export ASMFLAGS=$CFLAGS
 	\
 	-DLLVM_INCLUDE_TESTS:BOOL=ON \
 	-DLLVM_BUILD_TESTS:BOOL=ON \
+%if %{with compat_build}
+	-DLLVM_INSTALL_GTEST:BOOL=OFF \
+%else
+	-DLLVM_INSTALL_GTEST:BOOL=ON \
+%endif
 	-DLLVM_LIT_ARGS=-v \
 	\
 	-DLLVM_INCLUDE_EXAMPLES:BOOL=ON \
@@ -336,6 +347,7 @@ export ASMFLAGS=$CFLAGS
 %if %{without compat_build}
 	-DLLVM_VERSION_SUFFIX='' \
 %endif
+	-DLLVM_UNREACHABLE_OPTIMIZE:BOOL=OFF \
 	-DLLVM_BUILD_LLVM_DYLIB:BOOL=ON \
 	-DLLVM_LINK_LLVM_DYLIB:BOOL=ON \
 	-DLLVM_BUILD_EXTERNAL_COMPILER_RT:BOOL=ON \
@@ -346,7 +358,8 @@ export ASMFLAGS=$CFLAGS
 	-DCMAKE_INSTALL_PREFIX=%{install_prefix} \
 	-DLLVM_INSTALL_SPHINX_HTML_DIR=%{_pkgdocdir}/html \
 	-DSPHINX_EXECUTABLE=%{_bindir}/sphinx-build-3 \
-	-DLLVM_INCLUDE_BENCHMARKS=OFF
+	-DLLVM_INCLUDE_BENCHMARKS=OFF \
+	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -Wl,-z,cet-report=error"
 
 # Build libLLVM.so first.  This ensures that when libLLVM.so is linking, there
 # are no other compile jobs running.  This will help reduce OOM errors on the
@@ -371,6 +384,11 @@ export ASMFLAGS=$CFLAGS
 %endif
 
 %install
+
+# Use newer GDB for gdb-add-index step, as system GDB can't handle the LTO debuginfo.
+source scl_source enable gcc-toolset-%{gts_version}
+export GDB=`which gdb`
+
 %cmake_install
 
 %if %{with bundle_compat_lib}
@@ -408,17 +426,7 @@ rm -rf test/tools/UpdateTestChecks
 %endif
 
 install %{build_libdir}/libLLVMTestingSupport.a %{buildroot}%{_libdir}
-
-%global install_srcdir %{buildroot}%{_datadir}/llvm/src
-
-# Install gtest sources so clang can use them for gtest
-install -d %{install_srcdir}
-install -d %{install_srcdir}/utils/
-cp -R utils/unittest %{install_srcdir}/utils/
-
-# Clang needs these for running lit tests.
-cp utils/update_cc_test_checks.py %{install_srcdir}/utils/
-cp -R utils/UpdateTestChecks %{install_srcdir}/utils/
+install %{build_libdir}/libLLVMTestingAnnotations.a %{buildroot}%{_libdir}
 
 %if %{with gold}
 # Add symlink to lto plugin in the binutils plugin directory.
@@ -610,6 +618,9 @@ fi
 %if %{without compat_build}
 %{_libdir}/*.a
 %exclude %{_libdir}/libLLVMTestingSupport.a
+%exclude %{_libdir}/libLLVMTestingAnnotations.a
+%exclude %{_libdir}/libllvm_gtest.a
+%exclude %{_libdir}/libllvm_gtest_main.a
 %else
 %{_libdir}/%{name}/lib/*.a
 %endif
@@ -627,8 +638,12 @@ fi
 
 %files googletest
 %license LICENSE.TXT
-%{_datadir}/llvm/src/utils
 %{_libdir}/libLLVMTestingSupport.a
+%{_libdir}/libLLVMTestingAnnotations.a
+%{_libdir}/libllvm_gtest.a
+%{_libdir}/libllvm_gtest_main.a
+%{_includedir}/llvm-gtest
+%{_includedir}/llvm-gmock
 
 %files toolset
 %license LICENSE.TXT
@@ -636,8 +651,30 @@ fi
 %endif
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> - 15.0.7-1.redsleeve
-- changed llvm_triple for armv6
+* Fri Aug 04 2023 Tulio Magno Quites Machado Filho <tuliom@redhat.com> - 16.0.6-4
+- Re-add LDFLAGS to shared libraries
+
+* Thu Aug 03 2023 Tulio Magno Quites Machado Filho <tuliom@redhat.com> - 16.0.6-3
+- Fix rhbz #2226795
+
+* Tue Aug 01 2023 Nikita Popov <npopov@redhat.com> - 16.0.6-2
+- Fix CET support
+
+* Tue Jul 04 2023 Nikita Popov <npopov@redhat.com> - 16.0.6-1
+- Update to LLVM 16.0.6
+
+* Mon Jul 03 2023 Tulio Magno Quites Machado Filho <tuliom@redhat.com> - 16.0.1-4
+- Improve error messages for unsupported relocs on s390x (rhbz#2216906)
+- Disable LLVM_UNREACHABLE_OPTIMIZE
+
+* Thu Jun 29 2023 Nikita Popov <npopov@redhat.com> - 16.0.1-3
+- Use gcc-toolset-13-gdb for gdb-add-index
+
+* Fri May 05 2023 Nikita Popov <npopov@redhat.com> - 16.0.1-2
+- Build with LTO
+
+* Fri Apr 14 2023 Nikita Popov <npopov@redhat.com> - 16.0.1-1
+- Update to LLVM 16.0.1
 
 * Fri Jan 13 2023 Konrad Kleine <kkleine@redhat.com> - 15.0.7-1
 - Update to LLVM 15.0.7

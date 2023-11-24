@@ -1,7 +1,7 @@
 Summary:        A high-performance implementation of MPI
 Name:           mpich
-Version:        3.4.2
-Release:        1%{?dist}.redsleeve
+Version:        4.1.1
+Release:        1%{?dist}
 License:        MIT
 URL:            https://www.mpich.org/
 
@@ -11,12 +11,6 @@ Source2:        mpich.pth.py2
 Source3:        mpich.pth.py3
 Patch0:         mpich-modules.patch
 Patch1:         0001-Drop-real128.patch
-# Drop build flags, e.g. -specs... and -lto from mpi wrappers (mpicc and mpicxx)
-# for discussion see:
-# https://lists.fedoraproject.org/archives/list/devel@lists.fedoraproject.org/message/7TFWEKTDWBYBHEGMIWBVI3AVGORZGNBS/
-Patch3:         fix_wrapper_flags.patch
-# https://github.com/pmodels/mpich/issues/4534
-Patch4:         0001-Revert-Remove-use-of-vasprintf.patch
 
 BuildRequires: make
 BuildRequires:  gcc
@@ -28,7 +22,7 @@ BuildRequires:  automake
 BuildRequires:  libtool
 # For ./maint/extractcvars
 BuildRequires:  perl(lib)
-%ifnarch s390 %{mips} %{arm}
+%ifnarch s390 %{mips}
 BuildRequires:  valgrind-devel
 %endif
 # For %%{python3_sitearch}
@@ -114,10 +108,6 @@ mpich support for Python 3.
 %ifarch %{arm}
 %patch1 -p1
 %endif
-
-%patch3 -p1
-
-%patch4 -p1
 
 %build
 ./autogen.sh
@@ -251,8 +241,9 @@ make check VERBOSE=1 \
 %{python3_sitearch}/%{name}.pth
 
 %changelog
-* Sun Aug 21 2022 Jacco Ligthart <jacco@redsleeve.org> - 3.4.2-1.redsleeve
-- no valgrind for %{arm}
+* Sat Jun 03 2023 Kamal Heib <kheib@redhat.com> - 4.1.1-1
+- Update to upstream release 4.1.1
+- Resolves: rhbz#2212010
 
 * Sat Nov 27 2021 Honggang Li <honli@redhat.com> - 3.4.2-1
 - Update to latest version 3.4.2

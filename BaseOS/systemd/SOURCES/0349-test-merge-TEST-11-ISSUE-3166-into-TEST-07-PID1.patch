@@ -1,0 +1,108 @@
+From b04b14f0fda07377721362d9ff384f85a754ef18 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 10 May 2023 13:49:34 +0200
+Subject: [PATCH] test: merge TEST-11-ISSUE-3166 into TEST-07-PID1
+
+(cherry picked from commit 33dff897b9ad1e24b2c737de1e41b21c4543c8e1)
+
+Related: #2213521
+---
+ test/TEST-11-ISSUE-3166/Makefile                 |  1 -
+ test/TEST-11-ISSUE-3166/test.sh                  | 11 -----------
+ .../issue3166-fail-on-restart.service}           |  0
+ test/units/testsuite-07.issue-3166.sh            | 16 ++++++++++++++++
+ test/units/testsuite-11.service                  |  8 --------
+ test/units/testsuite-11.sh                       | 14 --------------
+ 6 files changed, 16 insertions(+), 34 deletions(-)
+ delete mode 120000 test/TEST-11-ISSUE-3166/Makefile
+ delete mode 100755 test/TEST-11-ISSUE-3166/test.sh
+ rename test/{testsuite-11.units/fail-on-restart.service => testsuite-07.units/issue3166-fail-on-restart.service} (100%)
+ create mode 100755 test/units/testsuite-07.issue-3166.sh
+ delete mode 100644 test/units/testsuite-11.service
+ delete mode 100755 test/units/testsuite-11.sh
+
+diff --git a/test/TEST-11-ISSUE-3166/Makefile b/test/TEST-11-ISSUE-3166/Makefile
+deleted file mode 120000
+index e9f93b1104..0000000000
+--- a/test/TEST-11-ISSUE-3166/Makefile
++++ /dev/null
+@@ -1 +0,0 @@
+-../TEST-01-BASIC/Makefile
+\ No newline at end of file
+diff --git a/test/TEST-11-ISSUE-3166/test.sh b/test/TEST-11-ISSUE-3166/test.sh
+deleted file mode 100755
+index 12dabd704d..0000000000
+--- a/test/TEST-11-ISSUE-3166/test.sh
++++ /dev/null
+@@ -1,11 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -e
+-
+-TEST_DESCRIPTION="https://github.com/systemd/systemd/issues/3166"
+-TEST_NO_NSPAWN=1
+-
+-# shellcheck source=test/test-functions
+-. "${TEST_BASE_DIR:?}/test-functions"
+-
+-do_test "$@"
+diff --git a/test/testsuite-11.units/fail-on-restart.service b/test/testsuite-07.units/issue3166-fail-on-restart.service
+similarity index 100%
+rename from test/testsuite-11.units/fail-on-restart.service
+rename to test/testsuite-07.units/issue3166-fail-on-restart.service
+diff --git a/test/units/testsuite-07.issue-3166.sh b/test/units/testsuite-07.issue-3166.sh
+new file mode 100755
+index 0000000000..6677901358
+--- /dev/null
++++ b/test/units/testsuite-07.issue-3166.sh
+@@ -0,0 +1,16 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++# Service doesn't enter the "failed" state
++# Issue: https://github.com/systemd/systemd/issues/3166
++
++systemctl --no-block start issue3166-fail-on-restart.service
++active_state="$(systemctl show --value --property ActiveState issue3166-fail-on-restart.service)"
++while [[ "$active_state" == "activating" || "$active_state" =~ ^(in)?active$ ]]; do
++    sleep .5
++    active_state="$(systemctl show --value --property ActiveState issue3166-fail-on-restart.service)"
++done
++systemctl is-failed issue3166-fail-on-restart.service || exit 1
++[[ "$(systemctl show --value --property NRestarts issue3166-fail-on-restart.service)" -le 3 ]] || exit 1
+diff --git a/test/units/testsuite-11.service b/test/units/testsuite-11.service
+deleted file mode 100644
+index 5dfcf50e3f..0000000000
+--- a/test/units/testsuite-11.service
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-[Unit]
+-Description=TEST-11-ISSUE-3166
+-
+-[Service]
+-ExecStartPre=rm -f /failed /testok
+-ExecStart=/usr/lib/systemd/tests/testdata/units/%N.sh
+-Type=oneshot
+diff --git a/test/units/testsuite-11.sh b/test/units/testsuite-11.sh
+deleted file mode 100755
+index 7e1391d8ea..0000000000
+--- a/test/units/testsuite-11.sh
++++ /dev/null
+@@ -1,14 +0,0 @@
+-#!/usr/bin/env bash
+-# SPDX-License-Identifier: LGPL-2.1-or-later
+-set -eux
+-set -o pipefail
+-
+-systemctl --no-block start fail-on-restart.service
+-active_state=$(systemctl show --value --property ActiveState fail-on-restart.service)
+-while [[ "$active_state" == "activating" || "$active_state" =~ ^(in)?active$ ]]; do
+-    sleep .5
+-    active_state=$(systemctl show --value --property ActiveState fail-on-restart.service)
+-done
+-systemctl is-failed fail-on-restart.service || exit 1
+-[[ "$(systemctl show --value --property NRestarts fail-on-restart.service)" -le 3 ]] || exit 1
+-touch /testok

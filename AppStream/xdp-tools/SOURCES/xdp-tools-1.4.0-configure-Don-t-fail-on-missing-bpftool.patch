@@ -1,0 +1,117 @@
+From 7760d84998f1fd042b3842f598296efe264fc385 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Toke=20H=C3=B8iland-J=C3=B8rgensen?= <toke@redhat.com>
+Date: Thu, 9 Feb 2023 17:57:41 +0100
+Subject: [PATCH] configure: Don't fail on missing bpftool
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Instead of bailing out of configure if bpftool is not found, just disable
+compilation of the tools that require it (i.e., xdp-bench, xdp-monitor and
+xdp-trafficgen which use BPF skeletons).
+
+Signed-off-by: Toke Høiland-Jørgensen <toke@redhat.com>
+---
+ Makefile                |  8 +++++++-
+ configure               |  9 +++++----
+ lib/testing/test-tool.c |  4 ++++
+ lib/util/util.mk        | 13 +++++++++++--
+ 4 files changed, 27 insertions(+), 7 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 5c22e854db8d..d5dc21fb076c 100644
+--- a/Makefile
++++ b/Makefile
+@@ -14,8 +14,14 @@ MAKEFLAGS += --no-print-directory
+ endif
+ 
+ include version.mk
++include config.mk
++
++UTILS := xdp-filter xdp-loader xdp-dump
++
++ifneq ($(BPFTOOL),)
++UTILS += xdp-bench xdp-monitor xdp-trafficgen
++endif
+ 
+-UTILS := xdp-filter xdp-loader xdp-dump xdp-bench xdp-monitor xdp-trafficgen
+ SUBDIRS := lib $(UTILS)
+ .PHONY: check_submodule help clobber distclean clean install test libxdp $(SUBDIRS)
+ 
+diff --git a/configure b/configure
+index c32790cc361d..4bdb66b8b761 100755
+--- a/configure
++++ b/configure
+@@ -71,7 +71,7 @@ check_toolchain()
+     CLANG=$(find_tool clang "$CLANG")
+     LLC=$(find_tool llc "$LLC")
+ 
+-    for TOOL in $PKG_CONFIG $CC $LD $OBJCOPY $CLANG $LLC $M4 $BPFTOOL; do
++    for TOOL in $PKG_CONFIG $CC $LD $OBJCOPY $CLANG $LLC $M4; do
+         if [ ! $(command -v ${TOOL} 2>/dev/null) ]; then
+             echo "*** ERROR: Cannot find tool ${TOOL}" ;
+             exit 1;
+@@ -108,12 +108,12 @@ check_toolchain()
+         exit 1
+     fi
+ 
+-    if $BPFTOOL gen help 2>&1 | grep 'gen skeleton.*name' > /dev/null; then
++    if command -v $BPFTOOL &>/dev/null && $BPFTOOL gen help 2>&1 | grep 'gen skeleton.*name' > /dev/null; then
+         bpftool_version=$($BPFTOOL version | head -n 1)
+ 	echo "using $bpftool_version"
+     else
+-	echo "bpftool doesn't support skeleton generation"
+-        exit 1
++	echo "bpftool not found or doesn't support skeleton generation; not building all tools"
++        BPFTOOL=
+     fi
+ 
+     if [ -z "$ARCH_INCLUDES" ]; then
+@@ -134,6 +134,7 @@ check_toolchain()
+     echo "EMACS:=${EMACS}" >>$CONFIG
+     echo "ARCH_INCLUDES:=$ARCH_INCLUDES" >> $CONFIG
+     echo "BPFTOOL:=${BPFTOOL}" >> $CONFIG
++    [ -n "$BPFTOOL" ] && echo "HAVE_FEATURES+=BPFTOOL" >>"$CONFIG"
+ }
+ 
+ check_zlib()
+diff --git a/lib/testing/test-tool.c b/lib/testing/test-tool.c
+index 3dd5270af95f..95f76cb36573 100644
+--- a/lib/testing/test-tool.c
++++ b/lib/testing/test-tool.c
+@@ -205,10 +205,14 @@ int do_probe(const void *cfg, __unused const char *pin_root_path)
+ 
+ 	switch (opt->action) {
+ 	case PROBE_CPUMAP_PROGRAM:
++#ifdef HAVE_BPFTOOL
+ 		res = sample_probe_cpumap_compat();
++#endif
+ 		break;
+ 	case PROBE_XDP_LOAD_BYTES:
++#ifdef HAVE_BPFTOOL
+ 		res = sample_probe_xdp_load_bytes();
++#endif
+ 		break;
+         default:
+                 return EXIT_FAILURE;
+diff --git a/lib/util/util.mk b/lib/util/util.mk
+index 2b6a2e08af3b..6c9ebaf00f77 100644
+--- a/lib/util/util.mk
++++ b/lib/util/util.mk
+@@ -1,2 +1,11 @@
+-UTIL_OBJS := params.o logging.o util.o stats.o xpcapng.o xdp_sample.o
+-UTIL_BPF_OBJS := xdp_sample.bpf.o xdp_load_bytes.bpf.o
++LIB_DIR ?= ..
++include $(LIB_DIR)/defines.mk
++
++UTIL_OBJS := params.o logging.o util.o stats.o xpcapng.o
++UTIL_BPF_OBJS :=
++
++ifneq ($(BPFTOOL),)
++UTIL_OBJS += xdp_sample.o
++UTIL_BPF_OBJS += xdp_sample.bpf.o xdp_load_bytes.bpf.o
++endif
++
+-- 
+2.41.0
+

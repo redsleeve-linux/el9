@@ -1,0 +1,140 @@
+From 7ce47c0fc8b624d08f238f5ef364275ec8a791f5 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 25 May 2023 18:08:37 +0900
+Subject: [PATCH] core/unit: search shared namespace in transitive relation of
+ JoinsNamespaceOf=
+
+Previously, dependency chain of JoinsNamespaceOf= did not work, e.g.
+- a.service has JoinsNamespaceOf=b.service
+- b.service has JoinsNamespaceOf=c.service
+if, first c.service, next a.service, finally b.service is started,
+then a.service is not joined to the namespace of c.service. And, as
+mentioned in the document, the namespace used by b.service is not
+deterministic.
+
+This makes when searching exsiting namespace to be joined, all units in
+the transitive dependency of JoinsNamespaceOf= are checked.
+
+(cherry picked from commit 83123a44989c095f9b7a89841db9917417fc451a)
+
+Related: #2213521
+---
+ src/core/unit.c                               | 36 ++++++++++++++++++-
+ src/core/unit.h                               |  1 +
+ .../testsuite-23-joins-namespace-of-7.service |  2 +-
+ .../testsuite-23-joins-namespace-of-8.service |  2 +-
+ .../testsuite-23-joins-namespace-of-9.service |  6 ++--
+ 5 files changed, 41 insertions(+), 6 deletions(-)
+
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 8b66139ad9..6acc63e091 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -4718,6 +4718,7 @@ int unit_require_mounts_for(Unit *u, const char *path, UnitDependencyMask mask)
+ }
+ 
+ int unit_setup_exec_runtime(Unit *u) {
++        _cleanup_set_free_ Set *units = NULL;
+         ExecRuntime **rt;
+         size_t offset;
+         Unit *other;
+@@ -4731,9 +4732,15 @@ int unit_setup_exec_runtime(Unit *u) {
+         if (*rt)
+                 return 0;
+ 
++        r = unit_get_transitive_dependency_set(u, UNIT_ATOM_JOINS_NAMESPACE_OF, &units);
++        if (r < 0)
++                return r;
++
+         /* Try to get it from somebody else */
+-        UNIT_FOREACH_DEPENDENCY(other, u, UNIT_ATOM_JOINS_NAMESPACE_OF) {
++        SET_FOREACH(other, units) {
+                 r = exec_runtime_acquire(u->manager, NULL, other->id, false, rt);
++                if (r < 0)
++                        return r;
+                 if (r == 1)
+                         return 1;
+         }
+@@ -5921,6 +5928,33 @@ int unit_get_dependency_array(const Unit *u, UnitDependencyAtom atom, Unit ***re
+         return (int) n;
+ }
+ 
++int unit_get_transitive_dependency_set(Unit *u, UnitDependencyAtom atom, Set **ret) {
++        _cleanup_set_free_ Set *units = NULL, *queue = NULL;
++        Unit *other;
++        int r;
++
++        assert(u);
++        assert(ret);
++
++        /* Similar to unit_get_dependency_array(), but also search the same dependency in other units. */
++
++        do {
++                UNIT_FOREACH_DEPENDENCY(other, u, atom) {
++                        r = set_ensure_put(&units, NULL, other);
++                        if (r < 0)
++                                return r;
++                        if (r == 0)
++                                continue;
++                        r = set_ensure_put(&queue, NULL, other);
++                        if (r < 0)
++                                return r;
++                }
++        } while ((u = set_steal_first(queue)));
++
++        *ret = TAKE_PTR(units);
++        return 0;
++}
++
+ const ActivationDetailsVTable * const activation_details_vtable[_UNIT_TYPE_MAX] = {
+         [UNIT_PATH] = &activation_details_path_vtable,
+         [UNIT_TIMER] = &activation_details_timer_vtable,
+diff --git a/src/core/unit.h b/src/core/unit.h
+index 3bc7de3d1c..e79b5322b4 100644
+--- a/src/core/unit.h
++++ b/src/core/unit.h
+@@ -805,6 +805,7 @@ static inline const UnitVTable* UNIT_VTABLE(const Unit *u) {
+ 
+ Unit* unit_has_dependency(const Unit *u, UnitDependencyAtom atom, Unit *other);
+ int unit_get_dependency_array(const Unit *u, UnitDependencyAtom atom, Unit ***ret_array);
++int unit_get_transitive_dependency_set(Unit *u, UnitDependencyAtom atom, Set **ret);
+ 
+ static inline Hashmap* unit_get_dependencies(Unit *u, UnitDependency d) {
+         return hashmap_get(u->dependencies, UNIT_DEPENDENCY_TO_PTR(d));
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-7.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-7.service
+index 6c7bbdb097..60c083a3f4 100644
+--- a/test/testsuite-23.units/testsuite-23-joins-namespace-of-7.service
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-7.service
+@@ -6,6 +6,6 @@ JoinsNamespaceOf=testsuite-23-joins-namespace-of-8.service
+ Type=oneshot
+ MountAPIVFS=yes
+ PrivateTmp=yes
+-ExecStart=test ! -e /tmp/shared-private-file-x
++ExecStart=test -e /tmp/shared-private-file-x
+ ExecStart=test ! -e /tmp/shared-private-file-y
+ ExecStart=touch /tmp/hoge
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service
+index 42053b99f8..dac1cea7bd 100644
+--- a/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-8.service
+@@ -5,5 +5,5 @@ NotifyAccess=all
+ MountAPIVFS=yes
+ PrivateTmp=yes
+ ExecStartPre=test -e /tmp/shared-private-file-x
+-ExecStartPre=test ! -e /tmp/hoge
++ExecStartPre=test -e /tmp/hoge
+ ExecStart=/bin/bash -c 'touch /tmp/shared-private-file-y && systemd-notify --ready && sleep infinity'
+diff --git a/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service b/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service
+index a50a7fcdc2..6c64873b24 100644
+--- a/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service
++++ b/test/testsuite-23.units/testsuite-23-joins-namespace-of-9.service
+@@ -6,6 +6,6 @@ JoinsNamespaceOf=testsuite-23-joins-namespace-of-8.service
+ Type=oneshot
+ MountAPIVFS=yes
+ PrivateTmp=yes
+-ExecStart=test ! -e /tmp/shared-private-file-x
+-ExecStart=test ! -e /tmp/shared-private-file-y
+-ExecStart=test ! -e /tmp/hoge
++ExecStart=test -e /tmp/shared-private-file-x
++ExecStart=test -e /tmp/shared-private-file-y
++ExecStart=test -e /tmp/hoge

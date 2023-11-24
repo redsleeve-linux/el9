@@ -12,83 +12,84 @@
 #global patchver P1
 %global DHCPVERSION %{version}%{?prever}%{?patchver:-%{patchver}}
 
-Summary:  Dynamic host configuration protocol software
-Name:     dhcp
-Version:  4.4.2
-Release:  18.b1%{?dist}.redsleeve
+Summary:              Dynamic host configuration protocol software
+Name:                 dhcp
+Version:              4.4.2
+Release:              19.b1%{?dist}
 
 # NEVER CHANGE THE EPOCH on this package.  The previous maintainer (prior to
 # dcantrell maintaining the package) made incorrect use of the epoch and
 # that's why it is at 12 now.  It should have never been used, but it was.
 # So we are stuck with it.
-Epoch:    12
-License:  ISC
-Url:      https://www.isc.org/dhcp/
-Source0:  ftp://ftp.isc.org/isc/dhcp/%{DHCPVERSION}/dhcp-%{DHCPVERSION}.tar.gz
-Source1:  dhclient-script
-Source2:  README.dhclient.d
-Source3:  11-dhclient
-Source5:  56dhclient
-Source6:  dhcpd.service
-Source7:  dhcpd6.service
-Source8:  dhcrelay.service
-Source9:  dhcp.sysusers
+Epoch:                12
+License:              ISC
+Url:                  https://www.isc.org/dhcp/
+Source0:              ftp://ftp.isc.org/isc/dhcp/%{DHCPVERSION}/dhcp-%{DHCPVERSION}.tar.gz
+Source1:              dhclient-script
+Source2:              README.dhclient.d
+Source3:              11-dhclient
+Source5:              56dhclient
+Source6:              dhcpd.service
+Source7:              dhcpd6.service
+Source8:              dhcrelay.service
+Source9:              dhcp.sysusers
 
-Patch1: 0001-change-bug-url.patch
-Patch2: 0002-additional-dhclient-options.patch
-Patch3: 0003-Handle-releasing-interfaces-requested-by-sbin-ifup.patch
-Patch4: 0004-Support-unicast-BOOTP-for-IBM-pSeries-systems-and-ma.patch
-Patch5: 0005-Change-default-requested-options.patch
-Patch6: 0006-Various-man-page-only-fixes.patch
-Patch7: 0007-Change-paths-to-conform-to-our-standards.patch
-Patch8: 0008-Make-sure-all-open-file-descriptors-are-closed-on-ex.patch
-Patch9: 0009-Fix-garbage-in-format-string-error.patch
-Patch10: 0010-Handle-null-timeout.patch
-Patch11: 0011-Drop-unnecessary-capabilities.patch
-Patch12: 0012-RFC-3442-Classless-Static-Route-Option-for-DHCPv4-51.patch
-Patch13: 0013-DHCPv6-over-PPP-support-626514.patch
-Patch14: 0014-IPoIB-support-660681.patch
-Patch15: 0015-Add-GUID-DUID-to-dhcpd-logs-1064416.patch
-Patch16: 0016-Turn-on-creating-sending-of-DUID.patch
-Patch17: 0017-Send-unicast-request-release-via-correct-interface.patch
-Patch18: 0018-No-subnet-declaration-for-iface-should-be-info-not-e.patch
-Patch19: 0019-dhclient-write-DUID_LLT-even-in-stateless-mode-11563.patch
-Patch20: 0020-Discover-all-hwaddress-for-xid-uniqueness.patch
-Patch21: 0021-Load-leases-DB-in-non-replay-mode-only.patch
-Patch22: 0022-dhclient-make-sure-link-local-address-is-ready-in-st.patch
-Patch23: 0023-option-97-pxe-client-id.patch
-Patch24: 0024-Detect-system-time-changes.patch
-Patch25: 0025-bind-Detect-system-time-changes.patch
-Patch26: 0026-Add-dhclient-5-B-option-description.patch
-Patch27: 0027-Add-missed-sd-notify-patch-to-manage-dhcpd-with-syst.patch
-Patch28: 0028-Fix-for-CVE-2021-25217.patch
-Patch29: 0029-Use-system-getaddrinfo-for-dhcp.patch
-Patch30: CVE-2021-25220.patch
-Patch31: omshell-hmac-sha512-support.patch
-Patch32: CVE-2022-2928.patch
-Patch33: CVE-2022-2929.patch
+Patch1:               0001-change-bug-url.patch
+Patch2:               0002-additional-dhclient-options.patch
+Patch3:               0003-Handle-releasing-interfaces-requested-by-sbin-ifup.patch
+Patch4:               0004-Support-unicast-BOOTP-for-IBM-pSeries-systems-and-ma.patch
+Patch5:               0005-Change-default-requested-options.patch
+Patch6:               0006-Various-man-page-only-fixes.patch
+Patch7:               0007-Change-paths-to-conform-to-our-standards.patch
+Patch8:               0008-Make-sure-all-open-file-descriptors-are-closed-on-ex.patch
+Patch9:               0009-Fix-garbage-in-format-string-error.patch
+Patch10:              0010-Handle-null-timeout.patch
+Patch11:              0011-Drop-unnecessary-capabilities.patch
+Patch12:              0012-RFC-3442-Classless-Static-Route-Option-for-DHCPv4-51.patch
+Patch13:              0013-DHCPv6-over-PPP-support-626514.patch
+Patch14:              0014-IPoIB-support-660681.patch
+Patch15:              0015-Add-GUID-DUID-to-dhcpd-logs-1064416.patch
+Patch16:              0016-Turn-on-creating-sending-of-DUID.patch
+Patch17:              0017-Send-unicast-request-release-via-correct-interface.patch
+Patch18:              0018-No-subnet-declaration-for-iface-should-be-info-not-e.patch
+Patch19:              0019-dhclient-write-DUID_LLT-even-in-stateless-mode-11563.patch
+Patch20:              0020-Discover-all-hwaddress-for-xid-uniqueness.patch
+Patch21:              0021-Load-leases-DB-in-non-replay-mode-only.patch
+Patch22:              0022-dhclient-make-sure-link-local-address-is-ready-in-st.patch
+Patch23:              0023-option-97-pxe-client-id.patch
+Patch24:              0024-Detect-system-time-changes.patch
+Patch25:              0025-bind-Detect-system-time-changes.patch
+Patch26:              0026-Add-dhclient-5-B-option-description.patch
+Patch27:              0027-Add-missed-sd-notify-patch-to-manage-dhcpd-with-syst.patch
+Patch28:              0028-Fix-for-CVE-2021-25217.patch
+Patch29:              0029-Use-system-getaddrinfo-for-dhcp.patch
+Patch30:              CVE-2021-25220.patch
+Patch31:              omshell-hmac-sha512-support.patch
+Patch32:              CVE-2022-2928.patch
+Patch33:              CVE-2022-2929.patch
+Patch34:              dont-drop-bounds-twice.patch
 
 
-BuildRequires: autoconf
-BuildRequires: automake
-BuildRequires: make
-BuildRequires: libtool
-BuildRequires: openldap-devel
+BuildRequires:        autoconf
+BuildRequires:        automake
+BuildRequires:        make
+BuildRequires:        libtool
+BuildRequires:        openldap-devel
 # --with-ldap-gssapi
-BuildRequires: krb5-devel
-BuildRequires: libcap-ng-devel
+BuildRequires:        krb5-devel
+BuildRequires:        libcap-ng-devel
 # https://fedorahosted.org/fpc/ticket/502#comment:3
-BuildRequires: systemd systemd-devel
+BuildRequires:        systemd systemd-devel
 # dhcp-sd_notify.patch
-BuildRequires: pkgconfig(libsystemd)
+BuildRequires:        pkgconfig(libsystemd)
 %if ! 0%{?_module_build}
-BuildRequires: doxygen
+BuildRequires:        doxygen
 %endif
 %if %{sdt}
-BuildRequires: systemtap-sdt-devel
+BuildRequires:        systemtap-sdt-devel
 %global tapsetdir    /usr/share/systemtap/tapset
 %endif
-BuildRequires: systemd-rpm-macros
+BuildRequires:        systemd-rpm-macros
 
 # In _docdir we ship some perl scripts and module from contrib subdirectory.
 # Because nothing under _docdir is allowed to "require" anything,
@@ -100,8 +101,8 @@ BuildRequires: systemd-rpm-macros
 DHCP (Dynamic Host Configuration Protocol)
 
 %package server
-Summary: Provides the ISC DHCP server
-Requires: %{name}-common = %{epoch}:%{version}-%{release}
+Summary:              Provides the ISC DHCP server
+Requires:             %{name}-common = %{epoch}:%{version}-%{release}
 Requires(post): coreutils grep sed
 %{?sysusers_requires_compat}
 %{?systemd_requires}
@@ -116,8 +117,8 @@ easier to administer a large network.
 This package provides the ISC DHCP server.
 
 %package relay
-Summary: Provides the ISC DHCP relay agent
-Requires: %{name}-common = %{epoch}:%{version}-%{release}
+Summary:              Provides the ISC DHCP relay agent
+Requires:             %{name}-common = %{epoch}:%{version}-%{release}
 Requires(post): grep sed
 %{?systemd_requires}
 
@@ -132,14 +133,14 @@ This package provides the ISC DHCP relay agent.
 
 
 %package client
-Summary: Provides the ISC DHCP client daemon and dhclient-script
-Provides: dhclient = %{epoch}:%{version}-%{release}
-Obsoletes: dhclient < %{epoch}:%{version}-%{release}
+Summary:              Provides the ISC DHCP client daemon and dhclient-script
+Provides:             dhclient = %{epoch}:%{version}-%{release}
+Obsoletes:            dhclient < %{epoch}:%{version}-%{release}
 # dhclient-script requires:
-Requires: coreutils gawk grep ipcalc iproute iputils sed systemd
-Requires: %{name}-common = %{epoch}:%{version}-%{release}
+Requires:             coreutils gawk grep ipcalc iproute iputils sed systemd
+Requires:             %{name}-common = %{epoch}:%{version}-%{release}
 # Old NetworkManager expects the dispatcher scripts in a different place
-Conflicts: NetworkManager < 1.20
+Conflicts:            NetworkManager < 1.20
 
 %description client
 DHCP (Dynamic Host Configuration Protocol) is a protocol which allows
@@ -151,9 +152,9 @@ easier to administer a large network.
 This package provides the ISC DHCP client.
 
 %package common
-Summary: Common files used by ISC dhcp client, server and relay agent
-BuildArch: noarch
-Obsoletes: dhcp-libs < %{epoch}:%{version}
+Summary:              Common files used by ISC dhcp client, server and relay agent
+BuildArch:            noarch
+Obsoletes:            dhcp-libs < %{epoch}:%{version}
 
 
 
@@ -167,19 +168,19 @@ easier to administer a large network.
 This package provides common files used by dhcp and dhclient package.
 
 %package libs-static
-Summary: Shared libraries used by ISC dhcp client and server
-Provides: %{name}-libs%{?_isa} =  %{epoch}:%{version}-%{release}
-Provides: %{name}-libs =  %{epoch}:%{version}-%{release}
-Provides: bundled(bind-export-libs)
-Provides: bundled(bind)
+Summary:              Shared libraries used by ISC dhcp client and server
+Provides:             %{name}-libs%{?_isa} =  %{epoch}:%{version}-%{release}
+Provides:             %{name}-libs =  %{epoch}:%{version}-%{release}
+Provides:             bundled(bind-export-libs)
+Provides:             bundled(bind)
 
 %description libs-static
 This package contains shared libraries used by ISC dhcp client and server
 
 
 %package devel
-Summary: Development headers and libraries for interfacing to the DHCP server
-Requires: %{name}-libs%{?_isa} = %{epoch}:%{version}-%{release}
+Summary:              Development headers and libraries for interfacing to the DHCP server
+Requires:             %{name}-libs%{?_isa} = %{epoch}:%{version}-%{release}
 
 %description devel
 Header files and API documentation for using the ISC DHCP libraries.  The
@@ -187,9 +188,9 @@ libdhcpctl and libomapi static libraries are also included in this package.
 
 %if ! 0%{?_module_build}
 %package devel-doc
-Summary: Developer's Guide for ISC DHCP
-Requires: %{name}-libs = %{epoch}:%{version}-%{release}
-BuildArch: noarch
+Summary:              Developer's Guide for ISC DHCP
+Requires:             %{name}-libs = %{epoch}:%{version}-%{release}
+BuildArch:            noarch
 
 %description devel-doc
 This documentation is intended for developers, contributors and other
@@ -228,10 +229,6 @@ sed -i -e 's|/var/db/|%{_localstatedir}/lib/dhcpd/|g' contrib/dhcp-lease-list.pl
 %build
 #libtoolize --copy --force
 autoreconf --verbose --force --install
-
-%ifarch %{arm}
-export LIBS=-latomic
-%endif
 
 CFLAGS="%{optflags} -fno-strict-aliasing -fcommon" \
 %configure \
@@ -512,11 +509,11 @@ done
 %endif
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> 4.4.2-18.b1.el9.redsleeve
-- added atomic libs for arm
+* Thu Oct 26 2023 Release Engineering <releng@rockylinux.org> - 4.4.2-19.b1
+- Change bug tracker path
 
-* Tue May 09 2023 CentOS Sources <bugs@centos.org> - 4.4.2-18.b1.el9.centos
-- Apply debranding changes
+* Wed Apr 12 2023 Martin Osvald <mosvald@redhat.com> - 12:4.4.2-19.b1
+- Do not drop bounding set twice (#2184965)
 
 * Mon Oct 10 2022 Martin Osvald <mosvald@redhat.com> - 12:4.4.2-18.b1
 - Fix for CVE-2022-2928

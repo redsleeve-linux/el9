@@ -1,0 +1,39 @@
+From 65d993c2efe52d683396dc3181cc79f29698bf39 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?C=C3=A9dric=20Le=20Goater?= <clg@redhat.com>
+Date: Wed, 21 Jun 2023 17:10:46 +0200
+Subject: [PATCH] rules: online CPU automatically on IBM s390x platforms when
+ configured
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RHEL-only
+
+Fix CPU hotplug regression on s390x introduced by commit 94c7e260b499 ("rules:
+do not online CPU automatically on IBM platforms"). After discussion with IBM,
+CPUs should be auto-enabled when in the configured state after a hotplug.
+However, if the CPU is deconfigured, it should not.
+
+This is because on zVM and KVM hotplugged CPUs are configured and on LPAR/DPM
+they are deconfigured.
+
+Resolves: #2212612
+Signed-off-by: Cédric Le Goater <clg@redhat.com>
+---
+ rules.d/40-redhat.rules | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/rules.d/40-redhat.rules b/rules.d/40-redhat.rules
+index efb866966e..00c02a59bd 100644
+--- a/rules.d/40-redhat.rules
++++ b/rules.d/40-redhat.rules
+@@ -3,7 +3,8 @@
+ # CPU hotadd request
+ SUBSYSTEM!="cpu", GOTO="cpu_online_end"
+ ACTION!="add", GOTO="cpu_online_end"
+-CONST{arch}=="s390*|ppc64*", GOTO="cpu_online_end"
++CONST{arch}=="ppc64*", GOTO="cpu_online_end"
++CONST{arch}=="s390*", ATTR{configure}=="0", GOTO="cpu_online_end"
+ 
+ TEST=="online", ATTR{online}=="0", ATTR{online}="1"
+ 

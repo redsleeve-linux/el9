@@ -1,0 +1,100 @@
+From 7816037425c80202ed375cff0cc6249c2bc91e2c Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 4 Apr 2023 14:19:51 +0900
+Subject: [PATCH] sd-journal: allow to specify compression algorithm through
+ env
+
+Fixes RHBZ#2183546 (https://bugzilla.redhat.com/show_bug.cgi?id=2183546).
+
+Previously, journal file is always compressed with the default algorithm
+set at compile time. So, if a newer algorithm is used, journal files
+cannot be read by older version of journalctl that does not support the
+algorithm.
+
+Co-authored-by: Colin Walters <walters@verbum.org>
+(cherry picked from commit 1f06ea747b5939a1083c436dd7dae97b37bedee7)
+
+Resolves: #2183546
+---
+ docs/ENVIRONMENT.md                      |  8 +++++
+ src/libsystemd/sd-journal/journal-file.c | 44 +++++++++++++++++++++++-
+ 2 files changed, 51 insertions(+), 1 deletion(-)
+
+diff --git a/docs/ENVIRONMENT.md b/docs/ENVIRONMENT.md
+index ab3add6031..70fac2e361 100644
+--- a/docs/ENVIRONMENT.md
++++ b/docs/ENVIRONMENT.md
+@@ -471,3 +471,11 @@ SYSTEMD_HOME_DEBUG_SUFFIX=foo \
+   in a more compact format that reduces the amount of disk space required by the
+   journal. Note that journal files in compact mode are limited to 4G to allow use of
+   32-bit offsets. Enabled by default.
++
++* `$SYSTEMD_JOURNAL_COMPRESS` – Takes a boolean, or one of the compression
++  algorithms "XZ", "LZ4", and "ZSTD". If enabled, the default compression
++  algorithm set at compile time will be used when opening a new journal file.
++  If disabled, the journal file compression will be disabled. Note that the
++  compression mode of existing journal files are not changed. To make the
++  specified algorithm takes an effect immediately, you need to explicitly run
++  `journalctl --rotate`.
+diff --git a/src/libsystemd/sd-journal/journal-file.c b/src/libsystemd/sd-journal/journal-file.c
+index 1b8f0abf97..3c1385ddb0 100644
+--- a/src/libsystemd/sd-journal/journal-file.c
++++ b/src/libsystemd/sd-journal/journal-file.c
+@@ -329,6 +329,48 @@ static bool compact_mode_requested(void) {
+         return cached;
+ }
+ 
++#if HAVE_COMPRESSION
++static Compression getenv_compression(void) {
++        Compression c;
++        const char *e;
++        int r;
++
++        e = getenv("SYSTEMD_JOURNAL_COMPRESS");
++        if (!e)
++                return DEFAULT_COMPRESSION;
++
++        r = parse_boolean(e);
++        if (r >= 0)
++                return r ? DEFAULT_COMPRESSION : COMPRESSION_NONE;
++
++        c = compression_from_string(e);
++        if (c < 0) {
++                log_debug_errno(c, "Failed to parse SYSTEMD_JOURNAL_COMPRESS value, ignoring: %s", e);
++                return DEFAULT_COMPRESSION;
++        }
++
++        if (!compression_supported(c)) {
++                log_debug("Unsupported compression algorithm specified, ignoring: %s", e);
++                return DEFAULT_COMPRESSION;
++        }
++
++        return c;
++}
++#endif
++
++static Compression compression_requested(void) {
++#if HAVE_COMPRESSION
++        static thread_local Compression cached = _COMPRESSION_INVALID;
++
++        if (cached < 0)
++                cached = getenv_compression();
++
++        return cached;
++#else
++        return COMPRESSION_NONE;
++#endif
++}
++
+ static int journal_file_init_header(JournalFile *f, JournalFileFlags file_flags, JournalFile *template) {
+         bool seal = false;
+         ssize_t k;
+@@ -344,7 +386,7 @@ static int journal_file_init_header(JournalFile *f, JournalFileFlags file_flags,
+         Header h = {
+                 .header_size = htole64(ALIGN64(sizeof(h))),
+                 .incompatible_flags = htole32(
+-                                FLAGS_SET(file_flags, JOURNAL_COMPRESS) * COMPRESSION_TO_HEADER_INCOMPATIBLE_FLAG(DEFAULT_COMPRESSION) |
++                                FLAGS_SET(file_flags, JOURNAL_COMPRESS) * COMPRESSION_TO_HEADER_INCOMPATIBLE_FLAG(compression_requested()) |
+                                 keyed_hash_requested() * HEADER_INCOMPATIBLE_KEYED_HASH |
+                                 compact_mode_requested() * HEADER_INCOMPATIBLE_COMPACT),
+                 .compatible_flags = htole32(seal * HEADER_COMPATIBLE_SEALED),

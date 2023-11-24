@@ -2,7 +2,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 37%{?dist}.redsleeve
+Release: 42%{?dist}
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -424,6 +424,22 @@ Patch61: binutils-increase-the-max-number-of-open-fi.patch
 # Purpose:  Remove a comment from bfd_stdint.h, indicating how the file was generated.
 # Lifetime: Fixed in 2.39 ?
 Patch62: binutils-no-comment-in-bfd-stdint.patch
+
+# Purpose:  Fix a potential seg-fault when dumping corrupt ELF files.
+# Lifetime: Fixed in 2.40
+Patch63: binutils-CVE-2023-25587.patch
+
+# Purpose:  Fix an illegal memory access when parsing an elf file containing corrupt symbol version information
+# Lifetime: 2.39 
+Patch64: binutils-memory-access-when-parsing-an-elf-file.patch
+
+# Purpose:  Fix an illegal memory access when parsing an elf file containing corrupt DWARF information
+# Lifetime: 2.38
+Patch65: binutils.gold.dwarf-5-support.patch
+
+# Purpose:  Add support for the AArch64 'flagm' extenstion to the assembler.
+# Lifetime: 2.36
+Patch66: binutils-aarch64-flagm.patch
 #----------------------------------------------------------------------------
 
 Provides: bundled(libiberty)
@@ -489,7 +505,6 @@ Requires(post): coreutils
 BuildRequires: elfutils-debuginfod-client-devel
 %endif
 
-Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 %description
@@ -1265,8 +1280,20 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-37.redsleeve
-- minor adjustments for armv6
+* Wed Apr 26 2023 Nick Clifton  <nickc@redhat.com> - 2.35.2-42
+- Add support for the AArch64 'flagm' extenstion to the assembler.  (#2189304)
+
+* Wed Apr 19 2023 Nick Clifton  <nickc@redhat.com> - 2.35.2-41
+- Add DWARF-5 support to GOLD.  (#2182587)
+
+* Thu Mar 16 2023 Yara Ahmad  <yahmad@redhat.com> - 2.35.2-40
+- Fix an illegal memory access when parsing an ELF file containing corrupt symbol version information.  (#2164701) 
+
+* Thu Mar 09 2023 Nick Clifton  <nickc@redhat.com> - 2.35.2-39
+- NVR bump to allow rebuilding.
+
+* Fri Mar 03 2023 Nick Clifton  <nickc@redhat.com> - 2.35.2-38
+- Fix a potential seg-fault when dumping a corrupt ELF format file.  (#2174205)
 
 * Fri Jan 20 2023 Nick Clifton  <nickc@redhat.com> - 2.35.2-37
 - Stop the cross binaries from leaking into the native packages.
