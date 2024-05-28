@@ -1,6 +1,6 @@
 Name: rdma-core
 Version: 46.0
-Release: 1%{?dist}
+Release: 1%{?dist}.redsleeve
 Summary: RDMA core userspace libraries and daemons
 
 # Almost everything is licensed under the OFA dual GPLv2, 2 Clause BSD license
@@ -17,7 +17,7 @@ Patch9999: 9999-udev-keep-NAME_KERNEL-as-default-interface-naming-co.patch
 %define with_static %{?_with_static: 1} %{?!_with_static: 0}
 
 # 32-bit arm is missing required arch-specific memory barriers,
-ExcludeArch: %{arm}
+#ExcludeArch: %{arm}
 
 BuildRequires: binutils
 BuildRequires: cmake >= 2.8.11
@@ -27,7 +27,7 @@ BuildRequires: pkgconfig
 BuildRequires: pkgconfig(libnl-3.0)
 BuildRequires: pkgconfig(libnl-route-3.0)
 BuildRequires: /usr/bin/rst2man
-BuildRequires: valgrind-devel
+#BuildRequires: valgrind-devel
 BuildRequires: systemd
 BuildRequires: systemd-devel
 %if 0%{?fedora} >= 32 || 0%{?rhel} >= 8
@@ -396,8 +396,10 @@ fi
 %config(noreplace) %{_sysconfdir}/rdma/modules/opa.conf
 %config(noreplace) %{_sysconfdir}/rdma/modules/rdma.conf
 %config(noreplace) %{_sysconfdir}/rdma/modules/roce.conf
+%ifnarch %{arm}
 %dir %{_sysconfdir}/modprobe.d
 %config(noreplace) %{_sysconfdir}/modprobe.d/mlx4.conf
+%endif
 %{_unitdir}/rdma-hw.target
 %{_unitdir}/rdma-load-modules@.service
 %dir %{dracutlibdir}
@@ -432,12 +434,13 @@ fi
 %endif
 %{_libdir}/lib*.so
 %{_libdir}/pkgconfig/*.pc
-%{_mandir}/man3/efadv*
 %{_mandir}/man3/ibv_*
 %{_mandir}/man3/rdma*
 %{_mandir}/man3/umad*
 %{_mandir}/man3/*_to_ibv_rate.*
 %{_mandir}/man7/rdma_cm.*
+%ifnarch %{arm}
+%{_mandir}/man3/efadv*
 %{_mandir}/man3/mlx5dv*
 %{_mandir}/man3/mlx4dv*
 %{_mandir}/man3/manadv*
@@ -445,6 +448,7 @@ fi
 %{_mandir}/man7/mlx5dv*
 %{_mandir}/man7/mlx4dv*
 %{_mandir}/man7/manadv*
+%endif
 %{_mandir}/man3/ibnd_*
 
 %files -n infiniband-diags
@@ -518,12 +522,14 @@ fi
 %files -n libibverbs
 %dir %{_sysconfdir}/libibverbs.d
 %dir %{_libdir}/libibverbs
-%{_libdir}/libefa.so.*
 %{_libdir}/libibverbs*.so.*
 %{_libdir}/libibverbs/*.so
+%ifnarch %{arm}
+%{_libdir}/libefa.so.*
 %{_libdir}/libmana.so.*
 %{_libdir}/libmlx5.so.*
 %{_libdir}/libmlx4.so.*
+%endif
 %config(noreplace) %{_sysconfdir}/libibverbs.d/*.driver
 %doc %{_docdir}/%{name}/libibverbs.md
 
@@ -615,6 +621,9 @@ fi
 %endif
 
 %changelog
+* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org > - 46.0-1.redsleeve
+- patched for armv6
+
 * Wed May 24 2023 Kamal Heib <kheib@redhat.com> - 46.0-1
 - Rebase to upstream release v46.0
 - Resolves: rhbz#2159650, rhbz#2167513, rhbz#2170367, rhbz#2189721 rhbz#2209688

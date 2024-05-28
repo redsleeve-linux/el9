@@ -1,3 +1,7 @@
+# Workaround for
+# Cannot handle 8-byte build ID
+%define debug_package %{nil}
+
 # We are building with clang for faster/lower memory LTO builds.
 # See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
 %global toolchain clang
@@ -69,7 +73,8 @@ ver:rc%{rc_ver}}.src
 %ifarch %{arm}
 # koji overrides the _gnu variable to be gnu, which is not correct for clang, so
 # we need to hard-code the correct triple here.
-%global llvm_triple armv7l-redhat-linux-gnueabihf
+#global llvm_triple armv7l-redhat-linux-gnueabihf
+%global llvm_triple armv6l-redhat-linux-gnueabihf
 %else
 %global llvm_triple %{_target_platform}
 %endif
@@ -81,7 +86,7 @@ ver:rc%{rc_ver}}.src
 
 Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}
-Release:	4%{?dist}
+Release:	4%{?dist}.redsleeve
 Summary:	The Low Level Virtual Machine
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
@@ -359,7 +364,7 @@ export ASMFLAGS="%{build_cflags}"
 	-DLLVM_INSTALL_SPHINX_HTML_DIR=%{_pkgdocdir}/html \
 	-DSPHINX_EXECUTABLE=%{_bindir}/sphinx-build-3 \
 	-DLLVM_INCLUDE_BENCHMARKS=OFF \
-	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -Wl,-z,cet-report=error"
+	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -Wl"
 
 # Build libLLVM.so first.  This ensures that when libLLVM.so is linking, there
 # are no other compile jobs running.  This will help reduce OOM errors on the
@@ -651,6 +656,9 @@ fi
 %endif
 
 %changelog
+* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 16.0.6-4.redsleeve
+- changed llvm_triple for armv6
+
 * Fri Aug 04 2023 Tulio Magno Quites Machado Filho <tuliom@redhat.com> - 16.0.6-4
 - Re-add LDFLAGS to shared libraries
 

@@ -1,0 +1,62 @@
+From 0f1b918692e1810ac9b8bd10a688f6f50d797a58 Mon Sep 17 00:00:00 2001
+From: Jacco Ligthart <jacco@redsleeve.org>
+Date: Sat, 25 Nov 2023 20:48:43 +0100
+Subject: [PATCH] added compiler flags for armv6
+
+---
+ SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff | 10 ++++++++++
+ SPECS/clang.spec                                       |  7 ++++++-
+ 2 files changed, 16 insertions(+), 1 deletion(-)
+ create mode 100755 SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff
+
+diff --git a/SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff b/SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff
+new file mode 100755
+index 0000000..2b9fa26
+--- /dev/null
++++ b/SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff
+@@ -0,0 +1,10 @@
++--- a/clang/lib/Driver/ToolChains/Gnu.cpp-bak	2023-06-04 16:48:04.389190068 +0200
+++++ b/clang/lib/Driver/ToolChains/Gnu.cpp	2023-06-04 16:50:14.327438386 +0200
++@@ -1974,6 +1974,7 @@
++ static const char *ConvertToGccTriple(StringRef CandidateTriple) {
++   return llvm::StringSwitch<const char *>(CandidateTriple)
++       .Case("aarch64-redhat-linux-gnu", "aarch64-redhat-linux")
+++      .Case("armv6l-redhat-linux-gnueabihf", "armv6hl-redhat-linux-gnueabi")
++       .Case("i686-redhat-linux-gnu", "i686-redhat-linux")
++       .Case("ppc64le-redhat-linux-gnu", "ppc64le-redhat-linux")
++       .Case("s390x-redhat-linux-gnu", "s390x-redhat-linux")
+diff --git a/SPECS/clang.spec b/SPECS/clang.spec
+index 7007f48..1462a63 100644
+--- a/SPECS/clang.spec
++++ b/SPECS/clang.spec
+@@ -47,7 +47,7 @@
+ 
+ Name:		%pkg_name
+ Version:	%{clang_version}%{?rc_ver:~rc%{rc_ver}}
+-Release:	1%{?dist}
++Release:	1%{?dist}.redsleeve
+ Summary:	A C language family front-end for LLVM
+ 
+ License:	Apache-2.0 WITH LLVM-exception OR NCSA
+@@ -92,6 +92,8 @@ Patch11:    0001-Change-LLVM_COMMON_CMAKE_UTILS-usage.patch
+ Patch12:     0009-disable-recommonmark.patch
+ Patch13:     0001-Driver-Give-devtoolset-path-precedence-over-Installe.patch
+ 
++Patch100:  100-armv6-add-llc-gcc-triplet-translation.diff
++
+ %if %{without compat_build}
+ # Patches for clang-tools-extra
+ # See https://reviews.llvm.org/D120301
+@@ -686,6 +688,9 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
+ 
+ %endif
+ %changelog
++* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 16.0.6-1.redsleeve
++- added triple translation for armv6
++
+ * Wed Jul 05 2023 Nikita Popov <npopov@redhat.com> - 16.0.6-1
+ - Update to LLVM 16.0.6
+ 
+-- 
+2.39.3
+

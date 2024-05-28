@@ -47,7 +47,7 @@
 
 Name:		%pkg_name
 Version:	%{clang_version}%{?rc_ver:~rc%{rc_ver}}
-Release:	1%{?dist}
+Release:	1%{?dist}.redsleeve
 Summary:	A C language family front-end for LLVM
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
@@ -91,6 +91,8 @@ Patch11:    0001-Change-LLVM_COMMON_CMAKE_UTILS-usage.patch
 # RHEL specific patch
 Patch12:     0009-disable-recommonmark.patch
 Patch13:     0001-Driver-Give-devtoolset-path-precedence-over-Installe.patch
+
+Patch100:  100-armv6-add-llc-gcc-triplet-translation.diff
 
 %if %{without compat_build}
 # Patches for clang-tools-extra
@@ -686,6 +688,9 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
 
 %endif
 %changelog
+* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 16.0.6-1.redsleeve
+- added triple translation for armv6
+
 * Wed Jul 05 2023 Nikita Popov <npopov@redhat.com> - 16.0.6-1
 - Update to LLVM 16.0.6
 

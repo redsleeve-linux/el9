@@ -9,7 +9,7 @@ BuildRequires: scl-utils-build
 Summary: A GNU collection of binary utilities
 Name: %{?scl_prefix}binutils
 Version: 2.40
-Release: 13%{?dist}
+Release: 13%{?dist}.redsleeve
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -276,6 +276,8 @@ Patch20: binutils-reloc-symtab.patch
 #            a file with corrupt symbol version information.
 # Lifetime: Fixed in 2.41
 Patch21: binutils-CVE-2023-1972.patch
+
+Patch1000: binutils-armv6.patch
 
 #----------------------------------------------------------------------------
 
@@ -1276,6 +1278,9 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
+* Mon Nov 27 2023 Jacco Ligthart <jacco@redsleeve.org> 2.40-13.redsleeve
+- minor adjustments for armv6
+
 * Thu Aug 03 2023 Nick Clifton  <nickc@redhat.com> - 2.40-13
 - Spec File: Really fix building with GTS-13 gcc.  (#2217819) (#2225130)
 

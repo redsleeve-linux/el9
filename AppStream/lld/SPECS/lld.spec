@@ -14,7 +14,7 @@
 
 Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}
-Release:	1%{?dist}
+Release:	1%{?dist}.redsleeve
 Summary:	The LLVM Linker
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
@@ -29,6 +29,8 @@ ExcludeArch:	s390x
 
 # Backport from LLVM 17.
 Patch0:     0001-lld-Use-installed-llvm_gtest-in-standalone-builds.patch
+
+Patch1000:	1000_patch_atomic_arm.patch
 
 # Bundle libunwind header need during build for MachO support
 Patch1:		0002-PATCH-lld-Import-compact_unwind_encoding.h-from-libu.patch
@@ -161,6 +163,9 @@ fi
 
 
 %changelog
+* Sat Nov 25 2023 Jacco Ligthart < jacco@redsleeve.org> - 16.0.6-1.redsleeve
+- link COFF with atomic
+
 * Wed Jul 05 2023 Nikita Popov <npopov@redhat.com> - 16.0.6-1
 - Update to LLVM 16.0.6
 

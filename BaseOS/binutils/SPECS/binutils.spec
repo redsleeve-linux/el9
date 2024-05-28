@@ -2,7 +2,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 42%{?dist}
+Release: 42%{?dist}.redsleeve
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -505,6 +505,7 @@ Requires(post): coreutils
 BuildRequires: elfutils-debuginfod-client-devel
 %endif
 
+Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 %description
@@ -1280,6 +1281,9 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
+* Fri Nov 24 2023 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-42.redsleeve
+- minor adjustments for armv6
+
 * Wed Apr 26 2023 Nick Clifton  <nickc@redhat.com> - 2.35.2-42
 - Add support for the AArch64 'flagm' extenstion to the assembler.  (#2189304)
 

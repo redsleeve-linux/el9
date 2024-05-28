@@ -149,7 +149,7 @@ BuildRequires: scl-utils-build
 Summary: GCC version 13
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.2%{?dist}
+Release: %{gcc_release}.2%{?dist}.redsleeve
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -362,6 +362,9 @@ Patch3020: gcc13-testsuite-no-ssp.patch
 Patch3021: gcc13-testsuite-p10.patch
 Patch3022: gcc13-testsuite-plugin.patch
 
+Patch10000: gcc6-decimal-rtti-arm.patch
+Patch10001: gcc13-nonshared-arm.patch
+
 %if 0%{?rhel} == 9
 %global nonsharedver 110
 %endif
@@ -378,6 +381,9 @@ Patch3022: gcc13-testsuite-plugin.patch
 %if 0%{?scl:1}
 %global _gnu %{nil}
 %else
+%global _gnu -gnueabi
+%endif
+%ifarch %{arm}
 %global _gnu -gnueabi
 %endif
 %ifarch sparcv9
@@ -743,6 +749,11 @@ rm -f libphobos/testsuite/libphobos.gc/forkgc2.d
 %patch -P3021 -p1 -b .dts-test-21~
 %patch -P3022 -p1 -b .dts-test-22~
 
+%ifarch %{arm}
+%patch10000 -p1
+%patch10001 -p1
+%endif
+
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
 echo 'Red Hat %{version}-%{gcc_release}' > gcc/DEV-PHASE
@@ -1037,6 +1048,9 @@ CONFIGURE_OPTS="\
 %endif
 %endif
 	--enable-decimal-float \
+%endif
+%ifarch armv6hl
+	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
@@ -2904,6 +2918,9 @@ fi
 %endif
 
 %changelog
+* Mon Nov 27 2023 Jacco Ligthart <jacco@redsleeve.org> 13.1.1-4.2.redsleeve
+- patched for armv6
+
 * Tue Jun 27 2023 Marek Polacek <polacek@redhat.com> 13.1.1-4.2
 - fix switch to -gdwarf-4 on RHEL 8 (#2217938)
 - apply some testsuite fixes (#2217498)
