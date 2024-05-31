@@ -1,0 +1,30 @@
+commit e6547d635b991651600fab31f788ed5facd77610
+Author: WANG Xuerui <git@xen0n.name>
+Date:   Wed Jun 1 10:12:28 2022 +0800
+
+    linux: use statx for fstat if neither newfstatat nor fstatat64 is present
+    
+    LoongArch is going to be the first architecture supported by Linux that
+    has neither fstat* nor newfstatat [1], instead exclusively relying on
+    statx. So in fstatat64's implementation, we need to also enable statx
+    usage if neither fstatat64 nor newfstatat is present, to prepare for
+    this new case of kernel ABI.
+    
+    [1]: https://lore.kernel.org/all/20220518092619.1269111-1-chenhuacai@loongson.cn/
+    
+    Reviewed-by: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+
+diff --git a/sysdeps/unix/sysv/linux/fstatat64.c b/sysdeps/unix/sysv/linux/fstatat64.c
+index 45221bbdf901fa47..ded431257bf3450f 100644
+--- a/sysdeps/unix/sysv/linux/fstatat64.c
++++ b/sysdeps/unix/sysv/linux/fstatat64.c
+@@ -42,7 +42,8 @@ _Static_assert (sizeof (__blkcnt_t) == sizeof (__blkcnt64_t),
+ 
+ #if (__WORDSIZE == 32 \
+      && (!defined __SYSCALL_WORDSIZE || __SYSCALL_WORDSIZE == 32)) \
+-     || defined STAT_HAS_TIME32
++     || defined STAT_HAS_TIME32 \
++     || (!defined __NR_newfstatat && !defined __NR_fstatat64)
+ # define FSTATAT_USE_STATX 1
+ 
+ static inline int

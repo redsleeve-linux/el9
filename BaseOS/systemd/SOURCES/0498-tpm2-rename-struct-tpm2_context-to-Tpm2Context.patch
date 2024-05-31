@@ -1,0 +1,151 @@
+From 55edf6d2080573d3395aec6f9f99e62cf8bd8d01 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Mon, 23 Jan 2023 19:52:56 -0500
+Subject: [PATCH] tpm2: rename struct tpm2_context to Tpm2Context
+
+This aligns with systemd coding guidelines for struct naming
+
+(cherry picked from commit bd860983a6f884e37e88915f545d5520f92890ec)
+
+Related: RHEL-16182
+---
+ src/boot/measure.c          |  2 +-
+ src/boot/pcrphase.c         |  4 ++--
+ src/cryptsetup/cryptsetup.c |  2 +-
+ src/shared/tpm2-util.c      | 10 +++++-----
+ src/shared/tpm2-util.h      | 14 +++++++-------
+ 5 files changed, 16 insertions(+), 16 deletions(-)
+
+diff --git a/src/boot/measure.c b/src/boot/measure.c
+index 8af3a337d6..d71a7a1d13 100644
+--- a/src/boot/measure.c
++++ b/src/boot/measure.c
+@@ -717,7 +717,7 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
+         _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
+         _cleanup_(pcr_state_free_all) PcrState *pcr_states = NULL;
+         _cleanup_(EVP_PKEY_freep) EVP_PKEY *privkey = NULL, *pubkey = NULL;
+-        _cleanup_(tpm2_context_destroy) struct tpm2_context c = {};
++        _cleanup_(tpm2_context_destroy) Tpm2Context c = {};
+         _cleanup_fclose_ FILE *privkeyf = NULL;
+         ESYS_TR session_handle = ESYS_TR_NONE;
+         TSS2_RC rc;
+diff --git a/src/boot/pcrphase.c b/src/boot/pcrphase.c
+index fda9a8420d..694e131ac1 100644
+--- a/src/boot/pcrphase.c
++++ b/src/boot/pcrphase.c
+@@ -154,7 +154,7 @@ static int parse_argv(int argc, char *argv[]) {
+         return 1;
+ }
+ 
+-static int determine_banks(struct tpm2_context *c, unsigned target_pcr_nr) {
++static int determine_banks(Tpm2Context *c, unsigned target_pcr_nr) {
+         _cleanup_strv_free_ char **l = NULL;
+         int r;
+ 
+@@ -239,7 +239,7 @@ static int get_file_system_word(
+ }
+ 
+ static int run(int argc, char *argv[]) {
+-        _cleanup_(tpm2_context_destroy) struct tpm2_context c = {};
++        _cleanup_(tpm2_context_destroy) Tpm2Context c = {};
+         _cleanup_free_ char *joined = NULL, *word = NULL;
+         unsigned target_pcr_nr;
+         size_t length;
+diff --git a/src/cryptsetup/cryptsetup.c b/src/cryptsetup/cryptsetup.c
+index 4d587fed1e..712d208741 100644
+--- a/src/cryptsetup/cryptsetup.c
++++ b/src/cryptsetup/cryptsetup.c
+@@ -841,7 +841,7 @@ static int measure_volume_key(
+         if (r < 0)
+                 return log_error_errno(r, "Failed to load TPM2 libraries: %m");
+ 
+-        _cleanup_(tpm2_context_destroy) struct tpm2_context c = {};
++        _cleanup_(tpm2_context_destroy) Tpm2Context c = {};
+         r = tpm2_context_init(arg_tpm2_device, &c);
+         if (r < 0)
+                 return r;
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index fe4d63b775..5c4d5476a3 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -103,7 +103,7 @@ int dlopen_tpm2(void) {
+                         DLSYM_ARG(Tss2_MU_TPM2B_PUBLIC_Unmarshal));
+ }
+ 
+-void tpm2_context_destroy(struct tpm2_context *c) {
++void tpm2_context_destroy(Tpm2Context *c) {
+         assert(c);
+ 
+         if (c->esys_context)
+@@ -137,7 +137,7 @@ ESYS_TR tpm2_flush_context_verbose(ESYS_CONTEXT *c, ESYS_TR handle) {
+         return ESYS_TR_NONE;
+ }
+ 
+-int tpm2_context_init(const char *device, struct tpm2_context *ret) {
++int tpm2_context_init(const char *device, Tpm2Context *ret) {
+         _cleanup_(Esys_Finalize_wrapper) ESYS_CONTEXT *c = NULL;
+         _cleanup_free_ TSS2_TCTI_CONTEXT *tcti = NULL;
+         _cleanup_(dlclosep) void *dl = NULL;
+@@ -237,7 +237,7 @@ int tpm2_context_init(const char *device, struct tpm2_context *ret) {
+                 return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+                                        "Failed to start up TPM: %s", sym_Tss2_RC_Decode(rc));
+ 
+-        *ret = (struct tpm2_context) {
++        *ret = (Tpm2Context) {
+                 .esys_context = TAKE_PTR(c),
+                 .tcti_context = TAKE_PTR(tcti),
+                 .tcti_dl = TAKE_PTR(dl),
+@@ -1402,7 +1402,7 @@ int tpm2_seal(const char *device,
+               uint16_t *ret_pcr_bank,
+               uint16_t *ret_primary_alg) {
+ 
+-        _cleanup_(tpm2_context_destroy) struct tpm2_context c = {};
++        _cleanup_(tpm2_context_destroy) Tpm2Context c = {};
+         _cleanup_(Esys_Freep) TPM2B_DIGEST *policy_digest = NULL;
+         _cleanup_(Esys_Freep) TPM2B_PRIVATE *private = NULL;
+         _cleanup_(Esys_Freep) TPM2B_PUBLIC *public = NULL;
+@@ -1623,7 +1623,7 @@ int tpm2_unseal(const char *device,
+                 void **ret_secret,
+                 size_t *ret_secret_size) {
+ 
+-        _cleanup_(tpm2_context_destroy) struct tpm2_context c = {};
++        _cleanup_(tpm2_context_destroy) Tpm2Context c = {};
+         ESYS_TR primary = ESYS_TR_NONE, session = ESYS_TR_NONE, hmac_session = ESYS_TR_NONE,
+                 hmac_key = ESYS_TR_NONE;
+         _cleanup_(Esys_Freep) TPM2B_SENSITIVE_DATA* unsealed = NULL;
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 9e302021ab..bc960c6f50 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -52,11 +52,11 @@ int dlopen_tpm2(void);
+ int tpm2_seal(const char *device, uint32_t hash_pcr_mask, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, void **ret_pcr_hash, size_t *ret_pcr_hash_size, uint16_t *ret_pcr_bank, uint16_t *ret_primary_alg);
+ int tpm2_unseal(const char *device, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, JsonVariant *signature, const char *pin, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, void **ret_secret, size_t *ret_secret_size);
+ 
+-struct tpm2_context {
++typedef struct {
+         void *tcti_dl;
+         TSS2_TCTI_CONTEXT *tcti_context;
+         ESYS_CONTEXT *esys_context;
+-};
++} Tpm2Context;
+ 
+ ESYS_TR tpm2_flush_context_verbose(ESYS_CONTEXT *c, ESYS_TR handle);
+ 
+@@ -72,12 +72,12 @@ int tpm2_get_good_pcr_banks_strv(ESYS_CONTEXT *c, uint32_t pcr_mask, char ***ret
+ 
+ int tpm2_extend_bytes(ESYS_CONTEXT *c, char **banks, unsigned pcr_index, const void *data, size_t data_size, const void *secret, size_t secret_size);
+ 
+-#else
+-struct tpm2_context;
+-#endif
++#else /* HAVE_TPM2 */
++typedef struct {} Tpm2Context;
++#endif /* HAVE_TPM2 */
+ 
+-int tpm2_context_init(const char *device, struct tpm2_context *ret);
+-void tpm2_context_destroy(struct tpm2_context *c);
++int tpm2_context_init(const char *device, Tpm2Context *ret);
++void tpm2_context_destroy(Tpm2Context *c);
+ 
+ int tpm2_list_devices(void);
+ int tpm2_find_device_auto(int log_level, char **ret);

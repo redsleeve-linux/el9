@@ -1,0 +1,59 @@
+From ee8090db1c2fe4df29fd0b134d80791eced6434d Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Sun, 21 May 2023 15:18:21 +0100
+Subject: [PATCH] stub: measure SMBIOS kernel-cmdline-extra in PCR12
+
+PCR1, where SMBIOS strings are measured, is filled with data that is not
+under the control of the machine owner. Measure cmdline extensions in
+PCR12 too, where we measure other optional addons that are loaded by
+sd-stub.
+
+(cherry picked from commit 2c90b5ec63ab420d074ebe4f5c6881737c9bc155)
+
+Related: RHEL-16952
+---
+ man/systemd-stub.xml | 5 ++++-
+ src/boot/efi/stub.c  | 7 +++++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/man/systemd-stub.xml b/man/systemd-stub.xml
+index 66c158c44d..edfc299bc2 100644
+--- a/man/systemd-stub.xml
++++ b/man/systemd-stub.xml
+@@ -66,6 +66,9 @@
+       <listitem><para>A compiled binary DeviceTree will be looked for in the <literal>.dtb</literal> PE
+       section.</para></listitem>
+ 
++      <listitem><para>Kernel version information, i.e. the output of <command>uname -r</command> for the
++      kernel included in the UKI, in the <literal>.uname</literal> PE section.</para></listitem>
++
+       <listitem><para>The kernel command line to pass to the invoked kernel will be looked for in the
+       <literal>.cmdline</literal> PE section.</para></listitem>
+ 
+@@ -394,7 +397,7 @@
+       <varlistentry>
+         <term><varname>io.systemd.stub.kernel-cmdline-extra</varname></term>
+         <listitem><para>If set, the value of this string is added to the list of kernel command line
+-        arguments that are passed to the kernel.</para></listitem>
++        arguments that are measured in PCR12 and passed to the kernel.</para></listitem>
+       </varlistentry>
+     </variablelist>
+   </refsect1>
+diff --git a/src/boot/efi/stub.c b/src/boot/efi/stub.c
+index 86eae2e350..a195612f0e 100644
+--- a/src/boot/efi/stub.c
++++ b/src/boot/efi/stub.c
+@@ -282,6 +282,13 @@ static EFI_STATUS real_main(EFI_HANDLE image) {
+         if (extra) {
+                 _cleanup_free_ char16_t *tmp = TAKE_PTR(cmdline), *extra16 = xstr8_to_16(extra);
+                 cmdline = xasprintf("%ls %ls", tmp, extra16);
++
++                /* SMBIOS strings are measured in PCR1, but we also want to measure them in our specific
++                 * PCR12, as firmware-owned PCRs are very difficult to use as they'll contain unpredictable
++                 * measurements that are not under control of the machine owner. */
++                m = false;
++                (void) tpm_log_load_options(extra16, &m);
++                parameters_measured = parameters_measured < 0 ? m : (parameters_measured && m);
+         }
+ 
+         export_variables(loaded_image);

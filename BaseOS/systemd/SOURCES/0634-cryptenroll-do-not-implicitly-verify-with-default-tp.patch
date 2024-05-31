@@ -1,0 +1,53 @@
+From 83d8729b090803f37208995ff3b97544d8ce5725 Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Wed, 8 Feb 2023 02:10:28 +0000
+Subject: [PATCH] cryptenroll: do not implicitly verify with default tpm policy
+ signature
+
+If it was not requested to use a tpm2 signature file when enrolling, do
+not fallback to the default /run/systemd/tpm2-pcr-signature.json as it
+likely will be unrelated if it exists.
+
+Fixes https://github.com/systemd/systemd/issues/25435
+
+(cherry picked from commit b0fc23fae51d244d2c33d70c10003aa5d5840223)
+
+Related: RHEL-16182
+---
+ src/cryptenroll/cryptenroll-tpm2.c | 5 +++--
+ test/units/testsuite-70.sh         | 6 ++++++
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/src/cryptenroll/cryptenroll-tpm2.c b/src/cryptenroll/cryptenroll-tpm2.c
+index 98c45f42f6..d9de9aa96c 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.c
++++ b/src/cryptenroll/cryptenroll-tpm2.c
+@@ -198,8 +198,9 @@ int enroll_tpm2(struct crypt_device *cd,
+ 
+                 log_debug_errno(r, "Failed to read TPM2 PCR public key, proceeding without: %m");
+                 pubkey_pcr_mask = 0;
+-        } else {
+-                /* Also try to load the signature JSON object, to verify that our enrollment will work. This is optional however. */
++        } else if (signature_path) {
++                /* Also try to load the signature JSON object, to verify that our enrollment will work.
++                 * This is optional however, skip it if it's not explicitly provided. */
+ 
+                 r = tpm2_load_pcr_signature(signature_path, &signature_json);
+                 if (r < 0) {
+diff --git a/test/units/testsuite-70.sh b/test/units/testsuite-70.sh
+index 12b47f329c..9e42dd5b28 100755
+--- a/test/units/testsuite-70.sh
++++ b/test/units/testsuite-70.sh
+@@ -225,6 +225,12 @@ if [ -e /usr/lib/systemd/systemd-measure ] && \
+     # Now, do the same, but with a cryptsetup binding
+     truncate -s 20M $img
+     cryptsetup luksFormat -q --pbkdf pbkdf2 --pbkdf-force-iterations 1000 --use-urandom $img /tmp/passphrase
++    # Ensure that an unrelated signature, when not requested, is not used
++    touch /run/systemd/tpm2-pcr-signature.json
++    systemd-cryptenroll --unlock-key-file=/tmp/passphrase --tpm2-device=auto --tpm2-public-key="/tmp/pcrsign-public.pem" $img
++    # Reset and use the signature now
++    rm -f /run/systemd/tpm2-pcr-signature.json
++    systemd-cryptenroll --wipe-slot=tpm2 $img
+     systemd-cryptenroll --unlock-key-file=/tmp/passphrase --tpm2-device=auto --tpm2-public-key="/tmp/pcrsign-public.pem" --tpm2-signature="/tmp/pcrsign.sig2" $img
+ 
+     # Check if we can activate that (without the token module stuff)

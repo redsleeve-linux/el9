@@ -1,0 +1,101 @@
+From 1c4cb49d13264fe1e3de51d64b293b964439fee5 Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Wed, 8 Feb 2023 23:06:27 +0000
+Subject: [PATCH] units: change assert to condition to skip running in
+ initrd/os
+
+These units are also present in the initrd, so instead of an assert,
+just use a condition so they are skipped where they need to be skipped.
+
+Fixes https://github.com/systemd/systemd/issues/26358
+
+(cherry picked from commit 7ef09e2099a4f97ad40748d6b7c735b45aa4c990)
+
+Related: RHEL-16182
+---
+ units/systemd-pcrfs-root.service.in       | 2 +-
+ units/systemd-pcrfs@.service.in           | 2 +-
+ units/systemd-pcrmachine.service.in       | 2 +-
+ units/systemd-pcrphase-initrd.service.in  | 2 +-
+ units/systemd-pcrphase-sysinit.service.in | 2 +-
+ units/systemd-pcrphase.service.in         | 2 +-
+ 6 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/units/systemd-pcrfs-root.service.in b/units/systemd-pcrfs-root.service.in
+index b0da413bb4..432eb9fd8c 100644
+--- a/units/systemd-pcrfs-root.service.in
++++ b/units/systemd-pcrfs-root.service.in
+@@ -14,7 +14,7 @@ DefaultDependencies=no
+ Conflicts=shutdown.target
+ After=systemd-pcrmachine.service
+ Before=shutdown.target
+-AssertPathExists=!/etc/initrd-release
++ConditionPathExists=!/etc/initrd-release
+ ConditionSecurity=tpm2
+ ConditionPathExists=/sys/firmware/efi/efivars/StubPcrKernelImage-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+ 
+diff --git a/units/systemd-pcrfs@.service.in b/units/systemd-pcrfs@.service.in
+index ec1ff118c3..6bbd4b72a5 100644
+--- a/units/systemd-pcrfs@.service.in
++++ b/units/systemd-pcrfs@.service.in
+@@ -15,7 +15,7 @@ BindsTo=%i.mount
+ Conflicts=shutdown.target
+ After=%i.mount systemd-pcrfs-root.service
+ Before=shutdown.target
+-AssertPathExists=!/etc/initrd-release
++ConditionPathExists=!/etc/initrd-release
+ ConditionSecurity=tpm2
+ ConditionPathExists=/sys/firmware/efi/efivars/StubPcrKernelImage-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+ 
+diff --git a/units/systemd-pcrmachine.service.in b/units/systemd-pcrmachine.service.in
+index e154a7eec1..f1c6ce9f26 100644
+--- a/units/systemd-pcrmachine.service.in
++++ b/units/systemd-pcrmachine.service.in
+@@ -13,7 +13,7 @@ Documentation=man:systemd-pcrmachine.service(8)
+ DefaultDependencies=no
+ Conflicts=shutdown.target
+ Before=sysinit.target shutdown.target
+-AssertPathExists=!/etc/initrd-release
++ConditionPathExists=!/etc/initrd-release
+ ConditionSecurity=tpm2
+ ConditionPathExists=/sys/firmware/efi/efivars/StubPcrKernelImage-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+ 
+diff --git a/units/systemd-pcrphase-initrd.service.in b/units/systemd-pcrphase-initrd.service.in
+index e437c7e1ce..6320dccf27 100644
+--- a/units/systemd-pcrphase-initrd.service.in
++++ b/units/systemd-pcrphase-initrd.service.in
+@@ -13,7 +13,7 @@ Documentation=man:systemd-pcrphase-initrd.service(8)
+ DefaultDependencies=no
+ Conflicts=shutdown.target initrd-switch-root.target
+ Before=sysinit.target cryptsetup-pre.target cryptsetup.target shutdown.target initrd-switch-root.target systemd-sysext.service
+-AssertPathExists=/etc/initrd-release
++ConditionPathExists=/etc/initrd-release
+ ConditionSecurity=tpm2
+ ConditionPathExists=/sys/firmware/efi/efivars/StubPcrKernelImage-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+ 
+diff --git a/units/systemd-pcrphase-sysinit.service.in b/units/systemd-pcrphase-sysinit.service.in
+index a22fbbe935..f00ad61257 100644
+--- a/units/systemd-pcrphase-sysinit.service.in
++++ b/units/systemd-pcrphase-sysinit.service.in
+@@ -14,7 +14,7 @@ DefaultDependencies=no
+ Conflicts=shutdown.target
+ After=sysinit.target
+ Before=basic.target shutdown.target
+-AssertPathExists=!/etc/initrd-release
++ConditionPathExists=!/etc/initrd-release
+ ConditionSecurity=tpm2
+ ConditionPathExists=/sys/firmware/efi/efivars/StubPcrKernelImage-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+ 
+diff --git a/units/systemd-pcrphase.service.in b/units/systemd-pcrphase.service.in
+index 5ba437e5b1..558f268857 100644
+--- a/units/systemd-pcrphase.service.in
++++ b/units/systemd-pcrphase.service.in
+@@ -12,7 +12,7 @@ Description=TPM2 PCR Barrier (User)
+ Documentation=man:systemd-pcrphase.service(8)
+ After=remote-fs.target remote-cryptsetup.target
+ Before=systemd-user-sessions.service
+-AssertPathExists=!/etc/initrd-release
++ConditionPathExists=!/etc/initrd-release
+ ConditionSecurity=tpm2
+ ConditionPathExists=/sys/firmware/efi/efivars/StubPcrKernelImage-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+ 

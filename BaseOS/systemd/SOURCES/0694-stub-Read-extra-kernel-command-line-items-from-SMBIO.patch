@@ -1,0 +1,71 @@
+From dc742ee6411f4f7bd5d447cd29dc17a0025843e0 Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Mon, 30 Jan 2023 16:26:50 +0100
+Subject: [PATCH] stub: Read extra kernel command line items from SMBIOS
+
+Let's read more kernel command line arguments from SMBIOS OEM string
+io.systemd.stub.kernel-cmdline-extra. This allows adding debug kernel
+command line arguments when booting in qemy without having to modify
+the UKI.
+
+(cherry picked from commit 717af0de4648ccc223f06683a6baf73d64271e02)
+
+Related: RHEL-16952
+---
+ man/systemd-stub.xml | 17 +++++++++++++++++
+ src/boot/efi/stub.c  |  7 +++++++
+ 2 files changed, 24 insertions(+)
+
+diff --git a/man/systemd-stub.xml b/man/systemd-stub.xml
+index 85d30129d6..66c158c44d 100644
+--- a/man/systemd-stub.xml
++++ b/man/systemd-stub.xml
+@@ -382,6 +382,23 @@
+     default, this is done for the TPM2 PCR signature and public key files.</para>
+   </refsect1>
+ 
++  <refsect1>
++    <title>SMBIOS Type 11 Strings</title>
++
++    <para><command>systemd-stub</command> can be configured using SMBIOS Type 11 strings. Applicable strings
++    consist of a name, followed by <literal>=</literal>, followed by the value.
++    <command>systemd-stub</command> will search the table for a string with a specific name, and if found,
++    use its value. The following strings are read:</para>
++
++    <variablelist>
++      <varlistentry>
++        <term><varname>io.systemd.stub.kernel-cmdline-extra</varname></term>
++        <listitem><para>If set, the value of this string is added to the list of kernel command line
++        arguments that are passed to the kernel.</para></listitem>
++      </varlistentry>
++    </variablelist>
++  </refsect1>
++
+   <refsect1>
+     <title>Assembling Kernel Images</title>
+ 
+diff --git a/src/boot/efi/stub.c b/src/boot/efi/stub.c
+index dac1bb0606..86eae2e350 100644
+--- a/src/boot/efi/stub.c
++++ b/src/boot/efi/stub.c
+@@ -16,6 +16,7 @@
+ #include "splash.h"
+ #include "tpm-pcr.h"
+ #include "util.h"
++#include "vmm.h"
+ 
+ /* magic string to find in the binary image */
+ _used_ _section_(".sdmagic") static const char magic[] = "#### LoaderInfo: systemd-stub " GIT_VERSION " ####";
+@@ -277,6 +278,12 @@ static EFI_STATUS real_main(EFI_HANDLE image) {
+                 mangle_stub_cmdline(cmdline);
+         }
+ 
++        const char *extra = smbios_find_oem_string("io.systemd.stub.kernel-cmdline-extra");
++        if (extra) {
++                _cleanup_free_ char16_t *tmp = TAKE_PTR(cmdline), *extra16 = xstr8_to_16(extra);
++                cmdline = xasprintf("%ls %ls", tmp, extra16);
++        }
++
+         export_variables(loaded_image);
+ 
+         if (pack_cpio(loaded_image,

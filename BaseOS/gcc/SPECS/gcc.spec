@@ -1,10 +1,10 @@
-%global DATE 20230605
-%global gitrev 2c7f17ca0b642790d74cca6c798196e9053a4bcf
+%global DATE 20231218
+%global gitrev 9e6808abff4d96f3f09474a2a744ef5f56df3e28
 %global gcc_version 11.4.1
 %global gcc_major 11
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 2
+%global gcc_release 3
 %global nvptx_tools_gitrev 5f6f343a302d620b0868edab376c00b15741e39e
 %global newlib_cygwin_gitrev 50e2a63b04bdd018484605fbb954fd1bd5147fa0
 %global _unpackaged_files_terminate_build 0
@@ -128,7 +128,7 @@
 Summary:              Various compilers (C, C++, Objective-C, ...)
 Name:                 gcc
 Version:              %{gcc_version}
-Release:              %{gcc_release}.1%{?dist}.redsleeve
+Release:              %{gcc_release}%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License:              GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -291,8 +291,10 @@ Patch27:              gcc11-s390x-regarg-1.patch
 Patch28:              gcc11-s390x-regarg-2.patch
 Patch29:              gcc11-s390x-regarg-3.patch
 Patch30:              gcc11-testsuite-fixes.patch
-Patch31:              gcc11-pr96024.patch
 Patch32:              gcc11-testsuite-fixes-2.patch
+Patch33:              gcc11-pr111039.patch
+Patch34:              gcc11-pr111070.patch
+Patch35:              gcc11-testsuite-aarch64-add-fno-stack-protector.patch
 
 Patch100:             gcc11-fortran-fdec-duplicates.patch
 Patch101:             gcc11-fortran-flogical-as-integer.patch
@@ -889,8 +891,10 @@ mark them as cross compiled.
 %patch28 -p1 -b .s390x-regarg-2~
 %patch29 -p1 -b .s390x-regarg-3~
 %patch30 -p1 -b .testsuite~
-%patch31 -p1 -b .pr96024~
 %patch32 -p1 -b .testsuite2~
+%patch33 -p1 -b .pr111039~
+%patch34 -p1 -b .pr111070~
+%patch35 -p1 -b .testsuite3~
 
 %if 0%{?rhel} >= 9
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -1193,9 +1197,6 @@ CONFIGURE_OPTS_NATIVE="\
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
-%endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch mips mipsel
 	--with-arch=mips32r2 --with-fp-32=xx \
@@ -3587,8 +3588,33 @@ end
 %endif
 
 %changelog
-* Fri Nov 24 2023 Jacco Ligthart <jacco@redsleeve.org> 11.4.1-2.1.redsleeve
-- added config options for armv6hl
+* Mon Dec 18 2023 Marek Polacek <polacek@redhat.com> 11.4.1-3
+- update from releases/gcc-11-branch (RHEL-17638)
+  - PRs c++/106310, c++/106890, c++/109666, c++/109761, c++/111357,
+	c++/111512, c++/112795, d/108842, d/110359, d/110511, d/110516,
+	debug/110295, fortran/95947, fortran/103506, fortran/107397,
+	fortran/110288, fortran/110585, fortran/110658, fortran/111837,
+	fortran/111880, libstdc++/95048, libstdc++/99327, libstdc++/104161,
+	libstdc++/104242, libstdc++/108178, libstdc++/111050,
+	libstdc++/111511, libstdc++/112314, libstdc++/112491,
+	middle-end/110200, middle-end/111699, middle-end/111818,
+	middle-end/112733, rtl-optimization/110237, sanitizer/112727,
+	target/96762, target/101177, target/101469, target/105325,
+	target/109800, target/109932, target/110011, target/110044,
+	target/110170, target/110309, target/110741, target/111001,
+	target/111340, target/111367, target/111408, target/111815,
+	target/112672, target/112816, target/112837, target/112845,
+	target/112891, testsuite/66005, tree-optimization/110298,
+	tree-optimization/110731, tree-optimization/110914,
+	tree-optimization/111015, tree-optimization/111614,
+	tree-optimization/111764, tree-optimization/111917
+- use -fno-stack-protector in some aarch64 tests
+
+* Tue Oct  3 2023 Marek Polacek <polacek@redhat.com> 11.4.1-2.3
+- fix member vs global template (RHEL-2607)
+
+* Mon Oct  2 2023 Marek Polacek <polacek@redhat.com> 11.4.1-2.2
+- guard the bit test merging code in if-combine (RHEL-6068)
 
 * Fri Jun  9 2023 Marek Polacek <polacek@redhat.com> 11.4.1-2.1
 - fix ICE on pr96024.f90 on big-endian hosts (PR fortran/96024, #2213211)

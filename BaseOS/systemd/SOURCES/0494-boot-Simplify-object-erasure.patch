@@ -1,0 +1,151 @@
+From ffff09335760efc655faf093b6fbb364cfae4ad7 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Sat, 7 Jan 2023 22:16:52 +0100
+Subject: [PATCH] boot: Simplify object erasure
+
+This erase_obj() machinery looks like voodoo and creates an awful lot of
+noise as soon as we get back to building with -O0. We can do this in a
+more simple way by introducing a struct that holds the information we
+need on cleanup. When building with optimization enabled, all this gets
+inlined and the eraser vanishes.
+
+(cherry picked from commit 3f92dc2fd4070b213e6bc85263a9bef06ec9a486)
+
+Related: RHEL-16182
+---
+ src/basic/memory-util.c                   | 18 ----------
+ src/basic/memory-util.h                   | 12 +------
+ src/boot/efi/random-seed.c                |  1 +
+ src/fundamental/memory-util-fundamental.h | 42 +++++++++++++++++++++++
+ src/fundamental/meson.build               |  1 +
+ 5 files changed, 45 insertions(+), 29 deletions(-)
+ create mode 100644 src/fundamental/memory-util-fundamental.h
+
+diff --git a/src/basic/memory-util.c b/src/basic/memory-util.c
+index 2983762117..c4f54c7b4e 100644
+--- a/src/basic/memory-util.c
++++ b/src/basic/memory-util.c
+@@ -38,21 +38,3 @@ bool memeqbyte(uint8_t byte, const void *data, size_t length) {
+         /* Now we know first 16 bytes match, memcmp() with self.  */
+         return memcmp(data, p + 16, length) == 0;
+ }
+-
+-#if !HAVE_EXPLICIT_BZERO
+-/*
+- * The pointer to memset() is volatile so that compiler must de-reference the pointer and can't assume that
+- * it points to any function in particular (such as memset(), which it then might further "optimize"). This
+- * approach is inspired by openssl's crypto/mem_clr.c.
+- */
+-typedef void *(*memset_t)(void *,int,size_t);
+-
+-static volatile memset_t memset_func = memset;
+-
+-void* explicit_bzero_safe(void *p, size_t l) {
+-        if (l > 0)
+-                memset_func(p, '\0', l);
+-
+-        return p;
+-}
+-#endif
+diff --git a/src/basic/memory-util.h b/src/basic/memory-util.h
+index eea9c0e92f..d26a0918e1 100644
+--- a/src/basic/memory-util.h
++++ b/src/basic/memory-util.h
+@@ -9,6 +9,7 @@
+ 
+ #include "alloc-util.h"
+ #include "macro.h"
++#include "memory-util-fundamental.h"
+ 
+ size_t page_size(void) _pure_;
+ #define PAGE_ALIGN(l) ALIGN_TO((l), page_size())
+@@ -91,17 +92,6 @@ static inline void *mempmem_safe(const void *haystack, size_t haystacklen, const
+         return (uint8_t*) p + needlelen;
+ }
+ 
+-#if HAVE_EXPLICIT_BZERO
+-static inline void* explicit_bzero_safe(void *p, size_t l) {
+-        if (l > 0)
+-                explicit_bzero(p, l);
+-
+-        return p;
+-}
+-#else
+-void *explicit_bzero_safe(void *p, size_t l);
+-#endif
+-
+ static inline void* erase_and_free(void *p) {
+         size_t l;
+ 
+diff --git a/src/boot/efi/random-seed.c b/src/boot/efi/random-seed.c
+index aea4f7e532..3c9df5bb54 100644
+--- a/src/boot/efi/random-seed.c
++++ b/src/boot/efi/random-seed.c
+@@ -3,6 +3,7 @@
+ #include <efi.h>
+ #include <efilib.h>
+ 
++#include "memory-util-fundamental.h"
+ #include "missing_efi.h"
+ #include "random-seed.h"
+ #include "secure-boot.h"
+diff --git a/src/fundamental/memory-util-fundamental.h b/src/fundamental/memory-util-fundamental.h
+new file mode 100644
+index 0000000000..9015300ae8
+--- /dev/null
++++ b/src/fundamental/memory-util-fundamental.h
+@@ -0,0 +1,42 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++#pragma once
++
++#include <stddef.h>
++
++#ifdef SD_BOOT
++#  include "efi-string.h"
++#else
++#  include <string.h>
++#endif
++
++#include "macro-fundamental.h"
++
++#if defined(HAVE_EXPLICIT_BZERO)
++static inline void *explicit_bzero_safe(void *p, size_t l) {
++        if (p && l > 0)
++                explicit_bzero(p, l);
++
++        return p;
++}
++#else
++static inline void *explicit_bzero_safe(void *p, size_t l) {
++        if (p && l > 0) {
++                memset(p, 0, l);
++                __asm__ __volatile__("" : : "r"(p) : "memory");
++        }
++        return p;
++}
++#endif
++
++struct VarEraser {
++        void *p;
++        size_t size;
++};
++
++static inline void erase_var(struct VarEraser *e) {
++        explicit_bzero_safe(e->p, e->size);
++}
++
++/* Mark var to be erased when leaving scope. */
++#define CLEANUP_ERASE(var) \
++        _cleanup_(erase_var) _unused_ struct VarEraser CONCATENATE(_eraser_, UNIQ) = { .p = &var, .size = sizeof(var) }
+diff --git a/src/fundamental/meson.build b/src/fundamental/meson.build
+index 3810d6b456..4b8e32337d 100644
+--- a/src/fundamental/meson.build
++++ b/src/fundamental/meson.build
+@@ -6,6 +6,7 @@ fundamental_headers = files(
+         'bootspec-fundamental.h',
+         'efivars-fundamental.h',
+         'macro-fundamental.h',
++        'memory-util-fundamental.h',
+         'sha256.h',
+         'string-util-fundamental.h',
+         'tpm-pcr.h',

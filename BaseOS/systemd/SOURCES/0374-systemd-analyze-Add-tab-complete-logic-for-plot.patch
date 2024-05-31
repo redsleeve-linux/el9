@@ -1,0 +1,87 @@
+From a1bc66bfeac890107411686cb7567c9ffa926972 Mon Sep 17 00:00:00 2001
+From: joshuazivkovic <joshua.zivkovic@codethink.co.uk>
+Date: Wed, 14 Dec 2022 12:31:59 +0000
+Subject: [PATCH] systemd-analyze: Add tab complete logic for plot
+
+(cherry picked from commit f21a6502d81ca5690467cb161dafd4b875e4430e)
+
+Resolves: RHEL-5070
+---
+ shell-completion/bash/systemd-analyze |  8 +++++++-
+ shell-completion/zsh/_systemd-analyze | 14 ++++++++++++--
+ 2 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/shell-completion/bash/systemd-analyze b/shell-completion/bash/systemd-analyze
+index b1baec9978..5edba7bf58 100644
+--- a/shell-completion/bash/systemd-analyze
++++ b/shell-completion/bash/systemd-analyze
+@@ -62,7 +62,7 @@ _systemd_analyze() {
+     )
+ 
+     local -A VERBS=(
+-        [STANDALONE]='time blame plot unit-paths exit-status calendar timestamp timespan'
++        [STANDALONE]='time blame unit-paths exit-status calendar timestamp timespan'
+         [CRITICAL_CHAIN]='critical-chain'
+         [DOT]='dot'
+         [DUMP]='dump'
+@@ -72,6 +72,7 @@ _systemd_analyze() {
+         [SECURITY]='security'
+         [CONDITION]='condition'
+         [INSPECT_ELF]='inspect-elf'
++        [PLOT]='plot'
+     )
+ 
+     local CONFIGS='systemd/bootchart.conf systemd/coredump.conf systemd/journald.conf
+@@ -195,6 +196,11 @@ _systemd_analyze() {
+             comps=$( compgen -A file -- "$cur" )
+             compopt -o filenames
+         fi
++
++    elif __contains_word "$verb" ${VERBS[PLOT]}; then
++        if [[ $cur = -* ]]; then
++            comps='--help --version --system --user --global --no-pager --json=off --json=pretty --json=short --table --no-legend'
++        fi
+     fi
+ 
+     COMPREPLY=( $(compgen -W '$comps' -- "$cur") )
+diff --git a/shell-completion/zsh/_systemd-analyze b/shell-completion/zsh/_systemd-analyze
+index e305995cef..2e046ea111 100644
+--- a/shell-completion/zsh/_systemd-analyze
++++ b/shell-completion/zsh/_systemd-analyze
+@@ -40,6 +40,13 @@
+         _describe -t groups 'file system groups' _groups || compadd "$@"
+     }
+ 
++(( $+functions[_systemd-analyze_plot] )) ||
++    _systemd-analyze_plot() {
++        local -a _options
++        _options=( '--json=off' '--json=pretty' '--json=short' '--table' '--no-legend' )
++        _describe 'plot options' _options
++    }
++
+ (( $+functions[_systemd-analyze_commands] )) ||
+     _systemd-analyze_commands(){
+         local -a _systemd_analyze_cmds
+@@ -48,7 +55,8 @@
+             'time:Print time spent in the kernel before reaching userspace'
+             'blame:Print list of running units ordered by time to init'
+             'critical-chain:Print a tree of the time critical chain of units'
+-            'plot:Output SVG graphic showing service initialization'
++            'plot:Output SVG graphic showing service initialization, or raw time data in
++JSON or table format'
+             'dot:Dump dependency graph (in dot(1) format)'
+             'dump:Dump server status'
+             'cat-config:Cat systemd config files'
+@@ -97,9 +105,11 @@ _arguments \
+     '--offline=[Perform a security review of the specified unit files]:BOOL:(yes no)' \
+     '--threshold=[Set a value to compare the overall security exposure level with]: NUMBER' \
+     '--security-policy=[Use customized requirements to compare unit files against]: PATH' \
+-    '--json=[Generate a JSON output of the security analysis table]:MODE:(pretty short off)' \
++    "--json=[Generate a JSON output of the security analysis table or plot's raw time data]:MODE:(pretty short off)" \
++    "--table=[Generate a table of plot's raw time data]" \
+     '--profile=[Include the specified profile in the security review of units]: PATH' \
+     '--no-pager[Do not pipe output into a pager]' \
++    "--no-legend[Do not show the headers and footers for plot's raw time data formats]" \
+     '--man=[Do (not) check for existence of man pages]:BOOL:(yes no)' \
+     '--generators=[Do (not) run unit generators]:BOOL:(yes no)' \
+     '--order[When generating graph for dot, show only order]' \

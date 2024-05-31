@@ -1,0 +1,214 @@
+From 1b03cc4e54f74c075e177b57e04cd6f9338540fd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 10 Jan 2023 14:25:57 +0100
+Subject: [PATCH] meson: use 0|1 for SD_BOOT
+
+We converted to not using #ifdef for most of our defines because the syntax is
+nicer and we are protected against typos and can set -Werror=undef. Let's do
+the same for SD_BOOT. The define is nicely hidden in build.h for normal builds,
+and for EFI builds we were already setting SD_BOOT on the commandline.
+
+(cherry picked from commit 493cd5034c3eb091e7163ea1e744a4e07b410710)
+
+Related: RHEL-16952
+---
+ meson.build                               | 3 +++
+ src/boot/efi/efi-string.c                 | 8 ++++----
+ src/boot/efi/efi-string.h                 | 2 +-
+ src/boot/efi/meson.build                  | 2 +-
+ src/fundamental/macro-fundamental.h       | 6 +++---
+ src/fundamental/memory-util-fundamental.h | 2 +-
+ src/fundamental/sha256.c                  | 2 +-
+ src/fundamental/string-util-fundamental.c | 4 ++--
+ src/fundamental/string-util-fundamental.h | 6 +++---
+ 9 files changed, 19 insertions(+), 16 deletions(-)
+
+diff --git a/meson.build b/meson.build
+index 54155eee1f..843d823e3e 100644
+--- a/meson.build
++++ b/meson.build
+@@ -55,6 +55,9 @@ fuzzer_build = want_ossfuzz or want_libfuzzer
+ # limits).
+ conf.set10('FUZZ_USE_SIZE_LIMIT', fuzzer_build)
+ 
++# We'll set this to '1' for EFI builds in a different place.
++conf.set10('SD_BOOT', false)
++
+ # Create a title-less summary section early, so it ends up first in the output.
+ # More items are added later after they have been detected.
+ summary({'build mode' : get_option('mode')})
+diff --git a/src/boot/efi/efi-string.c b/src/boot/efi/efi-string.c
+index 2ba15673c9..79c296eda3 100644
+--- a/src/boot/efi/efi-string.c
++++ b/src/boot/efi/efi-string.c
+@@ -5,7 +5,7 @@
+ 
+ #include "efi-string.h"
+ 
+-#ifdef SD_BOOT
++#if SD_BOOT
+ #  include "util.h"
+ #else
+ #  include <stdlib.h>
+@@ -378,7 +378,7 @@ bool efi_fnmatch(const char16_t *pattern, const char16_t *haystack) {
+ DEFINE_PARSE_NUMBER(char, parse_number8);
+ DEFINE_PARSE_NUMBER(char16_t, parse_number16);
+ 
+-#ifdef SD_BOOT
++#if SD_BOOT
+ /* To provide the actual implementation for these we need to remove the redirection to the builtins. */
+ #  undef memcmp
+ #  undef memcpy
+@@ -414,7 +414,7 @@ _used_ _weak_ void *memcpy(void * restrict dest, const void * restrict src, size
+         if (!dest || !src || n == 0)
+                 return dest;
+ 
+-#ifdef SD_BOOT
++#if SD_BOOT
+         /* The firmware-provided memcpy is likely optimized, so use that. The function is guaranteed to be
+          * available by the UEFI spec. We still make it depend on the boot services pointer being set just in
+          * case the compiler emits a call before it is available. */
+@@ -441,7 +441,7 @@ _used_ _weak_ void *memset(void *p, int c, size_t n) {
+         if (!p || n == 0)
+                 return p;
+ 
+-#ifdef SD_BOOT
++#if SD_BOOT
+         /* See comment in efi_memcpy. Note that the signature has c and n swapped! */
+         if (_likely_(BS)) {
+                 BS->SetMem(p, n, c);
+diff --git a/src/boot/efi/efi-string.h b/src/boot/efi/efi-string.h
+index 25931a7d6e..aaa9b399c8 100644
+--- a/src/boot/efi/efi-string.h
++++ b/src/boot/efi/efi-string.h
+@@ -109,7 +109,7 @@ bool efi_fnmatch(const char16_t *pattern, const char16_t *haystack);
+ bool parse_number8(const char *s, uint64_t *ret_u, const char **ret_tail);
+ bool parse_number16(const char16_t *s, uint64_t *ret_u, const char16_t **ret_tail);
+ 
+-#ifdef SD_BOOT
++#if SD_BOOT
+ /* The compiler normally has knowledge about standard functions such as memcmp, but this is not the case when
+  * compiling with -ffreestanding. By referring to builtins, the compiler can check arguments and do
+  * optimizations again. Note that we still need to provide implementations as the compiler is free to not
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index ab2d7595f3..bba3b62d3c 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -176,7 +176,7 @@ efi_config_h = configure_file(
+ 
+ efi_cflags = [
+         '-DGNU_EFI_USE_MS_ABI',
+-        '-DSD_BOOT',
++        '-DSD_BOOT=1',
+         '-ffreestanding',
+         '-fshort-wchar',
+         '-fvisibility=hidden',
+diff --git a/src/fundamental/macro-fundamental.h b/src/fundamental/macro-fundamental.h
+index dd0de328cb..1c4c445e4e 100644
+--- a/src/fundamental/macro-fundamental.h
++++ b/src/fundamental/macro-fundamental.h
+@@ -1,7 +1,7 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ #pragma once
+ 
+-#ifndef SD_BOOT
++#if !SD_BOOT
+ #  include <assert.h>
+ #endif
+ 
+@@ -66,7 +66,7 @@
+ #define XCONCATENATE(x, y) x ## y
+ #define CONCATENATE(x, y) XCONCATENATE(x, y)
+ 
+-#ifdef SD_BOOT
++#if SD_BOOT
+         _noreturn_ void efi_assert(const char *expr, const char *file, unsigned line, const char *function);
+ 
+         #ifdef NDEBUG
+@@ -340,7 +340,7 @@ static inline size_t ALIGN_TO(size_t l, size_t ali) {
+ #define ALIGN2_PTR(p) ((void*) ALIGN2((uintptr_t) p))
+ #define ALIGN4_PTR(p) ((void*) ALIGN4((uintptr_t) p))
+ #define ALIGN8_PTR(p) ((void*) ALIGN8((uintptr_t) p))
+-#ifndef SD_BOOT
++#if !SD_BOOT
+ /* libefi also provides ALIGN, and we do not use them in sd-boot explicitly. */
+ #define ALIGN(l)  ALIGN_TO(l, sizeof(void*))
+ #define ALIGN_PTR(p) ((void*) ALIGN((uintptr_t) (p)))
+diff --git a/src/fundamental/memory-util-fundamental.h b/src/fundamental/memory-util-fundamental.h
+index 9015300ae8..8f50d8b8e1 100644
+--- a/src/fundamental/memory-util-fundamental.h
++++ b/src/fundamental/memory-util-fundamental.h
+@@ -3,7 +3,7 @@
+ 
+ #include <stddef.h>
+ 
+-#ifdef SD_BOOT
++#if SD_BOOT
+ #  include "efi-string.h"
+ #else
+ #  include <string.h>
+diff --git a/src/fundamental/sha256.c b/src/fundamental/sha256.c
+index 9b717645b3..39029de93c 100644
+--- a/src/fundamental/sha256.c
++++ b/src/fundamental/sha256.c
+@@ -22,7 +22,7 @@
+    <https://www.gnu.org/licenses/>.  */
+ 
+ #include <stdbool.h>
+-#ifdef SD_BOOT
++#if SD_BOOT
+ #  include "efi-string.h"
+ #else
+ #  include <string.h>
+diff --git a/src/fundamental/string-util-fundamental.c b/src/fundamental/string-util-fundamental.c
+index 11701ebe52..484131d72a 100644
+--- a/src/fundamental/string-util-fundamental.c
++++ b/src/fundamental/string-util-fundamental.c
+@@ -1,6 +1,6 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
+-#ifndef SD_BOOT
++#if !SD_BOOT
+ #  include <ctype.h>
+ #endif
+ 
+@@ -20,7 +20,7 @@ sd_char *startswith(const sd_char *s, const sd_char *prefix) {
+         return (sd_char*) s + l;
+ }
+ 
+-#ifndef SD_BOOT
++#if !SD_BOOT
+ sd_char *startswith_no_case(const sd_char *s, const sd_char *prefix) {
+         size_t l;
+ 
+diff --git a/src/fundamental/string-util-fundamental.h b/src/fundamental/string-util-fundamental.h
+index ecf32e519f..523c612a17 100644
+--- a/src/fundamental/string-util-fundamental.h
++++ b/src/fundamental/string-util-fundamental.h
+@@ -1,7 +1,7 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ #pragma once
+ 
+-#ifdef SD_BOOT
++#if SD_BOOT
+ #  include <efi.h>
+ #  include <efilib.h>
+ #  include "efi-string.h"
+@@ -11,7 +11,7 @@
+ 
+ #include "macro-fundamental.h"
+ 
+-#ifdef SD_BOOT
++#if SD_BOOT
+ #  define strlen strlen16
+ #  define strcmp strcmp16
+ #  define strncmp strncmp16
+@@ -59,7 +59,7 @@ static inline size_t strlen_ptr(const sd_char *s) {
+ }
+ 
+ sd_char *startswith(const sd_char *s, const sd_char *prefix) _pure_;
+-#ifndef SD_BOOT
++#if !SD_BOOT
+ sd_char *startswith_no_case(const sd_char *s, const sd_char *prefix) _pure_;
+ #endif
+ sd_char *endswith(const sd_char *s, const sd_char *postfix) _pure_;

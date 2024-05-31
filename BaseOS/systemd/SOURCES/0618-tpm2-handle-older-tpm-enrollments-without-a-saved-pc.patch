@@ -1,0 +1,37 @@
+From 9935268b03aa24fbf0e70eaa42ee58db94f237d3 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Fri, 14 Jul 2023 13:15:48 -0400
+Subject: [PATCH] tpm2: handle older tpm enrollments without a saved pcr bank
+
+Older code did not save the pcr bank (i.e. pcr hash algorithm), and instead let
+tpm2_unseal() find the best pcr bank to use. In commit
+2cd9d57548b0dadd52523df486d33aa4cf7c3b84 we changed tpm2_unseal() to no longer
+handle an unset pcr bank. This adds back in the handling of an unset pcr_bank
+so older sealed data should continue to work.
+
+(cherry picked from commit 730d6ab9302f42a2d49355ec8851bd5e3929b36d)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index ffadfa1498..e743dad392 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -4078,6 +4078,14 @@ int tpm2_unseal(const char *device,
+         if (r < 0)
+                 return r;
+ 
++        /* Older code did not save the pcr_bank, and unsealing needed to detect the best pcr bank to use,
++         * so we need to handle that legacy situation. */
++        if (pcr_bank == UINT16_MAX) {
++                r = tpm2_get_best_pcr_bank(c, hash_pcr_mask|pubkey_pcr_mask, &pcr_bank);
++                if (r < 0)
++                        return r;
++        }
++
+         _cleanup_(tpm2_handle_freep) Tpm2Handle *primary_handle = NULL;
+         if (srk_buf) {
+                 r = tpm2_deserialize(c, srk_buf, srk_buf_size, &primary_handle);

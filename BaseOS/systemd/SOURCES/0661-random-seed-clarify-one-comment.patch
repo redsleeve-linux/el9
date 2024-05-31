@@ -1,0 +1,33 @@
+From 22a598fa626bf440127c1dd2a6b116514869752a Mon Sep 17 00:00:00 2001
+From: Franck Bui <fbui@suse.com>
+Date: Tue, 25 Oct 2022 13:54:10 +0200
+Subject: [PATCH] random-seed: clarify one comment
+
+(cherry picked from commit 46e0b5dca7fa5368bccbf30a7d2569d93d994a44)
+
+Related: RHEL-16952
+---
+ src/random-seed/random-seed.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/random-seed/random-seed.c b/src/random-seed/random-seed.c
+index 7782509572..22ddf659ae 100644
+--- a/src/random-seed/random-seed.c
++++ b/src/random-seed/random-seed.c
+@@ -249,12 +249,13 @@ static int save_seed_file(
+         if (!buf)
+                 return log_oom();
+ 
+-        /* Let's make this whole job asynchronous, i.e. let's make ourselves a barrier for proper
+-         * initialization of the random pool. */
+         k = getrandom(buf, seed_size, GRND_NONBLOCK);
+         if (k < 0 && errno == EAGAIN && synchronous) {
++                /* If we're asked to make ourselves a barrier for proper initialization of the random pool
++                 * make this whole job synchronous by asking getrandom() to wait until the requested number
++                 * of random bytes is available. */
+                 log_notice("Kernel entropy pool is not initialized yet, waiting until it is.");
+-                k = getrandom(buf, seed_size, 0); /* retry synchronously */
++                k = getrandom(buf, seed_size, 0);
+         }
+         if (k < 0)
+                 log_debug_errno(errno, "Failed to read random data with getrandom(), falling back to /dev/urandom: %m");

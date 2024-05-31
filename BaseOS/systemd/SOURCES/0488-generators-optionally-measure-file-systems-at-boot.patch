@@ -1,0 +1,268 @@
+From 1d797fa7c074a9b6aa770466a3718a41d17d4aaf Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Sun, 16 Oct 2022 23:25:04 +0200
+Subject: [PATCH] generators: optionally, measure file systems at boot
+
+If we use gpt-auto-generator, automatically measure root fs and /var.
+
+Otherwise, add x-systemd.measure option to request this.
+
+(cherry picked from commit 04959faa632272a8fc9cdac3121b2e4af721c1b6)
+
+Related: RHEL-16182
+---
+ src/basic/special.h                         |  2 ++
+ src/fstab-generator/fstab-generator.c       | 21 +++++++++---
+ src/gpt-auto-generator/gpt-auto-generator.c |  6 ++++
+ src/shared/generator.c                      | 37 +++++++++++++++++++++
+ src/shared/generator.h                      |  4 +++
+ units/meson.build                           |  2 ++
+ units/systemd-pcrfs-root.service.in         | 24 +++++++++++++
+ units/systemd-pcrfs@.service.in             | 25 ++++++++++++++
+ 8 files changed, 116 insertions(+), 5 deletions(-)
+ create mode 100644 units/systemd-pcrfs-root.service.in
+ create mode 100644 units/systemd-pcrfs@.service.in
+
+diff --git a/src/basic/special.h b/src/basic/special.h
+index 9bb36c5732..0e4342eb40 100644
+--- a/src/basic/special.h
++++ b/src/basic/special.h
+@@ -89,6 +89,8 @@
+ #define SPECIAL_UDEVD_SERVICE "systemd-udevd.service"
+ #define SPECIAL_GROWFS_SERVICE "systemd-growfs@.service"
+ #define SPECIAL_GROWFS_ROOT_SERVICE "systemd-growfs-root.service"
++#define SPECIAL_PCRFS_SERVICE "systemd-pcrfs@.service"
++#define SPECIAL_PCRFS_ROOT_SERVICE "systemd-pcrfs-root.service"
+ 
+ /* Services systemd relies on */
+ #define SPECIAL_DBUS_SERVICE "dbus.service"
+diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
+index c3fe285344..c4915a37d3 100644
+--- a/src/fstab-generator/fstab-generator.c
++++ b/src/fstab-generator/fstab-generator.c
+@@ -42,6 +42,7 @@ typedef enum MountPointFlags {
+         MOUNT_MAKEFS    = 1 << 3,
+         MOUNT_GROWFS    = 1 << 4,
+         MOUNT_RW_ONLY   = 1 << 5,
++        MOUNT_PCRFS     = 1 << 6,
+ } MountPointFlags;
+ 
+ typedef struct Mount {
+@@ -238,9 +239,9 @@ static int add_swap(
+                 return true;
+         }
+ 
+-        log_debug("Found swap entry what=%s makefs=%s growfs=%s noauto=%s nofail=%s",
++        log_debug("Found swap entry what=%s makefs=%s growfs=%s pcrfs=%s noauto=%s nofail=%s",
+                   what,
+-                  yes_no(flags & MOUNT_MAKEFS), yes_no(flags & MOUNT_GROWFS),
++                  yes_no(flags & MOUNT_MAKEFS), yes_no(flags & MOUNT_GROWFS), yes_no(flags & MOUNT_PCRFS),
+                   yes_no(flags & MOUNT_NOAUTO), yes_no(flags & MOUNT_NOFAIL));
+ 
+         r = unit_name_from_path(what, ".swap", &name);
+@@ -291,6 +292,8 @@ static int add_swap(
+         if (flags & MOUNT_GROWFS)
+                 /* TODO: swap devices must be wiped and recreated */
+                 log_warning("%s: growing swap devices is currently unsupported.", what);
++        if (flags & MOUNT_PCRFS)
++                log_warning("%s: measuring swap devices is currently unsupported.", what);
+ 
+         if (!(flags & MOUNT_NOAUTO)) {
+                 r = generator_add_symlink(arg_dest, SPECIAL_SWAP_TARGET,
+@@ -642,6 +645,12 @@ static int add_mount(
+                         return r;
+         }
+ 
++        if (flags & MOUNT_PCRFS) {
++                r = generator_hook_up_pcrfs(dest, where, target_unit);
++                if (r < 0)
++                        return r;
++        }
++
+         if (!FLAGS_SET(flags, MOUNT_AUTOMOUNT)) {
+                 if (!FLAGS_SET(flags, MOUNT_NOAUTO) && strv_isempty(wanted_by) && strv_isempty(required_by)) {
+                         r = generator_add_symlink(dest, target_unit,
+@@ -784,6 +793,8 @@ static MountPointFlags fstab_options_to_flags(const char *options, bool is_swap)
+                 flags |= MOUNT_MAKEFS;
+         if (fstab_test_option(options, "x-systemd.growfs\0"))
+                 flags |= MOUNT_GROWFS;
++        if (fstab_test_option(options, "x-systemd.pcrfs\0"))
++                flags |= MOUNT_PCRFS;
+         if (fstab_test_yes_no_option(options, "noauto\0" "auto\0"))
+                 flags |= MOUNT_NOAUTO;
+         if (fstab_test_yes_no_option(options, "nofail\0" "fail\0"))
+@@ -912,9 +923,9 @@ static int parse_fstab_one(
+         }
+ 
+ 
+-        log_debug("Found entry what=%s where=%s type=%s makefs=%s growfs=%s noauto=%s nofail=%s",
++        log_debug("Found entry what=%s where=%s type=%s makefs=%s growfs=%s pcrfs=%s noauto=%s nofail=%s",
+                   what, where, strna(fstype),
+-                  yes_no(flags & MOUNT_MAKEFS), yes_no(flags & MOUNT_GROWFS),
++                  yes_no(flags & MOUNT_MAKEFS), yes_no(flags & MOUNT_GROWFS), yes_no(flags & MOUNT_PCRFS),
+                   yes_no(flags & MOUNT_NOAUTO), yes_no(flags & MOUNT_NOFAIL));
+ 
+         bool is_sysroot = in_initrd() && path_equal(where, "/sysroot");
+@@ -1127,7 +1138,7 @@ static int add_sysroot_mount(void) {
+                          fstype,
+                          opts,
+                          is_device_path(what) ? 1 : 0, /* passno */
+-                         0,                            /* makefs off, growfs off, noauto off, nofail off, automount off */
++                         0,                            /* makefs off, pcrfs off, noauto off, nofail off, automount off */
+                          SPECIAL_INITRD_ROOT_FS_TARGET);
+ }
+ 
+diff --git a/src/gpt-auto-generator/gpt-auto-generator.c b/src/gpt-auto-generator/gpt-auto-generator.c
+index 2134185f04..2620a12f03 100644
+--- a/src/gpt-auto-generator/gpt-auto-generator.c
++++ b/src/gpt-auto-generator/gpt-auto-generator.c
+@@ -245,6 +245,12 @@ static int add_mount(
+                         return r;
+         }
+ 
++        if (measure) {
++                r = generator_hook_up_pcrfs(arg_dest, where, post);
++                if (r < 0)
++                        return r;
++        }
++
+         if (post) {
+                 r = generator_add_symlink(arg_dest, post, "requires", unit);
+                 if (r < 0)
+diff --git a/src/shared/generator.c b/src/shared/generator.c
+index f1c5e506ab..284e5fc580 100644
+--- a/src/shared/generator.c
++++ b/src/shared/generator.c
+@@ -645,6 +645,43 @@ int generator_hook_up_growfs(
+         return generator_add_symlink_full(dir, where_unit, "wants", growfs_unit_path, instance);
+ }
+ 
++int generator_hook_up_pcrfs(
++                const char *dir,
++                const char *where,
++                const char *target) {
++
++        const char *pcrfs_unit, *pcrfs_unit_path;
++        _cleanup_free_ char *where_unit = NULL, *instance = NULL;
++        int r;
++
++        assert(dir);
++        assert(where);
++
++        r = unit_name_from_path(where, ".mount", &where_unit);
++        if (r < 0)
++                return log_error_errno(r, "Failed to make unit name from path '%s': %m", where);
++
++        if (empty_or_root(where)) {
++                pcrfs_unit = SPECIAL_PCRFS_ROOT_SERVICE;
++                pcrfs_unit_path = SYSTEM_DATA_UNIT_DIR "/" SPECIAL_PCRFS_ROOT_SERVICE;
++        } else {
++                pcrfs_unit = SPECIAL_PCRFS_SERVICE;
++                pcrfs_unit_path = SYSTEM_DATA_UNIT_DIR "/" SPECIAL_PCRFS_SERVICE;
++
++                r = unit_name_path_escape(where, &instance);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to escape path '%s': %m", where);
++        }
++
++        if (target) {
++                r = generator_add_ordering(dir, target, "After", pcrfs_unit, instance);
++                if (r < 0)
++                        return r;
++        }
++
++        return generator_add_symlink_full(dir, where_unit, "wants", pcrfs_unit_path, instance);
++}
++
+ int generator_enable_remount_fs_service(const char *dir) {
+         /* Pull in systemd-remount-fs.service */
+         return generator_add_symlink(dir, SPECIAL_LOCAL_FS_TARGET, "wants",
+diff --git a/src/shared/generator.h b/src/shared/generator.h
+index a4049dbd8f..111900fd45 100644
+--- a/src/shared/generator.h
++++ b/src/shared/generator.h
+@@ -81,6 +81,10 @@ int generator_hook_up_growfs(
+         const char *dir,
+         const char *where,
+         const char *target);
++int generator_hook_up_pcrfs(
++        const char *dir,
++        const char *where,
++        const char *target);
+ 
+ int generator_enable_remount_fs_service(const char *dir);
+ 
+diff --git a/units/meson.build b/units/meson.build
+index 9046e5d066..3a1f5229a0 100644
+--- a/units/meson.build
++++ b/units/meson.build
+@@ -264,6 +264,8 @@ in_units = [
+          'sysinit.target.wants/'],
+         ['systemd-pcrphase.service',             'HAVE_GNU_EFI HAVE_OPENSSL HAVE_TPM2',
+          'sysinit.target.wants/'],
++        ['systemd-pcrfs-root.service',           ''],
++        ['systemd-pcrfs@.service',               ''],
+         ['systemd-growfs-root.service',          ''],
+         ['systemd-growfs@.service',              ''],
+         ['systemd-pcrmachine.service',           'HAVE_GNU_EFI HAVE_OPENSSL HAVE_TPM2',
+diff --git a/units/systemd-pcrfs-root.service.in b/units/systemd-pcrfs-root.service.in
+new file mode 100644
+index 0000000000..b0da413bb4
+--- /dev/null
++++ b/units/systemd-pcrfs-root.service.in
+@@ -0,0 +1,24 @@
++#  SPDX-License-Identifier: LGPL-2.1-or-later
++#
++#  This file is part of systemd.
++#
++#  systemd is free software; you can redistribute it and/or modify it
++#  under the terms of the GNU Lesser General Public License as published by
++#  the Free Software Foundation; either version 2.1 of the License, or
++#  (at your option) any later version.
++
++[Unit]
++Description=TPM2 PCR Root File System Measurement
++Documentation=man:systemd-pcrfs-root.service(8)
++DefaultDependencies=no
++Conflicts=shutdown.target
++After=systemd-pcrmachine.service
++Before=shutdown.target
++AssertPathExists=!/etc/initrd-release
++ConditionSecurity=tpm2
++ConditionPathExists=/sys/firmware/efi/efivars/StubPcrKernelImage-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
++
++[Service]
++Type=oneshot
++RemainAfterExit=yes
++ExecStart={{ROOTLIBEXECDIR}}/systemd-pcrphase --file-system=/
+diff --git a/units/systemd-pcrfs@.service.in b/units/systemd-pcrfs@.service.in
+new file mode 100644
+index 0000000000..ec1ff118c3
+--- /dev/null
++++ b/units/systemd-pcrfs@.service.in
+@@ -0,0 +1,25 @@
++#  SPDX-License-Identifier: LGPL-2.1-or-later
++#
++#  This file is part of systemd.
++#
++#  systemd is free software; you can redistribute it and/or modify it
++#  under the terms of the GNU Lesser General Public License as published by
++#  the Free Software Foundation; either version 2.1 of the License, or
++#  (at your option) any later version.
++
++[Unit]
++Description=TPM2 PCR File System Measurement of %f
++Documentation=man:systemd-pcrfs@.service(8)
++DefaultDependencies=no
++BindsTo=%i.mount
++Conflicts=shutdown.target
++After=%i.mount systemd-pcrfs-root.service
++Before=shutdown.target
++AssertPathExists=!/etc/initrd-release
++ConditionSecurity=tpm2
++ConditionPathExists=/sys/firmware/efi/efivars/StubPcrKernelImage-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
++
++[Service]
++Type=oneshot
++RemainAfterExit=yes
++ExecStart={{ROOTLIBEXECDIR}}/systemd-pcrphase --file-system=%f

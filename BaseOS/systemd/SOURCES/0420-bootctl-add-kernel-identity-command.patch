@@ -1,0 +1,214 @@
+From ca716a0fdfd434e52384dd74ff4c909aa95b6c81 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Mon, 16 Jan 2023 18:58:21 +0100
+Subject: [PATCH] bootctl: add kernel-identity command
+
+The command takes a kernel as argument and checks what kind of kernel
+the image is.  Returns one of uki, pe or unknown.
+
+(cherry picked from commit 53c368d71ba43da7414ac86c58291a11da05ba84)
+
+Resolves: RHEL-16354
+---
+ man/bootctl.xml        |  13 +++++
+ meson.build            |   5 +-
+ src/boot/bootctl-uki.c | 109 +++++++++++++++++++++++++++++++++++++++++
+ src/boot/bootctl-uki.h |   3 ++
+ src/boot/bootctl.c     |   4 ++
+ 5 files changed, 133 insertions(+), 1 deletion(-)
+ create mode 100644 src/boot/bootctl-uki.c
+ create mode 100644 src/boot/bootctl-uki.h
+
+diff --git a/man/bootctl.xml b/man/bootctl.xml
+index dfc56d6125..0f992ec383 100644
+--- a/man/bootctl.xml
++++ b/man/bootctl.xml
+@@ -217,6 +217,19 @@
+     </variablelist>
+   </refsect1>
+ 
++  <refsect1>
++    <title><command>kernel</command> Commands</title>
++
++    <variablelist>
++      <varlistentry>
++        <term><option>kernel-identify</option> <replaceable>kernel</replaceable></term>
++
++        <listitem><para>Takes a kernel image as argument. Checks what kind of kernel the image is.  Returns
++        one of uki, pe or unknown.</para></listitem>
++      </varlistentry>
++    </variablelist>
++  </refsect1>
++
+   <refsect1>
+     <title>Options</title>
+     <para>The following options are understood:</para>
+diff --git a/meson.build b/meson.build
+index e0495ed36a..936e612a01 100644
+--- a/meson.build
++++ b/meson.build
+@@ -2566,7 +2566,10 @@ if conf.get('HAVE_BLKID') == 1 and conf.get('HAVE_GNU_EFI') == 1
+ 
+         public_programs += executable(
+                 'bootctl',
+-                'src/boot/bootctl.c',
++                ['src/boot/bootctl.c',
++                 'src/boot/bootctl-uki.c',
++                 'src/boot/bootctl-uki.h',
++                ],
+                 include_directories : includes,
+                 link_with : [boot_link_with],
+                 dependencies : [libblkid],
+diff --git a/src/boot/bootctl-uki.c b/src/boot/bootctl-uki.c
+new file mode 100644
+index 0000000000..7e8e8a570b
+--- /dev/null
++++ b/src/boot/bootctl-uki.c
+@@ -0,0 +1,109 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++
++#include "bootctl-uki.h"
++#include "fd-util.h"
++#include "parse-util.h"
++#include "pe-header.h"
++
++#define MAX_SECTIONS 96
++
++static const uint8_t dos_file_magic[2] = "MZ";
++static const uint8_t pe_file_magic[4] = "PE\0\0";
++
++static const uint8_t name_osrel[8] = ".osrel";
++static const uint8_t name_linux[8] = ".linux";
++static const uint8_t name_initrd[8] = ".initrd";
++
++static int pe_sections(FILE *uki, struct PeSectionHeader **ret, size_t *ret_n) {
++        _cleanup_free_ struct PeSectionHeader *sections = NULL;
++        struct DosFileHeader dos;
++        struct PeHeader pe;
++        size_t scount;
++        uint64_t soff, items;
++        int rc;
++
++        items = fread(&dos, 1, sizeof(dos), uki);
++        if (items != sizeof(dos))
++                return log_error_errno(SYNTHETIC_ERRNO(EIO), "DOS header read error");
++        if (memcmp(dos.Magic, dos_file_magic, sizeof(dos_file_magic)) != 0)
++                goto no_sections;
++
++        rc = fseek(uki, le32toh(dos.ExeHeader), SEEK_SET);
++        if (rc < 0)
++                return log_error_errno(errno, "seek to PE header");
++        items = fread(&pe, 1, sizeof(pe), uki);
++        if (items != sizeof(pe))
++                return log_error_errno(SYNTHETIC_ERRNO(EIO), "PE header read error");
++        if (memcmp(pe.Magic, pe_file_magic, sizeof(pe_file_magic)) != 0)
++                goto no_sections;
++
++        soff = le32toh(dos.ExeHeader) + sizeof(pe) + le16toh(pe.FileHeader.SizeOfOptionalHeader);
++        rc = fseek(uki, soff, SEEK_SET);
++        if (rc < 0)
++                return log_error_errno(errno, "seek to PE section headers");
++
++        scount = le16toh(pe.FileHeader.NumberOfSections);
++        if (scount > MAX_SECTIONS)
++                goto no_sections;
++        sections = new(struct PeSectionHeader, scount);
++        if (!sections)
++                return log_oom();
++        items = fread(sections, sizeof(*sections), scount, uki);
++        if (items != scount)
++                return log_error_errno(SYNTHETIC_ERRNO(EIO), "PE section header read error");
++
++        *ret = TAKE_PTR(sections);
++        *ret_n = scount;
++        return 0;
++
++no_sections:
++        *ret = NULL;
++        *ret_n = 0;
++        return 0;
++}
++
++static int find_pe_section(struct PeSectionHeader *sections, size_t scount,
++                           const uint8_t *name, size_t namelen, size_t *ret) {
++        for (size_t s = 0; s < scount; s++) {
++                if (memcmp_nn(sections[s].Name, sizeof(sections[s].Name),
++                              name, namelen) == 0) {
++                        if (ret)
++                                *ret = s;
++                        return 1;
++                }
++        }
++        return 0;
++}
++
++static bool is_uki(struct PeSectionHeader *sections, size_t scount) {
++        return (find_pe_section(sections, scount, name_osrel, sizeof(name_osrel), NULL) &&
++                find_pe_section(sections, scount, name_linux, sizeof(name_linux), NULL) &&
++                find_pe_section(sections, scount, name_initrd, sizeof(name_initrd), NULL));
++}
++
++int verb_kernel_identify(int argc, char *argv[], void *userdata) {
++        _cleanup_fclose_ FILE *uki = NULL;
++        _cleanup_free_ struct PeSectionHeader *sections = NULL;
++        size_t scount;
++        int rc;
++
++        uki = fopen(argv[1], "re");
++        if (!uki)
++                return log_error_errno(errno, "Failed to open UKI file '%s': %m", argv[1]);
++
++        rc = pe_sections(uki, &sections, &scount);
++        if (rc < 0)
++                return EXIT_FAILURE;
++
++        if (sections) {
++                if (is_uki(sections, scount)) {
++                        puts("uki");
++                        return EXIT_SUCCESS;
++                }
++                puts("pe");
++                return EXIT_SUCCESS;
++        }
++
++        puts("unknown");
++        return EXIT_SUCCESS;
++}
+diff --git a/src/boot/bootctl-uki.h b/src/boot/bootctl-uki.h
+new file mode 100644
+index 0000000000..3c1fb5bc6a
+--- /dev/null
++++ b/src/boot/bootctl-uki.h
+@@ -0,0 +1,3 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++
++int verb_kernel_identify(int argc, char *argv[], void *userdata);
+diff --git a/src/boot/bootctl.c b/src/boot/bootctl.c
+index 67fcbcc8cd..58e4af85f8 100644
+--- a/src/boot/bootctl.c
++++ b/src/boot/bootctl.c
+@@ -14,6 +14,7 @@
+ 
+ #include "alloc-util.h"
+ #include "blkid-util.h"
++#include "bootctl-uki.h"
+ #include "bootspec.h"
+ #include "chase-symlinks.h"
+ #include "copy.h"
+@@ -1453,6 +1454,8 @@ static int help(int argc, char *argv[], void *userdata) {
+                "  remove              Remove systemd-boot from the ESP and EFI variables\n"
+                "  is-installed        Test whether systemd-boot is installed in the ESP\n"
+                "  random-seed         Initialize random seed in ESP and EFI variables\n"
++               "\n%3$skernel Commands:%4$s\n"
++               "  kernel-identify     Identify kernel image type.\n"
+                "\n%3$sOptions:%4$s\n"
+                "  -h --help            Show this help\n"
+                "     --version         Print version\n"
+@@ -2567,6 +2570,7 @@ static int bootctl_main(int argc, char *argv[]) {
+                 { "update",              VERB_ANY, 1,        0,            verb_install             },
+                 { "remove",              VERB_ANY, 1,        0,            verb_remove              },
+                 { "is-installed",        VERB_ANY, 1,        0,            verb_is_installed        },
++                { "kernel-identify",     2,        2,        0,            verb_kernel_identify     },
+                 { "list",                VERB_ANY, 1,        0,            verb_list                },
+                 { "set-default",         2,        2,        0,            verb_set_efivar          },
+                 { "set-oneshot",         2,        2,        0,            verb_set_efivar          },

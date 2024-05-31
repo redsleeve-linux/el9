@@ -1,0 +1,37 @@
+From 8990010d76cd48f8c166f586a8c6ae07cb1a749d Mon Sep 17 00:00:00 2001
+From: Franck Bui <fbui@suse.com>
+Date: Fri, 21 Oct 2022 15:08:43 +0200
+Subject: [PATCH] random-seed: downgrade some messages
+
+In these cases, we eat up the error and propagate success so we should log at
+warning level only.
+
+(cherry picked from commit ea37e1edf9bdaa5a90050d69454a132dc5d60360)
+
+Related: RHEL-16952
+---
+ src/random-seed/random-seed.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/random-seed/random-seed.c b/src/random-seed/random-seed.c
+index 05fb5bb157..7782509572 100644
+--- a/src/random-seed/random-seed.c
++++ b/src/random-seed/random-seed.c
+@@ -167,7 +167,7 @@ static int load_seed_file(
+ 
+         k = loop_read(seed_fd, buf, seed_size, false);
+         if (k < 0) {
+-                log_error_errno(k, "Failed to read seed from " RANDOM_SEED ": %m");
++                log_warning_errno(k, "Failed to read seed from " RANDOM_SEED ": %m");
+                 return 0;
+         }
+         if (k == 0) {
+@@ -219,7 +219,7 @@ static int load_seed_file(
+         r = random_write_entropy(urandom_fd, buf, k,
+                                  IN_SET(lets_credit, CREDIT_ENTROPY_YES_PLEASE, CREDIT_ENTROPY_YES_FORCED));
+         if (r < 0)
+-                log_error_errno(r, "Failed to write seed to /dev/urandom: %m");
++                log_warning_errno(r, "Failed to write seed to /dev/urandom: %m");
+ 
+         return 0;
+ }

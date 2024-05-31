@@ -1,0 +1,47 @@
+From b433a32f0d4328afc7a3dddb7dbab82d206663f7 Mon Sep 17 00:00:00 2001
+From: Franck Bui <fbui@suse.com>
+Date: Wed, 19 Oct 2022 15:27:04 +0200
+Subject: [PATCH] random-seed: shorten a bit may_credit()
+
+No functional change.
+
+(cherry picked from commit 249d31b00a42aa016639bc0e9d708803d26f8f8f)
+
+Related: RHEL-16952
+---
+ src/random-seed/random-seed.c | 19 ++++++++-----------
+ 1 file changed, 8 insertions(+), 11 deletions(-)
+
+diff --git a/src/random-seed/random-seed.c b/src/random-seed/random-seed.c
+index 82c29d0d7f..569b916f4a 100644
+--- a/src/random-seed/random-seed.c
++++ b/src/random-seed/random-seed.c
+@@ -87,20 +87,17 @@ static CreditEntropy may_credit(int seed_fd) {
+         /* Don't credit the random seed if we are in first-boot mode, because we are supposed to start from
+          * scratch. This is a safety precaution for cases where we people ship "golden" images with empty
+          * /etc but populated /var that contains a random seed. */
+-        if (access("/run/systemd/first-boot", F_OK) < 0) {
+-
+-                if (errno != ENOENT) {
+-                        log_warning_errno(errno, "Failed to check whether we are in first-boot mode, not crediting entropy: %m");
+-                        return CREDIT_ENTROPY_NO_WAY;
+-                }
+-
+-                /* If ENOENT all is good, we are not in first-boot mode. */
+-        } else {
+-                log_debug("Not crediting entropy, since booted in first-boot mode.");
++        r = RET_NERRNO(access("/run/systemd/first-boot", F_OK));
++        if (r == -ENOENT)
++                /* All is good, we are not in first-boot mode. */
++                return CREDIT_ENTROPY_YES_PLEASE;
++        if (r < 0) {
++                log_warning_errno(r, "Failed to check whether we are in first-boot mode, not crediting entropy: %m");
+                 return CREDIT_ENTROPY_NO_WAY;
+         }
+ 
+-        return CREDIT_ENTROPY_YES_PLEASE;
++        log_debug("Not crediting entropy, since booted in first-boot mode.");
++        return CREDIT_ENTROPY_NO_WAY;
+ }
+ 
+ static int run(int argc, char *argv[]) {

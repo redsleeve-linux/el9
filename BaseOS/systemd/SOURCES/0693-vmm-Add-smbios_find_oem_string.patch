@@ -1,0 +1,107 @@
+From c7c166f2dd636418bfa25ea9c69ebfc45c618d8f Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Mon, 30 Jan 2023 16:26:14 +0100
+Subject: [PATCH] vmm: Add smbios_find_oem_string()
+
+This function can be used to find SMBIOS strings in the SMBIOS Type 11
+table.
+
+(cherry picked from commit a885188b3ab71c222cbcc42b083ba671884aa651)
+
+Related: RHEL-16952
+---
+ src/boot/efi/vmm.c | 44 +++++++++++++++++++++++++++++++++++++++++---
+ src/boot/efi/vmm.h |  2 ++
+ 2 files changed, 43 insertions(+), 3 deletions(-)
+
+diff --git a/src/boot/efi/vmm.c b/src/boot/efi/vmm.c
+index 6b684e1bf4..19b66a3974 100644
+--- a/src/boot/efi/vmm.c
++++ b/src/boot/efi/vmm.c
+@@ -201,6 +201,12 @@ typedef struct {
+         uint8_t bios_characteristics_ext[2];
+ } _packed_ SmbiosTableType0;
+ 
++typedef struct {
++        SmbiosHeader header;
++        uint8_t count;
++        char contents[];
++} _packed_ SmbiosTableType11;
++
+ static const void *find_smbios_configuration_table(uint64_t *ret_size) {
+         assert(ret_size);
+ 
+@@ -221,7 +227,7 @@ static const void *find_smbios_configuration_table(uint64_t *ret_size) {
+         return NULL;
+ }
+ 
+-static const SmbiosHeader *get_smbios_table(uint8_t type) {
++static const SmbiosHeader *get_smbios_table(uint8_t type, uint64_t *ret_size_left) {
+         uint64_t size = 0;
+         const uint8_t *p = find_smbios_configuration_table(&size);
+         if (!p)
+@@ -240,8 +246,11 @@ static const SmbiosHeader *get_smbios_table(uint8_t type) {
+                 if (size < header->length)
+                         return NULL;
+ 
+-                if (header->type == type)
++                if (header->type == type) {
++                        if (ret_size_left)
++                                *ret_size_left = size;
+                         return header; /* Yay! */
++                }
+ 
+                 /* Skip over formatted area. */
+                 size -= header->length;
+@@ -273,7 +282,7 @@ static const SmbiosHeader *get_smbios_table(uint8_t type) {
+ 
+ static bool smbios_in_hypervisor(void) {
+         /* Look up BIOS Information (Type 0). */
+-        const SmbiosTableType0 *type0 = (const SmbiosTableType0 *) get_smbios_table(0);
++        const SmbiosTableType0 *type0 = (const SmbiosTableType0 *) get_smbios_table(0, NULL);
+         if (!type0 || type0->header.length < sizeof(SmbiosTableType0))
+                 return false;
+ 
+@@ -289,3 +298,32 @@ bool in_hypervisor(void) {
+         cache = cpuid_in_hypervisor() || smbios_in_hypervisor();
+         return cache;
+ }
++
++const char* smbios_find_oem_string(const char *name) {
++        uint64_t left;
++
++        assert(name);
++
++        const SmbiosTableType11 *type11 = (const SmbiosTableType11 *) get_smbios_table(11, &left);
++        if (!type11 || type11->header.length < sizeof(SmbiosTableType11))
++                return NULL;
++
++        assert(left >= type11->header.length);
++
++        const char *s = type11->contents;
++        left -= type11->header.length;
++
++        for (const char *p = s; p < s + left; ) {
++                const char *e = memchr(p, 0, s + left - p);
++                if (!e || e == p) /* Double NUL byte means we've reached the end of the OEM strings. */
++                        break;
++
++                const char *eq = startswith8(p, name);
++                if (eq && *eq == '=')
++                        return eq + 1;
++
++                p = e + 1;
++        }
++
++        return NULL;
++}
+diff --git a/src/boot/efi/vmm.h b/src/boot/efi/vmm.h
+index e98ec74af1..2002f32bec 100644
+--- a/src/boot/efi/vmm.h
++++ b/src/boot/efi/vmm.h
+@@ -8,3 +8,5 @@ bool is_direct_boot(EFI_HANDLE device);
+ EFI_STATUS vmm_open(EFI_HANDLE *ret_qemu_dev, EFI_FILE **ret_qemu_dir);
+ 
+ bool in_hypervisor(void);
++
++const char* smbios_find_oem_string(const char *name);

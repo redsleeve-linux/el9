@@ -1,0 +1,61 @@
+From b4d4cbd6c0e4fae721d64432c79ad00f531e6fdd Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Tue, 10 Oct 2023 16:55:39 -0400
+Subject: [PATCH] tpm2: don't use GetCapability() to check transient handles
+
+The kernel tpm "resource manager" interface doesn't report that any transient
+handles exist, even if they do, so don't bother asking if the handle is
+transient.
+
+(cherry picked from commit 9c18019787a767fb6ed5cb906b6ad52847ee34cd)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c | 34 ++++++++++++++++++++--------------
+ 1 file changed, 20 insertions(+), 14 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index c487b1f0ee..7baa86a4e1 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -814,20 +814,26 @@ int tpm2_index_to_handle(
+                                        "Invalid handle 0x%08" PRIx32 " (in unknown range).", index);
+         }
+ 
+-        r = tpm2_get_capability_handle(c, index);
+-        if (r < 0)
+-                return r;
+-        if (r == 0) {
+-                log_debug("TPM handle 0x%08" PRIx32 " not populated.", index);
+-                if (ret_public)
+-                        *ret_public = NULL;
+-                if (ret_name)
+-                        *ret_name = NULL;
+-                if (ret_qname)
+-                        *ret_qname = NULL;
+-                if (ret_handle)
+-                        *ret_handle = NULL;
+-                return 0;
++        /* For transient handles, the kernel tpm "resource manager" (i.e. /dev/tpmrm0) never acknowleges that
++         * any transient handles exist, even if they actually do. So a failure to find the requested handle
++         * index, if it's a transient handle, may not actually mean it's not present in the tpm; thus, only
++         * check GetCapability() if the handle isn't transient. */
++        if (TPM2_HANDLE_TYPE(index) != TPM2_HT_TRANSIENT) { // FIXME: once kernel tpmrm is fixed to acknowledge transient handles, check transient handles too
++                r = tpm2_get_capability_handle(c, index);
++                if (r < 0)
++                        return r;
++                if (r == 0) {
++                        log_debug("TPM handle 0x%08" PRIx32 " not populated.", index);
++                        if (ret_public)
++                                *ret_public = NULL;
++                        if (ret_name)
++                                *ret_name = NULL;
++                        if (ret_qname)
++                                *ret_qname = NULL;
++                        if (ret_handle)
++                                *ret_handle = NULL;
++                        return 0;
++                }
+         }
+ 
+         _cleanup_(tpm2_handle_freep) Tpm2Handle *handle = NULL;

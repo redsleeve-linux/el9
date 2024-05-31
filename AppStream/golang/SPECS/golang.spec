@@ -29,7 +29,7 @@
 # Define GOROOT macros
 %global goroot          %{_prefix}/lib/%{name}
 %global gopath          %{_datadir}/gocode
-%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
+%global golang_arches   x86_64 aarch64 ppc64le s390x
 %global golibdir        %{_libdir}/%{name}
 
 # Golang build options.
@@ -56,7 +56,7 @@
 %endif
 
 # Controls what ever we fail on failed tests
-%ifarch x86_64 %{arm} aarch64 ppc64le s390x
+%ifarch x86_64 %{arm} ppc64le s390x
 %global fail_on_tests 1
 %else
 %global fail_on_tests 0
@@ -92,121 +92,122 @@
 %global gohostarch  s390x
 %endif
 
-%global go_api 1.20
-%global go_version 1.20.10
+%global go_api 1.21
+%global go_version 1.21.9
 %global version %{go_version}
 %global pkg_release 1
 
-Name: golang
-Version: %{version}
-Release: 1%{?dist}.redsleeve
-Summary: The Go Programming Language
+Name:           golang
+Version:        %{version}
+Release:        2%{?dist}
+Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
-License: BSD and Public Domain
-URL: http://golang.org/
-Source0: https://github.com/golang/go/archive/refs/tags/go%{version}.tar.gz
+License:        BSD and Public Domain
+URL:            http://golang.org/
+Source0:        https://github.com/golang/go/archive/refs/tags/go%{version}.tar.gz
 # Go's FIPS mode bindings are now provided as a standalone
 # module instead of in tree.  This makes it easier to see
 # the actual changes vs upstream Go.  The module source is
 # located at https://github.com/golang-fips/openssl-fips,
 # And pre-genetated patches to set up the module for a given
 # Go release are located at https://github.com/golang-fips/go.
-Source1: https://github.com/golang-fips/go/archive/refs/tags/go%{version}-%{pkg_release}-openssl-fips.tar.gz
+Source1:	https://github.com/golang-fips/go/archive/refs/tags/go%{version}-%{pkg_release}-openssl-fips.tar.gz
 # make possible to override default traceback level at build time by setting build tag rpm_crashtraceback
-Source2: fedora.go
+Source2:        fedora.go
 
 # The compiler is written in Go. Needs go(1.4+) compiler for build.
 # Actual Go based bootstrap compiler provided by above source.
 %if !%{golang_bootstrap}
-BuildRequires: gcc-go >= 5
+BuildRequires:  gcc-go >= 5
 %else
-BuildRequires: golang
+BuildRequires:  golang
 %endif
 %if 0%{?rhel} > 6 || 0%{?fedora} > 0
-BuildRequires: hostname
+BuildRequires:  hostname
 %else
-BuildRequires: net-tools
+BuildRequires:  net-tools
 %endif
 # For OpenSSL FIPS
-BuildRequires: openssl-devel
+BuildRequires:  openssl-devel
 # for tests
-BuildRequires: pcre-devel, glibc-static, perl
+BuildRequires:  pcre-devel, glibc-static, perl
 
-Provides: go = %{version}-%{release}
-Requires: %{name}-bin = %{version}-%{release}
-Requires: %{name}-src = %{version}-%{release}
-Requires: openssl-devel
-Requires: diffutils
-
+Provides:       go = %{version}-%{release}
+Requires:       %{name}-bin = %{version}-%{release}
+Requires:       %{name}-src = %{version}-%{release}
+Requires:       openssl-devel
+Requires:       diffutils
 
 # Proposed patch by jcajka https://golang.org/cl/86541
-Patch221: fix_TestScript_list_std.patch
+Patch221:       fix_TestScript_list_std.patch
+Patch229:       fix-memleak-setupRSA.patch
 
-Patch1939923: skip_test_rhbz1939923.patch
+Patch1939923:   skip_test_rhbz1939923.patch
 
 # Disables libc static linking tests which
 # are incompatible with dlopen in golang-fips
-Patch2: disable_static_tests_part1.patch
-Patch3: disable_static_tests_part2.patch
+Patch2: 	disable_static_tests_part1.patch
+Patch3: 	disable_static_tests_part2.patch
+Patch4:		modify_go.env.patch
 
 # Having documentation separate was broken
-Obsoletes: %{name}-docs < 1.1-4
+Obsoletes:      %{name}-docs < 1.1-4
 
 # RPM can't handle symlink -> dir with subpackages, so merge back
-Obsoletes: %{name}-data < 1.1.1-4
+Obsoletes:      %{name}-data < 1.1.1-4
 
 # We don't build golang-race anymore, rhbz#2230705
-Obsoletes: golang-race < 1.20.0
+Obsoletes:      golang-race < 1.20.0
 
 # These are the only RHEL/Fedora architectures that we compile this package for
-ExclusiveArch: %{golang_arches}
+ExclusiveArch:  %{golang_arches}
 
-Source100: golang-gdbinit
-Source101: golang-prelink.conf
+Source100:      golang-gdbinit
+Source101:      golang-prelink.conf
 
 %description
 %{summary}.
 
 %package       docs
-Summary: Golang compiler docs
-Requires: %{name} = %{version}-%{release}
-BuildArch: noarch
-Obsoletes: %{name}-docs < 1.1-4
+Summary:       Golang compiler docs
+Requires:      %{name} = %{version}-%{release}
+BuildArch:     noarch
+Obsoletes:     %{name}-docs < 1.1-4
 
 %description   docs
 %{summary}.
 
 %package       misc
-Summary: Golang compiler miscellaneous sources
-Requires: %{name} = %{version}-%{release}
-BuildArch: noarch
+Summary:       Golang compiler miscellaneous sources
+Requires:      %{name} = %{version}-%{release}
+BuildArch:     noarch
 
 %description   misc
 %{summary}.
 
 %package       tests
-Summary: Golang compiler tests for stdlib
-Requires: %{name} = %{version}-%{release}
-BuildArch: noarch
+Summary:       Golang compiler tests for stdlib
+Requires:      %{name} = %{version}-%{release}
+BuildArch:     noarch
 
 %description   tests
 %{summary}.
 
 %package        src
-Summary: Golang compiler source tree
-BuildArch: noarch
+Summary:        Golang compiler source tree
+BuildArch:      noarch
 
 %description    src
 %{summary}
 
 %package        bin
-Summary: Golang core compiler tools
-Requires: %{name} = %{version}-%{release}
+Summary:        Golang core compiler tools
+Requires:       %{name} = %{version}-%{release}
 
 # We strip the meta dependency, but go does require glibc.
 # This is an odd issue, still looking for a better fix.
-Requires: glibc
-Requires: /usr/bin/gcc
+Requires:       glibc
+Requires:       /usr/bin/gcc
 %description    bin
 %{summary}
 
@@ -222,7 +223,7 @@ end
 
 %if %{shared}
 %package        shared
-Summary: Golang shared object libraries
+Summary:        Golang shared object libraries
 
 %description    shared
 %{summary}.
@@ -230,19 +231,19 @@ Summary: Golang shared object libraries
 
 %if %{race}
 %package        race
-Summary: Golang std library with -race enabled
+Summary:        Golang std library with -race enabled
 
-Requires: %{name} = %{version}-%{release}
+Requires:       %{name} = %{version}-%{release}
 
 %description    race
 %{summary}
 %endif
 
 %package -n go-toolset
-Summary: Package that installs go-toolset
-Requires: %{name} = %{version}-%{release}
-%ifarch x86_64
-Requires: delve
+Summary:        Package that installs go-toolset
+Requires:       %{name} = %{version}-%{release}
+%ifarch x86_64 aarch64 ppc64le
+Requires:       delve
 %endif
 
 %description -n go-toolset
@@ -258,7 +259,6 @@ patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/000-initial-s
 patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/001-initial-openssl-for-fips.patch
 patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/002-strict-fips-runtime-detection.patch
 
-
 # Configure crypto tests
 pushd ../go-go%{version}-%{pkg_release}-openssl-fips
 ln -s ../go-go%{version} go
@@ -266,6 +266,8 @@ ln -s ../go-go%{version} go
 popd
 
 %autopatch -p1
+
+sed -i '1s/$/ (%{?rhel:Red Hat} %{version}-%{release})/' VERSION
 
 cp %{SOURCE2} ./src/runtime/
 
@@ -336,7 +338,7 @@ rm -rf pkg/bootstrap/bin
 
 # install everything into libdir (until symlink problems are fixed)
 # https://code.google.com/p/go/issues/detail?id=5830
-cp -apv api bin doc lib pkg src misc test VERSION \
+cp -apv api bin doc lib pkg src misc test go.env VERSION \
    $RPM_BUILD_ROOT%{goroot}
 
 # bz1099206
@@ -519,6 +521,7 @@ cd ..
 %files -f go-pkg.list bin
 %{_bindir}/go
 %{_bindir}/gofmt
+%{goroot}/go.env
 
 %if %{shared}
 %files -f go-shared.list shared
@@ -527,14 +530,51 @@ cd ..
 %files -n go-toolset
 
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.20.10-1.redsleeve
-- added arm to golang_arches
+* Mon Apr 15 2024 David Benoit <dbenoit@redhat.com> - 1.21.9-2
+- Rebuilt for z-stream
+- Related: RHEL-24312
+- Related: RHEL-28940
 
-* Fri Oct 13 2023 David Benoit <dbenoit@redhat.com> - 1.20.10-1
-- Update to Go 1.20.10
-- Fix CVE-2023-39325
-- Midstream patches
-- Resolves: RHEL-12623
+* Fri Apr 5 2024 Archana Ravindar <aravinda@redhat.com> - 1.21.9-1
+- Fix CVE-2024-1394
+- Fix CVE-2023-45288
+- Resolves RHEL-24312
+- Resolves RHEL-28940
+
+* Fri Feb 09 2024 Alejandro Sáez <asm@redhat.com> - 1.21.7-1
+- Rebase to Go 1.21.7
+- Set GOTOOLCHAIN to local
+- Resolves: RHEL-24334
+- Resolves: RHEL-18364
+- Resolves: RHEL-18365
+
+* Thu Nov 30 2023 Alejandro Sáez <asm@redhat.com> - 1.21.4-2
+- Add release information
+
+* Tue Nov 14 2023 Alejandro Sáez <asm@redhat.com> - 1.21.4-1
+- Rebase to Go 1.21.4
+- Resolves: RHEL-11871
+
+* Wed Nov 08 2023 David Benoit <dbenoit@redhat.com> - 1.21.3-5
+- Don't change GOPROXY/GOSUMDB
+- Related: RHEL-12624
+
+* Thu Nov 02 2023 David Benoit <dbenoit@redhat.com> - 1.21.3-4
+- Fix missing go.env in Go 1.21
+- Related: RHEL-12624
+
+* Tue Oct 31 2023 Archana Ravindar <aravinda@redhat.com> - 1.21.3-3
+- Add missing strict fips runtime detection patch
+- Temporarily disable FIPS tests on aarch64 due to builder kernel bugs
+- Related: RHEL-12624
+
+* Wed Oct 25 2023 Archana Ravindar <aravinda@redhat.com> - 1.21.3-2
+- Rebase disable_static_tests_part2.patch to Go 1.21.3
+- Related: RHEL-12624
+
+* Fri Oct 20 2023 Archana Ravindar <aravinda@redhat.com> - 1.21.3-1
+- Rebase to Go 1.21.3
+- Resolves: RHEL-12624
 
 * Wed Sep 27 2023 Alejandro Sáez <asm@redhat.com> - 1.20.8-1
 - Rebase to Go 1.20.8

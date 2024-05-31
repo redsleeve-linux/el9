@@ -1,0 +1,64 @@
+From 6e3fef6c0331610168de29242f6f2a0a0839a310 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 23 Oct 2023 10:18:41 +0200
+Subject: [PATCH] tpm2-util: make tpm2_marshal_blob()/tpm2_unmarshal_blob()
+ static
+
+These are not used outside of tpm2-util.[ch], and the way they merge
+public/private key pair into one blob is kinda specific to our
+implementation, hence better should be hidden away, and not used for new
+code anyway.
+
+(cherry picked from commit 9122edf9070f64b39f59e65a7976d190717e676b)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c | 6 +++---
+ src/shared/tpm2-util.h | 3 ---
+ 2 files changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 966b524000..36de831812 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -3742,7 +3742,7 @@ int tpm2_tpm2b_public_from_pem(const void *pem, size_t pem_size, TPM2B_PUBLIC *r
+ /* Marshal the public and private objects into a single nonstandard 'blob'. This is not a (publicly) standard
+  * format, this is specific to how we currently store the sealed object. This 'blob' can be unmarshalled by
+  * tpm2_unmarshal_blob(). */
+-int tpm2_marshal_blob(
++static int tpm2_marshal_blob(
+                 const TPM2B_PUBLIC *public,
+                 const TPM2B_PRIVATE *private,
+                 void **ret_blob,
+@@ -3781,7 +3781,7 @@ int tpm2_marshal_blob(
+ /* Unmarshal the 'blob' into public and private objects. This is not a (publicly) standard format, this is
+  * specific to how we currently store the sealed object. This expects the 'blob' to have been created by
+  * tpm2_marshal_blob(). */
+-int tpm2_unmarshal_blob(
++static int tpm2_unmarshal_blob(
+                 const void *blob,
+                 size_t blob_size,
+                 TPM2B_PUBLIC *ret_public,
+@@ -4007,7 +4007,7 @@ int tpm2_seal(Tpm2Context *c,
+         log_debug("Marshalling private and public part of HMAC key.");
+ 
+         _cleanup_free_ void *blob = NULL;
+-        size_t blob_size;
++        size_t blob_size = 0;
+         r = tpm2_marshal_blob(public, private, &blob, &blob_size);
+         if (r < 0)
+                 return log_debug_errno(r, "Could not create sealed blob: %m");
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 26050c9c55..a9a3554fe1 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -172,9 +172,6 @@ int tpm2_calculate_policy_authorize(const TPM2B_PUBLIC *public, const TPM2B_DIGE
+ int tpm2_calculate_policy_pcr(const Tpm2PCRValue *pcr_values, size_t n_pcr_values, TPM2B_DIGEST *digest);
+ int tpm2_calculate_sealing_policy(const Tpm2PCRValue *pcr_values, size_t n_pcr_values, const TPM2B_PUBLIC *public, bool use_pin, TPM2B_DIGEST *digest);
+ 
+-int tpm2_marshal_blob(const TPM2B_PUBLIC *public, const TPM2B_PRIVATE *private, void **ret_blob, size_t *ret_blob_size);
+-int tpm2_unmarshal_blob(const void *blob, size_t blob_size, TPM2B_PUBLIC *ret_public, TPM2B_PRIVATE *ret_private);
+-
+ int tpm2_seal(Tpm2Context *c, const TPM2B_DIGEST *policy, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, uint16_t *ret_primary_alg, void **ret_srk_buf, size_t *ret_srk_buf_size);
+ int tpm2_unseal(Tpm2Context *c, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, JsonVariant *signature, const char *pin, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, const void *srk_buf, size_t srk_buf_size, void **ret_secret, size_t *ret_secret_size);
+ 

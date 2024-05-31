@@ -1,13 +1,12 @@
 Name:             xdp-tools
-Version:          1.4.0
-Release:          1%{?dist}.redsleeve
+Version:          1.4.2
+Release:          1%{?dist}
 Summary:          Utilities and example programs for use with XDP
 %global _soversion 1.4.0
 
-License:          GPLv2
+License:          GPL-2.0-only
 URL:              https://github.com/xdp-project/%{name}
 Source0:          https://github.com/xdp-project/%{name}/releases/download/v%{version}/xdp-tools-%{version}.tar.gz
-Patch0:           xdp-tools-1.4.0-configure-Don-t-fail-on-missing-bpftool.patch
 
 BuildRequires:    libbpf-devel
 BuildRequires:    elfutils-libelf-devel
@@ -22,7 +21,7 @@ BuildRequires:    m4
 BuildRequires:    emacs-nox
 BuildRequires:    wireshark-cli
 
-%ifnarch i686 %{arm}
+%ifnarch i686
 BuildRequires:    bpftool
 %endif
 
@@ -39,15 +38,18 @@ Utilities and example programs for use with XDP
 
 %package -n libxdp
 Summary:          XDP helper library
+License:          LGPL-2.1-only OR BSD-2-Clause
 Requires:         kernel-headers
 
 %package -n libxdp-devel
 Summary:          Development files for libxdp
+License:          LGPL-2.1-only OR BSD-2-Clause
 Requires:         kernel-headers
 Requires:         libxdp = %{version}-%{release}
 
 %package -n libxdp-static
 Summary:          Static library files for libxdp
+License:          LGPL-2.1-only OR BSD-2-Clause
 Requires:         kernel-headers
 Requires:         libxdp-devel = %{version}-%{release}
 
@@ -94,7 +96,7 @@ make install V=1
 %{_sbindir}/xdp-filter
 %{_sbindir}/xdp-loader
 %{_sbindir}/xdpdump
-%ifnarch i686 %{arm}
+%ifnarch i686
 %{_sbindir}/xdp-bench
 %{_sbindir}/xdp-monitor
 %{_sbindir}/xdp-trafficgen
@@ -122,8 +124,11 @@ make install V=1
 %{_libdir}/pkgconfig/libxdp.pc
 
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> 1.4.0-1.redsleeve
-- do not require bpftool for arm
+* Tue Feb 6 2024 Toke Høiland-Jørgensen <toke@redhat.com> 1.4.2-1
+- Upstream version bump
+
+* Fri Oct 20 2023 Toke Høiland-Jørgensen <toke@redhat.com> 1.4.1-1
+- Upstream version bump
 
 * Thu Jul 6 2023 Toke Høiland-Jørgensen <toke@redhat.com> 1.4.0-1
 - Upstream version bump

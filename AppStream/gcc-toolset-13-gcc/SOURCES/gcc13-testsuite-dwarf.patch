@@ -1,0 +1,50 @@
+commit b6532d0edd50a6086a84ca748fe49c5a9d28f155
+Author: Marek Polacek <polacek@redhat.com>
+Date:   Wed Jul 5 17:43:31 2023 -0400
+
+    testsuite: fix dwarf2/utf-1.C with DWARF4
+    
+    Running
+    $ make check-c++ RUNTESTFLAGS='--target_board=unix\{-gdwarf-5,-gdwarf-4\} dwarf2.exp=utf-1.C'
+    shows
+    FAIL: g++.dg/debug/dwarf2/utf-1.C  -std=gnu++20  scan-assembler-times DW_AT_encoding \\(0x10\\) 3
+    because with -gdwarf-4 the output is:
+    
+      .byte   0x10    # DW_AT_encoding
+    
+    but with -gdwarf-5 the output is the expected:
+    
+                    # DW_AT_encoding (0x10)
+    
+    The difference is caused by the DWARF5 optimize_implicit_const
+    optimization:
+    <https://gcc.gnu.org/pipermail/gcc-patches/2016-October/459762.html>
+    
+    I suppose we could do what testsuite/rust/debug/chartype.rs does
+    and just run the test with -gdwarf-4.
+    
+    gcc/testsuite/ChangeLog:
+    
+            * g++.dg/debug/dwarf2/utf-1.C: Use -gdwarf-4.  Adjust expected
+            output.
+
+diff --git a/gcc/testsuite/g++.dg/debug/dwarf2/utf-1.C b/gcc/testsuite/g++.dg/debug/dwarf2/utf-1.C
+index 43b354f1bb5..0ce4d8727d6 100644
+--- a/gcc/testsuite/g++.dg/debug/dwarf2/utf-1.C
++++ b/gcc/testsuite/g++.dg/debug/dwarf2/utf-1.C
+@@ -1,8 +1,13 @@
+ // { dg-do compile { target c++20 } }
+-// { dg-options { -gdwarf -dA } }
++// { dg-options { -gdwarf-4 -dA } }
+ 
+ // Test that all three use DW_ATE_UTF.
+-// { dg-final { scan-assembler-times {DW_AT_encoding \(0x10\)} 3 } }
++// This test uses -gdwarf-4 since in DWARF5 optimize_implicit_const
++// would optimize the output from:
++//   .byte   0x10    # DW_AT_encoding
++// into:
++//                   # DW_AT_encoding (0x10)
++// { dg-final { scan-assembler-times "0x10\[ \t]\[^\n\r]* DW_AT_encoding" 3 } }
+ 
+ char8_t c8;
+ char16_t c16;

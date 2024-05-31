@@ -1,0 +1,965 @@
+From e5dea043b9c20f648bffffd581a0e624f5622a16 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Fri, 10 Jun 2022 19:06:57 +0200
+Subject: [PATCH] boot: Use printf for error logging
+
+This also drops the _stall suffix in anticipation of the next commit.
+
+(cherry picked from commit c2c6203556f842820ca09e0653c123305f2ba6d2)
+
+Related: RHEL-16952
+---
+ src/boot/efi/assert.c      | 12 ---------
+ src/boot/efi/boot.c        | 54 +++++++++++++++++++-------------------
+ src/boot/efi/console.c     |  6 ++---
+ src/boot/efi/cpio.c        | 23 ++++++++--------
+ src/boot/efi/devicetree.c  |  3 +--
+ src/boot/efi/drivers.c     | 16 +++++------
+ src/boot/efi/linux.c       | 10 +++----
+ src/boot/efi/linux_x86.c   | 15 +++++------
+ src/boot/efi/log.c         | 34 ++++++++++++++++++++++++
+ src/boot/efi/log.h         |  9 +++++++
+ src/boot/efi/measure.c     |  2 +-
+ src/boot/efi/meson.build   |  3 ++-
+ src/boot/efi/pe.c          |  2 +-
+ src/boot/efi/random-seed.c | 44 +++++++++++++++----------------
+ src/boot/efi/secure-boot.c | 11 ++++----
+ src/boot/efi/stub.c        |  6 ++---
+ src/boot/efi/util.c        | 30 +--------------------
+ src/boot/efi/util.h        | 12 +--------
+ 18 files changed, 141 insertions(+), 151 deletions(-)
+ delete mode 100644 src/boot/efi/assert.c
+ create mode 100644 src/boot/efi/log.c
+ create mode 100644 src/boot/efi/log.h
+
+diff --git a/src/boot/efi/assert.c b/src/boot/efi/assert.c
+deleted file mode 100644
+index bb16d2bf93..0000000000
+--- a/src/boot/efi/assert.c
++++ /dev/null
+@@ -1,12 +0,0 @@
+-/* SPDX-License-Identifier: LGPL-2.1-or-later */
+-
+-#include <efi.h>
+-#include <efilib.h>
+-
+-#include "util.h"
+-
+-void efi_assert(const char *expr, const char *file, unsigned line, const char *function) {
+-        log_error_stall(L"systemd-boot assertion '%a' failed at %a:%u, function %a(). Halting.", expr, file, line, function);
+-        for (;;)
+-                BS->Stall(60 * 1000 * 1000);
+-}
+diff --git a/src/boot/efi/boot.c b/src/boot/efi/boot.c
+index a39c356158..1e7b7a0fa7 100644
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -587,14 +587,14 @@ static EFI_STATUS reboot_into_firmware(void) {
+         EFI_STATUS err;
+ 
+         if (!FLAGS_SET(get_os_indications_supported(), EFI_OS_INDICATIONS_BOOT_TO_FW_UI))
+-                return log_error_status_stall(EFI_UNSUPPORTED, L"Reboot to firmware interface not supported.");
++                return log_error_status(EFI_UNSUPPORTED, "Reboot to firmware interface not supported.");
+ 
+         (void) efivar_get_uint64_le(EFI_GLOBAL_GUID, L"OsIndications", &osind);
+         osind |= EFI_OS_INDICATIONS_BOOT_TO_FW_UI;
+ 
+         err = efivar_set_uint64_le(EFI_GLOBAL_GUID, L"OsIndications", osind, EFI_VARIABLE_NON_VOLATILE);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error setting OsIndications: %r", err);
++                return log_error_status(err, "Error setting OsIndications: %m");
+ 
+         RT->ResetSystem(EfiResetCold, EFI_SUCCESS, 0, NULL);
+         assert_not_reached();
+@@ -634,7 +634,7 @@ static bool menu_run(
+                                config->console_mode_efivar : config->console_mode);
+         if (err != EFI_SUCCESS) {
+                 clear_screen(COLOR_NORMAL);
+-                log_error_stall(L"Error switching console mode: %r", err);
++                log_error_status(err, "Error switching console mode: %m");
+         }
+ 
+         size_t line_width = 0, entry_padding = 3;
+@@ -1177,7 +1177,7 @@ static void config_defaults_load_from_file(Config *config, char *content) {
+                         else {
+                                 uint64_t u;
+                                 if (!parse_number8(value, &u, NULL) || u > TIMEOUT_TYPE_MAX) {
+-                                        log_error_stall(L"Error parsing 'timeout' config option: %a", value);
++                                        log_error("Error parsing 'timeout' config option: %s", value);
+                                         continue;
+                                 }
+                                 config->timeout_sec_config = u;
+@@ -1188,7 +1188,7 @@ static void config_defaults_load_from_file(Config *config, char *content) {
+ 
+                 if (streq8(key, "default")) {
+                         if (value[0] == '@' && !strcaseeq8(value, "@saved")) {
+-                                log_error_stall(L"Unsupported special entry identifier: %a", value);
++                                log_error("Unsupported special entry identifier: %s", value);
+                                 continue;
+                         }
+                         free(config->entry_default_config);
+@@ -1199,35 +1199,35 @@ static void config_defaults_load_from_file(Config *config, char *content) {
+                 if (streq8(key, "editor")) {
+                         err = parse_boolean(value, &config->editor);
+                         if (err != EFI_SUCCESS)
+-                                log_error_stall(L"Error parsing 'editor' config option: %a", value);
++                                log_error("Error parsing 'editor' config option: %s", value);
+                         continue;
+                 }
+ 
+                 if (streq8(key, "auto-entries")) {
+                         err = parse_boolean(value, &config->auto_entries);
+                         if (err != EFI_SUCCESS)
+-                                log_error_stall(L"Error parsing 'auto-entries' config option: %a", value);
++                                log_error("Error parsing 'auto-entries' config option: %s", value);
+                         continue;
+                 }
+ 
+                 if (streq8(key, "auto-firmware")) {
+                         err = parse_boolean(value, &config->auto_firmware);
+                         if (err != EFI_SUCCESS)
+-                                log_error_stall(L"Error parsing 'auto-firmware' config option: %a", value);
++                                log_error("Error parsing 'auto-firmware' config option: %s", value);
+                         continue;
+                 }
+ 
+                 if (streq8(key, "beep")) {
+                         err = parse_boolean(value, &config->beep);
+                         if (err != EFI_SUCCESS)
+-                                log_error_stall(L"Error parsing 'beep' config option: %a", value);
++                                log_error("Error parsing 'beep' config option: %s", value);
+                         continue;
+                 }
+ 
+                 if (streq8(key, "reboot-for-bitlocker")) {
+                         err = parse_boolean(value, &config->reboot_for_bitlocker);
+                         if (err != EFI_SUCCESS)
+-                                log_error_stall(L"Error parsing 'reboot-for-bitlocker' config option: %a", value);
++                                log_error("Error parsing 'reboot-for-bitlocker' config option: %s", value);
+                 }
+ 
+                 if (streq8(key, "secure-boot-enroll")) {
+@@ -1238,7 +1238,7 @@ static void config_defaults_load_from_file(Config *config, char *content) {
+                         else if (streq8(value, "off"))
+                                 config->secure_boot_enroll = ENROLL_OFF;
+                         else
+-                                log_error_stall(L"Error parsing 'secure-boot-enroll' config option: %a", value);
++                                log_error("Error parsing 'secure-boot-enroll' config option: %s", value);
+                         continue;
+                 }
+ 
+@@ -1252,7 +1252,7 @@ static void config_defaults_load_from_file(Config *config, char *content) {
+                         else {
+                                 uint64_t u;
+                                 if (!parse_number8(value, &u, NULL) || u > CONSOLE_MODE_RANGE_MAX) {
+-                                        log_error_stall(L"Error parsing 'console-mode' config option: %a", value);
++                                        log_error("Error parsing 'console-mode' config option: %s", value);
+                                         continue;
+                                 }
+                                 config->console_mode = u;
+@@ -1356,7 +1356,7 @@ static void config_entry_bump_counters(ConfigEntry *entry, EFI_FILE *root_dir) {
+         strcpy16(file_info->FileName, entry->next_name);
+         err = handle->SetInfo(handle, &GenericFileInfo, file_info_size, file_info);
+         if (err != EFI_SUCCESS) {
+-                log_error_stall(L"Failed to rename '%s' to '%s', ignoring: %r", old_path, entry->next_name, err);
++                log_error_status(err, "Failed to rename '%ls' to '%ls', ignoring: %m", old_path, entry->next_name);
+                 return;
+         }
+ 
+@@ -1564,7 +1564,7 @@ static void config_load_defaults(Config *config, EFI_FILE *root_dir) {
+         if (err == EFI_SUCCESS)
+                 config->timeout_sec = config->timeout_sec_efivar;
+         else if (err != EFI_NOT_FOUND)
+-                log_error_stall(u"Error reading LoaderConfigTimeout EFI variable: %r", err);
++                log_error_status(err, "Error reading LoaderConfigTimeout EFI variable: %m");
+ 
+         err = efivar_get_timeout(u"LoaderConfigTimeoutOneShot", &config->timeout_sec);
+         if (err == EFI_SUCCESS) {
+@@ -1573,7 +1573,7 @@ static void config_load_defaults(Config *config, EFI_FILE *root_dir) {
+ 
+                 config->force_menu = true; /* force the menu when this is set */
+         } else if (err != EFI_NOT_FOUND)
+-                log_error_stall(u"Error reading LoaderConfigTimeoutOneShot EFI variable: %r", err);
++                log_error_status(err, "Error reading LoaderConfigTimeoutOneShot EFI variable: %m");
+ 
+         err = efivar_get_uint_string(LOADER_GUID, L"LoaderConfigConsoleMode", &value);
+         if (err == EFI_SUCCESS)
+@@ -2327,38 +2327,38 @@ static EFI_STATUS image_start(
+         _cleanup_(file_closep) EFI_FILE *image_root = NULL;
+         err = open_volume(entry->device, &image_root);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error opening root path: %r", err);
++                return log_error_status(err, "Error opening root path: %m");
+ 
+         err = make_file_device_path(entry->device, entry->loader, &path);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error making file device path: %r", err);
++                return log_error_status(err, "Error making file device path: %m");
+ 
+         size_t initrd_size = 0;
+         _cleanup_free_ void *initrd = NULL;
+         _cleanup_free_ char16_t *options_initrd = NULL;
+         err = initrd_prepare(image_root, entry, &options_initrd, &initrd, &initrd_size);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error preparing initrd: %r", err);
++                return log_error_status(err, "Error preparing initrd: %m");
+ 
+         err = shim_load_image(parent_image, path, &image);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error loading %s: %r", entry->loader, err);
++                return log_error_status(err, "Error loading %ls: %m", entry->loader);
+ 
+         if (entry->devicetree) {
+                 err = devicetree_install(&dtstate, image_root, entry->devicetree);
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Error loading %s: %r", entry->devicetree, err);
++                        return log_error_status(err, "Error loading %ls: %m", entry->devicetree);
+         }
+ 
+         _cleanup_(cleanup_initrd) EFI_HANDLE initrd_handle = NULL;
+         err = initrd_register(initrd, initrd_size, &initrd_handle);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error registering initrd: %r", err);
++                return log_error_status(err, "Error registering initrd: %m");
+ 
+         EFI_LOADED_IMAGE_PROTOCOL *loaded_image;
+         err = BS->HandleProtocol(image, &LoadedImageProtocol, (void **) &loaded_image);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error getting LoadedImageProtocol handle: %r", err);
++                return log_error_status(err, "Error getting LoadedImageProtocol handle: %m");
+ 
+         char16_t *options = options_initrd ?: entry->options;
+         if (options) {
+@@ -2382,7 +2382,7 @@ static EFI_STATUS image_start(
+                 err = pe_kernel_info(loaded_image->ImageBase, &compat_address);
+                 if (err != EFI_SUCCESS) {
+                         if (err != EFI_UNSUPPORTED)
+-                                return log_error_status_stall(err, L"Error finding kernel compat entry address: %r", err);
++                                return log_error_status(err, "Error finding kernel compat entry address: %m");
+                 } else if (compat_address > 0) {
+                         EFI_IMAGE_ENTRY_POINT kernel_entry =
+                                 (EFI_IMAGE_ENTRY_POINT) ((uint8_t *) loaded_image->ImageBase + compat_address);
+@@ -2395,7 +2395,7 @@ static EFI_STATUS image_start(
+                         err = EFI_UNSUPPORTED;
+         }
+ 
+-        return log_error_status_stall(err, L"Failed to execute %s (%s): %r", entry->title_show, entry->loader, err);
++        return log_error_status(err, "Failed to execute %ls (%ls): %m", entry->title_show, entry->loader);
+ }
+ 
+ static void config_free(Config *config) {
+@@ -2634,7 +2634,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+                         NULL,
+                         EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error getting a LoadedImageProtocol handle: %r", err);
++                return log_error_status(err, "Error getting a LoadedImageProtocol handle: %m");
+ 
+         (void) device_path_to_str(loaded_image->FilePath, &loaded_image_path);
+ 
+@@ -2642,14 +2642,14 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+ 
+         err = discover_root_dir(loaded_image, &root_dir);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Unable to open root directory: %r", err);
++                return log_error_status(err, "Unable to open root directory: %m");
+ 
+         (void) load_drivers(image, loaded_image, root_dir);
+ 
+         config_load_all_entries(&config, loaded_image, loaded_image_path, root_dir);
+ 
+         if (config.entry_count == 0) {
+-                log_error_stall(L"No loader found. Configuration files in \\loader\\entries\\*.conf are needed.");
++                log_error("No loader found. Configuration files in \\loader\\entries\\*.conf are needed.");
+                 goto out;
+         }
+ 
+diff --git a/src/boot/efi/console.c b/src/boot/efi/console.c
+index c3d9ff0e82..b876ff2bd7 100644
+--- a/src/boot/efi/console.c
++++ b/src/boot/efi/console.c
+@@ -83,7 +83,7 @@ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
+ 
+         err = BS->CreateEvent(EVT_TIMER, 0, NULL, NULL, &timer);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error creating timer event: %r", err);
++                return log_error_status(err, "Error creating timer event: %m");
+ 
+         EFI_EVENT events[] = {
+                 timer,
+@@ -104,14 +104,14 @@ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
+                                 TimerRelative,
+                                 MIN(timeout_usec, watchdog_ping_usec) * 10);
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Error arming timer event: %r", err);
++                        return log_error_status(err, "Error arming timer event: %m");
+ 
+                 (void) BS->SetWatchdogTimer(watchdog_timeout_sec, 0x10000, 0, NULL);
+                 err = BS->WaitForEvent(n_events, events, &index);
+                 (void) BS->SetWatchdogTimer(watchdog_timeout_sec, 0x10000, 0, NULL);
+ 
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Error waiting for events: %r", err);
++                        return log_error_status(err, "Error waiting for events: %m");
+ 
+                 /* We have keyboard input, process it after this loop. */
+                 if (timer != events[index])
+diff --git a/src/boot/efi/cpio.c b/src/boot/efi/cpio.c
+index bb424a44d5..62773ded9a 100644
+--- a/src/boot/efi/cpio.c
++++ b/src/boot/efi/cpio.c
+@@ -326,7 +326,7 @@ static EFI_STATUS measure_cpio(
+                                 tpm_description,
+                                 &m);
+                 if (err != EFI_SUCCESS) {
+-                        log_error_stall(L"Unable to add initrd TPM measurement for PCR %u (%s), ignoring: %r", tpm_pcr[i], tpm_description, err);
++                        log_error_status(err, "Unable to add initrd TPM measurement for PCR %u (%ls), ignoring: %m", tpm_pcr[i], tpm_description);
+                         measured = false;
+                         continue;
+                 }
+@@ -401,8 +401,7 @@ EFI_STATUS pack_cpio(
+                  * its file handles. */
+                 goto nothing;
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(
+-                                err, L"Unable to open root directory: %r", err);
++                return log_error_status(err, "Unable to open root directory: %m");
+ 
+         if (!dropin_dir)
+                 dropin_dir = rel_dropin_dir = get_dropin_dir(loaded_image->FilePath);
+@@ -412,14 +411,14 @@ EFI_STATUS pack_cpio(
+                 /* No extra subdir, that's totally OK */
+                 goto nothing;
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to open extra directory of loaded image: %r", err);
++                return log_error_status(err, "Failed to open extra directory of loaded image: %m");
+ 
+         for (;;) {
+                 _cleanup_free_ char16_t *d = NULL;
+ 
+                 err = readdir_harder(extra_dir, &dirent, &dirent_size);
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Failed to read extra directory of loaded image: %r", err);
++                        return log_error_status(err, "Failed to read extra directory of loaded image: %m");
+                 if (!dirent) /* End of directory */
+                         break;
+ 
+@@ -462,7 +461,7 @@ EFI_STATUS pack_cpio(
+          * archive. Otherwise the cpio archive cannot be unpacked, since the leading dirs won't exist. */
+         err = pack_cpio_prefix(target_dir_prefix, dir_mode, &inode, &buffer, &buffer_size);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to pack cpio prefix: %r", err);
++                return log_error_status(err, "Failed to pack cpio prefix: %m");
+ 
+         for (size_t i = 0; i < n_items; i++) {
+                 _cleanup_free_ char *content = NULL;
+@@ -470,7 +469,7 @@ EFI_STATUS pack_cpio(
+ 
+                 err = file_read(extra_dir, items[i], 0, 0, &content, &contentsize);
+                 if (err != EFI_SUCCESS) {
+-                        log_error_status_stall(err, L"Failed to read %s, ignoring: %r", items[i], err);
++                        log_error_status(err, "Failed to read %ls, ignoring: %m", items[i]);
+                         continue;
+                 }
+ 
+@@ -482,12 +481,12 @@ EFI_STATUS pack_cpio(
+                                 &inode,
+                                 &buffer, &buffer_size);
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Failed to pack cpio file %s: %r", dirent->FileName, err);
++                        return log_error_status(err, "Failed to pack cpio file %ls: %m", dirent->FileName);
+         }
+ 
+         err = pack_cpio_trailer(&buffer, &buffer_size);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to pack cpio trailer: %r");
++                return log_error_status(err, "Failed to pack cpio trailer: %m");
+ 
+         err = measure_cpio(buffer, buffer_size, tpm_pcr, n_tpm_pcr, tpm_description, ret_measured);
+         if (err != EFI_SUCCESS)
+@@ -539,7 +538,7 @@ EFI_STATUS pack_cpio_literal(
+ 
+         err = pack_cpio_prefix(target_dir_prefix, dir_mode, &inode, &buffer, &buffer_size);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to pack cpio prefix: %r", err);
++                return log_error_status(err, "Failed to pack cpio prefix: %m");
+ 
+         err = pack_cpio_one(
+                         target_filename,
+@@ -549,11 +548,11 @@ EFI_STATUS pack_cpio_literal(
+                         &inode,
+                         &buffer, &buffer_size);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to pack cpio file %s: %r", target_filename, err);
++                return log_error_status(err, "Failed to pack cpio file %ls: %m", target_filename);
+ 
+         err = pack_cpio_trailer(&buffer, &buffer_size);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to pack cpio trailer: %r");
++                return log_error_status(err, "Failed to pack cpio trailer: %m");
+ 
+         err = measure_cpio(buffer, buffer_size, tpm_pcr, n_tpm_pcr, tpm_description, ret_measured);
+         if (err != EFI_SUCCESS)
+diff --git a/src/boot/efi/devicetree.c b/src/boot/efi/devicetree.c
+index f3c2e47e58..52f64a6e2f 100644
+--- a/src/boot/efi/devicetree.c
++++ b/src/boot/efi/devicetree.c
+@@ -36,8 +36,7 @@ static EFI_STATUS devicetree_fixup(struct devicetree_state *state, size_t len) {
+ 
+         err = BS->LocateProtocol(&EfiDtFixupProtocol, NULL, (void **) &fixup);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(EFI_SUCCESS,
+-                                              L"Could not locate device tree fixup protocol, skipping.");
++                return log_error_status(EFI_SUCCESS, "Could not locate device tree fixup protocol, skipping.");
+ 
+         size = devicetree_allocated(state);
+         err = fixup->Fixup(fixup, PHYSICAL_ADDRESS_TO_POINTER(state->addr), &size,
+diff --git a/src/boot/efi/drivers.c b/src/boot/efi/drivers.c
+index 41a7d8fe15..c76f8e0903 100644
+--- a/src/boot/efi/drivers.c
++++ b/src/boot/efi/drivers.c
+@@ -23,26 +23,26 @@ static EFI_STATUS load_one_driver(
+         spath = xpool_print(L"\\EFI\\systemd\\drivers\\%s", fname);
+         err = make_file_device_path(loaded_image->DeviceHandle, spath, &path);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error making file device path: %r", err);
++                return log_error_status(err, "Error making file device path: %m");
+ 
+         err = BS->LoadImage(false, parent_image, path, NULL, 0, &image);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to load image %s: %r", fname, err);
++                return log_error_status(err, "Failed to load image %ls: %m", fname);
+ 
+         err = BS->HandleProtocol(image, &LoadedImageProtocol, (void **)&loaded_image);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to find protocol in driver image %s: %r", fname, err);
++                return log_error_status(err, "Failed to find protocol in driver image %ls: %m", fname);
+ 
+         if (loaded_image->ImageCodeType != EfiBootServicesCode &&
+             loaded_image->ImageCodeType != EfiRuntimeServicesCode)
+-                return log_error_status_stall(EFI_INVALID_PARAMETER, L"Image %s is not a driver, refusing.", fname);
++                return log_error("Image %ls is not a driver, refusing.", fname);
+ 
+         err = BS->StartImage(image, NULL, NULL);
+         if (err != EFI_SUCCESS) {
+                 /* EFI_ABORTED signals an initializing driver. It uses this error code on success
+                  * so that it is unloaded after. */
+                 if (err != EFI_ABORTED)
+-                        log_error_stall(L"Failed to start image %s: %r", fname, err);
++                        log_error_status(err, "Failed to start image %ls: %m", fname);
+                 return err;
+         }
+ 
+@@ -59,7 +59,7 @@ EFI_STATUS reconnect_all_drivers(void) {
+ 
+         err = BS->LocateHandleBuffer(AllHandles, NULL, NULL, &n_handles, &handles);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to get list of handles: %r", err);
++                return log_error_status(err, "Failed to get list of handles: %m");
+ 
+         for (size_t i = 0; i < n_handles; i++)
+                 /* Some firmware gives us some bogus handles (or they might become bad due to
+@@ -87,12 +87,12 @@ EFI_STATUS load_drivers(
+         if (err == EFI_NOT_FOUND)
+                 return EFI_SUCCESS;
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to open \\EFI\\systemd\\drivers: %r", err);
++                return log_error_status(err, "Failed to open \\EFI\\systemd\\drivers: %m");
+ 
+         for (;;) {
+                 err = readdir_harder(drivers_dir, &dirent, &dirent_size);
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Failed to read extra directory of loaded image: %r", err);
++                        return log_error_status(err, "Failed to read extra directory of loaded image: %m");
+                 if (!dirent) /* End of directory */
+                         break;
+ 
+diff --git a/src/boot/efi/linux.c b/src/boot/efi/linux.c
+index 48801f9dd8..2ae68ec295 100644
+--- a/src/boot/efi/linux.c
++++ b/src/boot/efi/linux.c
+@@ -120,17 +120,17 @@ EFI_STATUS linux_exec(
+                                 initrd_length);
+ #endif
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, u"Bad kernel image: %r", err);
++                return log_error_status(err, "Bad kernel image: %m");
+ 
+         _cleanup_(unload_imagep) EFI_HANDLE kernel_image = NULL;
+         err = load_image(parent, linux_buffer, linux_length, &kernel_image);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, u"Error loading kernel image: %r", err);
++                return log_error_status(err, "Error loading kernel image: %m");
+ 
+         EFI_LOADED_IMAGE_PROTOCOL *loaded_image;
+         err = BS->HandleProtocol(kernel_image, &LoadedImageProtocol, (void **) &loaded_image);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, u"Error getting kernel loaded image protocol: %r", err);
++                return log_error_status(err, "Error getting kernel loaded image protocol: %m");
+ 
+         if (cmdline) {
+                 loaded_image->LoadOptions = (void *) cmdline;
+@@ -140,7 +140,7 @@ EFI_STATUS linux_exec(
+         _cleanup_(cleanup_initrd) EFI_HANDLE initrd_handle = NULL;
+         err = initrd_register(initrd_buffer, initrd_length, &initrd_handle);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, u"Error registering initrd: %r", err);
++                return log_error_status(err, "Error registering initrd: %m");
+ 
+         err = BS->StartImage(kernel_image, NULL, NULL);
+ 
+@@ -151,5 +151,5 @@ EFI_STATUS linux_exec(
+                 err = compat_entry(kernel_image, ST);
+         }
+ 
+-        return log_error_status_stall(err, u"Error starting kernel image: %r", err);
++        return log_error_status(err, "Error starting kernel image: %m");
+ }
+diff --git a/src/boot/efi/linux_x86.c b/src/boot/efi/linux_x86.c
+index 6a5e431107..cbd92201b6 100644
+--- a/src/boot/efi/linux_x86.c
++++ b/src/boot/efi/linux_x86.c
+@@ -141,28 +141,27 @@ EFI_STATUS linux_exec_efi_handover(
+ 
+         const BootParams *image_params = (const BootParams *) linux_buffer;
+         if (image_params->hdr.header != SETUP_MAGIC || image_params->hdr.boot_flag != BOOT_FLAG_MAGIC)
+-                return log_error_status_stall(EFI_UNSUPPORTED, u"Unsupported kernel image.");
++                return log_error_status(EFI_UNSUPPORTED, "Unsupported kernel image.");
+         if (image_params->hdr.version < SETUP_VERSION_2_11)
+-                return log_error_status_stall(EFI_UNSUPPORTED, u"Kernel too old.");
++                return log_error_status(EFI_UNSUPPORTED, "Kernel too old.");
+         if (!image_params->hdr.relocatable_kernel)
+-                return log_error_status_stall(EFI_UNSUPPORTED, u"Kernel is not relocatable.");
++                return log_error_status(EFI_UNSUPPORTED, "Kernel is not relocatable.");
+ 
+         /* The xloadflags were added in version 2.12+ of the boot protocol but the handover support predates
+          * that, so we cannot safety-check this for 2.11. */
+         if (image_params->hdr.version >= SETUP_VERSION_2_12 &&
+             !FLAGS_SET(image_params->hdr.xloadflags, XLF_EFI_HANDOVER))
+-                return log_error_status_stall(EFI_UNSUPPORTED, u"Kernel does not support EFI handover protocol.");
++                return log_error_status(EFI_UNSUPPORTED, "Kernel does not support EFI handover protocol.");
+ 
+         bool can_4g = image_params->hdr.version >= SETUP_VERSION_2_12 &&
+                         FLAGS_SET(image_params->hdr.xloadflags, XLF_CAN_BE_LOADED_ABOVE_4G);
+ 
+         if (!can_4g && POINTER_TO_PHYSICAL_ADDRESS(linux_buffer) + linux_length > UINT32_MAX)
+-                return log_error_status_stall(
++                return log_error_status(
+                                 EFI_UNSUPPORTED,
+-                                u"Unified kernel image was loaded above 4G, but kernel lacks support.");
++                                "Unified kernel image was loaded above 4G, but kernel lacks support.");
+         if (!can_4g && POINTER_TO_PHYSICAL_ADDRESS(initrd_buffer) + initrd_length > UINT32_MAX)
+-                return log_error_status_stall(
+-                                EFI_UNSUPPORTED, u"Initrd is above 4G, but kernel lacks support.");
++                return log_error_status(EFI_UNSUPPORTED, "Initrd is above 4G, but kernel lacks support.");
+ 
+         _cleanup_pages_ Pages boot_params_page = xmalloc_pages(
+                         can_4g ? AllocateAnyPages : AllocateMaxAddress,
+diff --git a/src/boot/efi/log.c b/src/boot/efi/log.c
+new file mode 100644
+index 0000000000..38e7c5a8a8
+--- /dev/null
++++ b/src/boot/efi/log.c
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++
++#include <efi.h>
++#include <efilib.h>
++
++#include "log.h"
++
++void efi_assert(const char *expr, const char *file, unsigned line, const char *function) {
++        log_error("systemd-boot assertion '%s' failed at %s:%u@%s. Halting.", expr, file, line, function);
++        for (;;)
++                BS->Stall(60 * 1000 * 1000);
++}
++
++EFI_STATUS log_internal(EFI_STATUS status, const char *format, ...) {
++        assert(format);
++
++        int32_t attr = ST->ConOut->Mode->Attribute;
++
++        if (ST->ConOut->Mode->CursorColumn > 0)
++                ST->ConOut->OutputString(ST->ConOut, (char16_t *) u"\r\n");
++        ST->ConOut->SetAttribute(ST->ConOut, EFI_LIGHTRED | EFI_BACKGROUND_BLACK);
++
++        va_list ap;
++        va_start(ap, format);
++        vprintf_status(status, format, ap);
++        va_end(ap);
++
++        ST->ConOut->OutputString(ST->ConOut, (char16_t *) u"\r\n");
++        ST->ConOut->SetAttribute(ST->ConOut, attr);
++
++        /* Give the user a chance to see the message. */
++        BS->Stall(3 * 1000 * 1000);
++        return status;
++}
+diff --git a/src/boot/efi/log.h b/src/boot/efi/log.h
+new file mode 100644
+index 0000000000..c6e8d626ce
+--- /dev/null
++++ b/src/boot/efi/log.h
+@@ -0,0 +1,9 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++#pragma once
++
++#include "efi-string.h"
++
++_gnu_printf_(2, 3) EFI_STATUS log_internal(EFI_STATUS status, const char *format, ...);
++#define log_error_status(status, ...) log_internal(status, __VA_ARGS__)
++#define log_error(...) log_internal(EFI_INVALID_PARAMETER, __VA_ARGS__)
++#define log_oom() log_internal(EFI_OUT_OF_RESOURCES, "Out of memory.")
+diff --git a/src/boot/efi/measure.c b/src/boot/efi/measure.c
+index 27a0f06475..52c5cd7ae8 100644
+--- a/src/boot/efi/measure.c
++++ b/src/boot/efi/measure.c
+@@ -207,7 +207,7 @@ EFI_STATUS tpm_log_load_options(const char16_t *load_options, bool *ret_measured
+ 
+                 err = tpm_log_event(pcr, POINTER_TO_PHYSICAL_ADDRESS(load_options), strsize16(load_options), load_options, &m);
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Unable to add load options (i.e. kernel command) line measurement to PCR %u: %r", pcr, err);
++                        return log_error_status(err, "Unable to add load options (i.e. kernel command) line measurement to PCR %u: %m", pcr);
+ 
+                 measured = measured < 0 ? m : (measured && m);
+         }
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index ed332262e8..09c40a280b 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -359,6 +359,7 @@ efi_headers = files(
+         'graphics.h',
+         'initrd.h',
+         'linux.h',
++        'log.h',
+         'measure.h',
+         'missing_efi.h',
+         'part-discovery.h',
+@@ -372,7 +373,6 @@ efi_headers = files(
+ )
+ 
+ common_sources = files(
+-        'assert.c',
+         'console.c',
+         'devicetree.c',
+         'drivers.c',
+@@ -380,6 +380,7 @@ common_sources = files(
+         'efi-string.c',
+         'graphics.c',
+         'initrd.c',
++        'log.c',
+         'measure.c',
+         'part-discovery.c',
+         'pe.c',
+diff --git a/src/boot/efi/pe.c b/src/boot/efi/pe.c
+index 65308639f6..c946ce2b0a 100644
+--- a/src/boot/efi/pe.c
++++ b/src/boot/efi/pe.c
+@@ -158,7 +158,7 @@ static void locate_sections(
+ 
+                 if (in_memory) {
+                         if (prev_section_addr > sect->VirtualAddress)
+-                                log_error_stall(u"Overlapping PE sections detected. Boot may fail due to image memory corruption!");
++                                log_error("Overlapping PE sections detected. Boot may fail due to image memory corruption!");
+                         prev_section_addr = sect->VirtualAddress + sect->VirtualSize;
+                 }
+ 
+diff --git a/src/boot/efi/random-seed.c b/src/boot/efi/random-seed.c
+index a52934a901..e971f48097 100644
+--- a/src/boot/efi/random-seed.c
++++ b/src/boot/efi/random-seed.c
+@@ -48,7 +48,7 @@ static EFI_STATUS acquire_rng(void *ret, size_t size) {
+ 
+         err = rng->GetRNG(rng, NULL, size, ret);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to acquire RNG data: %r", err);
++                return log_error_status(err, "Failed to acquire RNG data: %m");
+         return EFI_SUCCESS;
+ }
+ 
+@@ -63,12 +63,12 @@ static EFI_STATUS acquire_system_token(void **ret, size_t *ret_size) {
+         err = efivar_get_raw(LOADER_GUID, L"LoaderSystemToken", &data, &size);
+         if (err != EFI_SUCCESS) {
+                 if (err != EFI_NOT_FOUND)
+-                        log_error_stall(L"Failed to read LoaderSystemToken EFI variable: %r", err);
++                        log_error_status(err, "Failed to read LoaderSystemToken EFI variable: %m");
+                 return err;
+         }
+ 
+         if (size <= 0)
+-                return log_error_status_stall(EFI_NOT_FOUND, L"System token too short, ignoring.");
++                return log_error_status(EFI_NOT_FOUND, "System token too short, ignoring.");
+ 
+         *ret = TAKE_PTR(data);
+         *ret_size = size;
+@@ -201,29 +201,29 @@ EFI_STATUS process_random_seed(EFI_FILE *root_dir) {
+                         0);
+         if (err != EFI_SUCCESS) {
+                 if (err != EFI_NOT_FOUND && err != EFI_WRITE_PROTECTED)
+-                        log_error_stall(L"Failed to open random seed file: %r", err);
++                        log_error_status(err, "Failed to open random seed file: %m");
+                 return err;
+         }
+ 
+         err = get_file_info_harder(handle, &info, NULL);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to get file info for random seed: %r", err);
++                return log_error_status(err, "Failed to get file info for random seed: %m");
+ 
+         size = info->FileSize;
+         if (size < RANDOM_MAX_SIZE_MIN)
+-                return log_error_status_stall(EFI_INVALID_PARAMETER, L"Random seed file is too short.");
++                return log_error("Random seed file is too short.");
+ 
+         if (size > RANDOM_MAX_SIZE_MAX)
+-                return log_error_status_stall(EFI_INVALID_PARAMETER, L"Random seed file is too large.");
++                return log_error("Random seed file is too large.");
+ 
+         seed = xmalloc(size);
+         rsize = size;
+         err = handle->Read(handle, &rsize, seed);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to read random seed file: %r", err);
++                return log_error_status(err, "Failed to read random seed file: %m");
+         if (rsize != size) {
+                 explicit_bzero_safe(seed, rsize);
+-                return log_error_status_stall(EFI_PROTOCOL_ERROR, L"Short read on random seed file.");
++                return log_error_status(EFI_PROTOCOL_ERROR, "Short read on random seed file.");
+         }
+ 
+         sha256_process_bytes(&size, sizeof(size), &hash);
+@@ -232,14 +232,14 @@ EFI_STATUS process_random_seed(EFI_FILE *root_dir) {
+ 
+         err = handle->SetPosition(handle, 0);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to seek to beginning of random seed file: %r", err);
++                return log_error_status(err, "Failed to seek to beginning of random seed file: %m");
+ 
+         /* Let's also include the UEFI monotonic counter (which is supposedly increasing on every single
+          * boot) in the hash, so that even if the changes to the ESP for some reason should not be
+          * persistent, the random seed we generate will still be different on every single boot. */
+         err = BS->GetNextMonotonicCount(&uefi_monotonic_counter);
+         if (err != EFI_SUCCESS && !seeded_by_efi)
+-                return log_error_status_stall(err, L"Failed to acquire UEFI monotonic counter: %r", err);
++                return log_error_status(err, "Failed to acquire UEFI monotonic counter: %m");
+         size = sizeof(uefi_monotonic_counter);
+         sha256_process_bytes(&size, sizeof(size), &hash);
+         sha256_process_bytes(&uefi_monotonic_counter, size, &hash);
+@@ -264,26 +264,26 @@ EFI_STATUS process_random_seed(EFI_FILE *root_dir) {
+         if (size < info->FileSize) {
+                 err = handle->SetPosition(handle, size);
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Failed to seek to offset of random seed file: %r", err);
++                        return log_error_status(err, "Failed to seek to offset of random seed file: %m");
+                 wsize = info->FileSize - size;
+                 err = handle->Write(handle, &wsize, seed /* All zeros now */);
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Failed to write random seed file: %r", err);
++                        return log_error_status(err, "Failed to write random seed file: %m");
+                 if (wsize != info->FileSize - size)
+-                        return log_error_status_stall(EFI_PROTOCOL_ERROR, L"Short write on random seed file.");
++                        return log_error_status(EFI_PROTOCOL_ERROR, "Short write on random seed file.");
+                 err = handle->Flush(handle);
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Failed to flush random seed file: %r", err);
++                        return log_error_status(err, "Failed to flush random seed file: %m");
+                 err = handle->SetPosition(handle, 0);
+                 if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Failed to seek to beginning of random seed file: %r", err);
++                        return log_error_status(err, "Failed to seek to beginning of random seed file: %m");
+ 
+                 /* We could truncate the file here with something like:
+                  *
+                  *     info->FileSize = size;
+                  *     err = handle->SetInfo(handle, &GenericFileInfo, info->Size, info);
+                  *     if (err != EFI_SUCCESS)
+-                 *             return log_error_status_stall(err, L"Failed to truncate random seed file: %r", err);
++                 *             return log_error_status(err, "Failed to truncate random seed file: %u");
+                  *
+                  * But this is considered slightly risky, because EFI filesystem drivers are a little bit
+                  * flimsy. So instead we rely on userspace eventually truncating this when it writes a new
+@@ -293,18 +293,18 @@ EFI_STATUS process_random_seed(EFI_FILE *root_dir) {
+         wsize = size;
+         err = handle->Write(handle, &wsize, random_bytes);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to write random seed file: %r", err);
++                return log_error_status(err, "Failed to write random seed file: %m");
+         if (wsize != size)
+-                return log_error_status_stall(EFI_PROTOCOL_ERROR, L"Short write on random seed file.");
++                return log_error_status(EFI_PROTOCOL_ERROR, "Short write on random seed file.");
+         err = handle->Flush(handle);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to flush random seed file: %r", err);
++                return log_error_status(err, "Failed to flush random seed file: %m");
+ 
+         err = BS->AllocatePool(EfiACPIReclaimMemory,
+                                offsetof(struct linux_efi_random_seed, seed) + DESIRED_SEED_SIZE,
+                                (void **) &new_seed_table);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to allocate EFI table for random seed: %r", err);
++                return log_error_status(err, "Failed to allocate EFI table for random seed: %m");
+         new_seed_table->size = DESIRED_SEED_SIZE;
+ 
+         /* hash = hash_key || 1 */
+@@ -316,7 +316,7 @@ EFI_STATUS process_random_seed(EFI_FILE *root_dir) {
+ 
+         err = BS->InstallConfigurationTable(&(EFI_GUID)LINUX_EFI_RANDOM_SEED_TABLE_GUID, new_seed_table);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed to install EFI table for random seed: %r", err);
++                return log_error_status(err, "Failed to install EFI table for random seed: %m");
+         TAKE_PTR(new_seed_table);
+ 
+         if (previous_seed_table) {
+diff --git a/src/boot/efi/secure-boot.c b/src/boot/efi/secure-boot.c
+index 3f3a222b5e..6b6d48277e 100644
+--- a/src/boot/efi/secure-boot.c
++++ b/src/boot/efi/secure-boot.c
+@@ -66,10 +66,9 @@ EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path) {
+                                 continue;
+                         }
+                         if (err != EFI_SUCCESS)
+-                                return log_error_status_stall(
++                                return log_error_status(
+                                                 err,
+-                                                L"Error waiting for user input to enroll Secure Boot keys: %r",
+-                                                err);
++                                                "Error waiting for user input to enroll Secure Boot keys: %m");
+ 
+                         /* user aborted, returning EFI_SUCCESS here allows the user to go back to the menu */
+                         return EFI_SUCCESS;
+@@ -80,7 +79,7 @@ EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path) {
+ 
+         err = open_directory(root_dir, path, &dir);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Failed opening keys directory %s: %r", path, err);
++                return log_error_status(err, "Failed opening keys directory %ls: %m", path);
+ 
+         struct {
+                 const char16_t *name;
+@@ -98,7 +97,7 @@ EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path) {
+         for (size_t i = 0; i < ELEMENTSOF(sb_vars); i++) {
+                 err = file_read(dir, sb_vars[i].filename, 0, 0, &sb_vars[i].buffer, &sb_vars[i].size);
+                 if (err != EFI_SUCCESS) {
+-                        log_error_stall(L"Failed reading file %s\\%s: %r", path, sb_vars[i].filename, err);
++                        log_error_status(err, "Failed reading file %ls\\%ls: %m", path, sb_vars[i].filename);
+                         goto out_deallocate;
+                 }
+         }
+@@ -112,7 +111,7 @@ EFI_STATUS secure_boot_enroll_at(EFI_FILE *root_dir, const char16_t *path) {
+ 
+                 err = efivar_set_raw(&sb_vars[i].vendor, sb_vars[i].name, sb_vars[i].buffer, sb_vars[i].size, sb_vars_opts);
+                 if (err != EFI_SUCCESS) {
+-                        log_error_stall(L"Failed to write %s secure boot variable: %r", sb_vars[i].name, err);
++                        log_error_status(err, "Failed to write %ls secure boot variable: %m", sb_vars[i].name);
+                         goto out_deallocate;
+                 }
+         }
+diff --git a/src/boot/efi/stub.c b/src/boot/efi/stub.c
+index 433fef548c..f9c023e11c 100644
+--- a/src/boot/efi/stub.c
++++ b/src/boot/efi/stub.c
+@@ -207,7 +207,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+                         NULL,
+                         EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+         if (err != EFI_SUCCESS)
+-                return log_error_status_stall(err, L"Error getting a LoadedImageProtocol handle: %r", err);
++                return log_error_status(err, "Error getting a LoadedImageProtocol handle: %m");
+ 
+         if (efivar_get_uint64_le(LOADER_GUID, L"LoaderFeatures", &loader_features) != EFI_SUCCESS ||
+             !FLAGS_SET(loader_features, EFI_LOADER_FEATURE_RANDOM_SEED)) {
+@@ -222,7 +222,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+         if (err != EFI_SUCCESS || szs[UNIFIED_SECTION_LINUX] == 0) {
+                 if (err == EFI_SUCCESS)
+                         err = EFI_NOT_FOUND;
+-                return log_error_status_stall(err, L"Unable to locate embedded .linux section: %r", err);
++                return log_error_status(err, "Unable to locate embedded .linux section: %m");
+         }
+ 
+         /* Measure all "payload" of this PE image into a separate PCR (i.e. where nothing else is written
+@@ -417,7 +417,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+                 err = devicetree_install_from_memory(
+                                 &dt_state, PHYSICAL_ADDRESS_TO_POINTER(dt_base), dt_size);
+                 if (err != EFI_SUCCESS)
+-                        log_error_stall(L"Error loading embedded devicetree: %r", err);
++                        log_error_status(err, "Error loading embedded devicetree: %m");
+         }
+ 
+         err = linux_exec(image, cmdline,
+diff --git a/src/boot/efi/util.c b/src/boot/efi/util.c
+index 7596bc3edc..320bddec1b 100644
+--- a/src/boot/efi/util.c
++++ b/src/boot/efi/util.c
+@@ -325,34 +325,6 @@ EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, size_t off, size_t siz
+         return err;
+ }
+ 
+-void log_error_stall(const char16_t *fmt, ...) {
+-        va_list args;
+-
+-        assert(fmt);
+-
+-        int32_t attr = ST->ConOut->Mode->Attribute;
+-        ST->ConOut->SetAttribute(ST->ConOut, EFI_LIGHTRED|EFI_BACKGROUND_BLACK);
+-
+-        if (ST->ConOut->Mode->CursorColumn > 0)
+-                Print(L"\n");
+-
+-        va_start(args, fmt);
+-        VPrint(fmt, args);
+-        va_end(args);
+-
+-        Print(L"\n");
+-
+-        ST->ConOut->SetAttribute(ST->ConOut, attr);
+-
+-        /* Give the user a chance to see the message. */
+-        BS->Stall(3 * 1000 * 1000);
+-}
+-
+-EFI_STATUS log_oom(void) {
+-        log_error_stall(L"Out of memory.");
+-        return EFI_OUT_OF_RESOURCES;
+-}
+-
+ void print_at(size_t x, size_t y, size_t attr, const char16_t *str) {
+         assert(str);
+         ST->ConOut->SetCursorPosition(ST->ConOut, x, y);
+@@ -572,7 +544,7 @@ void hexdump(const char16_t *prefix, const void *data, size_t size) {
+ 
+         buf[size*2] = 0;
+ 
+-        log_error_stall(L"%s[%" PRIuN "]: %s", prefix, size, buf);
++        log_error("%ls[%zu]: %ls", prefix, size, buf);
+ }
+ #endif
+ 
+diff --git a/src/boot/efi/util.h b/src/boot/efi/util.h
+index b97dc9768c..771f11c8bd 100644
+--- a/src/boot/efi/util.h
++++ b/src/boot/efi/util.h
+@@ -5,6 +5,7 @@
+ #include <efilib.h>
+ #include <stddef.h>
+ 
++#include "log.h"
+ #include "string-util-fundamental.h"
+ 
+ #define UINTN_MAX (~(UINTN)0)
+@@ -139,17 +140,6 @@ static inline void unload_imagep(EFI_HANDLE *image) {
+         &(const EFI_GUID) { 0x4a67b082, 0x0a4c, 0x41cf, { 0xb6, 0xc7, 0x44, 0x0b, 0x29, 0xbb, 0x8c, 0x4f } }
+ #define EFI_GLOBAL_GUID &(const EFI_GUID) EFI_GLOBAL_VARIABLE
+ 
+-void log_error_stall(const char16_t *fmt, ...);
+-EFI_STATUS log_oom(void);
+-
+-/* This works just like log_error_errno() from userspace, but requires you
+- * to provide err a second time if you want to use %r in the message! */
+-#define log_error_status_stall(err, fmt, ...) \
+-        ({ \
+-                log_error_stall(fmt, ##__VA_ARGS__); \
+-                err; \
+-        })
+-
+ void print_at(size_t x, size_t y, size_t attr, const char16_t *str);
+ void clear_screen(size_t attr);
+ 

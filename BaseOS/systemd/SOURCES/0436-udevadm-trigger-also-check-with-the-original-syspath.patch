@@ -1,0 +1,56 @@
+From 4007f494b2e4c45f2d59948af3f4053258d3f127 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 28 Oct 2022 09:06:02 +0900
+Subject: [PATCH] udevadm-trigger: also check with the original syspath if
+ device is renamed
+
+For older kernels that synthetic UUID is not supported, we need to also
+check the original device name, as udevd broadcasts uevent with new
+sysname.
+
+Fixes #25115.
+
+(cherry picked from commit 1193448cb68e5a90cab027e16a093bbd367e9494)
+
+Related: RHEL-5988
+---
+ src/udev/udevadm-trigger.c | 26 ++++++++++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/src/udev/udevadm-trigger.c b/src/udev/udevadm-trigger.c
+index 3909fa237c..40ee5085a0 100644
+--- a/src/udev/udevadm-trigger.c
++++ b/src/udev/udevadm-trigger.c
+@@ -176,6 +176,32 @@ static int device_monitor_handler(sd_device_monitor *m, sd_device *dev, void *us
+                 _cleanup_free_ char *saved = NULL;
+ 
+                 saved = set_remove(settle_path_or_ids, syspath);
++                if (!saved) {
++                        const char *old_sysname;
++
++                        /* When the device is renamed, the new name is broadcast, and the old name is saved
++                         * in INTERFACE_OLD. */
++
++                        if (sd_device_get_property_value(dev, "INTERFACE_OLD", &old_sysname) >= 0) {
++                                _cleanup_free_ char *dir = NULL, *old_syspath = NULL;
++
++                                r = path_extract_directory(syspath, &dir);
++                                if (r < 0) {
++                                        log_device_debug_errno(dev, r,
++                                                               "Failed to extract directory from '%s', ignoring: %m",
++                                                               syspath);
++                                        return 0;
++                                }
++
++                                old_syspath = path_join(dir, old_sysname);
++                                if (!old_syspath) {
++                                        log_oom_debug();
++                                        return 0;
++                                }
++
++                                saved = set_remove(settle_path_or_ids, old_syspath);
++                        }
++                }
+                 if (!saved) {
+                         log_device_debug(dev, "Got uevent for unexpected device, ignoring.");
+                         return 0;

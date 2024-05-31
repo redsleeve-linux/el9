@@ -1,0 +1,164 @@
+From ca51629f0509cbbbc54e89db9df83f26ae61ac70 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Sat, 21 Oct 2023 16:33:41 +0200
+Subject: [PATCH] tpm2-util: make tpm2_read_public() static, as we use it only
+ internally in tpm2-util.c
+
+(cherry picked from commit add8091c972b439a2143a962b6344c0f9881da8d)
+
+[dtardon: This picks just the tpm2-util.[ch] change from the upstream
+commit. It's not strictly necessary, but one of the following commits
+introduces a test for the function. So it's either make the function
+public or drop the test. I went with the former option, as the function
+is there anyway, so it's better if it's test-covered. And one more
+commit doesn't really make any difference.]
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c | 66 +++++++++++++++++++++---------------------
+ src/shared/tpm2-util.h |  6 ++--
+ 2 files changed, 37 insertions(+), 35 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 36de831812..6e6cbe076f 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -141,7 +141,7 @@ int dlopen_tpm2(void) {
+                         DLSYM_ARG(Tss2_MU_TPMT_PUBLIC_Marshal));
+ }
+ 
+-static inline void Esys_Freep(void *p) {
++void Esys_Freep(void *p) {
+         if (*(void**) p)
+                 sym_Esys_Free(*(void**) p);
+ }
+@@ -732,6 +732,35 @@ int tpm2_handle_new(Tpm2Context *context, Tpm2Handle **ret_handle) {
+         return 0;
+ }
+ 
++static int tpm2_read_public(
++                Tpm2Context *c,
++                const Tpm2Handle *session,
++                const Tpm2Handle *handle,
++                TPM2B_PUBLIC **ret_public,
++                TPM2B_NAME **ret_name,
++                TPM2B_NAME **ret_qname) {
++
++        TSS2_RC rc;
++
++        assert(c);
++        assert(handle);
++
++        rc = sym_Esys_ReadPublic(
++                        c->esys_context,
++                        handle->esys_handle,
++                        session ? session->esys_handle : ESYS_TR_NONE,
++                        ESYS_TR_NONE,
++                        ESYS_TR_NONE,
++                        ret_public,
++                        ret_name,
++                        ret_qname);
++        if (rc != TSS2_RC_SUCCESS)
++                return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
++                                       "Failed to read public info: %s", sym_Tss2_RC_Decode(rc));
++
++        return 0;
++}
++
+ /* Create a Tpm2Handle object that references a pre-existing handle in the TPM, at the handle index provided.
+  * This should be used only for persistent, transient, or NV handles; and the handle must already exist in
+  * the TPM at the specified handle index. The handle index should not be 0. Returns 1 if found, 0 if the
+@@ -978,35 +1007,6 @@ static int tpm2_credit_random(Tpm2Context *c) {
+         return 0;
+ }
+ 
+-int tpm2_read_public(
+-                Tpm2Context *c,
+-                const Tpm2Handle *session,
+-                const Tpm2Handle *handle,
+-                TPM2B_PUBLIC **ret_public,
+-                TPM2B_NAME **ret_name,
+-                TPM2B_NAME **ret_qname) {
+-
+-        TSS2_RC rc;
+-
+-        assert(c);
+-        assert(handle);
+-
+-        rc = sym_Esys_ReadPublic(
+-                        c->esys_context,
+-                        handle->esys_handle,
+-                        session ? session->esys_handle : ESYS_TR_NONE,
+-                        ESYS_TR_NONE,
+-                        ESYS_TR_NONE,
+-                        ret_public,
+-                        ret_name,
+-                        ret_qname);
+-        if (rc != TSS2_RC_SUCCESS)
+-                return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+-                                       "Failed to read public info: %s", sym_Tss2_RC_Decode(rc));
+-
+-        return 0;
+-}
+-
+ /* Get one of the legacy primary key templates.
+  *
+  * The legacy templates should only be used for older sealed data that did not use the SRK. Instead of a
+@@ -1194,7 +1194,7 @@ static int tpm2_get_srk(
+ }
+ 
+ /* Get the SRK, creating one if needed. Returns 0 on success, or < 0 on error. */
+-static int tpm2_get_or_create_srk(
++int tpm2_get_or_create_srk(
+                 Tpm2Context *c,
+                 const Tpm2Handle *session,
+                 TPM2B_PUBLIC **ret_public,
+@@ -1208,7 +1208,7 @@ static int tpm2_get_or_create_srk(
+         if (r < 0)
+                 return r;
+         if (r == 1)
+-                return 0;
++                return 0; /* 0 → SRK already set up */
+ 
+         /* No SRK, create and persist one */
+         TPM2B_PUBLIC template = { .size = sizeof(TPMT_PUBLIC), };
+@@ -1242,7 +1242,7 @@ static int tpm2_get_or_create_srk(
+                 /* This should never happen. */
+                 return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "SRK we just persisted couldn't be found.");
+ 
+-        return 0;
++        return 1; /* > 0 → SRK newly set up */
+ }
+ 
+ /* Utility functions for TPMS_PCR_SELECTION. */
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index a9a3554fe1..15ca677c1c 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -67,6 +67,8 @@ typedef struct {
+ #define _tpm2_handle(c, h) { .tpm2_context = (c), .esys_handle = (h), }
+ static const Tpm2Handle TPM2_HANDLE_NONE = _tpm2_handle(NULL, ESYS_TR_NONE);
+ 
++void Esys_Freep(void *p);
++
+ int tpm2_handle_new(Tpm2Context *context, Tpm2Handle **ret_handle);
+ Tpm2Handle *tpm2_handle_free(Tpm2Handle *handle);
+ DEFINE_TRIVIAL_CLEANUP_FUNC(Tpm2Handle*, tpm2_handle_free);
+@@ -161,8 +163,6 @@ void tpm2_log_debug_name(const TPM2B_NAME *name, const char *msg);
+ int tpm2_index_to_handle(Tpm2Context *c, TPM2_HANDLE index, const Tpm2Handle *session, TPM2B_PUBLIC **ret_public, TPM2B_NAME **ret_name, TPM2B_NAME **ret_qname, Tpm2Handle **ret_handle);
+ int tpm2_index_from_handle(Tpm2Context *c, const Tpm2Handle *handle, TPM2_HANDLE *ret_index);
+ 
+-int tpm2_read_public(Tpm2Context *c, const Tpm2Handle *session, const Tpm2Handle *handle, TPM2B_PUBLIC **ret_public, TPM2B_NAME **ret_name, TPM2B_NAME **ret_qname);
+-
+ int tpm2_pcr_read(Tpm2Context *c, const TPML_PCR_SELECTION *pcr_selection, Tpm2PCRValue **ret_pcr_values, size_t *ret_n_pcr_values);
+ int tpm2_pcr_read_missing_values(Tpm2Context *c, Tpm2PCRValue *pcr_values, size_t n_pcr_values);
+ 
+@@ -172,6 +172,8 @@ int tpm2_calculate_policy_authorize(const TPM2B_PUBLIC *public, const TPM2B_DIGE
+ int tpm2_calculate_policy_pcr(const Tpm2PCRValue *pcr_values, size_t n_pcr_values, TPM2B_DIGEST *digest);
+ int tpm2_calculate_sealing_policy(const Tpm2PCRValue *pcr_values, size_t n_pcr_values, const TPM2B_PUBLIC *public, bool use_pin, TPM2B_DIGEST *digest);
+ 
++int tpm2_get_or_create_srk(Tpm2Context *c, const Tpm2Handle *session, TPM2B_PUBLIC **ret_public, TPM2B_NAME **ret_name, TPM2B_NAME **ret_qname, Tpm2Handle **ret_handle);
++
+ int tpm2_seal(Tpm2Context *c, const TPM2B_DIGEST *policy, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, uint16_t *ret_primary_alg, void **ret_srk_buf, size_t *ret_srk_buf_size);
+ int tpm2_unseal(Tpm2Context *c, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, JsonVariant *signature, const char *pin, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, const void *srk_buf, size_t srk_buf_size, void **ret_secret, size_t *ret_secret_size);
+ 

@@ -1,0 +1,1107 @@
+From e4abc6417deba31821583bfefef279a4f6f51f0c Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Sun, 5 Jun 2022 17:30:45 +0200
+Subject: [PATCH] boot: Rework GUID handling
+
+This stops using global GUID variables provided by gnu-efi. The globals
+presumably exist to make EFI calls easier. But these GUIDs are just
+128bits, so it's cheap to just put them on the stack when needed. C99
+compound literals makes this even easier.
+
+This also adds a convenience macro to create GUID pointers and uses it
+everywhere. Not forcing a GUID definition to be a compound literal makes
+them easier to use when assigning them to variables:
+    EFI_GUID before = *SOME_CONST_GUID;
+    EFI_GUID after = SOME_GUID;
+
+And MAKE_GUID_PTR() makes it more explicit what is happening. It was
+easy to confuse the old code as a cast:
+    before(&(EFI_GUID) SOME_GUID);
+    after(MAKE_GUID_PTR(SOME));
+
+(cherry picked from commit 19f08504c500d870c61a300c7e2cd740f777466e)
+
+Related: RHEL-16952
+---
+ src/boot/efi/boot.c           | 95 ++++++++++++++++++-----------------
+ src/boot/efi/console.c        | 10 ++--
+ src/boot/efi/devicetree.c     | 14 +++---
+ src/boot/efi/disk.c           |  2 +-
+ src/boot/efi/drivers.c        |  2 +-
+ src/boot/efi/graphics.c       |  2 +-
+ src/boot/efi/initrd.c         | 24 +++++----
+ src/boot/efi/linux.c          |  3 +-
+ src/boot/efi/measure.c        |  4 +-
+ src/boot/efi/missing_efi.h    |  6 +--
+ src/boot/efi/part-discovery.c |  8 +--
+ src/boot/efi/part-discovery.h |  4 +-
+ src/boot/efi/random-seed.c    | 12 ++---
+ src/boot/efi/secure-boot.c    | 14 +++---
+ src/boot/efi/shim.c           |  9 ++--
+ src/boot/efi/splash.c         |  2 +-
+ src/boot/efi/stub.c           | 36 ++++++-------
+ src/boot/efi/util.c           | 12 ++---
+ src/boot/efi/util.h           | 13 ++++-
+ src/boot/efi/vmm.c            | 22 ++++----
+ 20 files changed, 159 insertions(+), 135 deletions(-)
+
+diff --git a/src/boot/efi/boot.c b/src/boot/efi/boot.c
+index cb237675ec..d859ffe0b8 100644
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -455,7 +455,7 @@ static void print_status(Config *config, char16_t *loaded_image_path) {
+         query_screen_resolution(&screen_width, &screen_height);
+ 
+         secure = secure_boot_mode();
+-        (void) efivar_get(LOADER_GUID, L"LoaderDevicePartUUID", &device_part_uuid);
++        (void) efivar_get(MAKE_GUID_PTR(LOADER), u"LoaderDevicePartUUID", &device_part_uuid);
+ 
+         printf("  systemd-boot version: " GIT_VERSION "\n");
+         if (loaded_image_path)
+@@ -561,7 +561,7 @@ static void print_status(Config *config, char16_t *loaded_image_path) {
+                 _cleanup_free_ char16_t *dp_str = NULL;
+ 
+                 if (entry->device &&
+-                    BS->HandleProtocol(entry->device, &(EFI_GUID) EFI_DEVICE_PATH_PROTOCOL_GUID, (void **) &dp) ==
++                    BS->HandleProtocol(entry->device, MAKE_GUID_PTR(EFI_DEVICE_PATH_PROTOCOL), (void **) &dp) ==
+                                     EFI_SUCCESS)
+                         (void) device_path_to_str(dp, &dp_str);
+ 
+@@ -608,10 +608,10 @@ static EFI_STATUS reboot_into_firmware(void) {
+         if (!FLAGS_SET(get_os_indications_supported(), EFI_OS_INDICATIONS_BOOT_TO_FW_UI))
+                 return log_error_status(EFI_UNSUPPORTED, "Reboot to firmware interface not supported.");
+ 
+-        (void) efivar_get_uint64_le(EFI_GLOBAL_GUID, L"OsIndications", &osind);
++        (void) efivar_get_uint64_le(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"OsIndications", &osind);
+         osind |= EFI_OS_INDICATIONS_BOOT_TO_FW_UI;
+ 
+-        err = efivar_set_uint64_le(EFI_GLOBAL_GUID, L"OsIndications", osind, EFI_VARIABLE_NON_VOLATILE);
++        err = efivar_set_uint64_le(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"OsIndications", osind, EFI_VARIABLE_NON_VOLATILE);
+         if (err != EFI_SUCCESS)
+                 return log_error_status(err, "Error setting OsIndications: %m");
+ 
+@@ -1038,29 +1038,29 @@ static bool menu_run(
+         /* Update EFI vars after we left the menu to reduce NVRAM writes. */
+ 
+         if (default_efivar_saved != config->idx_default_efivar)
+-                efivar_set(LOADER_GUID, L"LoaderEntryDefault", config->entry_default_efivar, EFI_VARIABLE_NON_VOLATILE);
++                efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderEntryDefault", config->entry_default_efivar, EFI_VARIABLE_NON_VOLATILE);
+ 
+         if (console_mode_efivar_saved != config->console_mode_efivar) {
+                 if (config->console_mode_efivar == CONSOLE_MODE_KEEP)
+-                        efivar_set(LOADER_GUID, L"LoaderConfigConsoleMode", NULL, EFI_VARIABLE_NON_VOLATILE);
++                        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderConfigConsoleMode", NULL, EFI_VARIABLE_NON_VOLATILE);
+                 else
+-                        efivar_set_uint_string(LOADER_GUID, L"LoaderConfigConsoleMode",
++                        efivar_set_uint_string(MAKE_GUID_PTR(LOADER), u"LoaderConfigConsoleMode",
+                                                config->console_mode_efivar, EFI_VARIABLE_NON_VOLATILE);
+         }
+ 
+         if (timeout_efivar_saved != config->timeout_sec_efivar) {
+                 switch (config->timeout_sec_efivar) {
+                 case TIMEOUT_UNSET:
+-                        efivar_set(LOADER_GUID, L"LoaderConfigTimeout", NULL, EFI_VARIABLE_NON_VOLATILE);
++                        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderConfigTimeout", NULL, EFI_VARIABLE_NON_VOLATILE);
+                         break;
+                 case TIMEOUT_MENU_FORCE:
+-                        efivar_set(LOADER_GUID, u"LoaderConfigTimeout", u"menu-force", EFI_VARIABLE_NON_VOLATILE);
++                        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderConfigTimeout", u"menu-force", EFI_VARIABLE_NON_VOLATILE);
+                         break;
+                 case TIMEOUT_MENU_HIDDEN:
+-                        efivar_set(LOADER_GUID, u"LoaderConfigTimeout", u"menu-hidden", EFI_VARIABLE_NON_VOLATILE);
++                        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderConfigTimeout", u"menu-hidden", EFI_VARIABLE_NON_VOLATILE);
+                         break;
+                 default:
+-                        efivar_set_uint_string(LOADER_GUID, L"LoaderConfigTimeout",
++                        efivar_set_uint_string(MAKE_GUID_PTR(LOADER), u"LoaderConfigTimeout",
+                                                config->timeout_sec_efivar, EFI_VARIABLE_NON_VOLATILE);
+                 }
+         }
+@@ -1378,7 +1378,7 @@ static void config_entry_bump_counters(ConfigEntry *entry, EFI_FILE *root_dir) {
+ 
+         /* And rename the file */
+         strcpy16(file_info->FileName, entry->next_name);
+-        err = handle->SetInfo(handle, &GenericFileInfo, file_info_size, file_info);
++        err = handle->SetInfo(handle, MAKE_GUID_PTR(EFI_FILE_INFO), file_info_size, file_info);
+         if (err != EFI_SUCCESS) {
+                 log_error_status(err, "Failed to rename '%ls' to '%ls', ignoring: %m", old_path, entry->next_name);
+                 return;
+@@ -1390,7 +1390,7 @@ static void config_entry_bump_counters(ConfigEntry *entry, EFI_FILE *root_dir) {
+         /* Let's tell the OS that we renamed this file, so that it knows what to rename to the counter-less name on
+          * success */
+         new_path = xasprintf("%ls\\%ls", entry->path, entry->next_name);
+-        efivar_set(LOADER_GUID, L"LoaderBootCountPath", new_path, 0);
++        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderBootCountPath", new_path, 0);
+ 
+         /* If the file we just renamed is the loader path, then let's update that. */
+         if (streq16(entry->loader, old_path)) {
+@@ -1539,7 +1539,7 @@ static EFI_STATUS efivar_get_timeout(const char16_t *var, uint32_t *ret_value) {
+         assert(var);
+         assert(ret_value);
+ 
+-        err = efivar_get(LOADER_GUID, var, &value);
++        err = efivar_get(MAKE_GUID_PTR(LOADER), var, &value);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+@@ -1593,22 +1593,22 @@ static void config_load_defaults(Config *config, EFI_FILE *root_dir) {
+         err = efivar_get_timeout(u"LoaderConfigTimeoutOneShot", &config->timeout_sec);
+         if (err == EFI_SUCCESS) {
+                 /* Unset variable now, after all it's "one shot". */
+-                (void) efivar_set(LOADER_GUID, L"LoaderConfigTimeoutOneShot", NULL, EFI_VARIABLE_NON_VOLATILE);
++                (void) efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderConfigTimeoutOneShot", NULL, EFI_VARIABLE_NON_VOLATILE);
+ 
+                 config->force_menu = true; /* force the menu when this is set */
+         } else if (err != EFI_NOT_FOUND)
+                 log_error_status(err, "Error reading LoaderConfigTimeoutOneShot EFI variable: %m");
+ 
+-        err = efivar_get_uint_string(LOADER_GUID, L"LoaderConfigConsoleMode", &value);
++        err = efivar_get_uint_string(MAKE_GUID_PTR(LOADER), u"LoaderConfigConsoleMode", &value);
+         if (err == EFI_SUCCESS)
+                 config->console_mode_efivar = value;
+ 
+-        err = efivar_get(LOADER_GUID, L"LoaderEntryOneShot", &config->entry_oneshot);
++        err = efivar_get(MAKE_GUID_PTR(LOADER), u"LoaderEntryOneShot", &config->entry_oneshot);
+         if (err == EFI_SUCCESS)
+                 /* Unset variable now, after all it's "one shot". */
+-                (void) efivar_set(LOADER_GUID, L"LoaderEntryOneShot", NULL, EFI_VARIABLE_NON_VOLATILE);
++                (void) efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderEntryOneShot", NULL, EFI_VARIABLE_NON_VOLATILE);
+ 
+-        (void) efivar_get(LOADER_GUID, L"LoaderEntryDefault", &config->entry_default_efivar);
++        (void) efivar_get(MAKE_GUID_PTR(LOADER), u"LoaderEntryDefault", &config->entry_default_efivar);
+ 
+         strtolower16(config->entry_default_config);
+         strtolower16(config->entry_default_efivar);
+@@ -1618,7 +1618,7 @@ static void config_load_defaults(Config *config, EFI_FILE *root_dir) {
+         config->use_saved_entry = streq16(config->entry_default_config, u"@saved");
+         config->use_saved_entry_efivar = streq16(config->entry_default_efivar, u"@saved");
+         if (config->use_saved_entry || config->use_saved_entry_efivar)
+-                (void) efivar_get(LOADER_GUID, L"LoaderEntryLastBooted", &config->entry_saved);
++                (void) efivar_get(MAKE_GUID_PTR(LOADER), u"LoaderEntryLastBooted", &config->entry_saved);
+ }
+ 
+ static void config_load_entries(
+@@ -1941,7 +1941,8 @@ static void config_entry_add_osx(Config *config) {
+         if (!config->auto_entries)
+                 return;
+ 
+-        err = BS->LocateHandleBuffer(ByProtocol, &FileSystemProtocol, NULL, &n_handles, &handles);
++        err = BS->LocateHandleBuffer(
++                        ByProtocol, MAKE_GUID_PTR(EFI_SIMPLE_FILE_SYSTEM_PROTOCOL), NULL, &n_handles, &handles);
+         if (err != EFI_SUCCESS)
+                 return;
+ 
+@@ -1976,7 +1977,8 @@ static EFI_STATUS boot_windows_bitlocker(void) {
+         if (!tpm_present())
+                 return EFI_NOT_FOUND;
+ 
+-        err = BS->LocateHandleBuffer(ByProtocol, &BlockIoProtocol, NULL, &n_handles, &handles);
++        err = BS->LocateHandleBuffer(
++                        ByProtocol, MAKE_GUID_PTR(EFI_BLOCK_IO_PROTOCOL), NULL, &n_handles, &handles);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+@@ -1984,7 +1986,7 @@ static EFI_STATUS boot_windows_bitlocker(void) {
+         bool found = false;
+         for (size_t i = 0; i < n_handles; i++) {
+                 EFI_BLOCK_IO_PROTOCOL *block_io;
+-                err = BS->HandleProtocol(handles[i], &BlockIoProtocol, (void **) &block_io);
++                err = BS->HandleProtocol(handles[i], MAKE_GUID_PTR(EFI_BLOCK_IO_PROTOCOL), (void **) &block_io);
+                 if (err != EFI_SUCCESS || block_io->Media->BlockSize < 512 || block_io->Media->BlockSize > 4096)
+                         continue;
+ 
+@@ -2008,7 +2010,7 @@ static EFI_STATUS boot_windows_bitlocker(void) {
+ 
+         /* There can be gaps in Boot#### entries. Instead of iterating over the full
+          * EFI var list or uint16_t namespace, just look for "Windows Boot Manager" in BootOrder. */
+-        err = efivar_get_raw(EFI_GLOBAL_GUID, L"BootOrder", (char **) &boot_order, &boot_order_size);
++        err = efivar_get_raw(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"BootOrder", (char **) &boot_order, &boot_order_size);
+         if (err != EFI_SUCCESS || boot_order_size % sizeof(uint16_t) != 0)
+                 return err;
+ 
+@@ -2017,7 +2019,7 @@ static EFI_STATUS boot_windows_bitlocker(void) {
+                 size_t buf_size;
+ 
+                 _cleanup_free_ char16_t *name = xasprintf("Boot%04x", boot_order[i]);
+-                err = efivar_get_raw(EFI_GLOBAL_GUID, name, &buf, &buf_size);
++                err = efivar_get_raw(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), name, &buf, &buf_size);
+                 if (err != EFI_SUCCESS)
+                         continue;
+ 
+@@ -2029,8 +2031,8 @@ static EFI_STATUS boot_windows_bitlocker(void) {
+ 
+                 if (streq16((char16_t *) (buf + offset), u"Windows Boot Manager")) {
+                         err = efivar_set_raw(
+-                                EFI_GLOBAL_GUID,
+-                                L"BootNext",
++                                MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE),
++                                u"BootNext",
+                                 boot_order + i,
+                                 sizeof(boot_order[i]),
+                                 EFI_VARIABLE_NON_VOLATILE);
+@@ -2243,7 +2245,7 @@ static void config_load_xbootldr(
+         assert(config);
+         assert(device);
+ 
+-        err = partition_open(XBOOTLDR_GUID, device, &new_device, &root_dir);
++        err = partition_open(MAKE_GUID_PTR(XBOOTLDR), device, &new_device, &root_dir);
+         if (err != EFI_SUCCESS)
+                 return;
+ 
+@@ -2375,7 +2377,7 @@ static EFI_STATUS image_start(
+                 return log_error_status(err, "Error registering initrd: %m");
+ 
+         EFI_LOADED_IMAGE_PROTOCOL *loaded_image;
+-        err = BS->HandleProtocol(image, &LoadedImageProtocol, (void **) &loaded_image);
++        err = BS->HandleProtocol(image, MAKE_GUID_PTR(EFI_LOADED_IMAGE_PROTOCOL), (void **) &loaded_image);
+         if (err != EFI_SUCCESS)
+                 return log_error_status(err, "Error getting LoadedImageProtocol handle: %m");
+ 
+@@ -2388,7 +2390,7 @@ static EFI_STATUS image_start(
+                 (void) tpm_log_load_options(options, NULL);
+         }
+ 
+-        efivar_set_time_usec(LOADER_GUID, L"LoaderTimeExecUSec", 0);
++        efivar_set_time_usec(MAKE_GUID_PTR(LOADER), u"LoaderTimeExecUSec", 0);
+         err = BS->StartImage(image, NULL, NULL);
+         graphics_mode(false);
+         if (err == EFI_SUCCESS)
+@@ -2444,7 +2446,7 @@ static void config_write_entries_to_variable(Config *config) {
+         assert(p == buffer + sz);
+ 
+         /* Store the full list of discovered entries. */
+-        (void) efivar_set_raw(LOADER_GUID, L"LoaderEntries", buffer, sz, 0);
++        (void) efivar_set_raw(MAKE_GUID_PTR(LOADER), u"LoaderEntries", buffer, sz, 0);
+ }
+ 
+ static void save_selected_entry(const Config *config, const ConfigEntry *entry) {
+@@ -2453,7 +2455,7 @@ static void save_selected_entry(const Config *config, const ConfigEntry *entry)
+         assert(entry->loader || !entry->call);
+ 
+         /* Always export the selected boot entry to the system in a volatile var. */
+-        (void) efivar_set(LOADER_GUID, L"LoaderEntrySelected", entry->id, 0);
++        (void) efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderEntrySelected", entry->id, 0);
+ 
+         /* Do not save or delete if this was a oneshot boot. */
+         if (streq16(config->entry_oneshot, entry->id))
+@@ -2464,10 +2466,10 @@ static void save_selected_entry(const Config *config, const ConfigEntry *entry)
+                 if (streq16(config->entry_saved, entry->id))
+                         return;
+ 
+-                (void) efivar_set(LOADER_GUID, L"LoaderEntryLastBooted", entry->id, EFI_VARIABLE_NON_VOLATILE);
++                (void) efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderEntryLastBooted", entry->id, EFI_VARIABLE_NON_VOLATILE);
+         } else
+                 /* Delete the non-volatile var if not needed. */
+-                (void) efivar_set(LOADER_GUID, L"LoaderEntryLastBooted", NULL, EFI_VARIABLE_NON_VOLATILE);
++                (void) efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderEntryLastBooted", NULL, EFI_VARIABLE_NON_VOLATILE);
+ }
+ 
+ static EFI_STATUS secure_boot_discover_keys(Config *config, EFI_FILE *root_dir) {
+@@ -2543,23 +2545,23 @@ static void export_variables(
+ 
+         assert(loaded_image);
+ 
+-        efivar_set_time_usec(LOADER_GUID, L"LoaderTimeInitUSec", init_usec);
+-        efivar_set(LOADER_GUID, L"LoaderInfo", L"systemd-boot " GIT_VERSION, 0);
++        efivar_set_time_usec(MAKE_GUID_PTR(LOADER), u"LoaderTimeInitUSec", init_usec);
++        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderInfo", u"systemd-boot " GIT_VERSION, 0);
+ 
+         infostr = xasprintf("%ls %u.%02u", ST->FirmwareVendor, ST->FirmwareRevision >> 16, ST->FirmwareRevision & 0xffff);
+-        efivar_set(LOADER_GUID, L"LoaderFirmwareInfo", infostr, 0);
++        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderFirmwareInfo", infostr, 0);
+ 
+         typestr = xasprintf("UEFI %u.%02u", ST->Hdr.Revision >> 16, ST->Hdr.Revision & 0xffff);
+-        efivar_set(LOADER_GUID, L"LoaderFirmwareType", typestr, 0);
++        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderFirmwareType", typestr, 0);
+ 
+-        (void) efivar_set_uint64_le(LOADER_GUID, L"LoaderFeatures", loader_features, 0);
++        (void) efivar_set_uint64_le(MAKE_GUID_PTR(LOADER), u"LoaderFeatures", loader_features, 0);
+ 
+         /* the filesystem path to this image, to prevent adding ourselves to the menu */
+-        efivar_set(LOADER_GUID, L"LoaderImageIdentifier", loaded_image_path, 0);
++        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderImageIdentifier", loaded_image_path, 0);
+ 
+         /* export the device path this image is started from */
+         if (disk_get_part_uuid(loaded_image->DeviceHandle, uuid) == EFI_SUCCESS)
+-                efivar_set(LOADER_GUID, L"LoaderDevicePartUUID", uuid, 0);
++                efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderDevicePartUUID", uuid, 0);
+ }
+ 
+ static void config_load_all_entries(
+@@ -2642,9 +2644,10 @@ static EFI_STATUS real_main(EFI_HANDLE image) {
+ 
+         init_usec = time_usec();
+ 
+-        err = BS->OpenProtocol(image,
+-                        &LoadedImageProtocol,
+-                        (void **)&loaded_image,
++        err = BS->OpenProtocol(
++                        image,
++                        MAKE_GUID_PTR(EFI_LOADED_IMAGE_PROTOCOL),
++                        (void **) &loaded_image,
+                         image,
+                         NULL,
+                         EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+@@ -2691,7 +2694,7 @@ static EFI_STATUS real_main(EFI_HANDLE image) {
+ 
+                 entry = config.entries[config.idx_default];
+                 if (menu) {
+-                        efivar_set_time_usec(LOADER_GUID, L"LoaderTimeMenuUSec", 0);
++                        efivar_set_time_usec(MAKE_GUID_PTR(LOADER), u"LoaderTimeMenuUSec", 0);
+                         if (!menu_run(&config, &entry, loaded_image_path))
+                                 break;
+                 }
+@@ -2726,7 +2729,7 @@ static EFI_STATUS real_main(EFI_HANDLE image) {
+         }
+         err = EFI_SUCCESS;
+ out:
+-        BS->CloseProtocol(image, &LoadedImageProtocol, image, NULL);
++        BS->CloseProtocol(image, MAKE_GUID_PTR(EFI_LOADED_IMAGE_PROTOCOL), image, NULL);
+         return err;
+ }
+ 
+diff --git a/src/boot/efi/console.c b/src/boot/efi/console.c
+index 001b82854b..85a76e6e68 100644
+--- a/src/boot/efi/console.c
++++ b/src/boot/efi/console.c
+@@ -64,14 +64,18 @@ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
+                 console_connect();
+ 
+                 /* Get the *first* TextInputEx device.*/
+-                err = BS->LocateProtocol(&SimpleTextInputExProtocol, NULL, (void **) &extraInEx);
++                err = BS->LocateProtocol(
++                                MAKE_GUID_PTR(EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL), NULL, (void **) &extraInEx);
+                 if (err != EFI_SUCCESS || BS->CheckEvent(extraInEx->WaitForKeyEx) == EFI_INVALID_PARAMETER)
+                         /* If WaitForKeyEx fails here, the firmware pretends it talks this
+                          * protocol, but it really doesn't. */
+                         extraInEx = NULL;
+ 
+                 /* Get the TextInputEx version of ST->ConIn. */
+-                err = BS->HandleProtocol(ST->ConsoleInHandle, &SimpleTextInputExProtocol, (void **) &conInEx);
++                err = BS->HandleProtocol(
++                                ST->ConsoleInHandle,
++                                MAKE_GUID_PTR(EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL),
++                                (void **) &conInEx);
+                 if (err != EFI_SUCCESS || BS->CheckEvent(conInEx->WaitForKeyEx) == EFI_INVALID_PARAMETER)
+                         conInEx = NULL;
+ 
+@@ -207,7 +211,7 @@ EFI_STATUS query_screen_resolution(uint32_t *ret_w, uint32_t *ret_h) {
+         EFI_STATUS err;
+         EFI_GRAPHICS_OUTPUT_PROTOCOL *go;
+ 
+-        err = BS->LocateProtocol(&GraphicsOutputProtocol, NULL, (void **) &go);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_GRAPHICS_OUTPUT_PROTOCOL), NULL, (void **) &go);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+diff --git a/src/boot/efi/devicetree.c b/src/boot/efi/devicetree.c
+index 52f64a6e2f..eef08985f1 100644
+--- a/src/boot/efi/devicetree.c
++++ b/src/boot/efi/devicetree.c
+@@ -34,7 +34,7 @@ static EFI_STATUS devicetree_fixup(struct devicetree_state *state, size_t len) {
+ 
+         assert(state);
+ 
+-        err = BS->LocateProtocol(&EfiDtFixupProtocol, NULL, (void **) &fixup);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_DT_FIXUP_PROTOCOL), NULL, (void **) &fixup);
+         if (err != EFI_SUCCESS)
+                 return log_error_status(EFI_SUCCESS, "Could not locate device tree fixup protocol, skipping.");
+ 
+@@ -73,7 +73,7 @@ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir
+         assert(root_dir);
+         assert(name);
+ 
+-        state->orig = find_configuration_table(&EfiDtbTableGuid);
++        state->orig = find_configuration_table(MAKE_GUID_PTR(EFI_DTB_TABLE));
+         if (!state->orig)
+                 return EFI_UNSUPPORTED;
+ 
+@@ -102,7 +102,8 @@ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+-        return BS->InstallConfigurationTable(&EfiDtbTableGuid, PHYSICAL_ADDRESS_TO_POINTER(state->addr));
++        return BS->InstallConfigurationTable(
++                        MAKE_GUID_PTR(EFI_DTB_TABLE), PHYSICAL_ADDRESS_TO_POINTER(state->addr));
+ }
+ 
+ EFI_STATUS devicetree_install_from_memory(
+@@ -113,7 +114,7 @@ EFI_STATUS devicetree_install_from_memory(
+         assert(state);
+         assert(dtb_buffer && dtb_length > 0);
+ 
+-        state->orig = find_configuration_table(&EfiDtbTableGuid);
++        state->orig = find_configuration_table(MAKE_GUID_PTR(EFI_DTB_TABLE));
+         if (!state->orig)
+                 return EFI_UNSUPPORTED;
+ 
+@@ -127,7 +128,8 @@ EFI_STATUS devicetree_install_from_memory(
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+-        return BS->InstallConfigurationTable(&EfiDtbTableGuid, PHYSICAL_ADDRESS_TO_POINTER(state->addr));
++        return BS->InstallConfigurationTable(
++                        MAKE_GUID_PTR(EFI_DTB_TABLE), PHYSICAL_ADDRESS_TO_POINTER(state->addr));
+ }
+ 
+ void devicetree_cleanup(struct devicetree_state *state) {
+@@ -136,7 +138,7 @@ void devicetree_cleanup(struct devicetree_state *state) {
+         if (!state->pages)
+                 return;
+ 
+-        err = BS->InstallConfigurationTable(&EfiDtbTableGuid, state->orig);
++        err = BS->InstallConfigurationTable(MAKE_GUID_PTR(EFI_DTB_TABLE), state->orig);
+         /* don't free the current device tree if we can't reinstate the old one */
+         if (err != EFI_SUCCESS)
+                 return;
+diff --git a/src/boot/efi/disk.c b/src/boot/efi/disk.c
+index 524662603c..8be1620a82 100644
+--- a/src/boot/efi/disk.c
++++ b/src/boot/efi/disk.c
+@@ -15,7 +15,7 @@ EFI_STATUS disk_get_part_uuid(EFI_HANDLE *handle, char16_t uuid[static 37]) {
+         if (!handle)
+                 return EFI_NOT_FOUND;
+ 
+-        err = BS->HandleProtocol(handle, &DevicePathProtocol, (void **) &dp);
++        err = BS->HandleProtocol(handle, MAKE_GUID_PTR(EFI_DEVICE_PATH_PROTOCOL), (void **) &dp);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+diff --git a/src/boot/efi/drivers.c b/src/boot/efi/drivers.c
+index 4abb3fbd82..7b4164513c 100644
+--- a/src/boot/efi/drivers.c
++++ b/src/boot/efi/drivers.c
+@@ -29,7 +29,7 @@ static EFI_STATUS load_one_driver(
+         if (err != EFI_SUCCESS)
+                 return log_error_status(err, "Failed to load image %ls: %m", fname);
+ 
+-        err = BS->HandleProtocol(image, &LoadedImageProtocol, (void **)&loaded_image);
++        err = BS->HandleProtocol(image, MAKE_GUID_PTR(EFI_LOADED_IMAGE_PROTOCOL), (void **) &loaded_image);
+         if (err != EFI_SUCCESS)
+                 return log_error_status(err, "Failed to find protocol in driver image %ls: %m", fname);
+ 
+diff --git a/src/boot/efi/graphics.c b/src/boot/efi/graphics.c
+index 350d1bc434..d68123df58 100644
+--- a/src/boot/efi/graphics.c
++++ b/src/boot/efi/graphics.c
+@@ -19,7 +19,7 @@ EFI_STATUS graphics_mode(bool on) {
+         BOOLEAN stdin_locked;
+         EFI_STATUS err;
+ 
+-        err = BS->LocateProtocol((EFI_GUID *) EFI_CONSOLE_CONTROL_GUID, NULL, (void **) &ConsoleControl);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_CONSOLE_CONTROL), NULL, (void **) &ConsoleControl);
+         if (err != EFI_SUCCESS)
+                 /* console control protocol is nonstandard and might not exist. */
+                 return err == EFI_NOT_FOUND ? EFI_SUCCESS : err;
+diff --git a/src/boot/efi/initrd.c b/src/boot/efi/initrd.c
+index 3e9f6a7251..6d362435c4 100644
+--- a/src/boot/efi/initrd.c
++++ b/src/boot/efi/initrd.c
+@@ -85,7 +85,7 @@ EFI_STATUS initrd_register(
+            LocateDevicePath checks for the "closest DevicePath" and returns its handle,
+            where as InstallMultipleProtocolInterfaces only matches identical DevicePaths.
+          */
+-        err = BS->LocateDevicePath(&EfiLoadFile2Protocol, &dp, &handle);
++        err = BS->LocateDevicePath(MAKE_GUID_PTR(EFI_LOAD_FILE2_PROTOCOL), &dp, &handle);
+         if (err != EFI_NOT_FOUND) /* InitrdMedia is already registered */
+                 return EFI_ALREADY_STARTED;
+ 
+@@ -98,9 +98,9 @@ EFI_STATUS initrd_register(
+ 
+         /* create a new handle and register the LoadFile2 protocol with the InitrdMediaPath on it */
+         err = BS->InstallMultipleProtocolInterfaces(
+-                        ret_initrd_handle,
+-                        &DevicePathProtocol, &efi_initrd_device_path,
+-                        &EfiLoadFile2Protocol, loader,
++                        ret_initrd_handle, MAKE_GUID_PTR(EFI_DEVICE_PATH_PROTOCOL),
++                        &efi_initrd_device_path, MAKE_GUID_PTR(EFI_LOAD_FILE2_PROTOCOL),
++                        loader,
+                         NULL);
+         if (err != EFI_SUCCESS)
+                 free(loader);
+@@ -117,19 +117,23 @@ EFI_STATUS initrd_unregister(EFI_HANDLE initrd_handle) {
+ 
+         /* get the LoadFile2 protocol that we allocated earlier */
+         err = BS->OpenProtocol(
+-                        initrd_handle, &EfiLoadFile2Protocol, (void **) &loader,
+-                        NULL, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
++                        initrd_handle,
++                        MAKE_GUID_PTR(EFI_LOAD_FILE2_PROTOCOL),
++                        (void **) &loader,
++                        NULL,
++                        NULL,
++                        EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+         /* close the handle */
+-        (void) BS->CloseProtocol(initrd_handle, &EfiLoadFile2Protocol, NULL, NULL);
++        (void) BS->CloseProtocol(initrd_handle, MAKE_GUID_PTR(EFI_LOAD_FILE2_PROTOCOL), NULL, NULL);
+ 
+         /* uninstall all protocols thus destroying the handle */
+         err = BS->UninstallMultipleProtocolInterfaces(
+-                        initrd_handle,
+-                        &DevicePathProtocol, &efi_initrd_device_path,
+-                        &EfiLoadFile2Protocol, loader,
++                        initrd_handle, MAKE_GUID_PTR(EFI_DEVICE_PATH_PROTOCOL),
++                        &efi_initrd_device_path, MAKE_GUID_PTR(EFI_LOAD_FILE2_PROTOCOL),
++                        loader,
+                         NULL);
+         if (err != EFI_SUCCESS)
+                 return err;
+diff --git a/src/boot/efi/linux.c b/src/boot/efi/linux.c
+index 727e507101..8feea1d3c9 100644
+--- a/src/boot/efi/linux.c
++++ b/src/boot/efi/linux.c
+@@ -128,7 +128,8 @@ EFI_STATUS linux_exec(
+                 return log_error_status(err, "Error loading kernel image: %m");
+ 
+         EFI_LOADED_IMAGE_PROTOCOL *loaded_image;
+-        err = BS->HandleProtocol(kernel_image, &LoadedImageProtocol, (void **) &loaded_image);
++        err = BS->HandleProtocol(
++                        kernel_image, MAKE_GUID_PTR(EFI_LOADED_IMAGE_PROTOCOL), (void **) &loaded_image);
+         if (err != EFI_SUCCESS)
+                 return log_error_status(err, "Error getting kernel loaded image protocol: %m");
+ 
+diff --git a/src/boot/efi/measure.c b/src/boot/efi/measure.c
+index 52c5cd7ae8..b0f3ced898 100644
+--- a/src/boot/efi/measure.c
++++ b/src/boot/efi/measure.c
+@@ -87,7 +87,7 @@ static EFI_TCG *tcg1_interface_check(void) {
+         uint32_t features;
+         EFI_TCG *tcg;
+ 
+-        err = BS->LocateProtocol((EFI_GUID *) EFI_TCG_GUID, NULL, (void **) &tcg);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_TCG), NULL, (void **) &tcg);
+         if (err != EFI_SUCCESS)
+                 return NULL;
+ 
+@@ -116,7 +116,7 @@ static EFI_TCG2 * tcg2_interface_check(void) {
+         EFI_STATUS err;
+         EFI_TCG2 *tcg;
+ 
+-        err = BS->LocateProtocol((EFI_GUID *) EFI_TCG2_GUID, NULL, (void **) &tcg);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_TCG2), NULL, (void **) &tcg);
+         if (err != EFI_SUCCESS)
+                 return NULL;
+ 
+diff --git a/src/boot/efi/missing_efi.h b/src/boot/efi/missing_efi.h
+index a71c8fa7e2..d34dfc3379 100644
+--- a/src/boot/efi/missing_efi.h
++++ b/src/boot/efi/missing_efi.h
+@@ -124,7 +124,7 @@ struct _EFI_DT_FIXUP_PROTOCOL {
+ #ifndef EFI_TCG_GUID
+ 
+ #define EFI_TCG_GUID \
+-        &(const EFI_GUID) { 0xf541796d, 0xa62e, 0x4954, { 0xa7, 0x75, 0x95, 0x84, 0xf6, 0x1b, 0x9c, 0xdd } }
++        { 0xf541796d, 0xa62e, 0x4954, { 0xa7, 0x75, 0x95, 0x84, 0xf6, 0x1b, 0x9c, 0xdd } }
+ 
+ typedef struct _TCG_VERSION {
+         UINT8 Major;
+@@ -224,7 +224,7 @@ typedef struct _EFI_TCG {
+ #ifndef EFI_TCG2_GUID
+ 
+ #define EFI_TCG2_GUID \
+-        &(const EFI_GUID) { 0x607f766c, 0x7455, 0x42be, { 0x93, 0x0b, 0xe4, 0xd7, 0x6d, 0xb2, 0x72, 0x0f } }
++        { 0x607f766c, 0x7455, 0x42be, { 0x93, 0x0b, 0xe4, 0xd7, 0x6d, 0xb2, 0x72, 0x0f } }
+ 
+ typedef struct tdEFI_TCG2_PROTOCOL EFI_TCG2_PROTOCOL;
+ 
+@@ -344,7 +344,7 @@ struct EFI_SECURITY2_ARCH_PROTOCOL {
+ #ifndef EFI_CONSOLE_CONTROL_GUID
+ 
+ #define EFI_CONSOLE_CONTROL_GUID \
+-        &(const EFI_GUID) { 0xf42f7782, 0x12e, 0x4c12, { 0x99, 0x56, 0x49, 0xf9, 0x43, 0x4, 0xf7, 0x21 } }
++        { 0xf42f7782, 0x12e, 0x4c12, { 0x99, 0x56, 0x49, 0xf9, 0x43, 0x4, 0xf7, 0x21 } }
+ 
+ struct _EFI_CONSOLE_CONTROL_PROTOCOL;
+ 
+diff --git a/src/boot/efi/part-discovery.c b/src/boot/efi/part-discovery.c
+index 26e1b45475..eb22df95b6 100644
+--- a/src/boot/efi/part-discovery.c
++++ b/src/boot/efi/part-discovery.c
+@@ -173,7 +173,7 @@ static EFI_STATUS find_device(const EFI_GUID *type, EFI_HANDLE *device, EFI_DEVI
+         assert(ret_device_path);
+ 
+         EFI_DEVICE_PATH *partition_path;
+-        err = BS->HandleProtocol(device, &DevicePathProtocol, (void **) &partition_path);
++        err = BS->HandleProtocol(device, MAKE_GUID_PTR(EFI_DEVICE_PATH_PROTOCOL), (void **) &partition_path);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+@@ -198,7 +198,7 @@ static EFI_STATUS find_device(const EFI_GUID *type, EFI_HANDLE *device, EFI_DEVI
+ 
+         EFI_HANDLE disk_handle;
+         EFI_BLOCK_IO_PROTOCOL *block_io;
+-        err = BS->LocateDevicePath(&BlockIoProtocol, &p, &disk_handle);
++        err = BS->LocateDevicePath(MAKE_GUID_PTR(EFI_BLOCK_IO_PROTOCOL), &p, &disk_handle);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+@@ -206,7 +206,7 @@ static EFI_STATUS find_device(const EFI_GUID *type, EFI_HANDLE *device, EFI_DEVI
+          * have to ask the firmware to do just that. */
+         (void) BS->ConnectController(disk_handle, NULL, NULL, true);
+ 
+-        err = BS->HandleProtocol(disk_handle, &BlockIoProtocol, (void **)&block_io);
++        err = BS->HandleProtocol(disk_handle, MAKE_GUID_PTR(EFI_BLOCK_IO_PROTOCOL), (void **) &block_io);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+@@ -272,7 +272,7 @@ EFI_STATUS partition_open(const EFI_GUID *type, EFI_HANDLE *device, EFI_HANDLE *
+                 return err;
+ 
+         EFI_DEVICE_PATH *dp = partition_path;
+-        err = BS->LocateDevicePath(&BlockIoProtocol, &dp, &new_device);
++        err = BS->LocateDevicePath(MAKE_GUID_PTR(EFI_BLOCK_IO_PROTOCOL), &dp, &new_device);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+diff --git a/src/boot/efi/part-discovery.h b/src/boot/efi/part-discovery.h
+index 5cc17f6b3b..18d34ec7f8 100644
+--- a/src/boot/efi/part-discovery.h
++++ b/src/boot/efi/part-discovery.h
+@@ -4,8 +4,8 @@
+ #include <efi.h>
+ 
+ #define XBOOTLDR_GUID \
+-        &(const EFI_GUID) { 0xbc13c2ff, 0x59e6, 0x4262, { 0xa3, 0x52, 0xb2, 0x75, 0xfd, 0x6f, 0x71, 0x72 } }
++        { 0xbc13c2ff, 0x59e6, 0x4262, { 0xa3, 0x52, 0xb2, 0x75, 0xfd, 0x6f, 0x71, 0x72 } }
+ #define ESP_GUID \
+-        &(const EFI_GUID) { 0xc12a7328, 0xf81f, 0x11d2, { 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b } }
++        { 0xc12a7328, 0xf81f, 0x11d2, { 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b } }
+ 
+ EFI_STATUS partition_open(const EFI_GUID *type, EFI_HANDLE *device, EFI_HANDLE *ret_device, EFI_FILE **ret_root_dir);
+diff --git a/src/boot/efi/random-seed.c b/src/boot/efi/random-seed.c
+index e971f48097..0370de1147 100644
+--- a/src/boot/efi/random-seed.c
++++ b/src/boot/efi/random-seed.c
+@@ -13,15 +13,13 @@
+ #define RANDOM_MAX_SIZE_MIN (32U)
+ #define RANDOM_MAX_SIZE_MAX (32U*1024U)
+ 
+-#define EFI_RNG_GUID &(const EFI_GUID) EFI_RNG_PROTOCOL_GUID
+-
+ struct linux_efi_random_seed {
+         uint32_t size;
+         uint8_t seed[];
+ };
+ 
+ #define LINUX_EFI_RANDOM_SEED_TABLE_GUID \
+-        { 0x1ce1e5bc, 0x7ceb, 0x42f2,  { 0x81, 0xe5, 0x8a, 0xad, 0xf1, 0x80, 0xf5, 0x7b } }
++        { 0x1ce1e5bc, 0x7ceb, 0x42f2, { 0x81, 0xe5, 0x8a, 0xad, 0xf1, 0x80, 0xf5, 0x7b } }
+ 
+ /* SHA256 gives us 256/8=32 bytes */
+ #define HASH_VALUE_SIZE 32
+@@ -40,7 +38,7 @@ static EFI_STATUS acquire_rng(void *ret, size_t size) {
+ 
+         /* Try to acquire the specified number of bytes from the UEFI RNG */
+ 
+-        err = BS->LocateProtocol((EFI_GUID *) EFI_RNG_GUID, NULL, (void **) &rng);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_RNG_PROTOCOL), NULL, (void **) &rng);
+         if (err != EFI_SUCCESS)
+                 return err;
+         if (!rng)
+@@ -60,7 +58,7 @@ static EFI_STATUS acquire_system_token(void **ret, size_t *ret_size) {
+         assert(ret);
+         assert(ret_size);
+ 
+-        err = efivar_get_raw(LOADER_GUID, L"LoaderSystemToken", &data, &size);
++        err = efivar_get_raw(MAKE_GUID_PTR(LOADER), u"LoaderSystemToken", &data, &size);
+         if (err != EFI_SUCCESS) {
+                 if (err != EFI_NOT_FOUND)
+                         log_error_status(err, "Failed to read LoaderSystemToken EFI variable: %m");
+@@ -146,7 +144,7 @@ EFI_STATUS process_random_seed(EFI_FILE *root_dir) {
+         /* Some basic domain separation in case somebody uses this data elsewhere */
+         sha256_process_bytes(HASH_LABEL, sizeof(HASH_LABEL) - 1, &hash);
+ 
+-        previous_seed_table = find_configuration_table(&(const EFI_GUID) LINUX_EFI_RANDOM_SEED_TABLE_GUID);
++        previous_seed_table = find_configuration_table(MAKE_GUID_PTR(LINUX_EFI_RANDOM_SEED_TABLE));
+         if (!previous_seed_table) {
+                 size = 0;
+                 sha256_process_bytes(&size, sizeof(size), &hash);
+@@ -314,7 +312,7 @@ EFI_STATUS process_random_seed(EFI_FILE *root_dir) {
+         /* new_seed_table->seed = HASH(hash) */
+         sha256_finish_ctx(&hash, new_seed_table->seed);
+ 
+-        err = BS->InstallConfigurationTable(&(EFI_GUID)LINUX_EFI_RANDOM_SEED_TABLE_GUID, new_seed_table);
++        err = BS->InstallConfigurationTable(MAKE_GUID_PTR(LINUX_EFI_RANDOM_SEED_TABLE), new_seed_table);
+         if (err != EFI_SUCCESS)
+                 return log_error_status(err, "Failed to install EFI table for random seed: %m");
+         TAKE_PTR(new_seed_table);
+diff --git a/src/boot/efi/secure-boot.c b/src/boot/efi/secure-boot.c
+index 2594c8798f..952e92923e 100644
+--- a/src/boot/efi/secure-boot.c
++++ b/src/boot/efi/secure-boot.c
+@@ -10,7 +10,7 @@ bool secure_boot_enabled(void) {
+         bool secure = false;  /* avoid false maybe-uninitialized warning */
+         EFI_STATUS err;
+ 
+-        err = efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"SecureBoot", &secure);
++        err = efivar_get_boolean_u8(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"SecureBoot", &secure);
+ 
+         return err == EFI_SUCCESS && secure;
+ }
+@@ -19,15 +19,15 @@ SecureBootMode secure_boot_mode(void) {
+         bool secure, audit = false, deployed = false, setup = false;
+         EFI_STATUS err;
+ 
+-        err = efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"SecureBoot", &secure);
++        err = efivar_get_boolean_u8(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"SecureBoot", &secure);
+         if (err != EFI_SUCCESS)
+                 return SECURE_BOOT_UNSUPPORTED;
+ 
+         /* We can assume false for all these if they are abscent (AuditMode and
+          * DeployedMode may not exist on older firmware). */
+-        (void) efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"AuditMode", &audit);
+-        (void) efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"DeployedMode", &deployed);
+-        (void) efivar_get_boolean_u8(EFI_GLOBAL_GUID, L"SetupMode", &setup);
++        (void) efivar_get_boolean_u8(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"AuditMode", &audit);
++        (void) efivar_get_boolean_u8(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"DeployedMode", &deployed);
++        (void) efivar_get_boolean_u8(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"SetupMode", &setup);
+ 
+         return decode_secure_boot_mode(secure, audit, deployed, setup);
+ }
+@@ -195,7 +195,7 @@ void install_security_override(security_validator_t validator, const void *valid
+         };
+ 
+         EFI_SECURITY_ARCH_PROTOCOL *security = NULL;
+-        err = BS->LocateProtocol(&(EFI_GUID) EFI_SECURITY_ARCH_PROTOCOL_GUID, NULL, (void **) &security);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_SECURITY_ARCH_PROTOCOL), NULL, (void **) &security);
+         if (err == EFI_SUCCESS) {
+                 security_override.security = security;
+                 security_override.original_hook = security->FileAuthenticationState;
+@@ -203,7 +203,7 @@ void install_security_override(security_validator_t validator, const void *valid
+         }
+ 
+         EFI_SECURITY2_ARCH_PROTOCOL *security2 = NULL;
+-        err = BS->LocateProtocol(&(EFI_GUID) EFI_SECURITY2_ARCH_PROTOCOL_GUID, NULL, (void **) &security2);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_SECURITY2_ARCH_PROTOCOL), NULL, (void **) &security2);
+         if (err == EFI_SUCCESS) {
+                 security_override.security2 = security2;
+                 security_override.original_hook2 = security2->FileAuthentication;
+diff --git a/src/boot/efi/shim.c b/src/boot/efi/shim.c
+index ac224336bc..5da298c10a 100644
+--- a/src/boot/efi/shim.c
++++ b/src/boot/efi/shim.c
+@@ -33,12 +33,12 @@ struct ShimLock {
+ };
+ 
+ #define SHIM_LOCK_GUID \
+-        &(const EFI_GUID) { 0x605dab50, 0xe046, 0x4300, { 0xab, 0xb6, 0x3d, 0xd8, 0x10, 0xdd, 0x8b, 0x23 } }
++        { 0x605dab50, 0xe046, 0x4300, { 0xab, 0xb6, 0x3d, 0xd8, 0x10, 0xdd, 0x8b, 0x23 } }
+ 
+ bool shim_loaded(void) {
+         struct ShimLock *shim_lock;
+ 
+-        return BS->LocateProtocol((EFI_GUID*) SHIM_LOCK_GUID, NULL, (void**) &shim_lock) == EFI_SUCCESS;
++        return BS->LocateProtocol(MAKE_GUID_PTR(SHIM_LOCK), NULL, (void **) &shim_lock) == EFI_SUCCESS;
+ }
+ 
+ static bool shim_validate(
+@@ -53,7 +53,8 @@ static bool shim_validate(
+ 
+                 EFI_HANDLE device_handle;
+                 EFI_DEVICE_PATH *file_dp = (EFI_DEVICE_PATH *) device_path;
+-                err = BS->LocateDevicePath(&FileSystemProtocol, &file_dp, &device_handle);
++                err = BS->LocateDevicePath(
++                                MAKE_GUID_PTR(EFI_SIMPLE_FILE_SYSTEM_PROTOCOL), &file_dp, &device_handle);
+                 if (err != EFI_SUCCESS)
+                         return false;
+ 
+@@ -75,7 +76,7 @@ static bool shim_validate(
+         }
+ 
+         struct ShimLock *shim_lock;
+-        err = BS->LocateProtocol((EFI_GUID *) SHIM_LOCK_GUID, NULL, (void **) &shim_lock);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(SHIM_LOCK), NULL, (void **) &shim_lock);
+         if (err != EFI_SUCCESS)
+                 return false;
+ 
+diff --git a/src/boot/efi/splash.c b/src/boot/efi/splash.c
+index 5bc1084e62..2543ab1636 100644
+--- a/src/boot/efi/splash.c
++++ b/src/boot/efi/splash.c
+@@ -276,7 +276,7 @@ EFI_STATUS graphics_splash(const uint8_t *content, UINTN len) {
+                 background.Blue = 0xc0;
+         }
+ 
+-        err = BS->LocateProtocol(&GraphicsOutputProtocol, NULL, (void **) &GraphicsOutput);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_GRAPHICS_OUTPUT_PROTOCOL), NULL, (void **) &GraphicsOutput);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+diff --git a/src/boot/efi/stub.c b/src/boot/efi/stub.c
+index 69e6a0b07f..dac1bb0606 100644
+--- a/src/boot/efi/stub.c
++++ b/src/boot/efi/stub.c
+@@ -94,9 +94,9 @@ static void export_variables(EFI_LOADED_IMAGE_PROTOCOL *loaded_image) {
+         assert(loaded_image);
+ 
+         /* Export the device path this image is started from, if it's not set yet */
+-        if (efivar_get_raw(LOADER_GUID, L"LoaderDevicePartUUID", NULL, NULL) != EFI_SUCCESS)
++        if (efivar_get_raw(MAKE_GUID_PTR(LOADER), u"LoaderDevicePartUUID", NULL, NULL) != EFI_SUCCESS)
+                 if (disk_get_part_uuid(loaded_image->DeviceHandle, uuid) == EFI_SUCCESS)
+-                        efivar_set(LOADER_GUID, L"LoaderDevicePartUUID", uuid, 0);
++                        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderDevicePartUUID", uuid, 0);
+ 
+         /* If LoaderImageIdentifier is not set, assume the image with this stub was loaded directly from the
+          * UEFI firmware without any boot loader, and hence set the LoaderImageIdentifier ourselves. Note
+@@ -104,33 +104,33 @@ static void export_variables(EFI_LOADED_IMAGE_PROTOCOL *loaded_image) {
+          * in which case there's simple nothing to set for us. (The UEFI spec doesn't really say who's wrong
+          * here, i.e. whether FilePath may be NULL or not, hence handle this gracefully and check if FilePath
+          * is non-NULL explicitly.) */
+-        if (efivar_get_raw(LOADER_GUID, L"LoaderImageIdentifier", NULL, NULL) != EFI_SUCCESS &&
++        if (efivar_get_raw(MAKE_GUID_PTR(LOADER), u"LoaderImageIdentifier", NULL, NULL) != EFI_SUCCESS &&
+             loaded_image->FilePath) {
+                 _cleanup_free_ char16_t *s = NULL;
+                 if (device_path_to_str(loaded_image->FilePath, &s) == EFI_SUCCESS)
+-                        efivar_set(LOADER_GUID, L"LoaderImageIdentifier", s, 0);
++                        efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderImageIdentifier", s, 0);
+         }
+ 
+         /* if LoaderFirmwareInfo is not set, let's set it */
+-        if (efivar_get_raw(LOADER_GUID, L"LoaderFirmwareInfo", NULL, NULL) != EFI_SUCCESS) {
++        if (efivar_get_raw(MAKE_GUID_PTR(LOADER), u"LoaderFirmwareInfo", NULL, NULL) != EFI_SUCCESS) {
+                 _cleanup_free_ char16_t *s = NULL;
+                 s = xasprintf("%ls %u.%02u", ST->FirmwareVendor, ST->FirmwareRevision >> 16, ST->FirmwareRevision & 0xffff);
+-                efivar_set(LOADER_GUID, L"LoaderFirmwareInfo", s, 0);
++                efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderFirmwareInfo", s, 0);
+         }
+ 
+         /* ditto for LoaderFirmwareType */
+-        if (efivar_get_raw(LOADER_GUID, L"LoaderFirmwareType", NULL, NULL) != EFI_SUCCESS) {
++        if (efivar_get_raw(MAKE_GUID_PTR(LOADER), u"LoaderFirmwareType", NULL, NULL) != EFI_SUCCESS) {
+                 _cleanup_free_ char16_t *s = NULL;
+                 s = xasprintf("UEFI %u.%02u", ST->Hdr.Revision >> 16, ST->Hdr.Revision & 0xffff);
+-                efivar_set(LOADER_GUID, L"LoaderFirmwareType", s, 0);
++                efivar_set(MAKE_GUID_PTR(LOADER), u"LoaderFirmwareType", s, 0);
+         }
+ 
+ 
+         /* add StubInfo (this is one is owned by the stub, hence we unconditionally override this with our
+          * own data) */
+-        (void) efivar_set(LOADER_GUID, L"StubInfo", L"systemd-stub " GIT_VERSION, 0);
++        (void) efivar_set(MAKE_GUID_PTR(LOADER), u"StubInfo", u"systemd-stub " GIT_VERSION, 0);
+ 
+-        (void) efivar_set_uint64_le(LOADER_GUID, L"StubFeatures", stub_features, 0);
++        (void) efivar_set_uint64_le(MAKE_GUID_PTR(LOADER), u"StubFeatures", stub_features, 0);
+ }
+ 
+ static bool use_load_options(
+@@ -156,7 +156,7 @@ static bool use_load_options(
+         /* The UEFI shell registers EFI_SHELL_PARAMETERS_PROTOCOL onto images it runs. This lets us know that
+          * LoadOptions starts with the stub binary path which we want to strip off. */
+         EFI_SHELL_PARAMETERS_PROTOCOL *shell;
+-        if (BS->HandleProtocol(stub_image, &(EFI_GUID) EFI_SHELL_PARAMETERS_PROTOCOL_GUID, (void **) &shell)
++        if (BS->HandleProtocol(stub_image, MAKE_GUID_PTR(EFI_SHELL_PARAMETERS_PROTOCOL), (void **) &shell)
+             != EFI_SUCCESS) {
+                 /* Not running from EFI shell, use entire LoadOptions. Note that LoadOptions is a void*, so
+                  * it could be anything! */
+@@ -196,19 +196,19 @@ static EFI_STATUS real_main(EFI_HANDLE image) {
+ 
+         err = BS->OpenProtocol(
+                         image,
+-                        &LoadedImageProtocol,
+-                        (void **)&loaded_image,
++                        MAKE_GUID_PTR(EFI_LOADED_IMAGE_PROTOCOL),
++                        (void **) &loaded_image,
+                         image,
+                         NULL,
+                         EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+         if (err != EFI_SUCCESS)
+                 return log_error_status(err, "Error getting a LoadedImageProtocol handle: %m");
+ 
+-        if (efivar_get_uint64_le(LOADER_GUID, L"LoaderFeatures", &loader_features) != EFI_SUCCESS ||
++        if (efivar_get_uint64_le(MAKE_GUID_PTR(LOADER), u"LoaderFeatures", &loader_features) != EFI_SUCCESS ||
+             !FLAGS_SET(loader_features, EFI_LOADER_FEATURE_RANDOM_SEED)) {
+                 _cleanup_(file_closep) EFI_FILE *esp_dir = NULL;
+ 
+-                err = partition_open(ESP_GUID, loaded_image->DeviceHandle, NULL, &esp_dir);
++                err = partition_open(MAKE_GUID_PTR(ESP), loaded_image->DeviceHandle, NULL, &esp_dir);
+                 if (err == EFI_SUCCESS) /* Non-fatal on failure, so that we still boot without it. */
+                         (void) process_random_seed(esp_dir);
+         }
+@@ -257,7 +257,7 @@ static EFI_STATUS real_main(EFI_HANDLE image) {
+         /* After we are done, set an EFI variable that tells userspace this was done successfully, and encode
+          * in it which PCR was used. */
+         if (sections_measured > 0)
+-                (void) efivar_set_uint_string(LOADER_GUID, L"StubPcrKernelImage", TPM_PCR_INDEX_KERNEL_IMAGE, 0);
++                (void) efivar_set_uint_string(MAKE_GUID_PTR(LOADER), u"StubPcrKernelImage", TPM_PCR_INDEX_KERNEL_IMAGE, 0);
+ 
+         /* Show splash screen as early as possible */
+         graphics_splash((const uint8_t*) loaded_image->ImageBase + addrs[UNIFIED_SECTION_SPLASH], szs[UNIFIED_SECTION_SPLASH]);
+@@ -322,9 +322,9 @@ static EFI_STATUS real_main(EFI_HANDLE image) {
+                 sysext_measured = m;
+ 
+         if (parameters_measured > 0)
+-                (void) efivar_set_uint_string(LOADER_GUID, L"StubPcrKernelParameters", TPM_PCR_INDEX_KERNEL_PARAMETERS, 0);
++                (void) efivar_set_uint_string(MAKE_GUID_PTR(LOADER), u"StubPcrKernelParameters", TPM_PCR_INDEX_KERNEL_PARAMETERS, 0);
+         if (sysext_measured)
+-                (void) efivar_set_uint_string(LOADER_GUID, L"StubPcrInitRDSysExts", TPM_PCR_INDEX_INITRD_SYSEXTS, 0);
++                (void) efivar_set_uint_string(MAKE_GUID_PTR(LOADER), u"StubPcrInitRDSysExts", TPM_PCR_INDEX_INITRD_SYSEXTS, 0);
+ 
+         /* If the PCR signature was embedded in the PE image, then let's wrap it in a cpio and also pass it
+          * to the kernel, so that it can be read from /.extra/tpm2-pcr-signature.json. Note that this section
+diff --git a/src/boot/efi/util.c b/src/boot/efi/util.c
+index aa7b1fa1a2..bd821a5afb 100644
+--- a/src/boot/efi/util.c
++++ b/src/boot/efi/util.c
+@@ -379,11 +379,11 @@ EFI_STATUS get_file_info_harder(
+         /* A lot like LibFileInfo() but with useful error propagation */
+ 
+         fi = xmalloc(size);
+-        err = handle->GetInfo(handle, &GenericFileInfo, &size, fi);
++        err = handle->GetInfo(handle, MAKE_GUID_PTR(EFI_FILE_INFO), &size, fi);
+         if (err == EFI_BUFFER_TOO_SMALL) {
+                 free(fi);
+                 fi = xmalloc(size);  /* GetInfo tells us the required size, let's use that now */
+-                err = handle->GetInfo(handle, &GenericFileInfo, &size, fi);
++                err = handle->GetInfo(handle, MAKE_GUID_PTR(EFI_FILE_INFO), &size, fi);
+         }
+ 
+         if (err != EFI_SUCCESS)
+@@ -500,7 +500,7 @@ uint64_t get_os_indications_supported(void) {
+         /* Returns the supported OS indications. If we can't acquire it, returns a zeroed out mask, i.e. no
+          * supported features. */
+ 
+-        err = efivar_get_uint64_le(EFI_GLOBAL_GUID, L"OsIndicationsSupported", &osind);
++        err = efivar_get_uint64_le(MAKE_GUID_PTR(EFI_GLOBAL_VARIABLE), u"OsIndicationsSupported", &osind);
+         if (err != EFI_SUCCESS)
+                 return 0;
+ 
+@@ -607,7 +607,7 @@ EFI_STATUS open_volume(EFI_HANDLE device, EFI_FILE **ret_file) {
+ 
+         assert(ret_file);
+ 
+-        err = BS->HandleProtocol(device, &FileSystemProtocol, (void **) &volume);
++        err = BS->HandleProtocol(device, MAKE_GUID_PTR(EFI_SIMPLE_FILE_SYSTEM_PROTOCOL), (void **) &volume);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+@@ -626,7 +626,7 @@ EFI_STATUS make_file_device_path(EFI_HANDLE device, const char16_t *file, EFI_DE
+         assert(file);
+         assert(ret_dp);
+ 
+-        err = BS->HandleProtocol(device, &DevicePathProtocol, (void **) &dp);
++        err = BS->HandleProtocol(device, MAKE_GUID_PTR(EFI_DEVICE_PATH_PROTOCOL), (void **) &dp);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+@@ -661,7 +661,7 @@ EFI_STATUS device_path_to_str(const EFI_DEVICE_PATH *dp, char16_t **ret) {
+         assert(dp);
+         assert(ret);
+ 
+-        err = BS->LocateProtocol(&(EFI_GUID) EFI_DEVICE_PATH_TO_TEXT_PROTOCOL_GUID, NULL, (void **) &dp_to_text);
++        err = BS->LocateProtocol(MAKE_GUID_PTR(EFI_DEVICE_PATH_TO_TEXT_PROTOCOL), NULL, (void **) &dp_to_text);
+         if (err != EFI_SUCCESS) {
+                 /* If the device path to text protocol is not available we can still do a best-effort attempt
+                  * to convert it ourselves if we are given filepath-only device path. */
+diff --git a/src/boot/efi/util.h b/src/boot/efi/util.h
+index 3247694014..f7452e3cf5 100644
+--- a/src/boot/efi/util.h
++++ b/src/boot/efi/util.h
+@@ -130,14 +130,23 @@ static inline void unload_imagep(EFI_HANDLE *image) {
+                 (void) BS->UnloadImage(*image);
+ }
+ 
++/* Creates a EFI_GUID pointer suitable for EFI APIs. Use of const allows the compiler to merge multiple
++ * uses (although, currently compilers do that regardless). Most EFI APIs declare their EFI_GUID input
++ * as non-const, but almost all of them are in fact const. */
++#define MAKE_GUID_PTR(name) ((EFI_GUID *) &(const EFI_GUID) name##_GUID)
++
++/* These allow MAKE_GUID_PTR() to work without requiring an extra _GUID in the passed name. We want to
++ * keep the GUID definitions in line with the UEFI spec. */
++#define EFI_GLOBAL_VARIABLE_GUID EFI_GLOBAL_VARIABLE
++#define EFI_FILE_INFO_GUID EFI_FILE_INFO_ID
++
+ /*
+  * Allocated random UUID, intended to be shared across tools that implement
+  * the (ESP)\loader\entries\<vendor>-<revision>.conf convention and the
+  * associated EFI variables.
+  */
+ #define LOADER_GUID \
+-        &(const EFI_GUID) { 0x4a67b082, 0x0a4c, 0x41cf, { 0xb6, 0xc7, 0x44, 0x0b, 0x29, 0xbb, 0x8c, 0x4f } }
+-#define EFI_GLOBAL_GUID &(const EFI_GUID) EFI_GLOBAL_VARIABLE
++        { 0x4a67b082, 0x0a4c, 0x41cf, { 0xb6, 0xc7, 0x44, 0x0b, 0x29, 0xbb, 0x8c, 0x4f } }
+ 
+ void print_at(size_t x, size_t y, size_t attr, const char16_t *str);
+ void clear_screen(size_t attr);
+diff --git a/src/boot/efi/vmm.c b/src/boot/efi/vmm.c
+index b24d556700..6bd440f032 100644
+--- a/src/boot/efi/vmm.c
++++ b/src/boot/efi/vmm.c
+@@ -12,25 +12,25 @@
+ #include "string-util-fundamental.h"
+ #include "util.h"
+ 
+-#define QEMU_KERNEL_LOADER_FS_MEDIA_GUID                                \
+-        { 0x1428f772, 0xb64a, 0x441e, {0xb8, 0xc3, 0x9e, 0xbd, 0xd7, 0xf8, 0x93, 0xc7 }}
++#define QEMU_KERNEL_LOADER_FS_MEDIA_GUID \
++        { 0x1428f772, 0xb64a, 0x441e, { 0xb8, 0xc3, 0x9e, 0xbd, 0xd7, 0xf8, 0x93, 0xc7 } }
+ 
+ #define VMM_BOOT_ORDER_GUID \
+-        { 0x668f4529, 0x63d0, 0x4bb5, {0xb6, 0x5d, 0x6f, 0xbb, 0x9d, 0x36, 0xa4, 0x4a }}
++        { 0x668f4529, 0x63d0, 0x4bb5, { 0xb6, 0x5d, 0x6f, 0xbb, 0x9d, 0x36, 0xa4, 0x4a } }
+ 
+ /* detect direct boot */
+ bool is_direct_boot(EFI_HANDLE device) {
+         EFI_STATUS err;
+         VENDOR_DEVICE_PATH *dp; /* NB: Alignment of this structure might be quirky! */
+ 
+-        err = BS->HandleProtocol(device, &DevicePathProtocol, (void **) &dp);
++        err = BS->HandleProtocol(device, MAKE_GUID_PTR(EFI_DEVICE_PATH_PROTOCOL), (void **) &dp);
+         if (err != EFI_SUCCESS)
+                 return false;
+ 
+         /* 'qemu -kernel systemd-bootx64.efi' */
+         if (dp->Header.Type == MEDIA_DEVICE_PATH &&
+             dp->Header.SubType == MEDIA_VENDOR_DP &&
+-            memcmp(&dp->Guid, &(EFI_GUID)QEMU_KERNEL_LOADER_FS_MEDIA_GUID, sizeof(EFI_GUID)) == 0) /* Don't change to efi_guid_equal() because EFI device path objects are not necessarily aligned! */
++            memcmp(&dp->Guid, MAKE_GUID_PTR(QEMU_KERNEL_LOADER_FS_MEDIA), sizeof(EFI_GUID)) == 0) /* Don't change to efi_guid_equal() because EFI device path objects are not necessarily aligned! */
+                 return true;
+ 
+         /* loaded from firmware volume (sd-boot added to ovmf) */
+@@ -91,7 +91,8 @@ EFI_STATUS vmm_open(EFI_HANDLE *ret_vmm_dev, EFI_FILE **ret_vmm_dir) {
+         (void) reconnect_all_drivers();
+ 
+         /* find all file system handles */
+-        err = BS->LocateHandleBuffer(ByProtocol, &FileSystemProtocol, NULL, &n_handles, &handles);
++        err = BS->LocateHandleBuffer(
++                        ByProtocol, MAKE_GUID_PTR(EFI_SIMPLE_FILE_SYSTEM_PROTOCOL), NULL, &n_handles, &handles);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+@@ -99,13 +100,14 @@ EFI_STATUS vmm_open(EFI_HANDLE *ret_vmm_dev, EFI_FILE **ret_vmm_dir) {
+                 _cleanup_free_ EFI_DEVICE_PATH *dp = NULL;
+ 
+                 _cleanup_free_ char16_t *order_str = xasprintf("VMMBootOrder%04zx", order);
+-                dp_err = efivar_get_raw(&(EFI_GUID)VMM_BOOT_ORDER_GUID, order_str, (char**)&dp, NULL);
++                dp_err = efivar_get_raw(MAKE_GUID_PTR(VMM_BOOT_ORDER), order_str, (char **) &dp, NULL);
+ 
+                 for (size_t i = 0; i < n_handles; i++) {
+                         _cleanup_(file_closep) EFI_FILE *root_dir = NULL, *efi_dir = NULL;
+                         EFI_DEVICE_PATH *fs;
+ 
+-                        err = BS->HandleProtocol(handles[i], &DevicePathProtocol, (void **) &fs);
++                        err = BS->HandleProtocol(
++                                        handles[i], MAKE_GUID_PTR(EFI_DEVICE_PATH_PROTOCOL), (void **) &fs);
+                         if (err != EFI_SUCCESS)
+                                 return err;
+ 
+@@ -202,14 +204,14 @@ typedef struct {
+ static void *find_smbios_configuration_table(uint64_t *ret_size) {
+         assert(ret_size);
+ 
+-        Smbios3EntryPoint *entry3 = find_configuration_table(&(EFI_GUID) SMBIOS3_TABLE_GUID);
++        Smbios3EntryPoint *entry3 = find_configuration_table(MAKE_GUID_PTR(SMBIOS3_TABLE));
+         if (entry3 && memcmp(entry3->anchor_string, "_SM3_", 5) == 0 &&
+             entry3->entry_point_length <= sizeof(*entry3)) {
+                 *ret_size = entry3->table_maximum_size;
+                 return PHYSICAL_ADDRESS_TO_POINTER(entry3->table_address);
+         }
+ 
+-        SmbiosEntryPoint *entry = find_configuration_table(&(EFI_GUID) SMBIOS_TABLE_GUID);
++        SmbiosEntryPoint *entry = find_configuration_table(MAKE_GUID_PTR(SMBIOS_TABLE));
+         if (entry && memcmp(entry->anchor_string, "_SM_", 4) == 0 &&
+             entry->entry_point_length <= sizeof(*entry)) {
+                 *ret_size = entry->table_length;

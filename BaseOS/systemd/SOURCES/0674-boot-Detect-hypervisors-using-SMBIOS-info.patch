@@ -1,0 +1,310 @@
+From 4fad2ae3115ee9cedc61fffaf920fbd08fabc267 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Tue, 10 Jan 2023 14:44:29 +0100
+Subject: [PATCH] boot: Detect hypervisors using SMBIOS info
+
+This allows skipping secure boot enrollment wait time on other arches.
+
+(cherry picked from commit ba2793927461b82216f56aa8a800cf53fac28d37)
+
+Related: RHEL-16952
+---
+ src/boot/efi/meson.build   |   4 +-
+ src/boot/efi/secure-boot.c |   3 +-
+ src/boot/efi/ticks.c       |   1 +
+ src/boot/efi/util.c        |  17 ----
+ src/boot/efi/util.h        |   8 --
+ src/boot/efi/vmm.c         | 156 +++++++++++++++++++++++++++++++++++++
+ src/boot/efi/vmm.h         |   2 +
+ 7 files changed, 163 insertions(+), 28 deletions(-)
+
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index 8e96a33119..ab2d7595f3 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -375,6 +375,7 @@ common_sources = files(
+         'assert.c',
+         'console.c',
+         'devicetree.c',
++        'drivers.c',
+         'disk.c',
+         'efi-string.c',
+         'graphics.c',
+@@ -386,13 +387,12 @@ common_sources = files(
+         'secure-boot.c',
+         'ticks.c',
+         'util.c',
++        'vmm.c',
+ )
+ 
+ systemd_boot_sources = files(
+         'boot.c',
+-        'drivers.c',
+         'shim.c',
+-        'vmm.c',
+ )
+ 
+ stub_sources = files(
+diff --git a/src/boot/efi/secure-boot.c b/src/boot/efi/secure-boot.c
+index 6212868134..55c9ba5d4c 100644
+--- a/src/boot/efi/secure-boot.c
++++ b/src/boot/efi/secure-boot.c
+@@ -1,9 +1,10 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
++#include "console.h"
+ #include "sbat.h"
+ #include "secure-boot.h"
+-#include "console.h"
+ #include "util.h"
++#include "vmm.h"
+ 
+ bool secure_boot_enabled(void) {
+         bool secure = false;  /* avoid false maybe-uninitialized warning */
+diff --git a/src/boot/efi/ticks.c b/src/boot/efi/ticks.c
+index 1b74ba15d0..2f6ff878ca 100644
+--- a/src/boot/efi/ticks.c
++++ b/src/boot/efi/ticks.c
+@@ -5,6 +5,7 @@
+ 
+ #include "ticks.h"
+ #include "util.h"
++#include "vmm.h"
+ 
+ #ifdef __x86_64__
+ static uint64_t ticks_read(void) {
+diff --git a/src/boot/efi/util.c b/src/boot/efi/util.c
+index 0a6bb59dce..dfe2fe791d 100644
+--- a/src/boot/efi/util.c
++++ b/src/boot/efi/util.c
+@@ -2,9 +2,6 @@
+ 
+ #include <efi.h>
+ #include <efilib.h>
+-#if defined(__i386__) || defined(__x86_64__)
+-#  include <cpuid.h>
+-#endif
+ 
+ #include "ticks.h"
+ #include "util.h"
+@@ -734,20 +731,6 @@ EFI_STATUS device_path_to_str(const EFI_DEVICE_PATH *dp, char16_t **ret) {
+         return EFI_SUCCESS;
+ }
+ 
+-#if defined(__i386__) || defined(__x86_64__)
+-bool in_hypervisor(void) {
+-        uint32_t eax, ebx, ecx, edx;
+-
+-        /* This is a dumbed down version of src/basic/virt.c's detect_vm() that safely works in the UEFI
+-         * environment. */
+-
+-        if (__get_cpuid(1, &eax, &ebx, &ecx, &edx) == 0)
+-                return false;
+-
+-        return !!(ecx & 0x80000000U);
+-}
+-#endif
+-
+ void *find_configuration_table(const EFI_GUID *guid) {
+         for (UINTN i = 0; i < ST->NumberOfTableEntries; i++)
+                 if (efi_guid_equal(&ST->ConfigurationTable[i].VendorGuid, guid))
+diff --git a/src/boot/efi/util.h b/src/boot/efi/util.h
+index 88fc60c17e..d688f392fc 100644
+--- a/src/boot/efi/util.h
++++ b/src/boot/efi/util.h
+@@ -210,14 +210,6 @@ EFI_STATUS open_volume(EFI_HANDLE device, EFI_FILE **ret_file);
+ EFI_STATUS make_file_device_path(EFI_HANDLE device, const char16_t *file, EFI_DEVICE_PATH **ret_dp);
+ EFI_STATUS device_path_to_str(const EFI_DEVICE_PATH *dp, char16_t **ret);
+ 
+-#if defined(__i386__) || defined(__x86_64__)
+-bool in_hypervisor(void);
+-#else
+-static inline bool in_hypervisor(void) {
+-        return false;
+-}
+-#endif
+-
+ static inline bool efi_guid_equal(const EFI_GUID *a, const EFI_GUID *b) {
+         return memcmp(a, b, sizeof(EFI_GUID)) == 0;
+ }
+diff --git a/src/boot/efi/vmm.c b/src/boot/efi/vmm.c
+index 10d4a75ab2..3dfa92b58d 100644
+--- a/src/boot/efi/vmm.c
++++ b/src/boot/efi/vmm.c
+@@ -3,6 +3,9 @@
+ #include <efi.h>
+ #include <efilib.h>
+ #include <stdbool.h>
++#if defined(__i386__) || defined(__x86_64__)
++#  include <cpuid.h>
++#endif
+ 
+ #include "drivers.h"
+ #include "efi-string.h"
+@@ -132,3 +135,156 @@ EFI_STATUS vmm_open(EFI_HANDLE *ret_vmm_dev, EFI_FILE **ret_vmm_dir) {
+         }
+         assert_not_reached();
+ }
++
++static bool cpuid_in_hypervisor(void) {
++#if defined(__i386__) || defined(__x86_64__)
++        unsigned eax, ebx, ecx, edx;
++
++        /* This is a dumbed down version of src/basic/virt.c's detect_vm() that safely works in the UEFI
++         * environment. */
++
++        if (__get_cpuid(1, &eax, &ebx, &ecx, &edx) == 0)
++                return false;
++
++        if (FLAGS_SET(ecx, 0x80000000U))
++                return true;
++#endif
++
++        return false;
++}
++
++typedef struct {
++        uint8_t anchor_string[4];
++        uint8_t entry_point_structure_checksum;
++        uint8_t entry_point_length;
++        uint8_t major_version;
++        uint8_t minor_version;
++        uint16_t max_structure_size;
++        uint8_t entry_point_revision;
++        uint8_t formatted_area[5];
++        uint8_t intermediate_anchor_string[5];
++        uint8_t intermediate_checksum;
++        uint16_t table_length;
++        uint32_t table_address;
++        uint16_t number_of_smbios_structures;
++        uint8_t smbios_bcd_revision;
++} _packed_ SmbiosEntryPoint;
++
++typedef struct {
++        uint8_t anchor_string[5];
++        uint8_t entry_point_structure_checksum;
++        uint8_t entry_point_length;
++        uint8_t major_version;
++        uint8_t minor_version;
++        uint8_t docrev;
++        uint8_t entry_point_revision;
++        uint8_t reserved;
++        uint32_t table_maximum_size;
++        uint64_t table_address;
++} _packed_ Smbios3EntryPoint;
++
++typedef struct {
++        uint8_t type;
++        uint8_t length;
++        uint8_t handle[2];
++} _packed_ SmbiosHeader;
++
++typedef struct {
++        SmbiosHeader header;
++        uint8_t vendor;
++        uint8_t bios_version;
++        uint16_t bios_segment;
++        uint8_t bios_release_date;
++        uint8_t bios_size;
++        uint64_t bios_characteristics;
++        uint8_t bios_characteristics_ext[2];
++} _packed_ SmbiosTableType0;
++
++static void *find_smbios_configuration_table(uint64_t *ret_size) {
++        assert(ret_size);
++
++        Smbios3EntryPoint *entry3 = find_configuration_table(&(EFI_GUID) SMBIOS3_TABLE_GUID);
++        if (entry3 && memcmp(entry3->anchor_string, "_SM3_", 5) == 0 &&
++            entry3->entry_point_length <= sizeof(*entry3)) {
++                *ret_size = entry3->table_maximum_size;
++                return PHYSICAL_ADDRESS_TO_POINTER(entry3->table_address);
++        }
++
++        SmbiosEntryPoint *entry = find_configuration_table(&(EFI_GUID) SMBIOS_TABLE_GUID);
++        if (entry && memcmp(entry->anchor_string, "_SM_", 4) == 0 &&
++            entry->entry_point_length <= sizeof(*entry)) {
++                *ret_size = entry->table_length;
++                return PHYSICAL_ADDRESS_TO_POINTER(entry->table_address);
++        }
++
++        return NULL;
++}
++
++static SmbiosHeader *get_smbios_table(uint8_t type) {
++        uint64_t size = 0;
++        uint8_t *p = find_smbios_configuration_table(&size);
++        if (!p)
++                return false;
++
++        for (;;) {
++                if (size < sizeof(SmbiosHeader))
++                        return NULL;
++
++                SmbiosHeader *header = (SmbiosHeader *) p;
++
++                /* End of table. */
++                if (header->type == 127)
++                        return NULL;
++
++                if (size < header->length)
++                        return NULL;
++
++                if (header->type == type)
++                        return header; /* Yay! */
++
++                /* Skip over formatted area. */
++                size -= header->length;
++                p += header->length;
++
++                /* Skip over string table. */
++                for (;;) {
++                        while (size > 0 && *p != '\0') {
++                                p++;
++                                size--;
++                        }
++                        if (size == 0)
++                                return NULL;
++                        p++;
++                        size--;
++
++                        /* Double NUL terminates string table. */
++                        if (*p == '\0') {
++                                if (size == 0)
++                                        return NULL;
++                                p++;
++                                break;
++                        }
++                }
++        }
++
++        return NULL;
++}
++
++static bool smbios_in_hypervisor(void) {
++        /* Look up BIOS Information (Type 0). */
++        SmbiosTableType0 *type0 = (SmbiosTableType0 *) get_smbios_table(0);
++        if (!type0 || type0->header.length < sizeof(SmbiosTableType0))
++                return false;
++
++        /* Bit 4 of 2nd BIOS characteristics extension bytes indicates virtualization. */
++        return FLAGS_SET(type0->bios_characteristics_ext[1], 1 << 4);
++}
++
++bool in_hypervisor(void) {
++        static int cache = -1;
++        if (cache >= 0)
++                return cache;
++
++        cache = cpuid_in_hypervisor() || smbios_in_hypervisor();
++        return cache;
++}
+diff --git a/src/boot/efi/vmm.h b/src/boot/efi/vmm.h
+index 7bac1a324a..e98ec74af1 100644
+--- a/src/boot/efi/vmm.h
++++ b/src/boot/efi/vmm.h
+@@ -6,3 +6,5 @@
+ 
+ bool is_direct_boot(EFI_HANDLE device);
+ EFI_STATUS vmm_open(EFI_HANDLE *ret_qemu_dev, EFI_FILE **ret_qemu_dir);
++
++bool in_hypervisor(void);

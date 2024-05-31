@@ -1,0 +1,36 @@
+From 2adec0d845e6d00a604ddaa5639759896b78728f Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Mon, 28 Aug 2023 18:22:43 +0300
+Subject: [PATCH] ukify: move to /usr/bin and mark as non non-experimental
+
+The tool is moved into the $PATH and a compat symlink is provided.
+
+It is fairly widely used now, and realistically we need to keep backwards
+compat or people will be very unhappy.
+
+(cherry picked from commit f65aa477d90ab7fbbc50ba05c55180213d5992e0)
+
+Related: RHEL-13199
+---
+ meson.build | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/meson.build b/meson.build
+index b874c2f9b4..e0495ed36a 100644
+--- a/meson.build
++++ b/meson.build
+@@ -3861,9 +3861,13 @@ ukify = custom_target(
+         command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
+         install : want_ukify,
+         install_mode : 'rwxr-xr-x',
+-        install_dir : rootlibexecdir)
++        install_dir : bindir)
+ if want_ukify
+         public_programs += ukify
++
++        meson.add_install_script(sh, '-c',
++                                 ln_s.format(bindir / 'ukify',
++                                             rootlibexecdir / 'ukify'))
+ endif
+ 
+ if want_tests != 'false' and want_kernel_install

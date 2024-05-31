@@ -1,0 +1,78 @@
+From 529df7ab684596d7dae85da8360138647fa0c46b Mon Sep 17 00:00:00 2001
+From: Maanya Goenka <maanyagoenka@microsoft.com>
+Date: Wed, 27 Sep 2023 15:44:04 +0000
+Subject: [PATCH] fix: do not check/verify slice units if recursive errors are
+ to be ignored
+
+Before this fix, when recursive-errors was set to 'no' during a systemd-analyze
+verification, the parent slice was checked regardless. The 'no' setting means that,
+only the specified unit should be looked at and verified and errors in the slices should be
+ignored. This commit fixes that issue.
+
+Example:
+
+Say we have a sample.service file:
+
+[Unit]
+Description=Sample Service
+
+[Service]
+ExecStart=/bin/echo "a"
+Slice=support.slice
+
+Before Change:
+
+systemd-analyze verify --recursive-errors=no maanya/sample.service
+Assertion 'u' failed at src/core/unit.c:153, function unit_has_name(). Aborting.
+Aborted (core dumped)
+
+After Change:
+systemd-analyze verify --recursive-errors=no maanya/sample.service
+{No errors}
+
+(cherry picked from commit f660c7fa56b247c278fdb2ebcfea37912f249524)
+
+Related: RHEL-1086
+---
+ src/core/slice.c           |  4 ++++
+ test/units/testsuite-65.sh | 12 ++++++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/src/core/slice.c b/src/core/slice.c
+index c453aa033e..8f913a8d45 100644
+--- a/src/core/slice.c
++++ b/src/core/slice.c
+@@ -96,6 +96,10 @@ static int slice_verify(Slice *s) {
+         if (r < 0)
+                 return log_unit_error_errno(UNIT(s), r, "Failed to determine parent slice: %m");
+ 
++        /* If recursive errors are to be ignored, the parent slice should not be verified */
++        if (UNIT(s)->manager && FLAGS_SET(UNIT(s)->manager->test_run_flags, MANAGER_TEST_RUN_IGNORE_DEPENDENCIES))
++                return 0;
++
+         if (parent ? !unit_has_name(UNIT_GET_SLICE(UNIT(s)), parent) : !!UNIT_GET_SLICE(UNIT(s)))
+                 return log_unit_error_errno(UNIT(s), SYNTHETIC_ERRNO(ENOEXEC), "Located outside of parent slice. Refusing.");
+ 
+diff --git a/test/units/testsuite-65.sh b/test/units/testsuite-65.sh
+index 4093c5a2a7..7c34948f82 100755
+--- a/test/units/testsuite-65.sh
++++ b/test/units/testsuite-65.sh
+@@ -217,6 +217,18 @@ set -e
+ rm /tmp/testfile.service
+ rm /tmp/testfile2.service
+ 
++cat <<EOF >/tmp/sample.service
++[Unit]
++Description = A Sample Service
++
++[Service]
++ExecStart = echo hello
++Slice=support.slice
++EOF
++
++# Zero exit status since no additional dependencies are recursively loaded when the unit file is loaded
++systemd-analyze verify --recursive-errors=no /tmp/sample.service
++
+ cat <<EOF >/tmp/testfile.service
+ [Service]
+ ExecStart = echo hello

@@ -1,0 +1,1577 @@
+From cd71b60761193b24d425dee62983ebc6b9fc81fc Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Fri, 9 Dec 2022 11:13:09 +0100
+Subject: [PATCH] boot: Replace UINTN with size_t
+
+No changes in behavior.
+
+(cherry picked from commit dede50a715676d4ce3ebc9f958a8e3d65e09ce6c)
+
+Related: RHEL-16952
+---
+ src/boot/efi/boot.c           | 165 ++++++++++++++++------------------
+ src/boot/efi/console.c        |  10 +--
+ src/boot/efi/console.h        |   2 +-
+ src/boot/efi/cpio.c           |  52 ++++++-----
+ src/boot/efi/cpio.h           |   4 +-
+ src/boot/efi/devicetree.c     |  18 ++--
+ src/boot/efi/devicetree.h     |   4 +-
+ src/boot/efi/drivers.c        |   2 +-
+ src/boot/efi/initrd.c         |   6 +-
+ src/boot/efi/initrd.h         |   3 +-
+ src/boot/efi/measure.c        |  10 +--
+ src/boot/efi/measure.h        |   8 +-
+ src/boot/efi/part-discovery.c |  10 +--
+ src/boot/efi/pe.c             |  24 ++---
+ src/boot/efi/pe.h             |   8 +-
+ src/boot/efi/random-seed.c    |   8 +-
+ src/boot/efi/splash.h         |   3 +-
+ src/boot/efi/stub.c           |  10 +--
+ src/boot/efi/util.c           |  46 +++++-----
+ src/boot/efi/util.h           |  20 ++---
+ 20 files changed, 201 insertions(+), 212 deletions(-)
+
+diff --git a/src/boot/efi/boot.c b/src/boot/efi/boot.c
+index 2e657a8bf9..385cfd563a 100644
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -76,9 +76,9 @@ typedef struct {
+ 
+ typedef struct {
+         ConfigEntry **entries;
+-        UINTN entry_count;
+-        UINTN idx_default;
+-        UINTN idx_default_efivar;
++        size_t entry_count;
++        size_t idx_default;
++        size_t idx_default_efivar;
+         uint32_t timeout_sec; /* Actual timeout used (efi_main() override > efivar > config). */
+         uint32_t timeout_sec_config;
+         uint32_t timeout_sec_efivar;
+@@ -116,7 +116,7 @@ enum {
+         IDX_INVALID,
+ };
+ 
+-static void cursor_left(UINTN *cursor, UINTN *first) {
++static void cursor_left(size_t *cursor, size_t *first) {
+         assert(cursor);
+         assert(first);
+ 
+@@ -126,12 +126,7 @@ static void cursor_left(UINTN *cursor, UINTN *first) {
+                 (*first)--;
+ }
+ 
+-static void cursor_right(
+-                UINTN *cursor,
+-                UINTN *first,
+-                UINTN x_max,
+-                UINTN len) {
+-
++static void cursor_right(size_t *cursor, size_t *first, size_t x_max, size_t len) {
+         assert(cursor);
+         assert(first);
+ 
+@@ -141,13 +136,9 @@ static void cursor_right(
+                 (*first)++;
+ }
+ 
+-static bool line_edit(
+-                char16_t **line_in,
+-                UINTN x_max,
+-                UINTN y_pos) {
+-
++static bool line_edit(char16_t **line_in, size_t x_max, size_t y_pos) {
+         _cleanup_free_ char16_t *line = NULL, *print = NULL;
+-        UINTN size, len, first = 0, cursor = 0, clear = 0;
++        size_t size, len, first = 0, cursor = 0, clear = 0;
+ 
+         assert(line_in);
+ 
+@@ -160,8 +151,7 @@ static bool line_edit(
+         for (;;) {
+                 EFI_STATUS err;
+                 uint64_t key;
+-                UINTN j;
+-                UINTN cursor_color = TEXT_ATTR_SWAP(COLOR_EDIT);
++                size_t j, cursor_color = TEXT_ATTR_SWAP(COLOR_EDIT);
+ 
+                 j = MIN(len - first, x_max);
+                 memcpy(print, line + first, j * sizeof(char16_t));
+@@ -259,13 +249,13 @@ static bool line_edit(
+                         /* kill-word */
+                         clear = 0;
+ 
+-                        UINTN k;
++                        size_t k;
+                         for (k = first + cursor; k < len && line[k] == ' '; k++)
+                                 clear++;
+                         for (; k < len && line[k] != ' '; k++)
+                                 clear++;
+ 
+-                        for (UINTN i = first + cursor; i + clear < len; i++)
++                        for (size_t i = first + cursor; i + clear < len; i++)
+                                 line[i] = line[i + clear];
+                         len -= clear;
+                         line[len] = '\0';
+@@ -289,7 +279,7 @@ static bool line_edit(
+                                 clear++;
+                         }
+ 
+-                        for (UINTN i = first + cursor; i + clear < len; i++)
++                        for (size_t i = first + cursor; i + clear < len; i++)
+                                 line[i] = line[i + clear];
+                         len -= clear;
+                         line[len] = '\0';
+@@ -302,7 +292,7 @@ static bool line_edit(
+                                 continue;
+                         if (first + cursor == len)
+                                 continue;
+-                        for (UINTN i = first + cursor; i < len; i++)
++                        for (size_t i = first + cursor; i < len; i++)
+                                 line[i] = line[i+1];
+                         clear = 1;
+                         len--;
+@@ -331,7 +321,7 @@ static bool line_edit(
+                                 continue;
+                         if (first == 0 && cursor == 0)
+                                 continue;
+-                        for (UINTN i = first + cursor-1; i < len; i++)
++                        for (size_t i = first + cursor-1; i < len; i++)
+                                 line[i] = line[i+1];
+                         clear = 1;
+                         len--;
+@@ -359,7 +349,7 @@ static bool line_edit(
+                 case KEYPRESS(0, 0, 0x80) ... KEYPRESS(0, 0, 0xffff):
+                         if (len+1 == size)
+                                 continue;
+-                        for (UINTN i = len; i > first + cursor; i--)
++                        for (size_t i = len; i > first + cursor; i--)
+                                 line[i] = line[i-1];
+                         line[first + cursor] = KEYCHAR(key);
+                         len++;
+@@ -373,7 +363,7 @@ static bool line_edit(
+         }
+ }
+ 
+-static UINTN entry_lookup_key(Config *config, UINTN start, char16_t key) {
++static size_t entry_lookup_key(Config *config, size_t start, char16_t key) {
+         assert(config);
+ 
+         if (key == 0)
+@@ -381,18 +371,18 @@ static UINTN entry_lookup_key(Config *config, UINTN start, char16_t key) {
+ 
+         /* select entry by number key */
+         if (key >= '1' && key <= '9') {
+-                UINTN i = key - '0';
++                size_t i = key - '0';
+                 if (i > config->entry_count)
+                         i = config->entry_count;
+                 return i-1;
+         }
+ 
+         /* find matching key in config entries */
+-        for (UINTN i = start; i < config->entry_count; i++)
++        for (size_t i = start; i < config->entry_count; i++)
+                 if (config->entries[i]->key == key)
+                         return i;
+ 
+-        for (UINTN i = 0; i < start; i++)
++        for (size_t i = 0; i < start; i++)
+                 if (config->entries[i]->key == key)
+                         return i;
+ 
+@@ -465,7 +455,7 @@ static bool ps_continue(void) {
+ }
+ 
+ static void print_status(Config *config, char16_t *loaded_image_path) {
+-        UINTN x_max, y_max;
++        size_t x_max, y_max;
+         uint32_t screen_width = 0, screen_height = 0;
+         SecureBootMode secure;
+         _cleanup_free_ char16_t *device_part_uuid = NULL;
+@@ -558,7 +548,7 @@ static void print_status(Config *config, char16_t *loaded_image_path) {
+         if (!ps_continue())
+                 return;
+ 
+-        for (UINTN i = 0; i < config->entry_count; i++) {
++        for (size_t i = 0; i < config->entry_count; i++) {
+                 ConfigEntry *entry = config->entries[i];
+ 
+                 _cleanup_free_ char16_t *dp = NULL;
+@@ -619,21 +609,19 @@ static bool menu_run(
+         assert(chosen_entry);
+ 
+         EFI_STATUS err;
+-        UINTN visible_max = 0;
+-        UINTN idx_highlight = config->idx_default;
+-        UINTN idx_highlight_prev = 0;
+-        UINTN idx, idx_first = 0, idx_last = 0;
++        size_t visible_max = 0;
++        size_t idx_highlight = config->idx_default, idx_highlight_prev = 0;
++        size_t idx, idx_first = 0, idx_last = 0;
+         bool new_mode = true, clear = true;
+         bool refresh = true, highlight = false;
+-        UINTN x_start = 0, y_start = 0, y_status = 0;
+-        UINTN x_max, y_max;
++        size_t x_start = 0, y_start = 0, y_status = 0, x_max, y_max;
+         _cleanup_(strv_freep) char16_t **lines = NULL;
+         _cleanup_free_ char16_t *clearline = NULL, *separator = NULL, *status = NULL;
+         uint32_t timeout_efivar_saved = config->timeout_sec_efivar;
+         uint32_t timeout_remain = config->timeout_sec == TIMEOUT_MENU_FORCE ? 0 : config->timeout_sec;
+         bool exit = false, run = true, firmware_setup = false;
+         int64_t console_mode_initial = ST->ConOut->Mode->Mode, console_mode_efivar_saved = config->console_mode_efivar;
+-        UINTN default_efivar_saved = config->idx_default_efivar;
++        size_t default_efivar_saved = config->idx_default_efivar;
+ 
+         graphics_mode(false);
+         ST->ConIn->Reset(ST->ConIn, false);
+@@ -649,7 +637,7 @@ static bool menu_run(
+                 log_error_stall(L"Error switching console mode: %r", err);
+         }
+ 
+-        UINTN line_width = 0, entry_padding = 3;
++        size_t line_width = 0, entry_padding = 3;
+         while (!exit) {
+                 uint64_t key;
+ 
+@@ -673,7 +661,7 @@ static bool menu_run(
+ 
+                         /* length of the longest entry */
+                         line_width = 0;
+-                        for (UINTN i = 0; i < config->entry_count; i++)
++                        for (size_t i = 0; i < config->entry_count; i++)
+                                 line_width = MAX(line_width, strlen16(config->entries[i]->title_show));
+                         line_width = MIN(line_width + 2 * entry_padding, x_max);
+ 
+@@ -694,8 +682,8 @@ static bool menu_run(
+                         /* menu entries title lines */
+                         lines = xnew(char16_t *, config->entry_count + 1);
+ 
+-                        for (UINTN i = 0; i < config->entry_count; i++) {
+-                                UINTN j, padding;
++                        for (size_t i = 0; i < config->entry_count; i++) {
++                                size_t j, padding;
+ 
+                                 lines[i] = xnew(char16_t, line_width + 1);
+                                 padding = (line_width - MIN(strlen16(config->entries[i]->title_show), line_width)) / 2;
+@@ -703,7 +691,7 @@ static bool menu_run(
+                                 for (j = 0; j < padding; j++)
+                                         lines[i][j] = ' ';
+ 
+-                                for (UINTN k = 0; config->entries[i]->title_show[k] != '\0' && j < line_width; j++, k++)
++                                for (size_t k = 0; config->entries[i]->title_show[k] != '\0' && j < line_width; j++, k++)
+                                         lines[i][j] = config->entries[i]->title_show[k];
+ 
+                                 for (; j < line_width; j++)
+@@ -714,7 +702,7 @@ static bool menu_run(
+ 
+                         clearline = xnew(char16_t, x_max + 1);
+                         separator = xnew(char16_t, x_max + 1);
+-                        for (UINTN i = 0; i < x_max; i++) {
++                        for (size_t i = 0; i < x_max; i++) {
+                                 clearline[i] = ' ';
+                                 separator[i] = unicode_supported() ? L'─' : L'-';
+                         }
+@@ -732,7 +720,7 @@ static bool menu_run(
+                 }
+ 
+                 if (refresh) {
+-                        for (UINTN i = idx_first; i <= idx_last && i < config->entry_count; i++) {
++                        for (size_t i = idx_first; i <= idx_last && i < config->entry_count; i++) {
+                                 print_at(x_start, y_start + i - idx_first,
+                                          i == idx_highlight ? COLOR_HIGHLIGHT : COLOR_ENTRY,
+                                          lines[i]);
+@@ -769,8 +757,8 @@ static bool menu_run(
+                          * input. Therefore, draw one less character then we could for the status message.
+                          * Note that the same does not apply for the separator line as it will never be drawn
+                          * on the last line. */
+-                        UINTN len = strnlen16(status, x_max - 1);
+-                        UINTN x = (x_max - len) / 2;
++                        size_t len = strnlen16(status, x_max - 1);
++                        size_t x = (x_max - len) / 2;
+                         status[len] = '\0';
+                         print_at(0, y_status, COLOR_NORMAL, clearline + x_max - x);
+                         ST->ConOut->OutputString(ST->ConOut, status);
+@@ -1100,12 +1088,12 @@ static inline void config_entry_freep(ConfigEntry **entry) {
+ static char *line_get_key_value(
+                 char *content,
+                 const char *sep,
+-                UINTN *pos,
++                size_t *pos,
+                 char **key_ret,
+                 char **value_ret) {
+ 
+         char *line, *value;
+-        UINTN linelen;
++        size_t linelen;
+ 
+         assert(content);
+         assert(sep);
+@@ -1173,7 +1161,7 @@ static char *line_get_key_value(
+ 
+ static void config_defaults_load_from_file(Config *config, char *content) {
+         char *line;
+-        UINTN pos = 0;
++        size_t pos = 0;
+         char *key, *value;
+         EFI_STATUS err;
+ 
+@@ -1342,7 +1330,7 @@ static void config_entry_bump_counters(ConfigEntry *entry, EFI_FILE *root_dir) {
+         _cleanup_free_ char16_t* old_path = NULL, *new_path = NULL;
+         _cleanup_(file_closep) EFI_FILE *handle = NULL;
+         _cleanup_free_ EFI_FILE_INFO *file_info = NULL;
+-        UINTN file_info_size;
++        size_t file_info_size;
+         EFI_STATUS err;
+ 
+         assert(entry);
+@@ -1398,7 +1386,7 @@ static void config_entry_add_type1(
+ 
+         _cleanup_(config_entry_freep) ConfigEntry *entry = NULL;
+         char *line;
+-        UINTN pos = 0, n_initrd = 0;
++        size_t pos = 0, n_initrd = 0;
+         char *key, *value;
+         EFI_STATUS err;
+ 
+@@ -1550,7 +1538,7 @@ static EFI_STATUS efivar_get_timeout(const char16_t *var, uint32_t *ret_value) {
+ 
+ static void config_load_defaults(Config *config, EFI_FILE *root_dir) {
+         _cleanup_free_ char *content = NULL;
+-        UINTN value = 0;  /* avoid false maybe-uninitialized warning */
++        size_t value = 0;  /* avoid false maybe-uninitialized warning */
+         EFI_STATUS err;
+ 
+         assert(root_dir);
+@@ -1617,7 +1605,7 @@ static void config_load_entries(
+ 
+         _cleanup_(file_closep) EFI_FILE *entries_dir = NULL;
+         _cleanup_free_ EFI_FILE_INFO *f = NULL;
+-        UINTN f_size = 0;
++        size_t f_size = 0;
+         EFI_STATUS err;
+ 
+         assert(config);
+@@ -1707,7 +1695,7 @@ static int config_entry_compare(const ConfigEntry *a, const ConfigEntry *b) {
+         return CMP(a->tries_done, b->tries_done);
+ }
+ 
+-static UINTN config_entry_find(Config *config, const char16_t *pattern) {
++static size_t config_entry_find(Config *config, const char16_t *pattern) {
+         assert(config);
+ 
+         /* We expect pattern and entry IDs to be already case folded. */
+@@ -1715,7 +1703,7 @@ static UINTN config_entry_find(Config *config, const char16_t *pattern) {
+         if (!pattern)
+                 return IDX_INVALID;
+ 
+-        for (UINTN i = 0; i < config->entry_count; i++)
++        for (size_t i = 0; i < config->entry_count; i++)
+                 if (efi_fnmatch(pattern, config->entries[i]->id))
+                         return i;
+ 
+@@ -1723,7 +1711,7 @@ static UINTN config_entry_find(Config *config, const char16_t *pattern) {
+ }
+ 
+ static void config_default_entry_select(Config *config) {
+-        UINTN i;
++        size_t i;
+ 
+         assert(config);
+ 
+@@ -1764,14 +1752,14 @@ static void config_default_entry_select(Config *config) {
+                 config->timeout_sec = 10;
+ }
+ 
+-static bool entries_unique(ConfigEntry **entries, bool *unique, UINTN entry_count) {
++static bool entries_unique(ConfigEntry **entries, bool *unique, size_t entry_count) {
+         bool is_unique = true;
+ 
+         assert(entries);
+         assert(unique);
+ 
+-        for (UINTN i = 0; i < entry_count; i++)
+-                for (UINTN k = i + 1; k < entry_count; k++) {
++        for (size_t i = 0; i < entry_count; i++)
++                for (size_t k = i + 1; k < entry_count; k++) {
+                         if (!streq16(entries[i]->title_show, entries[k]->title_show))
+                                 continue;
+ 
+@@ -1788,7 +1776,7 @@ static void config_title_generate(Config *config) {
+         bool unique[config->entry_count];
+ 
+         /* set title */
+-        for (UINTN i = 0; i < config->entry_count; i++) {
++        for (size_t i = 0; i < config->entry_count; i++) {
+                 assert(!config->entries[i]->title_show);
+                 unique[i] = true;
+                 config->entries[i]->title_show = xstrdup16(config->entries[i]->title ?: config->entries[i]->id);
+@@ -1798,7 +1786,7 @@ static void config_title_generate(Config *config) {
+                 return;
+ 
+         /* add version to non-unique titles */
+-        for (UINTN i = 0; i < config->entry_count; i++) {
++        for (size_t i = 0; i < config->entry_count; i++) {
+                 if (unique[i])
+                         continue;
+ 
+@@ -1815,7 +1803,7 @@ static void config_title_generate(Config *config) {
+                 return;
+ 
+         /* add machine-id to non-unique titles */
+-        for (UINTN i = 0; i < config->entry_count; i++) {
++        for (size_t i = 0; i < config->entry_count; i++) {
+                 if (unique[i])
+                         continue;
+ 
+@@ -1836,7 +1824,7 @@ static void config_title_generate(Config *config) {
+                 return;
+ 
+         /* add file name to non-unique titles */
+-        for (UINTN i = 0; i < config->entry_count; i++) {
++        for (size_t i = 0; i < config->entry_count; i++) {
+                 if (unique[i])
+                         continue;
+ 
+@@ -1851,7 +1839,7 @@ static bool is_sd_boot(EFI_FILE *root_dir, const char16_t *loader_path) {
+                 ".sdmagic",
+                 NULL
+         };
+-        UINTN offset = 0, size = 0, read;
++        size_t offset = 0, size = 0, read;
+         _cleanup_free_ char *content = NULL;
+ 
+         assert(root_dir);
+@@ -1925,7 +1913,7 @@ static ConfigEntry *config_entry_add_loader_auto(
+ 
+ static void config_entry_add_osx(Config *config) {
+         EFI_STATUS err;
+-        UINTN n_handles = 0;
++        size_t n_handles = 0;
+         _cleanup_free_ EFI_HANDLE *handles = NULL;
+ 
+         assert(config);
+@@ -1937,7 +1925,7 @@ static void config_entry_add_osx(Config *config) {
+         if (err != EFI_SUCCESS)
+                 return;
+ 
+-        for (UINTN i = 0; i < n_handles; i++) {
++        for (size_t i = 0; i < n_handles; i++) {
+                 _cleanup_(file_closep) EFI_FILE *root = NULL;
+ 
+                 if (open_volume(handles[i], &root) != EFI_SUCCESS)
+@@ -1958,7 +1946,7 @@ static void config_entry_add_osx(Config *config) {
+ 
+ static EFI_STATUS boot_windows_bitlocker(void) {
+         _cleanup_free_ EFI_HANDLE *handles = NULL;
+-        UINTN n_handles;
++        size_t n_handles;
+         EFI_STATUS err;
+ 
+         // FIXME: Experimental for now. Should be generalized, and become a per-entry option that can be
+@@ -1974,7 +1962,7 @@ static EFI_STATUS boot_windows_bitlocker(void) {
+ 
+         /* Look for BitLocker magic string on all block drives. */
+         bool found = false;
+-        for (UINTN i = 0; i < n_handles; i++) {
++        for (size_t i = 0; i < n_handles; i++) {
+                 EFI_BLOCK_IO_PROTOCOL *block_io;
+                 err = BS->HandleProtocol(handles[i], &BlockIoProtocol, (void **) &block_io);
+                 if (err != EFI_SUCCESS || block_io->Media->BlockSize < 512 || block_io->Media->BlockSize > 4096)
+@@ -1996,7 +1984,7 @@ static EFI_STATUS boot_windows_bitlocker(void) {
+                 return EFI_NOT_FOUND;
+ 
+         _cleanup_free_ uint16_t *boot_order = NULL;
+-        UINTN boot_order_size;
++        size_t boot_order_size;
+ 
+         /* There can be gaps in Boot#### entries. Instead of iterating over the full
+          * EFI var list or uint16_t namespace, just look for "Windows Boot Manager" in BootOrder. */
+@@ -2004,10 +1992,10 @@ static EFI_STATUS boot_windows_bitlocker(void) {
+         if (err != EFI_SUCCESS || boot_order_size % sizeof(uint16_t) != 0)
+                 return err;
+ 
+-        for (UINTN i = 0; i < boot_order_size / sizeof(uint16_t); i++) {
++        for (size_t i = 0; i < boot_order_size / sizeof(uint16_t); i++) {
+                 _cleanup_free_ char *buf = NULL;
+                 char16_t name[sizeof(L"Boot0000")];
+-                UINTN buf_size;
++                size_t buf_size;
+ 
+                 SPrint(name, sizeof(name), L"Boot%04x", (uint32_t) boot_order[i]);
+                 err = efivar_get_raw(EFI_GLOBAL_GUID, name, &buf, &buf_size);
+@@ -2016,7 +2004,7 @@ static EFI_STATUS boot_windows_bitlocker(void) {
+ 
+                 /* Boot#### are EFI_LOAD_OPTION. But we really are only interested
+                  * for the description, which is at this offset. */
+-                UINTN offset = sizeof(uint32_t) + sizeof(uint16_t);
++                size_t offset = sizeof(uint32_t) + sizeof(uint16_t);
+                 if (buf_size < offset + sizeof(char16_t))
+                         continue;
+ 
+@@ -2042,7 +2030,7 @@ static void config_entry_add_windows(Config *config, EFI_HANDLE *device, EFI_FIL
+         _cleanup_free_ char *bcd = NULL;
+         char16_t *title = NULL;
+         EFI_STATUS err;
+-        UINTN len;
++        size_t len;
+ 
+         assert(config);
+         assert(device);
+@@ -2072,7 +2060,7 @@ static void config_entry_add_unified(
+ 
+         _cleanup_(file_closep) EFI_FILE *linux_dir = NULL;
+         _cleanup_free_ EFI_FILE_INFO *f = NULL;
+-        UINTN f_size = 0;
++        size_t f_size = 0;
+         EFI_STATUS err;
+ 
+         /* Adds Boot Loader Type #2 entries (i.e. /EFI/Linux/….efi) */
+@@ -2102,11 +2090,8 @@ static void config_entry_add_unified(
+                         *os_image_version = NULL, *os_version = NULL, *os_version_id = NULL, *os_build_id = NULL;
+                 const char16_t *good_name, *good_version, *good_sort_key;
+                 _cleanup_free_ char *content = NULL;
+-                UINTN offs[_SECTION_MAX] = {};
+-                UINTN szs[_SECTION_MAX] = {};
+-                char *line;
+-                UINTN pos = 0;
+-                char *key, *value;
++                size_t offs[_SECTION_MAX] = {}, szs[_SECTION_MAX] = {}, pos = 0;
++                char *line, *key, *value;
+ 
+                 err = readdir_harder(linux_dir, &f, &f_size);
+                 if (err != EFI_SUCCESS || !f)
+@@ -2252,7 +2237,7 @@ static EFI_STATUS initrd_prepare(
+                 const ConfigEntry *entry,
+                 char16_t **ret_options,
+                 void **ret_initrd,
+-                UINTN *ret_initrd_size) {
++                size_t *ret_initrd_size) {
+ 
+         assert(root);
+         assert(entry);
+@@ -2275,7 +2260,7 @@ static EFI_STATUS initrd_prepare(
+         _cleanup_free_ char16_t *options = NULL;
+ 
+         EFI_STATUS err;
+-        UINTN size = 0;
++        size_t size = 0;
+         _cleanup_free_ uint8_t *initrd = NULL;
+ 
+         STRV_FOREACH(i, entry->initrd) {
+@@ -2295,7 +2280,11 @@ static EFI_STATUS initrd_prepare(
+                 if (err != EFI_SUCCESS)
+                         return err;
+ 
+-                UINTN new_size, read_size = info->FileSize;
++                size_t new_size, read_size = info->FileSize;
++
++                if (info->FileSize == 0) /* Automatically skip over empty files */
++                        continue;
++
+                 if (__builtin_add_overflow(size, read_size, &new_size))
+                         return EFI_OUT_OF_RESOURCES;
+                 initrd = xrealloc(initrd, size, new_size);
+@@ -2344,7 +2333,7 @@ static EFI_STATUS image_start(
+         if (err != EFI_SUCCESS)
+                 return log_error_status_stall(err, L"Error making file device path: %r", err);
+ 
+-        UINTN initrd_size = 0;
++        size_t initrd_size = 0;
+         _cleanup_free_ void *initrd = NULL;
+         _cleanup_free_ char16_t *options_initrd = NULL;
+         err = initrd_prepare(image_root, entry, &options_initrd, &initrd, &initrd_size);
+@@ -2411,7 +2400,7 @@ static EFI_STATUS image_start(
+ 
+ static void config_free(Config *config) {
+         assert(config);
+-        for (UINTN i = 0; i < config->entry_count; i++)
++        for (size_t i = 0; i < config->entry_count; i++)
+                 config_entry_free(config->entries[i]);
+         free(config->entries);
+         free(config->entry_default_config);
+@@ -2420,17 +2409,17 @@ static void config_free(Config *config) {
+ 
+ static void config_write_entries_to_variable(Config *config) {
+         _cleanup_free_ char *buffer = NULL;
+-        UINTN sz = 0;
++        size_t sz = 0;
+         char *p;
+ 
+         assert(config);
+ 
+-        for (UINTN i = 0; i < config->entry_count; i++)
++        for (size_t i = 0; i < config->entry_count; i++)
+                 sz += strsize16(config->entries[i]->id);
+ 
+         p = buffer = xmalloc(sz);
+ 
+-        for (UINTN i = 0; i < config->entry_count; i++)
++        for (size_t i = 0; i < config->entry_count; i++)
+                 p = mempcpy(p, config->entries[i]->id, strsize16(config->entries[i]->id));
+ 
+         assert(p == buffer + sz);
+@@ -2674,7 +2663,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+                 err = console_key_read(&key, 100 * 1000);
+                 if (err == EFI_SUCCESS) {
+                         /* find matching key in config entries */
+-                        UINTN idx = entry_lookup_key(&config, config.idx_default, KEYCHAR(key));
++                        size_t idx = entry_lookup_key(&config, config.idx_default, KEYCHAR(key));
+                         if (idx != IDX_INVALID)
+                                 config.idx_default = idx;
+                         else
+diff --git a/src/boot/efi/console.c b/src/boot/efi/console.c
+index cd980fd535..c3d9ff0e82 100644
+--- a/src/boot/efi/console.c
++++ b/src/boot/efi/console.c
+@@ -54,7 +54,7 @@ static inline void event_closep(EFI_EVENT *event) {
+ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
+         static EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL *conInEx = NULL, *extraInEx = NULL;
+         static bool checked = false;
+-        UINTN index;
++        size_t index;
+         EFI_STATUS err;
+         _cleanup_(event_closep) EFI_EVENT timer = NULL;
+ 
+@@ -90,7 +90,7 @@ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec) {
+                 conInEx ? conInEx->WaitForKeyEx : ST->ConIn->WaitForKey,
+                 extraInEx ? extraInEx->WaitForKeyEx : NULL,
+         };
+-        UINTN n_events = extraInEx ? 3 : 2;
++        size_t n_events = extraInEx ? 3 : 2;
+ 
+         /* Watchdog rearming loop in case the user never provides us with input or some
+          * broken firmware never returns from WaitForEvent. */
+@@ -184,7 +184,7 @@ static EFI_STATUS change_mode(int64_t mode) {
+         EFI_STATUS err;
+         int32_t old_mode;
+ 
+-        /* SetMode expects a UINTN, so make sure these values are sane. */
++        /* SetMode expects a size_t, so make sure these values are sane. */
+         mode = CLAMP(mode, CONSOLE_MODE_RANGE_MIN, CONSOLE_MODE_RANGE_MAX);
+         old_mode = MAX(CONSOLE_MODE_RANGE_MIN, ST->ConOut->Mode->Mode);
+ 
+@@ -234,7 +234,7 @@ static int64_t get_auto_mode(void) {
+                  * then assume the text is readable and keep the text mode. */
+                 else {
+                         uint64_t text_area;
+-                        UINTN x_max, y_max;
++                        size_t x_max, y_max;
+                         uint64_t screen_area = (uint64_t)screen_width * (uint64_t)screen_height;
+ 
+                         console_query_mode(&x_max, &y_max);
+@@ -300,7 +300,7 @@ EFI_STATUS console_set_mode(int64_t mode) {
+         }
+ }
+ 
+-EFI_STATUS console_query_mode(UINTN *x_max, UINTN *y_max) {
++EFI_STATUS console_query_mode(size_t *x_max, size_t *y_max) {
+         EFI_STATUS err;
+ 
+         assert(x_max);
+diff --git a/src/boot/efi/console.h b/src/boot/efi/console.h
+index 673a8ee79a..83c219bc73 100644
+--- a/src/boot/efi/console.h
++++ b/src/boot/efi/console.h
+@@ -33,5 +33,5 @@ enum {
+ 
+ EFI_STATUS console_key_read(uint64_t *key, uint64_t timeout_usec);
+ EFI_STATUS console_set_mode(int64_t mode);
+-EFI_STATUS console_query_mode(UINTN *x_max, UINTN *y_max);
++EFI_STATUS console_query_mode(size_t *x_max, size_t *y_max);
+ EFI_STATUS query_screen_resolution(uint32_t *ret_width, uint32_t *ret_height);
+diff --git a/src/boot/efi/cpio.c b/src/boot/efi/cpio.c
+index 79b5d4327b..bb424a44d5 100644
+--- a/src/boot/efi/cpio.c
++++ b/src/boot/efi/cpio.c
+@@ -11,7 +11,7 @@ static char *write_cpio_word(char *p, uint32_t v) {
+ 
+         /* Writes a CPIO header 8 character hex value */
+ 
+-        for (UINTN i = 0; i < 8; i++)
++        for (size_t i = 0; i < 8; i++)
+                 p[7-i] = hex[(v >> (4 * i)) & 0xF];
+ 
+         return p + 8;
+@@ -52,14 +52,14 @@ static char *pad4(char *p, const char *start) {
+ static EFI_STATUS pack_cpio_one(
+                 const char16_t *fname,
+                 const void *contents,
+-                UINTN contents_size,
++                size_t contents_size,
+                 const char *target_dir_prefix,
+                 uint32_t access_mode,
+                 uint32_t *inode_counter,
+                 void **cpio_buffer,
+-                UINTN *cpio_buffer_size) {
++                size_t *cpio_buffer_size) {
+ 
+-        UINTN l, target_dir_prefix_size, fname_size, q;
++        size_t l, target_dir_prefix_size, fname_size, q;
+         char *a;
+ 
+         assert(fname);
+@@ -82,12 +82,12 @@ static EFI_STATUS pack_cpio_one(
+         l = 6 + 13*8 + 1 + 1; /* Fixed CPIO header size, slash separator, and NUL byte after the file name*/
+ 
+         target_dir_prefix_size = strlen8(target_dir_prefix);
+-        if (l > UINTN_MAX - target_dir_prefix_size)
++        if (l > SIZE_MAX - target_dir_prefix_size)
+                 return EFI_OUT_OF_RESOURCES;
+         l += target_dir_prefix_size;
+ 
+         fname_size = strlen16(fname);
+-        if (l > UINTN_MAX - fname_size)
++        if (l > SIZE_MAX - fname_size)
+                 return EFI_OUT_OF_RESOURCES;
+         l += fname_size; /* append space for file name */
+ 
+@@ -97,19 +97,19 @@ static EFI_STATUS pack_cpio_one(
+ 
+         /* Align the whole header to 4 byte size */
+         l = ALIGN4(l);
+-        if (l == UINTN_MAX) /* overflow check */
++        if (l == SIZE_MAX) /* overflow check */
+                 return EFI_OUT_OF_RESOURCES;
+ 
+         /* Align the contents to 4 byte size */
+         q = ALIGN4(contents_size);
+-        if (q == UINTN_MAX) /* overflow check */
++        if (q == SIZE_MAX) /* overflow check */
+                 return EFI_OUT_OF_RESOURCES;
+ 
+-        if (l > UINTN_MAX - q) /* overflow check */
++        if (l > SIZE_MAX - q) /* overflow check */
+                 return EFI_OUT_OF_RESOURCES;
+         l += q; /* Add contents to header */
+ 
+-        if (*cpio_buffer_size > UINTN_MAX - l) /* overflow check */
++        if (*cpio_buffer_size > SIZE_MAX - l) /* overflow check */
+                 return EFI_OUT_OF_RESOURCES;
+         a = xrealloc(*cpio_buffer, *cpio_buffer_size, *cpio_buffer_size + l);
+ 
+@@ -161,9 +161,9 @@ static EFI_STATUS pack_cpio_dir(
+                 uint32_t access_mode,
+                 uint32_t *inode_counter,
+                 void **cpio_buffer,
+-                UINTN *cpio_buffer_size) {
++                size_t *cpio_buffer_size) {
+ 
+-        UINTN l, path_size;
++        size_t l, path_size;
+         char *a;
+ 
+         assert(path);
+@@ -180,16 +180,16 @@ static EFI_STATUS pack_cpio_dir(
+         l = 6 + 13*8 + 1; /* Fixed CPIO header size, and NUL byte after the file name*/
+ 
+         path_size = strlen8(path);
+-        if (l > UINTN_MAX - path_size)
++        if (l > SIZE_MAX - path_size)
+                 return EFI_OUT_OF_RESOURCES;
+         l += path_size;
+ 
+         /* Align the whole header to 4 byte size */
+         l = ALIGN4(l);
+-        if (l == UINTN_MAX) /* overflow check */
++        if (l == SIZE_MAX) /* overflow check */
+                 return EFI_OUT_OF_RESOURCES;
+ 
+-        if (*cpio_buffer_size > UINTN_MAX - l) /* overflow check */
++        if (*cpio_buffer_size > SIZE_MAX - l) /* overflow check */
+                 return EFI_OUT_OF_RESOURCES;
+ 
+         *cpio_buffer = a = xrealloc(*cpio_buffer, *cpio_buffer_size, *cpio_buffer_size + l);
+@@ -227,7 +227,7 @@ static EFI_STATUS pack_cpio_prefix(
+                 uint32_t dir_mode,
+                 uint32_t *inode_counter,
+                 void **cpio_buffer,
+-                UINTN *cpio_buffer_size) {
++                size_t *cpio_buffer_size) {
+ 
+         EFI_STATUS err;
+ 
+@@ -267,7 +267,7 @@ static EFI_STATUS pack_cpio_prefix(
+ 
+ static EFI_STATUS pack_cpio_trailer(
+                 void **cpio_buffer,
+-                UINTN *cpio_buffer_size) {
++                size_t *cpio_buffer_size) {
+ 
+         static const char trailer[] =
+                 "070701"
+@@ -374,11 +374,11 @@ EFI_STATUS pack_cpio(
+                 UINTN n_tpm_pcr,
+                 const char16_t *tpm_description,
+                 void **ret_buffer,
+-                UINTN *ret_buffer_size,
++                size_t *ret_buffer_size,
+                 bool *ret_measured) {
+ 
+         _cleanup_(file_closep) EFI_FILE *root = NULL, *extra_dir = NULL;
+-        UINTN dirent_size = 0, buffer_size = 0, n_items = 0, n_allocated = 0;
++        size_t dirent_size = 0, buffer_size = 0, n_items = 0, n_allocated = 0;
+         _cleanup_free_ char16_t *rel_dropin_dir = NULL;
+         _cleanup_free_ EFI_FILE_INFO *dirent = NULL;
+         _cleanup_(strv_freep) char16_t **items = NULL;
+@@ -437,13 +437,11 @@ EFI_STATUS pack_cpio(
+                 d = xstrdup16(dirent->FileName);
+ 
+                 if (n_items+2 > n_allocated) {
+-                        UINTN m;
+-
+                         /* We allocate 16 entries at a time, as a matter of optimization */
+-                        if (n_items > (UINTN_MAX / sizeof(uint16_t)) - 16) /* Overflow check, just in case */
++                        if (n_items > (SIZE_MAX / sizeof(uint16_t)) - 16) /* Overflow check, just in case */
+                                 return log_oom();
+ 
+-                        m = n_items + 16;
++                        size_t m = n_items + 16;
+                         items = xrealloc(items, n_allocated * sizeof(uint16_t *), m * sizeof(uint16_t *));
+                         n_allocated = m;
+                 }
+@@ -466,9 +464,9 @@ EFI_STATUS pack_cpio(
+         if (err != EFI_SUCCESS)
+                 return log_error_status_stall(err, L"Failed to pack cpio prefix: %r", err);
+ 
+-        for (UINTN i = 0; i < n_items; i++) {
++        for (size_t i = 0; i < n_items; i++) {
+                 _cleanup_free_ char *content = NULL;
+-                UINTN contentsize = 0;  /* avoid false maybe-uninitialized warning */
++                size_t contentsize = 0;  /* avoid false maybe-uninitialized warning */
+ 
+                 err = file_read(extra_dir, items[i], 0, 0, &content, &contentsize);
+                 if (err != EFI_SUCCESS) {
+@@ -521,12 +519,12 @@ EFI_STATUS pack_cpio_literal(
+                 UINTN n_tpm_pcr,
+                 const char16_t *tpm_description,
+                 void **ret_buffer,
+-                UINTN *ret_buffer_size,
++                size_t *ret_buffer_size,
+                 bool *ret_measured) {
+ 
+         uint32_t inode = 1; /* inode counter, so that each item gets a new inode */
+         _cleanup_free_ void *buffer = NULL;
+-        UINTN buffer_size = 0;
++        size_t buffer_size = 0;
+         EFI_STATUS err;
+ 
+         assert(data || data_size == 0);
+diff --git a/src/boot/efi/cpio.h b/src/boot/efi/cpio.h
+index beebef3d8b..e80e06723c 100644
+--- a/src/boot/efi/cpio.h
++++ b/src/boot/efi/cpio.h
+@@ -16,7 +16,7 @@ EFI_STATUS pack_cpio(
+                 UINTN n_tpm_pcr,
+                 const char16_t *tpm_description,
+                 void **ret_buffer,
+-                UINTN *ret_buffer_size,
++                size_t *ret_buffer_size,
+                 bool *ret_measured);
+ 
+ EFI_STATUS pack_cpio_literal(
+@@ -30,5 +30,5 @@ EFI_STATUS pack_cpio_literal(
+                 UINTN n_tpm_pcr,
+                 const char16_t *tpm_description,
+                 void **ret_buffer,
+-                UINTN *ret_buffer_size,
++                size_t *ret_buffer_size,
+                 bool *ret_measured);
+diff --git a/src/boot/efi/devicetree.c b/src/boot/efi/devicetree.c
+index 12015fce6b..f3c2e47e58 100644
+--- a/src/boot/efi/devicetree.c
++++ b/src/boot/efi/devicetree.c
+@@ -8,8 +8,8 @@
+ 
+ #define FDT_V1_SIZE (7*4)
+ 
+-static EFI_STATUS devicetree_allocate(struct devicetree_state *state, UINTN size) {
+-        UINTN pages = DIV_ROUND_UP(size, EFI_PAGE_SIZE);
++static EFI_STATUS devicetree_allocate(struct devicetree_state *state, size_t size) {
++        size_t pages = DIV_ROUND_UP(size, EFI_PAGE_SIZE);
+         EFI_STATUS err;
+ 
+         assert(state);
+@@ -22,14 +22,14 @@ static EFI_STATUS devicetree_allocate(struct devicetree_state *state, UINTN size
+         return err;
+ }
+ 
+-static UINTN devicetree_allocated(const struct devicetree_state *state) {
++static size_t devicetree_allocated(const struct devicetree_state *state) {
+         assert(state);
+         return state->pages * EFI_PAGE_SIZE;
+ }
+ 
+-static EFI_STATUS devicetree_fixup(struct devicetree_state *state, UINTN len) {
++static EFI_STATUS devicetree_fixup(struct devicetree_state *state, size_t len) {
+         EFI_DT_FIXUP_PROTOCOL *fixup;
+-        UINTN size;
++        size_t size;
+         EFI_STATUS err;
+ 
+         assert(state);
+@@ -44,7 +44,7 @@ static EFI_STATUS devicetree_fixup(struct devicetree_state *state, UINTN len) {
+                            EFI_DT_APPLY_FIXUPS | EFI_DT_RESERVE_MEMORY);
+         if (err == EFI_BUFFER_TOO_SMALL) {
+                 EFI_PHYSICAL_ADDRESS oldaddr = state->addr;
+-                UINTN oldpages = state->pages;
++                size_t oldpages = state->pages;
+                 void *oldptr = PHYSICAL_ADDRESS_TO_POINTER(state->addr);
+ 
+                 err = devicetree_allocate(state, size);
+@@ -67,7 +67,7 @@ static EFI_STATUS devicetree_fixup(struct devicetree_state *state, UINTN len) {
+ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir, char16_t *name) {
+         _cleanup_(file_closep) EFI_FILE *handle = NULL;
+         _cleanup_free_ EFI_FILE_INFO *info = NULL;
+-        UINTN len;
++        size_t len;
+         EFI_STATUS err;
+ 
+         assert(state);
+@@ -106,8 +106,8 @@ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir
+         return BS->InstallConfigurationTable(&EfiDtbTableGuid, PHYSICAL_ADDRESS_TO_POINTER(state->addr));
+ }
+ 
+-EFI_STATUS devicetree_install_from_memory(struct devicetree_state *state,
+-                const void *dtb_buffer, UINTN dtb_length) {
++EFI_STATUS devicetree_install_from_memory(
++                struct devicetree_state *state, const void *dtb_buffer, size_t dtb_length) {
+ 
+         EFI_STATUS err;
+ 
+diff --git a/src/boot/efi/devicetree.h b/src/boot/efi/devicetree.h
+index d512cb5037..1a05c85d85 100644
+--- a/src/boot/efi/devicetree.h
++++ b/src/boot/efi/devicetree.h
+@@ -6,11 +6,11 @@
+ 
+ struct devicetree_state {
+         EFI_PHYSICAL_ADDRESS addr;
+-        UINTN pages;
++        size_t pages;
+         void *orig;
+ };
+ 
+ EFI_STATUS devicetree_install(struct devicetree_state *state, EFI_FILE *root_dir, char16_t *name);
+ EFI_STATUS devicetree_install_from_memory(
+-                struct devicetree_state *state, const VOID *dtb_buffer, UINTN dtb_length);
++                struct devicetree_state *state, const void *dtb_buffer, size_t dtb_length);
+ void devicetree_cleanup(struct devicetree_state *state);
+diff --git a/src/boot/efi/drivers.c b/src/boot/efi/drivers.c
+index 7f2057f5a1..c073e1a4f2 100644
+--- a/src/boot/efi/drivers.c
++++ b/src/boot/efi/drivers.c
+@@ -77,7 +77,7 @@ EFI_STATUS load_drivers(
+ 
+         _cleanup_(file_closep) EFI_FILE *drivers_dir = NULL;
+         _cleanup_free_ EFI_FILE_INFO *dirent = NULL;
+-        UINTN dirent_size = 0, n_succeeded = 0;
++        size_t dirent_size = 0, n_succeeded = 0;
+         EFI_STATUS err;
+ 
+         err = open_directory(
+diff --git a/src/boot/efi/initrd.c b/src/boot/efi/initrd.c
+index d994ef86da..3e9f6a7251 100644
+--- a/src/boot/efi/initrd.c
++++ b/src/boot/efi/initrd.c
+@@ -12,7 +12,7 @@
+ struct initrd_loader {
+         EFI_LOAD_FILE_PROTOCOL load_file;
+         const void *address;
+-        UINTN length;
++        size_t length;
+ };
+ 
+ /* static structure for LINUX_INITRD_MEDIA device path
+@@ -41,7 +41,7 @@ static EFIAPI EFI_STATUS initrd_load_file(
+                 EFI_LOAD_FILE_PROTOCOL *this,
+                 EFI_DEVICE_PATH *file_path,
+                 BOOLEAN boot_policy,
+-                UINTN *buffer_size,
++                size_t *buffer_size,
+                 void *buffer) {
+ 
+         struct initrd_loader *loader;
+@@ -68,7 +68,7 @@ static EFIAPI EFI_STATUS initrd_load_file(
+ 
+ EFI_STATUS initrd_register(
+                 const void *initrd_address,
+-                UINTN initrd_length,
++                size_t initrd_length,
+                 EFI_HANDLE *ret_initrd_handle) {
+ 
+         EFI_STATUS err;
+diff --git a/src/boot/efi/initrd.h b/src/boot/efi/initrd.h
+index d1478e3baf..c3dda6d8c1 100644
+--- a/src/boot/efi/initrd.h
++++ b/src/boot/efi/initrd.h
+@@ -2,10 +2,11 @@
+ #pragma once
+ 
+ #include <efi.h>
++#include <stddef.h>
+ 
+ EFI_STATUS initrd_register(
+                 const void *initrd_address,
+-                UINTN initrd_length,
++                size_t initrd_length,
+                 EFI_HANDLE *ret_initrd_handle);
+ 
+ EFI_STATUS initrd_unregister(EFI_HANDLE initrd_handle);
+diff --git a/src/boot/efi/measure.c b/src/boot/efi/measure.c
+index 6da07d917e..27a0f06475 100644
+--- a/src/boot/efi/measure.c
++++ b/src/boot/efi/measure.c
+@@ -15,13 +15,13 @@ static EFI_STATUS tpm1_measure_to_pcr_and_event_log(
+                 const EFI_TCG *tcg,
+                 uint32_t pcrindex,
+                 EFI_PHYSICAL_ADDRESS buffer,
+-                UINTN buffer_size,
++                size_t buffer_size,
+                 const char16_t *description) {
+ 
+         _cleanup_free_ TCG_PCR_EVENT *tcg_event = NULL;
+         EFI_PHYSICAL_ADDRESS event_log_last;
+         uint32_t event_number = 1;
+-        UINTN desc_len;
++        size_t desc_len;
+ 
+         assert(tcg);
+         assert(description);
+@@ -53,7 +53,7 @@ static EFI_STATUS tpm2_measure_to_pcr_and_event_log(
+                 const char16_t *description) {
+ 
+         _cleanup_free_ EFI_TCG2_EVENT *tcg_event = NULL;
+-        UINTN desc_len;
++        size_t desc_len;
+ 
+         assert(tcg);
+         assert(description);
+@@ -142,7 +142,7 @@ bool tpm_present(void) {
+         return tcg2_interface_check() || tcg1_interface_check();
+ }
+ 
+-EFI_STATUS tpm_log_event(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, UINTN buffer_size, const char16_t *description, bool *ret_measured) {
++EFI_STATUS tpm_log_event(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, size_t buffer_size, const char16_t *description, bool *ret_measured) {
+         EFI_TCG2 *tpm2;
+         EFI_STATUS err;
+ 
+@@ -183,7 +183,7 @@ EFI_STATUS tpm_log_event(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, UINTN b
+         return err;
+ }
+ 
+-EFI_STATUS tpm_log_event_ascii(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, UINTN buffer_size, const char *description, bool *ret_measured) {
++EFI_STATUS tpm_log_event_ascii(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, size_t buffer_size, const char *description, bool *ret_measured) {
+         _cleanup_free_ char16_t *c = NULL;
+ 
+         if (description)
+diff --git a/src/boot/efi/measure.h b/src/boot/efi/measure.h
+index 19a50f47e7..44d23fe75c 100644
+--- a/src/boot/efi/measure.h
++++ b/src/boot/efi/measure.h
+@@ -8,8 +8,8 @@
+ #if ENABLE_TPM
+ 
+ bool tpm_present(void);
+-EFI_STATUS tpm_log_event(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, UINTN buffer_size, const char16_t *description, bool *ret_measured);
+-EFI_STATUS tpm_log_event_ascii(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, UINTN buffer_size, const char *description, bool *ret_measured);
++EFI_STATUS tpm_log_event(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, size_t buffer_size, const char16_t *description, bool *ret_measured);
++EFI_STATUS tpm_log_event_ascii(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, size_t buffer_size, const char *description, bool *ret_measured);
+ EFI_STATUS tpm_log_load_options(const char16_t *cmdline, bool *ret_measured);
+ 
+ #else
+@@ -18,13 +18,13 @@ static inline bool tpm_present(void) {
+         return false;
+ }
+ 
+-static inline EFI_STATUS tpm_log_event(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, UINTN buffer_size, const char16_t *description, bool *ret_measured) {
++static inline EFI_STATUS tpm_log_event(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, size_t buffer_size, const char16_t *description, bool *ret_measured) {
+         if (ret_measured)
+                 *ret_measured = false;
+         return EFI_SUCCESS;
+ }
+ 
+-static inline EFI_STATUS tpm_log_event_ascii(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, UINTN buffer_size, const char *description, bool *ret_measured) {
++static inline EFI_STATUS tpm_log_event_ascii(uint32_t pcrindex, EFI_PHYSICAL_ADDRESS buffer, size_t buffer_size, const char *description, bool *ret_measured) {
+         if (ret_measured)
+                 *ret_measured = false;
+         return EFI_SUCCESS;
+diff --git a/src/boot/efi/part-discovery.c b/src/boot/efi/part-discovery.c
+index 2659a5b6b4..26e1b45475 100644
+--- a/src/boot/efi/part-discovery.c
++++ b/src/boot/efi/part-discovery.c
+@@ -74,7 +74,7 @@ static bool verify_gpt(union GptHeaderBuffer *gpt_header_buffer, EFI_LBA lba_exp
+                 return false;
+ 
+         /* overflow check */
+-        if (h->SizeOfPartitionEntry > UINTN_MAX / h->NumberOfPartitionEntries)
++        if (h->SizeOfPartitionEntry > SIZE_MAX / h->NumberOfPartitionEntries)
+                 return false;
+ 
+         return true;
+@@ -91,7 +91,7 @@ static EFI_STATUS try_gpt(
+         union GptHeaderBuffer gpt;
+         EFI_STATUS err;
+         uint32_t crc32;
+-        UINTN size;
++        size_t size;
+ 
+         assert(block_io);
+         assert(ret_hd);
+@@ -113,7 +113,7 @@ static EFI_STATUS try_gpt(
+                 return EFI_NOT_FOUND;
+ 
+         /* Now load the GPT entry table */
+-        size = ALIGN_TO((UINTN) gpt.gpt_header.SizeOfPartitionEntry * (UINTN) gpt.gpt_header.NumberOfPartitionEntries, 512);
++        size = ALIGN_TO((size_t) gpt.gpt_header.SizeOfPartitionEntry * (size_t) gpt.gpt_header.NumberOfPartitionEntries, 512);
+         entries = xmalloc(size);
+ 
+         err = block_io->ReadBlocks(
+@@ -130,7 +130,7 @@ static EFI_STATUS try_gpt(
+                 return EFI_CRC_ERROR;
+ 
+         /* Now we can finally look for xbootloader partitions. */
+-        for (UINTN i = 0; i < gpt.gpt_header.NumberOfPartitionEntries; i++) {
++        for (size_t i = 0; i < gpt.gpt_header.NumberOfPartitionEntries; i++) {
+                 EFI_PARTITION_ENTRY *entry =
+                                 (EFI_PARTITION_ENTRY *) ((uint8_t *) entries + gpt.gpt_header.SizeOfPartitionEntry * i);
+ 
+@@ -220,7 +220,7 @@ static EFI_STATUS find_device(const EFI_GUID *type, EFI_HANDLE *device, EFI_DEVI
+ 
+         /* Try several copies of the GPT header, in case one is corrupted */
+         EFI_LBA backup_lba = 0;
+-        for (UINTN nr = 0; nr < 3; nr++) {
++        for (size_t nr = 0; nr < 3; nr++) {
+                 EFI_LBA lba;
+ 
+                 /* Read the first copy at LBA 1 and then try the backup GPT header pointed
+diff --git a/src/boot/efi/pe.c b/src/boot/efi/pe.c
+index 3d5da14d10..65308639f6 100644
+--- a/src/boot/efi/pe.c
++++ b/src/boot/efi/pe.c
+@@ -132,7 +132,7 @@ static inline bool verify_pe(const PeFileHeader *pe, bool allow_compatibility) {
+                IN_SET(pe->OptionalHeader.Magic, OPTHDR32_MAGIC, OPTHDR64_MAGIC);
+ }
+ 
+-static inline UINTN section_table_offset(const DosFileHeader *dos, const PeFileHeader *pe) {
++static inline size_t section_table_offset(const DosFileHeader *dos, const PeFileHeader *pe) {
+         assert(dos);
+         assert(pe);
+         return dos->ExeHeader + offsetof(PeFileHeader, OptionalHeader) + pe->FileHeader.SizeOfOptionalHeader;
+@@ -140,10 +140,10 @@ static inline UINTN section_table_offset(const DosFileHeader *dos, const PeFileH
+ 
+ static void locate_sections(
+                 const PeSectionHeader section_table[],
+-                UINTN n_table,
++                size_t n_table,
+                 const char * const sections[],
+-                UINTN *offsets,
+-                UINTN *sizes,
++                size_t *offsets,
++                size_t *sizes,
+                 bool in_memory) {
+ 
+         assert(section_table);
+@@ -153,7 +153,7 @@ static void locate_sections(
+ 
+         size_t prev_section_addr = 0;
+ 
+-        for (UINTN i = 0; i < n_table; i++) {
++        for (size_t i = 0; i < n_table; i++) {
+                 const PeSectionHeader *sect = section_table + i;
+ 
+                 if (in_memory) {
+@@ -162,7 +162,7 @@ static void locate_sections(
+                         prev_section_addr = sect->VirtualAddress + sect->VirtualSize;
+                 }
+ 
+-                for (UINTN j = 0; sections[j]; j++) {
++                for (size_t j = 0; sections[j]; j++) {
+                         if (memcmp(sect->Name, sections[j], strlen8(sections[j])) != 0)
+                                 continue;
+ 
+@@ -173,7 +173,7 @@ static void locate_sections(
+ }
+ 
+ static uint32_t get_compatibility_entry_address(const DosFileHeader *dos, const PeFileHeader *pe) {
+-        UINTN addr = 0, size = 0;
++        size_t addr = 0, size = 0;
+         static const char *sections[] = { ".compat", NULL };
+ 
+         /* The kernel may provide alternative PE entry points for different PE architectures. This allows
+@@ -245,10 +245,10 @@ EFI_STATUS pe_kernel_info(const void *base, uint32_t *ret_compat_address) {
+         return EFI_SUCCESS;
+ }
+ 
+-EFI_STATUS pe_memory_locate_sections(const void *base, const char * const sections[], UINTN *addrs, UINTN *sizes) {
++EFI_STATUS pe_memory_locate_sections(const void *base, const char * const sections[], size_t *addrs, size_t *sizes) {
+         const DosFileHeader *dos;
+         const PeFileHeader *pe;
+-        UINTN offset;
++        size_t offset;
+ 
+         assert(base);
+         assert(sections);
+@@ -278,13 +278,13 @@ EFI_STATUS pe_file_locate_sections(
+                 EFI_FILE *dir,
+                 const char16_t *path,
+                 const char * const sections[],
+-                UINTN *offsets,
+-                UINTN *sizes) {
++                size_t *offsets,
++                size_t *sizes) {
+         _cleanup_free_ PeSectionHeader *section_table = NULL;
+         _cleanup_(file_closep) EFI_FILE *handle = NULL;
+         DosFileHeader dos;
+         PeFileHeader pe;
+-        UINTN len, section_table_len;
++        size_t len, section_table_len;
+         EFI_STATUS err;
+ 
+         assert(dir);
+diff --git a/src/boot/efi/pe.h b/src/boot/efi/pe.h
+index ff7ff479ec..99dcbb3a1b 100644
+--- a/src/boot/efi/pe.h
++++ b/src/boot/efi/pe.h
+@@ -7,14 +7,14 @@
+ EFI_STATUS pe_memory_locate_sections(
+                 const void *base,
+                 const char * const sections[],
+-                UINTN *addrs,
+-                UINTN *sizes);
++                size_t *addrs,
++                size_t *sizes);
+ 
+ EFI_STATUS pe_file_locate_sections(
+                 EFI_FILE *dir,
+                 const char16_t *path,
+                 const char * const sections[],
+-                UINTN *offsets,
+-                UINTN *sizes);
++                size_t *offsets,
++                size_t *sizes);
+ 
+ EFI_STATUS pe_kernel_info(const void *base, uint32_t *ret_compat_address);
+diff --git a/src/boot/efi/random-seed.c b/src/boot/efi/random-seed.c
+index 332f537d91..5d7459d87e 100644
+--- a/src/boot/efi/random-seed.c
++++ b/src/boot/efi/random-seed.c
+@@ -32,7 +32,7 @@ struct linux_efi_random_seed {
+ /* Some basic domain separation in case somebody uses this data elsewhere */
+ #define HASH_LABEL "systemd-boot random seed label v1"
+ 
+-static EFI_STATUS acquire_rng(void *ret, UINTN size) {
++static EFI_STATUS acquire_rng(void *ret, size_t size) {
+         EFI_RNG_PROTOCOL *rng;
+         EFI_STATUS err;
+ 
+@@ -52,10 +52,10 @@ static EFI_STATUS acquire_rng(void *ret, UINTN size) {
+         return EFI_SUCCESS;
+ }
+ 
+-static EFI_STATUS acquire_system_token(void **ret, UINTN *ret_size) {
++static EFI_STATUS acquire_system_token(void **ret, size_t *ret_size) {
+         _cleanup_free_ char *data = NULL;
+         EFI_STATUS err;
+-        UINTN size;
++        size_t size;
+ 
+         assert(ret);
+         assert(ret_size);
+@@ -112,7 +112,7 @@ static void validate_sha256(void) {
+                     0xaf, 0xac, 0x45, 0x03, 0x7a, 0xfe, 0xe9, 0xd1 }},
+         };
+ 
+-        for (UINTN i = 0; i < ELEMENTSOF(array); i++)
++        for (size_t i = 0; i < ELEMENTSOF(array); i++)
+                 assert(memcmp(SHA256_DIRECT(array[i].string, strlen8(array[i].string)), array[i].hash, HASH_VALUE_SIZE) == 0);
+ #endif
+ }
+diff --git a/src/boot/efi/splash.h b/src/boot/efi/splash.h
+index 2e502e5c36..bb49740ab2 100644
+--- a/src/boot/efi/splash.h
++++ b/src/boot/efi/splash.h
+@@ -2,5 +2,6 @@
+ #pragma once
+ 
+ #include <efi.h>
++#include <stddef.h>
+ 
+-EFI_STATUS graphics_splash(const uint8_t *content, UINTN len);
++EFI_STATUS graphics_splash(const uint8_t *content, size_t len);
+diff --git a/src/boot/efi/stub.c b/src/boot/efi/stub.c
+index 023f8ae255..e3b97164a8 100644
+--- a/src/boot/efi/stub.c
++++ b/src/boot/efi/stub.c
+@@ -21,11 +21,11 @@
+ _used_ _section_(".sdmagic") static const char magic[] = "#### LoaderInfo: systemd-stub " GIT_VERSION " ####";
+ 
+ static EFI_STATUS combine_initrd(
+-                EFI_PHYSICAL_ADDRESS initrd_base, UINTN initrd_size,
++                EFI_PHYSICAL_ADDRESS initrd_base, size_t initrd_size,
+                 const void * const extra_initrds[], const size_t extra_initrd_sizes[], size_t n_extra_initrds,
+-                Pages *ret_initr_pages, UINTN *ret_initrd_size) {
++                Pages *ret_initr_pages, size_t *ret_initrd_size) {
+ 
+-        UINTN n;
++        size_t n;
+ 
+         assert(ret_initr_pages);
+         assert(ret_initrd_size);
+@@ -38,7 +38,7 @@ static EFI_STATUS combine_initrd(
+                 if (!extra_initrds[i])
+                         continue;
+ 
+-                if (n > UINTN_MAX - extra_initrd_sizes[i])
++                if (n > SIZE_MAX - extra_initrd_sizes[i])
+                         return EFI_OUT_OF_RESOURCES;
+ 
+                 n += extra_initrd_sizes[i];
+@@ -51,7 +51,7 @@ static EFI_STATUS combine_initrd(
+                         UINT32_MAX /* Below 4G boundary. */);
+         uint8_t *p = PHYSICAL_ADDRESS_TO_POINTER(pages.addr);
+         if (initrd_base != 0) {
+-                UINTN pad;
++                size_t pad;
+ 
+                 /* Order matters, the real initrd must come first, since it might include microcode updates
+                  * which the kernel only looks for in the first cpio archive */
+diff --git a/src/boot/efi/util.c b/src/boot/efi/util.c
+index dfe2fe791d..2be18936b0 100644
+--- a/src/boot/efi/util.c
++++ b/src/boot/efi/util.c
+@@ -27,7 +27,7 @@ EFI_STATUS parse_boolean(const char *v, bool *b) {
+         return EFI_INVALID_PARAMETER;
+ }
+ 
+-EFI_STATUS efivar_set_raw(const EFI_GUID *vendor, const char16_t *name, const void *buf, UINTN size, uint32_t flags) {
++EFI_STATUS efivar_set_raw(const EFI_GUID *vendor, const char16_t *name, const void *buf, size_t size, uint32_t flags) {
+         assert(vendor);
+         assert(name);
+         assert(buf || size == 0);
+@@ -92,7 +92,7 @@ EFI_STATUS efivar_get(const EFI_GUID *vendor, const char16_t *name, char16_t **r
+         _cleanup_free_ char16_t *buf = NULL;
+         EFI_STATUS err;
+         char16_t *val;
+-        UINTN size;
++        size_t size;
+ 
+         assert(vendor);
+         assert(name);
+@@ -124,7 +124,7 @@ EFI_STATUS efivar_get(const EFI_GUID *vendor, const char16_t *name, char16_t **r
+         return EFI_SUCCESS;
+ }
+ 
+-EFI_STATUS efivar_get_uint_string(const EFI_GUID *vendor, const char16_t *name, UINTN *ret) {
++EFI_STATUS efivar_get_uint_string(const EFI_GUID *vendor, const char16_t *name, size_t *ret) {
+         _cleanup_free_ char16_t *val = NULL;
+         EFI_STATUS err;
+         uint64_t u;
+@@ -136,7 +136,7 @@ EFI_STATUS efivar_get_uint_string(const EFI_GUID *vendor, const char16_t *name,
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+-        if (!parse_number16(val, &u, NULL) || u > UINTN_MAX)
++        if (!parse_number16(val, &u, NULL) || u > SIZE_MAX)
+                 return EFI_INVALID_PARAMETER;
+ 
+         if (ret)
+@@ -146,7 +146,7 @@ EFI_STATUS efivar_get_uint_string(const EFI_GUID *vendor, const char16_t *name,
+ 
+ EFI_STATUS efivar_get_uint32_le(const EFI_GUID *vendor, const char16_t *name, uint32_t *ret) {
+         _cleanup_free_ char *buf = NULL;
+-        UINTN size;
++        size_t size;
+         EFI_STATUS err;
+ 
+         assert(vendor);
+@@ -168,7 +168,7 @@ EFI_STATUS efivar_get_uint32_le(const EFI_GUID *vendor, const char16_t *name, ui
+ 
+ EFI_STATUS efivar_get_uint64_le(const EFI_GUID *vendor, const char16_t *name, uint64_t *ret) {
+         _cleanup_free_ char *buf = NULL;
+-        UINTN size;
++        size_t size;
+         EFI_STATUS err;
+ 
+         assert(vendor);
+@@ -189,9 +189,9 @@ EFI_STATUS efivar_get_uint64_le(const EFI_GUID *vendor, const char16_t *name, ui
+         return EFI_SUCCESS;
+ }
+ 
+-EFI_STATUS efivar_get_raw(const EFI_GUID *vendor, const char16_t *name, char **ret, UINTN *ret_size) {
++EFI_STATUS efivar_get_raw(const EFI_GUID *vendor, const char16_t *name, char **ret, size_t *ret_size) {
+         _cleanup_free_ char *buf = NULL;
+-        UINTN l;
++        size_t l;
+         EFI_STATUS err;
+ 
+         assert(vendor);
+@@ -214,7 +214,7 @@ EFI_STATUS efivar_get_raw(const EFI_GUID *vendor, const char16_t *name, char **r
+ 
+ EFI_STATUS efivar_get_boolean_u8(const EFI_GUID *vendor, const char16_t *name, bool *ret) {
+         _cleanup_free_ char *b = NULL;
+-        UINTN size;
++        size_t size;
+         EFI_STATUS err;
+ 
+         assert(vendor);
+@@ -278,7 +278,7 @@ void mangle_stub_cmdline(char16_t *cmdline) {
+                         *cmdline = ' ';
+ }
+ 
+-EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, UINTN off, UINTN size, char **ret, UINTN *ret_size) {
++EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, size_t off, size_t size, char **ret, size_t *ret_size) {
+         _cleanup_(file_closep) EFI_FILE *handle = NULL;
+         _cleanup_free_ char *buf = NULL;
+         EFI_STATUS err;
+@@ -308,7 +308,7 @@ EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, UINTN off, UINTN size,
+         }
+ 
+         /* Allocate some extra bytes to guarantee the result is NUL-terminated for char and char16_t strings. */
+-        UINTN extra = size % sizeof(char16_t) + sizeof(char16_t);
++        size_t extra = size % sizeof(char16_t) + sizeof(char16_t);
+ 
+         buf = xmalloc(size + extra);
+         err = handle->Read(handle, &size, buf);
+@@ -353,21 +353,21 @@ EFI_STATUS log_oom(void) {
+         return EFI_OUT_OF_RESOURCES;
+ }
+ 
+-void print_at(UINTN x, UINTN y, UINTN attr, const char16_t *str) {
++void print_at(size_t x, size_t y, size_t attr, const char16_t *str) {
+         assert(str);
+         ST->ConOut->SetCursorPosition(ST->ConOut, x, y);
+         ST->ConOut->SetAttribute(ST->ConOut, attr);
+         ST->ConOut->OutputString(ST->ConOut, (char16_t *) str);
+ }
+ 
+-void clear_screen(UINTN attr) {
++void clear_screen(size_t attr) {
+         ST->ConOut->SetAttribute(ST->ConOut, attr);
+         ST->ConOut->ClearScreen(ST->ConOut);
+ }
+ 
+ void sort_pointer_array(
+                 void **array,
+-                UINTN n_members,
++                size_t n_members,
+                 compare_pointer_func_t compare) {
+ 
+         assert(array || n_members == 0);
+@@ -376,8 +376,8 @@ void sort_pointer_array(
+         if (n_members <= 1)
+                 return;
+ 
+-        for (UINTN i = 1; i < n_members; i++) {
+-                UINTN k;
++        for (size_t i = 1; i < n_members; i++) {
++                size_t k;
+                 void *entry = array[i];
+ 
+                 for (k = i; k > 0; k--) {
+@@ -394,9 +394,9 @@ void sort_pointer_array(
+ EFI_STATUS get_file_info_harder(
+                 EFI_FILE *handle,
+                 EFI_FILE_INFO **ret,
+-                UINTN *ret_size) {
++                size_t *ret_size) {
+ 
+-        UINTN size = offsetof(EFI_FILE_INFO, FileName) + 256;
++        size_t size = offsetof(EFI_FILE_INFO, FileName) + 256;
+         _cleanup_free_ EFI_FILE_INFO *fi = NULL;
+         EFI_STATUS err;
+ 
+@@ -427,10 +427,10 @@ EFI_STATUS get_file_info_harder(
+ EFI_STATUS readdir_harder(
+                 EFI_FILE *handle,
+                 EFI_FILE_INFO **buffer,
+-                UINTN *buffer_size) {
++                size_t *buffer_size) {
+ 
+         EFI_STATUS err;
+-        UINTN sz;
++        size_t sz;
+ 
+         assert(handle);
+         assert(buffer);
+@@ -553,7 +553,7 @@ __attribute__((noinline)) void debug_break(void) {
+ 
+ 
+ #ifdef EFI_DEBUG
+-void hexdump(const char16_t *prefix, const void *data, UINTN size) {
++void hexdump(const char16_t *prefix, const void *data, size_t size) {
+         static const char hex[16] = "0123456789abcdef";
+         _cleanup_free_ char16_t *buf = NULL;
+         const uint8_t *d = data;
+@@ -565,7 +565,7 @@ void hexdump(const char16_t *prefix, const void *data, UINTN size) {
+ 
+         buf = xnew(char16_t, size*2+1);
+ 
+-        for (UINTN i = 0; i < size; i++) {
++        for (size_t i = 0; i < size; i++) {
+                 buf[i*2] = hex[d[i] >> 4];
+                 buf[i*2+1] = hex[d[i] & 0x0F];
+         }
+@@ -732,7 +732,7 @@ EFI_STATUS device_path_to_str(const EFI_DEVICE_PATH *dp, char16_t **ret) {
+ }
+ 
+ void *find_configuration_table(const EFI_GUID *guid) {
+-        for (UINTN i = 0; i < ST->NumberOfTableEntries; i++)
++        for (size_t i = 0; i < ST->NumberOfTableEntries; i++)
+                 if (efi_guid_equal(&ST->ConfigurationTable[i].VendorGuid, guid))
+                         return ST->ConfigurationTable[i].VendorTable;
+ 
+diff --git a/src/boot/efi/util.h b/src/boot/efi/util.h
+index d688f392fc..33472a5b6a 100644
+--- a/src/boot/efi/util.h
++++ b/src/boot/efi/util.h
+@@ -99,15 +99,15 @@ static inline Pages xmalloc_pages(
+ EFI_STATUS parse_boolean(const char *v, bool *b);
+ 
+ EFI_STATUS efivar_set(const EFI_GUID *vendor, const char16_t *name, const char16_t *value, uint32_t flags);
+-EFI_STATUS efivar_set_raw(const EFI_GUID *vendor, const char16_t *name, const void *buf, UINTN size, uint32_t flags);
+-EFI_STATUS efivar_set_uint_string(const EFI_GUID *vendor, const char16_t *name, UINTN i, uint32_t flags);
++EFI_STATUS efivar_set_raw(const EFI_GUID *vendor, const char16_t *name, const void *buf, size_t size, uint32_t flags);
++EFI_STATUS efivar_set_uint_string(const EFI_GUID *vendor, const char16_t *name, size_t i, uint32_t flags);
+ EFI_STATUS efivar_set_uint32_le(const EFI_GUID *vendor, const char16_t *NAME, uint32_t value, uint32_t flags);
+ EFI_STATUS efivar_set_uint64_le(const EFI_GUID *vendor, const char16_t *name, uint64_t value, uint32_t flags);
+ void efivar_set_time_usec(const EFI_GUID *vendor, const char16_t *name, uint64_t usec);
+ 
+ EFI_STATUS efivar_get(const EFI_GUID *vendor, const char16_t *name, char16_t **ret);
+-EFI_STATUS efivar_get_raw(const EFI_GUID *vendor, const char16_t *name, char **ret, UINTN *ret_size);
+-EFI_STATUS efivar_get_uint_string(const EFI_GUID *vendor, const char16_t *name, UINTN *ret);
++EFI_STATUS efivar_get_raw(const EFI_GUID *vendor, const char16_t *name, char **ret, size_t *ret_size);
++EFI_STATUS efivar_get_uint_string(const EFI_GUID *vendor, const char16_t *name, size_t *ret);
+ EFI_STATUS efivar_get_uint32_le(const EFI_GUID *vendor, const char16_t *name, uint32_t *ret);
+ EFI_STATUS efivar_get_uint64_le(const EFI_GUID *vendor, const char16_t *name, uint64_t *ret);
+ EFI_STATUS efivar_get_boolean_u8(const EFI_GUID *vendor, const char16_t *name, bool *ret);
+@@ -116,7 +116,7 @@ void convert_efi_path(char16_t *path);
+ char16_t *xstr8_to_path(const char *stra);
+ void mangle_stub_cmdline(char16_t *cmdline);
+ 
+-EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, UINTN off, UINTN size, char **content, UINTN *content_size);
++EFI_STATUS file_read(EFI_FILE *dir, const char16_t *name, size_t off, size_t size, char **content, size_t *content_size);
+ 
+ static inline void file_closep(EFI_FILE **handle) {
+         if (!*handle)
+@@ -150,15 +150,15 @@ EFI_STATUS log_oom(void);
+                 err; \
+         })
+ 
+-void print_at(UINTN x, UINTN y, UINTN attr, const char16_t *str);
+-void clear_screen(UINTN attr);
++void print_at(size_t x, size_t y, size_t attr, const char16_t *str);
++void clear_screen(size_t attr);
+ 
+ typedef int (*compare_pointer_func_t)(const void *a, const void *b);
+-void sort_pointer_array(void **array, UINTN n_members, compare_pointer_func_t compare);
++void sort_pointer_array(void **array, size_t n_members, compare_pointer_func_t compare);
+ 
+-EFI_STATUS get_file_info_harder(EFI_FILE *handle, EFI_FILE_INFO **ret, UINTN *ret_size);
++EFI_STATUS get_file_info_harder(EFI_FILE *handle, EFI_FILE_INFO **ret, size_t *ret_size);
+ 
+-EFI_STATUS readdir_harder(EFI_FILE *handle, EFI_FILE_INFO **buffer, UINTN *buffer_size);
++EFI_STATUS readdir_harder(EFI_FILE *handle, EFI_FILE_INFO **buffer, size_t *buffer_size);
+ 
+ bool is_ascii(const char16_t *f);
+ 

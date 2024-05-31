@@ -1,0 +1,58 @@
+From 468acdce5f4c6e5eaca7f348280e2491130e8d6d Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 29 Nov 2023 11:09:20 +0100
+Subject: [PATCH] logind: do TTY idle logic only for sessions marked as "tty"
+
+Otherwise things might be weird, because background sessions might
+become "idle", wich doesn#t really make much sense.
+
+This shouldn't change much in 99% of the cases, but slightly corrects
+behaviour as it ensures only "primary"/"foreground" sessions get the
+idle logic, i.e. where a user exists that could actually make it
+non-idle.
+
+(cherry picked from commit 20604ff219cf4027f4ee9ca9ba7c0b9e72aec448)
+
+Related: RHEL-20757
+---
+ src/login/logind-session.c | 26 ++++++++++++++------------
+ 1 file changed, 14 insertions(+), 12 deletions(-)
+
+diff --git a/src/login/logind-session.c b/src/login/logind-session.c
+index 68c2aa9670..af5817e2b6 100644
+--- a/src/login/logind-session.c
++++ b/src/login/logind-session.c
+@@ -1029,19 +1029,21 @@ int session_get_idle_hint(Session *s, dual_timestamp *t) {
+                 return s->idle_hint;
+         }
+ 
+-        /* For sessions with an explicitly configured tty, let's check its atime */
+-        if (s->tty) {
+-                r = get_tty_atime(s->tty, &atime);
+-                if (r >= 0)
+-                        goto found_atime;
+-        }
++        if (s->type == SESSION_TTY) {
++                /* For sessions with an explicitly configured tty, let's check its atime */
++                if (s->tty) {
++                        r = get_tty_atime(s->tty, &atime);
++                        if (r >= 0)
++                                goto found_atime;
++                }
+ 
+-        /* For sessions with a leader but no explicitly configured tty, let's check the controlling tty of
+-         * the leader */
+-        if (pid_is_valid(s->leader)) {
+-                r = get_process_ctty_atime(s->leader, &atime);
+-                if (r >= 0)
+-                        goto found_atime;
++                /* For sessions with a leader but no explicitly configured tty, let's check the controlling tty of
++                 * the leader */
++                if (pid_is_valid(s->leader)) {
++                        r = get_process_ctty_atime(s->leader, &atime);
++                        if (r >= 0)
++                                goto found_atime;
++                }
+         }
+ 
+         if (t)

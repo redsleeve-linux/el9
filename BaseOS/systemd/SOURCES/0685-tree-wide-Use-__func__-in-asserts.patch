@@ -1,0 +1,78 @@
+From b3fb286a49f0a4254f49ff88d1ed520e878c5cca Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Thu, 18 Aug 2022 13:43:19 +0200
+Subject: [PATCH] tree-wide: Use __func__ in asserts
+
+clang puts the whole function signature in __PRETTY_FUNCTION__, which is
+a bit excessive for something that can already be figured out by using
+the line number.
+
+(cherry picked from commit 5a9b91576630f82ca72a932b5195654dbb04d67e)
+
+Related: RHEL-16952
+---
+ src/basic/macro.h                       | 6 +++---
+ src/fundamental/macro-fundamental.h     | 6 +++---
+ src/journal/test-journal-interleaving.c | 2 +-
+ 3 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/src/basic/macro.h b/src/basic/macro.h
+index 9cb7ae5077..2d378454a2 100644
+--- a/src/basic/macro.h
++++ b/src/basic/macro.h
+@@ -194,12 +194,12 @@ static inline int __coverity_check_and_return__(int condition) {
+ #define assert_message_se(expr, message)                                \
+         do {                                                            \
+                 if (_unlikely_(!(expr)))                                \
+-                        log_assert_failed(message, PROJECT_FILE, __LINE__, __PRETTY_FUNCTION__); \
++                        log_assert_failed(message, PROJECT_FILE, __LINE__, __func__); \
+         } while (false)
+ 
+ #define assert_log(expr, message) ((_likely_(expr))                     \
+         ? (true)                                                        \
+-        : (log_assert_failed_return(message, PROJECT_FILE, __LINE__, __PRETTY_FUNCTION__), false))
++        : (log_assert_failed_return(message, PROJECT_FILE, __LINE__, __func__), false))
+ 
+ #endif  /* __COVERITY__ */
+ 
+@@ -214,7 +214,7 @@ static inline int __coverity_check_and_return__(int condition) {
+ #endif
+ 
+ #define assert_not_reached()                                            \
+-        log_assert_failed_unreachable(PROJECT_FILE, __LINE__, __PRETTY_FUNCTION__)
++        log_assert_failed_unreachable(PROJECT_FILE, __LINE__, __func__)
+ 
+ #define assert_return(expr, r)                                          \
+         do {                                                            \
+diff --git a/src/fundamental/macro-fundamental.h b/src/fundamental/macro-fundamental.h
+index 1c4c445e4e..e226d8d411 100644
+--- a/src/fundamental/macro-fundamental.h
++++ b/src/fundamental/macro-fundamental.h
+@@ -73,11 +73,11 @@
+                 #define assert(expr)
+                 #define assert_not_reached() __builtin_unreachable()
+         #else
+-                #define assert(expr) ({ _likely_(expr) ? VOID_0 : efi_assert(#expr, __FILE__, __LINE__, __PRETTY_FUNCTION__); })
+-                #define assert_not_reached() efi_assert("Code should not be reached", __FILE__, __LINE__, __PRETTY_FUNCTION__)
++                #define assert(expr) ({ _likely_(expr) ? VOID_0 : efi_assert(#expr, __FILE__, __LINE__, __func__); })
++                #define assert_not_reached() efi_assert("Code should not be reached", __FILE__, __LINE__, __func__)
+         #endif
+         #define static_assert _Static_assert
+-        #define assert_se(expr) ({ _likely_(expr) ? VOID_0 : efi_assert(#expr, __FILE__, __LINE__, __PRETTY_FUNCTION__); })
++        #define assert_se(expr) ({ _likely_(expr) ? VOID_0 : efi_assert(#expr, __FILE__, __LINE__, __func__); })
+ #endif
+ 
+ /* This passes the argument through after (if asserts are enabled) checking that it is not null. */
+diff --git a/src/journal/test-journal-interleaving.c b/src/journal/test-journal-interleaving.c
+index b3ae4b8143..fb38cc7e82 100644
+--- a/src/journal/test-journal-interleaving.c
++++ b/src/journal/test-journal-interleaving.c
+@@ -30,7 +30,7 @@ _noreturn_ static void log_assert_errno(const char *text, int error, const char
+         do {                                                            \
+                 int _r_ = (expr);                                       \
+                 if (_unlikely_(_r_ < 0))                                \
+-                        log_assert_errno(#expr, -_r_, PROJECT_FILE, __LINE__, __PRETTY_FUNCTION__); \
++                        log_assert_errno(#expr, -_r_, PROJECT_FILE, __LINE__, __func__); \
+         } while (false)
+ 
+ static ManagedJournalFile *test_open(const char *name) {

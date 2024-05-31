@@ -1,0 +1,79 @@
+From b16d2d2da2d84552cfe7437d728ab8d65bacb03c Mon Sep 17 00:00:00 2001
+From: Franck Bui <fbui@suse.com>
+Date: Thu, 20 Oct 2022 08:45:02 +0200
+Subject: [PATCH] random-seed: make the logic to calculate the number of bytes
+ read from the random seed file clearer
+
+We want the size to lie within [/proc/sys/kernel/random/poolsize,RANDOM_POOL_SIZE_MAX]
+interval. Let's make it more obvious.
+
+Also move the logic in a dedicated function.
+
+(cherry picked from commit 205138d88abf2e087440803ee046128092b722c6)
+
+Related: RHEL-16952
+---
+ src/random-seed/random-seed.c | 29 +++++++++++++++++++----------
+ 1 file changed, 19 insertions(+), 10 deletions(-)
+
+diff --git a/src/random-seed/random-seed.c b/src/random-seed/random-seed.c
+index 2ca2181ddb..5b5629d817 100644
+--- a/src/random-seed/random-seed.c
++++ b/src/random-seed/random-seed.c
+@@ -115,6 +115,22 @@ static CreditEntropy may_credit(int seed_fd) {
+         return CREDIT_ENTROPY_NO_WAY;
+ }
+ 
++static int random_seed_size(int seed_fd, size_t *ret_size) {
++        struct stat st;
++
++        assert(ret_size);
++        assert(seed_fd >= 0);
++
++        if (fstat(seed_fd, &st) < 0)
++                return log_error_errno(errno, "Failed to stat() seed file " RANDOM_SEED ": %m");
++
++        /* If the seed file is larger than what the kernel expects, then honour the existing size and
++         * save/restore as much as it says */
++
++        *ret_size = CLAMP((uint64_t)st.st_size, random_pool_size(), RANDOM_POOL_SIZE_MAX);
++        return 0;
++}
++
+ static int help(int argc, char *argv[], void *userdata) {
+         _cleanup_free_ char *link = NULL;
+         int r;
+@@ -193,7 +209,6 @@ static int run(int argc, char *argv[]) {
+         _cleanup_free_ void* buf = NULL;
+         struct sha256_ctx hash_state;
+         size_t buf_size;
+-        struct stat st;
+         ssize_t k, l;
+         int r;
+ 
+@@ -205,8 +220,6 @@ static int run(int argc, char *argv[]) {
+ 
+         umask(0022);
+ 
+-        buf_size = random_pool_size();
+-
+         r = mkdir_parents(RANDOM_SEED, 0755);
+         if (r < 0)
+                 return log_error_errno(r, "Failed to create directory " RANDOM_SEED_DIR ": %m");
+@@ -261,13 +274,9 @@ static int run(int argc, char *argv[]) {
+                 assert_not_reached();
+         }
+ 
+-        if (fstat(seed_fd, &st) < 0)
+-                return log_error_errno(errno, "Failed to stat() seed file " RANDOM_SEED ": %m");
+-
+-        /* If the seed file is larger than what we expect, then honour the existing size and save/restore as
+-         * much as it says */
+-        if ((uint64_t) st.st_size > buf_size)
+-                buf_size = MIN(st.st_size, RANDOM_POOL_SIZE_MAX);
++        r = random_seed_size(seed_fd, &buf_size);
++        if (r < 0)
++                return r;
+ 
+         buf = malloc(buf_size);
+         if (!buf)

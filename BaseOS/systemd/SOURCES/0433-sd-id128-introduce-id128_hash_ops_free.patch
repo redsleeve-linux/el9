@@ -1,0 +1,37 @@
+From 81802cf297a05d202aae5de21673fcc7064f9b7d Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 28 Oct 2022 09:08:09 +0900
+Subject: [PATCH] sd-id128: introduce id128_hash_ops_free
+
+(cherry picked from commit 3e61656fab869bb40f019c38c3347885238294de)
+
+Related: RHEL-5988
+---
+ src/libsystemd/sd-id128/id128-util.c | 1 +
+ src/libsystemd/sd-id128/id128-util.h | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/src/libsystemd/sd-id128/id128-util.c b/src/libsystemd/sd-id128/id128-util.c
+index 4f52c14f64..cef340f3bc 100644
+--- a/src/libsystemd/sd-id128/id128-util.c
++++ b/src/libsystemd/sd-id128/id128-util.c
+@@ -184,6 +184,7 @@ sd_id128_t id128_make_v4_uuid(sd_id128_t id) {
+ }
+ 
+ DEFINE_HASH_OPS(id128_hash_ops, sd_id128_t, id128_hash_func, id128_compare_func);
++DEFINE_HASH_OPS_WITH_KEY_DESTRUCTOR(id128_hash_ops_free, sd_id128_t, id128_hash_func, id128_compare_func, free);
+ 
+ int id128_get_product(sd_id128_t *ret) {
+         sd_id128_t uuid;
+diff --git a/src/libsystemd/sd-id128/id128-util.h b/src/libsystemd/sd-id128/id128-util.h
+index 17b180c10c..9d8fe93641 100644
+--- a/src/libsystemd/sd-id128/id128-util.h
++++ b/src/libsystemd/sd-id128/id128-util.h
+@@ -30,6 +30,7 @@ int id128_write(const char *p, Id128Format f, sd_id128_t id, bool do_sync);
+ void id128_hash_func(const sd_id128_t *p, struct siphash *state);
+ int id128_compare_func(const sd_id128_t *a, const sd_id128_t *b) _pure_;
+ extern const struct hash_ops id128_hash_ops;
++extern const struct hash_ops id128_hash_ops_free;
+ 
+ sd_id128_t id128_make_v4_uuid(sd_id128_t id);
+ 

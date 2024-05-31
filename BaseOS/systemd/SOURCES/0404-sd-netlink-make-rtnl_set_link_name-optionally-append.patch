@@ -1,0 +1,191 @@
+From ea5725b1e621c2733c28f818c3a58615a385337e Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 16 May 2023 13:29:37 +0900
+Subject: [PATCH] sd-netlink: make rtnl_set_link_name() optionally append
+ alternative names
+
+(cherry picked from commit 81824455008070253c62bf5c27187028ba8e7e99)
+
+Related: RHEL-5988
+---
+ src/libsystemd/sd-netlink/netlink-util.c | 89 ++++++++++++++++++------
+ src/libsystemd/sd-netlink/netlink-util.h |  5 +-
+ src/libsystemd/sd-netlink/test-netlink.c |  6 +-
+ src/udev/udev-event.c                    |  2 +-
+ 4 files changed, 78 insertions(+), 24 deletions(-)
+
+diff --git a/src/libsystemd/sd-netlink/netlink-util.c b/src/libsystemd/sd-netlink/netlink-util.c
+index cfcf2578d6..5438737b42 100644
+--- a/src/libsystemd/sd-netlink/netlink-util.c
++++ b/src/libsystemd/sd-netlink/netlink-util.c
+@@ -11,44 +11,93 @@
+ #include "process-util.h"
+ #include "strv.h"
+ 
+-int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name) {
++static int set_link_name(sd_netlink **rtnl, int ifindex, const char *name) {
+         _cleanup_(sd_netlink_message_unrefp) sd_netlink_message *message = NULL;
+-        _cleanup_strv_free_ char **alternative_names = NULL;
+-        bool altname_deleted = false;
+         int r;
+ 
+         assert(rtnl);
+         assert(ifindex > 0);
+         assert(name);
+ 
+-        if (!ifname_valid(name))
++        /* Assign the requested name. */
++        r = sd_rtnl_message_new_link(*rtnl, &message, RTM_SETLINK, ifindex);
++        if (r < 0)
++                return r;
++
++        r = sd_netlink_message_append_string(message, IFLA_IFNAME, name);
++        if (r < 0)
++                return r;
++
++        return sd_netlink_call(*rtnl, message, 0, NULL);
++}
++
++int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name, char* const *alternative_names) {
++        _cleanup_strv_free_ char **original_altnames = NULL, **new_altnames = NULL;
++        bool altname_deleted = false;
++        int r;
++
++        assert(rtnl);
++        assert(ifindex > 0);
++
++        if (isempty(name) && strv_isempty(alternative_names))
++                return 0;
++
++        if (name && !ifname_valid(name))
+                 return -EINVAL;
+ 
+-        r = rtnl_get_link_alternative_names(rtnl, ifindex, &alternative_names);
++        /* If the requested name is already assigned as an alternative name, then first drop it. */
++        r = rtnl_get_link_alternative_names(rtnl, ifindex, &original_altnames);
+         if (r < 0)
+                 log_debug_errno(r, "Failed to get alternative names on network interface %i, ignoring: %m",
+                                 ifindex);
+ 
+-        if (strv_contains(alternative_names, name)) {
+-                r = rtnl_delete_link_alternative_names(rtnl, ifindex, STRV_MAKE(name));
+-                if (r < 0)
+-                        return log_debug_errno(r, "Failed to remove '%s' from alternative names on network interface %i: %m",
+-                                               name, ifindex);
++        if (name) {
++                if (strv_contains(original_altnames, name)) {
++                        r = rtnl_delete_link_alternative_names(rtnl, ifindex, STRV_MAKE(name));
++                        if (r < 0)
++                                return log_debug_errno(r, "Failed to remove '%s' from alternative names on network interface %i: %m",
++                                                       name, ifindex);
++
++                        altname_deleted = true;
++                }
+ 
+-                altname_deleted = true;
++                r = set_link_name(rtnl, ifindex, name);
++                if (r < 0)
++                        goto fail;
+         }
+ 
+-        r = sd_rtnl_message_new_link(*rtnl, &message, RTM_SETLINK, ifindex);
+-        if (r < 0)
+-                goto fail;
++        /* Filter out already assigned names from requested alternative names. Also, dedup the request. */
++        STRV_FOREACH(a, alternative_names) {
++                if (streq_ptr(name, *a))
++                        continue;
+ 
+-        r = sd_netlink_message_append_string(message, IFLA_IFNAME, name);
+-        if (r < 0)
+-                goto fail;
++                if (strv_contains(original_altnames, *a))
++                        continue;
+ 
+-        r = sd_netlink_call(*rtnl, message, 0, NULL);
+-        if (r < 0)
+-                goto fail;
++                if (strv_contains(new_altnames, *a))
++                        continue;
++
++                if (!ifname_valid_full(*a, IFNAME_VALID_ALTERNATIVE))
++                        continue;
++
++                r = strv_extend(&new_altnames, *a);
++                if (r < 0)
++                        return r;
++        }
++
++        strv_sort(new_altnames);
++
++        /* Finally, assign alternative names. */
++        r = rtnl_set_link_alternative_names(rtnl, ifindex, new_altnames);
++        if (r == -EEXIST) /* Already assigned to another interface? */
++                STRV_FOREACH(a, new_altnames) {
++                        r = rtnl_set_link_alternative_names(rtnl, ifindex, STRV_MAKE(*a));
++                        if (r < 0)
++                                log_debug_errno(r, "Failed to assign '%s' as an alternative name on network interface %i, ignoring: %m",
++                                                *a, ifindex);
++                }
++        else if (r < 0)
++                log_debug_errno(r, "Failed to assign alternative names on network interface %i, ignoring: %m", ifindex);
+ 
+         return 0;
+ 
+diff --git a/src/libsystemd/sd-netlink/netlink-util.h b/src/libsystemd/sd-netlink/netlink-util.h
+index d14392a018..888e28642d 100644
+--- a/src/libsystemd/sd-netlink/netlink-util.h
++++ b/src/libsystemd/sd-netlink/netlink-util.h
+@@ -29,7 +29,10 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(MultipathRoute*, multipath_route_free);
+ 
+ int multipath_route_dup(const MultipathRoute *m, MultipathRoute **ret);
+ 
+-int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name);
++int rtnl_set_link_name(sd_netlink **rtnl, int ifindex, const char *name, char* const* alternative_names);
++static inline int rtnl_append_link_alternative_names(sd_netlink **rtnl, int ifindex, char* const *alternative_names) {
++        return rtnl_set_link_name(rtnl, ifindex, NULL, alternative_names);
++}
+ int rtnl_set_link_properties(
+                 sd_netlink **rtnl,
+                 int ifindex,
+diff --git a/src/libsystemd/sd-netlink/test-netlink.c b/src/libsystemd/sd-netlink/test-netlink.c
+index 9ad8ecf320..43124b99ae 100644
+--- a/src/libsystemd/sd-netlink/test-netlink.c
++++ b/src/libsystemd/sd-netlink/test-netlink.c
+@@ -662,12 +662,13 @@ TEST(rtnl_set_link_name) {
+         assert_se(strv_contains(alternative_names, "testlongalternativename"));
+         assert_se(strv_contains(alternative_names, "test-shortname"));
+ 
+-        assert_se(rtnl_set_link_name(&rtnl, ifindex, "testlongalternativename") == -EINVAL);
+-        assert_se(rtnl_set_link_name(&rtnl, ifindex, "test-shortname") >= 0);
++        assert_se(rtnl_set_link_name(&rtnl, ifindex, "testlongalternativename", NULL) == -EINVAL);
++        assert_se(rtnl_set_link_name(&rtnl, ifindex, "test-shortname", STRV_MAKE("testlongalternativename", "test-shortname", "test-additional-name")) >= 0);
+ 
+         alternative_names = strv_free(alternative_names);
+         assert_se(rtnl_get_link_alternative_names(&rtnl, ifindex, &alternative_names) >= 0);
+         assert_se(strv_contains(alternative_names, "testlongalternativename"));
++        assert_se(strv_contains(alternative_names, "test-additional-name"));
+         assert_se(!strv_contains(alternative_names, "test-shortname"));
+ 
+         assert_se(rtnl_delete_link_alternative_names(&rtnl, ifindex, STRV_MAKE("testlongalternativename")) >= 0);
+@@ -675,6 +676,7 @@ TEST(rtnl_set_link_name) {
+         alternative_names = strv_free(alternative_names);
+         assert_se(rtnl_get_link_alternative_names(&rtnl, ifindex, &alternative_names) >= 0);
+         assert_se(!strv_contains(alternative_names, "testlongalternativename"));
++        assert_se(strv_contains(alternative_names, "test-additional-name"));
+         assert_se(!strv_contains(alternative_names, "test-shortname"));
+ }
+ 
+diff --git a/src/udev/udev-event.c b/src/udev/udev-event.c
+index cf90d6f205..2662806d61 100644
+--- a/src/udev/udev-event.c
++++ b/src/udev/udev-event.c
+@@ -980,7 +980,7 @@ static int rename_netif(UdevEvent *event) {
+                 goto revert;
+         }
+ 
+-        r = rtnl_set_link_name(&event->rtnl, ifindex, event->name);
++        r = rtnl_set_link_name(&event->rtnl, ifindex, event->name, NULL);
+         if (r < 0) {
+                 if (r == -EBUSY) {
+                         log_device_info(dev, "Network interface '%s' is already up, cannot rename to '%s'.",

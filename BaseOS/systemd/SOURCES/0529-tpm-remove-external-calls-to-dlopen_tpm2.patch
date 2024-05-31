@@ -1,0 +1,46 @@
+From 31bb91d7c4cc04586865e041a227730b459554c0 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Fri, 5 May 2023 19:53:32 -0400
+Subject: [PATCH] tpm: remove external calls to dlopen_tpm2()
+
+The calls outside tpm2-util.c are redundant, as tpm2_context_new()
+is always called immediately after, which then calls dlopen_tpm2().
+
+(cherry picked from commit 9944909e68e06d903d828aeca4a48abc6285f74e)
+
+Related: RHEL-16182
+---
+ src/boot/pcrphase.c         | 4 ----
+ src/cryptsetup/cryptsetup.c | 4 ----
+ 2 files changed, 8 deletions(-)
+
+diff --git a/src/boot/pcrphase.c b/src/boot/pcrphase.c
+index 6c37d34fd6..57e31e6cad 100644
+--- a/src/boot/pcrphase.c
++++ b/src/boot/pcrphase.c
+@@ -340,10 +340,6 @@ static int run(int argc, char *argv[]) {
+                 return EXIT_SUCCESS;
+         }
+ 
+-        r = dlopen_tpm2();
+-        if (r < 0)
+-                return log_error_errno(r, "Failed to load TPM2 libraries: %m");
+-
+         _cleanup_tpm2_context_ Tpm2Context *c = NULL;
+         r = tpm2_context_new(arg_tpm2_device, &c);
+         if (r < 0)
+diff --git a/src/cryptsetup/cryptsetup.c b/src/cryptsetup/cryptsetup.c
+index caef45637c..b384897e4f 100644
+--- a/src/cryptsetup/cryptsetup.c
++++ b/src/cryptsetup/cryptsetup.c
+@@ -837,10 +837,6 @@ static int measure_volume_key(
+         }
+ 
+ #if HAVE_TPM2
+-        r = dlopen_tpm2();
+-        if (r < 0)
+-                return log_error_errno(r, "Failed to load TPM2 libraries: %m");
+-
+         _cleanup_tpm2_context_ Tpm2Context *c = NULL;
+         r = tpm2_context_new(arg_tpm2_device, &c);
+         if (r < 0)

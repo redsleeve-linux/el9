@@ -1,10 +1,29 @@
+%bcond_with snapshot_build
+
+%if %{with snapshot_build}
+# Unlock LLVM Snapshot LUA functions
+%{llvm_sb}
+%endif
+
 %global toolchain gcc
 
-%global maj_ver 16
+%global maj_ver 17
 %global libomp_version %{maj_ver}.0.6
+#global rc_ver 4
 %global libomp_srcdir openmp-%{libomp_version}%{?rc_ver:rc%{rc_ver}}.src
-%global cmake_srcdir cmake-%{libomp_version}%{?rc_ver:rc%{rc_ver}}.src
+%global so_suffix %{maj_ver}
 
+%if %{with snapshot_build}
+%undefine rc_ver
+%global maj_ver %{llvm_snapshot_version_major}
+%global libomp_version %{llvm_snapshot_version}
+%global so_suffix %{maj_ver}%{llvm_snapshot_version_suffix}
+%endif
+
+
+# Opt out of https://fedoraproject.org/wiki/Changes/fno-omit-frame-pointer
+# https://bugzilla.redhat.com/show_bug.cgi?id=2158587
+%undefine _include_frame_pointers
 
 %ifarch ppc64le
 %global libomp_arch ppc64
@@ -13,21 +32,22 @@
 %endif
 
 Name: libomp
-Version: %{libomp_version}
-Release: 1%{?dist}.redsleeve
+Version: %{libomp_version}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
+Release: 1%{?dist}
 Summary: OpenMP runtime for clang
 
-License: NCSA
+License: Apache-2.0 WITH LLVM-exception OR NCSA
 URL: http://openmp.llvm.org
-Source0: https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}/%{libomp_srcdir}.tar.xz
-Source1: https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}/%{libomp_srcdir}.tar.xz.sig
+%if %{with snapshot_build}
+Source0: %{llvm_snapshot_source_prefix}openmp-%{llvm_snapshot_yyyymmdd}.src.tar.xz
+%{llvm_snapshot_extra_source_tags}
+%else
+Source0: https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}%{?rc_ver:-rc%{rc_ver}}/%{libomp_srcdir}.tar.xz
+Source1: https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}%{?rc_ver:-rc%{rc_ver}}/%{libomp_srcdir}.tar.xz.sig
 Source2: release-keys.asc
-Source3: run-lit-tests
-Source4: lit.fedora.cfg.py
-Source5:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz
-Source6:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{libomp_version}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz.sig
+%endif
 
-BuildRequires: clang
+BuildRequires: clang >= %{maj_ver}
 # For clang-offload-packager
 BuildRequires: clang-tools-extra
 BuildRequires: cmake
@@ -43,8 +63,11 @@ BuildRequires:	gnupg2
 
 # libomptarget needs the llvm cmake files
 BuildRequires: llvm-devel
+BuildRequires: llvm-cmake-utils
 
 Requires: elfutils-libelf%{?isa}
+
+Obsoletes: libomp-test < 17.0.2
 
 # libomp does not support s390x.
 ExcludeArch: s390x
@@ -60,25 +83,10 @@ Requires: clang-resource-filesystem%{?isa} = %{version}
 %description devel
 OpenMP header files.
 
-%package test
-Summary: OpenMP regression tests
-Requires: %{name}%{?isa} = %{version}-%{release}
-Requires: %{name}-devel%{?isa} = %{version}-%{release}
-Requires: clang
-Requires: llvm
-Requires: python3-lit
-
-%description test
-OpenMP regression tests
-
 %prep
+%if %{without snapshot_build}
 %{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
-%{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE6}' --data='%{SOURCE5}'
-%setup -T -q -b 5 -n %{cmake_srcdir}
-# TODO: It would be more elegant to set -DLLVM_COMMON_CMAKE_UTILS=%{_builddir}/%{cmake_srcdir},
-# but this is not a CACHED variable, so we can't actually set it externally :(
-cd ..
-mv %{cmake_srcdir} cmake
+%endif
 %autosetup -n %{libomp_srcdir} -p2
 
 %build
@@ -87,16 +95,18 @@ mv %{cmake_srcdir} cmake
 # Building openmp with LTO fails with GCC but works with Clang
 %define _lto_cflags %{nil}
 %endif
-
 %cmake	-GNinja \
 	-DLIBOMP_INSTALL_ALIASES=OFF \
-	-DCMAKE_MODULE_PATH=%{_libdir}/cmake/llvm \
+	-DCMAKE_MODULE_PATH=%{_datadir}/llvm/cmake/Modules \
 	-DLLVM_DIR=%{_libdir}/cmake/llvm \
-	-DCMAKE_INSTALL_INCLUDEDIR=%{_libdir}/clang/%{maj_ver}/include \
+	-DCMAKE_INSTALL_INCLUDEDIR=%{_prefix}/lib/clang/%{maj_ver}/include \
 %if 0%{?__isa_bits} == 64
 	-DOPENMP_LIBDIR_SUFFIX=64 \
 %else
 	-DOPENMP_LIBDIR_SUFFIX= \
+%endif
+%if %{with snapshot_build}
+	-DLLVM_VERSION_SUFFIX="%{llvm_snapshot_version_suffix}" \
 %endif
 	-DCMAKE_SKIP_RPATH:BOOL=ON
 
@@ -105,30 +115,6 @@ mv %{cmake_srcdir} cmake
 
 %install
 %cmake_install
-
-# Test package setup
-%global libomp_srcdir %{_datadir}/libomp/src/
-%global libomp_testdir %{libomp_srcdir}/runtime/test/
-%global lit_cfg %{libomp_testdir}/%{_arch}.site.cfg.py
-%global lit_fedora_cfg %{_datadir}/libomp/lit.fedora.cfg.py
-
-install -d %{buildroot}%{libomp_srcdir}/runtime
-cp -R runtime/test  %{buildroot}%{libomp_srcdir}/runtime
-cp -R runtime/src  %{buildroot}%{libomp_srcdir}/runtime
-
-# Generate lit config files.  Strip off the last line that initiates the
-# test run, so we can customize the configuration.
-head -n -1 %{_vpath_builddir}/runtime/test/lit.site.cfg >> %{buildroot}%{lit_cfg}
-
-# Install custom fedora config file
-cp %{SOURCE4} %{buildroot}%{lit_fedora_cfg}
-
-# Patch lit config files to load custom fedora config
-echo "lit_config.load_config(config, '%{lit_fedora_cfg}')" >> %{buildroot}%{lit_cfg}
-
-# Install test script
-install -d %{buildroot}%{_libexecdir}/tests/libomp
-install -m 0755 %{SOURCE3} %{buildroot}%{_libexecdir}/tests/libomp
 
 # Remove static libraries with equivalent shared libraries
 rm -rf %{buildroot}%{_libdir}/libarcher_static.a
@@ -139,48 +125,48 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %files
 %license LICENSE.TXT
 %{_libdir}/libomp.so
-%ifnarch %{arm}
 %{_libdir}/libompd.so
+%ifnarch %{arm}
 %{_libdir}/libarcher.so
 %endif
 %ifnarch %{ix86} %{arm}
-%{_libdir}/libomptarget.rtl.amdgpu.so.%{maj_ver}
-%{_libdir}/libomptarget.rtl.amdgpu.nextgen.so.%{maj_ver}
-%{_libdir}/libomptarget.rtl.cuda.so.%{maj_ver}
-%{_libdir}/libomptarget.rtl.cuda.nextgen.so.%{maj_ver}
-%{_libdir}/libomptarget.rtl.%{libomp_arch}.so.%{maj_ver}
-%{_libdir}/libomptarget.rtl.%{libomp_arch}.nextgen.so.%{maj_ver}
-%{_libdir}/libomptarget.so.%{maj_ver}
+# libomptarget is not supported on 32-bit systems.
+%{_libdir}/libomptarget.rtl.amdgpu.so.%{so_suffix}
+%{_libdir}/libomptarget.rtl.cuda.so.%{so_suffix}
+%{_libdir}/libomptarget.rtl.%{libomp_arch}.so.%{so_suffix}
+%{_libdir}/libomptarget.so.%{so_suffix}
 %endif
 
 %files devel
-%{_libdir}/clang/%{maj_ver}/include/omp.h
-%{_libdir}/cmake/openmp/FindOpenMPTarget.cmake
+%{_prefix}/lib/clang/%{maj_ver}/include/omp.h
 %ifnarch %{arm}
-%{_libdir}/clang/%{maj_ver}/include/omp-tools.h
-%{_libdir}/clang/%{maj_ver}/include/ompt.h
-%{_libdir}/clang/%{maj_ver}/include/ompt-multiplex.h
+%{_prefix}/lib/clang/%{maj_ver}/include/omp-tools.h
+%{_prefix}/lib/clang/%{maj_ver}/include/ompt.h
+%{_prefix}/lib/clang/%{maj_ver}/include/ompt-multiplex.h
 %endif
+%{_libdir}/cmake/openmp/FindOpenMPTarget.cmake
 %ifnarch %{ix86} %{arm}
+# libomptarget is not supported on 32-bit systems.
 %{_libdir}/libomptarget.rtl.amdgpu.so
-%{_libdir}/libomptarget.rtl.amdgpu.nextgen.so
 %{_libdir}/libomptarget.rtl.cuda.so
-%{_libdir}/libomptarget.rtl.cuda.nextgen.so
 %{_libdir}/libomptarget.rtl.%{libomp_arch}.so
-%{_libdir}/libomptarget.rtl.%{libomp_arch}.nextgen.so
 %{_libdir}/libomptarget.devicertl.a
 %{_libdir}/libomptarget-amdgpu-*.bc
 %{_libdir}/libomptarget-nvptx-*.bc
 %{_libdir}/libomptarget.so
 %endif
 
-%files test
-%{_datadir}/libomp
-%{_libexecdir}/tests/libomp/
-
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart <jaccor@redsleeve.org> - 16.0.6-1.redsleeve
-- disabled libompd.so for arm
+%{?llvm_snapshot_changelog_entry}
+
+* Mon Dec 11 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.6-1
+- Update to 17.0.6
+
+* Fri Oct 20 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.1-2
+- Add obsoletes for libomp-test package.
+
+* Fri Sep 29 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.1-1
+- Update to 17.0.1
 
 * Wed Jul 05 2023 Nikita Popov <npopov@redhat.com> - 16.0.6-1
 - Update to LLVM 16.0.6

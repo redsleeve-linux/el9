@@ -11,7 +11,7 @@ Version:   3.2.0
 %global golang_arches   %{ix86} %{golang_arches_future}
 %global gccgo_arches    %{mips}
 %if 0%{?rhel} >= 9
-%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
+%global golang_arches   x86_64 aarch64 ppc64le s390x
 %endif
 # Go sources can contain arch-specific files and our macros will package the
 # correct files for each architecture. Therefore, move gopath to _libdir and
@@ -36,7 +36,7 @@ Version:   3.2.0
 ExclusiveArch: %{golang_arches} %{gccgo_arches}
 
 Name:      go-rpm-macros
-Release:   2%{?dist}.redsleeve
+Release:   3%{?dist}
 Summary:   Build-stage rpm automation for Go packages
 
 License:   GPLv3+
@@ -78,7 +78,9 @@ Patch1: golist-bootstrap-cli-no-vendor.patch
 # RHEL 8 only provides the macros.go-srpm file which includes gobuild and gotest.
 # C9S also only provides the macros.go-srpm file but it also follows upstream which includes gobuild and gotest in the macros.go-compilers-gcc.
 # For a simple fix, this patch ports both RHEL 8 macros to macros.go-srpm.
+# This also sets the GOAMD64 variable to v2
 # Resolves: rhbz#1965292
+# Resolves: RHEL-5529
 Patch2: add-gobuild-and-gotest.patch
 
 %description
@@ -251,8 +253,9 @@ sed -i "s,golist,%{golist_execdir}/golist,g" %{buildroot}%{_bindir}/go-rpm-integ
 %{_spectemplatedir}/*.spec
 
 %changelog
-* Sat Nov 25 2023 Jaccco Ligthart <jacco@redsleeve.org> 3.2.0-2.redsleeve
-- added arm to golang_arches
+* Fri Sep 22 2023 Alejandro Sáez <asm@redhat.com> - 3.2.0-3
+- Update add-gobuild-and-gotest.patch to add GOPPC64 and GOAMD64
+- Resolves: RHEL-5529
 
 * Fri Jul 28 2023 Alejandro Sáez <asm@redhat.com> - 3.2.0-2
 - Add golang_arches_future

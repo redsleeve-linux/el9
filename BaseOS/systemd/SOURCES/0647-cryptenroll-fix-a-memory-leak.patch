@@ -1,0 +1,57 @@
+From a4aa2ab6aada7e8c0f4bb99a94830baa5a774d58 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Mon, 27 Mar 2023 16:51:00 +0200
+Subject: [PATCH] cryptenroll: fix a memory leak
+
+$ dd if=/dev/zero of=luks.img bs=1M count=64
+$ echo 1231dfsd234d | cryptsetup luksFormat luks.img
+$ build-san/systemd-cryptenroll luks.img
+SLOT TYPE
+   0 password
+
+=================================================================
+==640364==ERROR: LeakSanitizer: detected memory leaks
+
+Direct leak of 64 byte(s) in 1 object(s) allocated from:
+    #0 0x7f43ffeb95b5 in __interceptor_realloc.part.0 (/lib64/libasan.so.8+0xb95b5)
+    #1 0x7f43ff0a4f2f in greedy_realloc ../src/basic/alloc-util.c:70
+    #2 0x404d9f in list_enrolled ../src/cryptenroll/cryptenroll-list.c:30
+    #3 0x40f149 in run ../src/cryptenroll/cryptenroll.c:673
+    #4 0x40f149 in main ../src/cryptenroll/cryptenroll.c:692
+    #5 0x7f43fd64a50f in __libc_start_call_main (/lib64/libc.so.6+0x2750f)
+
+SUMMARY: AddressSanitizer: 64 byte(s) leaked in 1 allocation(s).
+Aborted (core dumped)
+
+Reported in https://github.com/systemd/systemd/pull/27007.
+
+(cherry picked from commit 30dbadf65eaa64daa494118eb0cec7750f376c25)
+
+Related: RHEL-16182
+---
+ src/cryptenroll/cryptenroll-list.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/src/cryptenroll/cryptenroll-list.c b/src/cryptenroll/cryptenroll-list.c
+index 62688da3d3..d21df7123b 100644
+--- a/src/cryptenroll/cryptenroll-list.c
++++ b/src/cryptenroll/cryptenroll-list.c
+@@ -5,12 +5,13 @@
+ #include "format-table.h"
+ #include "parse-util.h"
+ 
+-int list_enrolled(struct crypt_device *cd) {
++struct keyslot_metadata {
++        int slot;
++        const char *type;
++};
+ 
+-        struct keyslot_metadata {
+-                int slot;
+-                const char *type;
+-        } *keyslot_metadata = NULL;
++int list_enrolled(struct crypt_device *cd) {
++        _cleanup_free_ struct keyslot_metadata *keyslot_metadata = NULL;
+         _cleanup_(table_unrefp) Table *t = NULL;
+         size_t n_keyslot_metadata = 0;
+         int slot_max, r;

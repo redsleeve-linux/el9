@@ -1,0 +1,51 @@
+From 50a254def1c98a34ee5fdb52dcfbb1ed59b1250a Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Mon, 30 Jan 2023 16:22:10 +0100
+Subject: [PATCH] efi-string: Fix strchr() null byte handling
+
+strchr() should be able to search for the terminating null byte,
+our implementation doesn't, let's fix that.
+
+(cherry picked from commit bbef5a9617e91b4b1bc30266eb9dcbda395a8c61)
+
+Related: RHEL-16952
+---
+ src/boot/efi/efi-string.c      | 2 +-
+ src/boot/efi/test-efi-string.c | 4 ++++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/boot/efi/efi-string.c b/src/boot/efi/efi-string.c
+index 860dfc00b2..cf0d71e986 100644
+--- a/src/boot/efi/efi-string.c
++++ b/src/boot/efi/efi-string.c
+@@ -116,7 +116,7 @@ DEFINE_STRCPY(char16_t, strcpy16);
+                         s++;                       \
+                 }                                  \
+                                                    \
+-                return NULL;                       \
++                return c ? NULL : (type *) s;      \
+         }
+ 
+ DEFINE_STRCHR(char, strchr8);
+diff --git a/src/boot/efi/test-efi-string.c b/src/boot/efi/test-efi-string.c
+index c26973d8bd..c7e42c7b94 100644
+--- a/src/boot/efi/test-efi-string.c
++++ b/src/boot/efi/test-efi-string.c
+@@ -229,6 +229,8 @@ TEST(strchr8) {
+         assert_se(strchr8(str, 'a') == &str[0]);
+         assert_se(strchr8(str, 'c') == &str[2]);
+         assert_se(strchr8(str, 'B') == &str[4]);
++
++        assert_se(strchr8(str, 0) == str + strlen8(str));
+ }
+ 
+ TEST(strchr16) {
+@@ -240,6 +242,8 @@ TEST(strchr16) {
+         assert_se(strchr16(str, 'a') == &str[0]);
+         assert_se(strchr16(str, 'c') == &str[2]);
+         assert_se(strchr16(str, 'B') == &str[4]);
++
++        assert_se(strchr16(str, 0) == str + strlen16(str));
+ }
+ 
+ TEST(xstrndup8) {

@@ -1,0 +1,74 @@
+From 9d1f05a7b8537deb5f626cd1b7b26ef2678f4c8e Mon Sep 17 00:00:00 2001
+From: Arthur Eubanks <aeubanks@google.com>
+Date: Thu, 27 Jul 2023 13:27:58 -0700
+Subject: [PATCH] [PEI] Don't zero out noreg operands
+
+A tail call may have $noreg operands.
+
+Fixes a crash.
+
+Reviewed By: xgupta
+
+Differential Revision: https://reviews.llvm.org/D156485
+
+(cherry picked from commit f800c1f3b207e7bcdc8b4c7192928d9a078242a0)
+---
+ llvm/lib/CodeGen/PrologEpilogInserter.cpp    |  9 +++++++--
+ llvm/test/CodeGen/X86/zero-call-used-regs.ll | 14 ++++++++++++++
+ 2 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/llvm/lib/CodeGen/PrologEpilogInserter.cpp b/llvm/lib/CodeGen/PrologEpilogInserter.cpp
+index e323aaaeefaf..49047719fdaa 100644
+--- a/llvm/lib/CodeGen/PrologEpilogInserter.cpp
++++ b/llvm/lib/CodeGen/PrologEpilogInserter.cpp
+@@ -1285,6 +1285,8 @@ void PEI::insertZeroCallUsedRegs(MachineFunction &MF) {
+           continue;
+ 
+         MCRegister Reg = MO.getReg();
++        if (!Reg)
++          continue;
+ 
+         // This picks up sibling registers (e.q. %al -> %ah).
+         for (MCRegUnit Unit : TRI.regunits(Reg))
+@@ -1308,8 +1310,11 @@ void PEI::insertZeroCallUsedRegs(MachineFunction &MF) {
+         if (!MO.isReg())
+           continue;
+ 
+-        for (const MCPhysReg &Reg :
+-             TRI.sub_and_superregs_inclusive(MO.getReg()))
++        MCRegister Reg = MO.getReg();
++        if (!Reg)
++          continue;
++
++        for (const MCPhysReg Reg : TRI.sub_and_superregs_inclusive(Reg))
+           RegsToZero.reset(Reg);
+       }
+     }
+diff --git a/llvm/test/CodeGen/X86/zero-call-used-regs.ll b/llvm/test/CodeGen/X86/zero-call-used-regs.ll
+index 63d51c916bb9..97ad5ce9c8cb 100644
+--- a/llvm/test/CodeGen/X86/zero-call-used-regs.ll
++++ b/llvm/test/CodeGen/X86/zero-call-used-regs.ll
+@@ -241,6 +241,20 @@ entry:
+   ret i32 %x
+ }
+ 
++define dso_local void @tailcall(ptr %p) local_unnamed_addr #0 "zero-call-used-regs"="used-gpr" {
++; I386-LABEL: tailcall:
++; I386:       # %bb.0:
++; I386-NEXT:    movl {{[0-9]+}}(%esp), %eax
++; I386-NEXT:    jmpl *(%eax) # TAILCALL
++;
++; X86-64-LABEL: tailcall:
++; X86-64:       # %bb.0:
++; X86-64-NEXT:    jmpq *(%rdi) # TAILCALL
++  %c = load ptr, ptr %p
++  tail call void %c()
++  ret void
++}
++
+ ; Don't emit zeroing registers in "main" function.
+ define dso_local i32 @main() local_unnamed_addr #1 {
+ ; I386-LABEL: main:
+-- 
+2.43.0
+

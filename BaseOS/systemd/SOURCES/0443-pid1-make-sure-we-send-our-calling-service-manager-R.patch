@@ -1,0 +1,105 @@
+From 567b6dcd4ff8e4a9c9b0b1629fa8c015d5e6a724 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 2 Jan 2023 15:01:56 +0100
+Subject: [PATCH] pid1: make sure we send our calling service manager
+ RELOADING=1 when reloading
+
+And send READY=1 again when we are done with it.
+
+We do this not only for "daemon-reload" but also for "daemon-reexec" and
+"switch-root", since from the perspective of an encapsulating service
+manager these three operations are not that different.
+
+(cherry picked from commit dd0ab174c36492cdcb92cf46844fb0905b1d4a7e)
+
+Related: RHEL-6090
+---
+ src/core/main.c        | 10 ++++++++++
+ src/core/manager.c     | 12 ++++++++++++
+ src/core/manager.h     |  1 +
+ units/user@.service.in |  2 +-
+ 4 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/main.c b/src/core/main.c
+index 0e2e5448bb..126a4bce8c 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -1925,6 +1925,8 @@ static int invoke_main_loop(
+                         LogTarget saved_log_target;
+                         int saved_log_level;
+ 
++                        manager_send_reloading(m);
++
+                         log_info("Reloading.");
+ 
+                         /* First, save any overridden log level/target, then parse the configuration file,
+@@ -1955,6 +1957,10 @@ static int invoke_main_loop(
+                 }
+ 
+                 case MANAGER_REEXECUTE:
++
++                        manager_send_reloading(m); /* From the perspective of the manager calling us this is
++                                                    * pretty much the same as a reload */
++
+                         r = prepare_reexecute(m, &arg_serialization, ret_fds, false);
+                         if (r < 0) {
+                                 *ret_error_message = "Failed to prepare for reexecution";
+@@ -1970,6 +1976,10 @@ static int invoke_main_loop(
+                         return objective;
+ 
+                 case MANAGER_SWITCH_ROOT:
++
++                        manager_send_reloading(m); /* From the perspective of the manager calling us this is
++                                                    * pretty much the same as a reload */
++
+                         manager_set_switching_root(m, true);
+ 
+                         if (!m->switch_root_init) {
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 6371810ce3..b34103d7d3 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -3641,6 +3641,18 @@ void manager_check_finished(Manager *m) {
+         manager_invalidate_startup_units(m);
+ }
+ 
++void manager_send_reloading(Manager *m) {
++        assert(m);
++
++        /* Let whoever invoked us know that we are now reloading */
++        (void) sd_notifyf(/* unset= */ false,
++                          "RELOADING=1\n"
++                          "MONOTONIC_USEC=" USEC_FMT "\n", now(CLOCK_MONOTONIC));
++
++        /* And ensure that we'll send READY=1 again as soon as we are ready again */
++        m->ready_sent = false;
++}
++
+ static bool generator_path_any(const char* const* paths) {
+         bool found = false;
+ 
+diff --git a/src/core/manager.h b/src/core/manager.h
+index 75c16d6e26..87e63c3b68 100644
+--- a/src/core/manager.h
++++ b/src/core/manager.h
+@@ -535,6 +535,7 @@ void manager_send_unit_plymouth(Manager *m, Unit *u);
+ bool manager_unit_inactive_or_pending(Manager *m, const char *name);
+ 
+ void manager_check_finished(Manager *m);
++void manager_send_reloading(Manager *m);
+ 
+ void disable_printk_ratelimit(void);
+ void manager_recheck_dbus(Manager *m);
+diff --git a/units/user@.service.in b/units/user@.service.in
+index efbd5dfbc8..2c99f50905 100644
+--- a/units/user@.service.in
++++ b/units/user@.service.in
+@@ -17,7 +17,7 @@ IgnoreOnIsolate=yes
+ [Service]
+ User=%i
+ PAMName=systemd-user
+-Type=notify
++Type=notify-reload
+ ExecStart={{ROOTLIBEXECDIR}}/systemd --user
+ Slice=user-%i.slice
+ KillMode=mixed

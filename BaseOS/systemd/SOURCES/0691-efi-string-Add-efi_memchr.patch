@@ -1,0 +1,93 @@
+From 9461c9b524c2f3bf19b86dbcda24f57acde67852 Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Tue, 31 Jan 2023 15:39:40 +0100
+Subject: [PATCH] efi-string: Add efi_memchr()
+
+(cherry picked from commit e71f0f63da87fb8043f665a142261bc393fe0216)
+
+Related: RHEL-16952
+---
+ src/boot/efi/efi-string.c      | 14 ++++++++++++++
+ src/boot/efi/efi-string.h      |  2 ++
+ src/boot/efi/test-efi-string.c | 13 +++++++++++++
+ 3 files changed, 29 insertions(+)
+
+diff --git a/src/boot/efi/efi-string.c b/src/boot/efi/efi-string.c
+index 6b84af69e6..60b5d0f712 100644
+--- a/src/boot/efi/efi-string.c
++++ b/src/boot/efi/efi-string.c
+@@ -886,16 +886,30 @@ char16_t *xvasprintf_status(EFI_STATUS status, const char *format, va_list ap) {
+ 
+ #if SD_BOOT
+ /* To provide the actual implementation for these we need to remove the redirection to the builtins. */
++#  undef memchr
+ #  undef memcmp
+ #  undef memcpy
+ #  undef memset
+ #else
+ /* And for userspace unit testing we need to give them an efi_ prefix. */
++#  define memchr efi_memchr
+ #  define memcmp efi_memcmp
+ #  define memcpy efi_memcpy
+ #  define memset efi_memset
+ #endif
+ 
++_used_ void *memchr(const void *p, int c, size_t n) {
++        if (!p || n == 0)
++                return NULL;
++
++        const uint8_t *q = p;
++        for (size_t i = 0; i < n; i++)
++                if (q[i] == (unsigned char) c)
++                        return (void *) (q + i);
++
++        return NULL;
++}
++
+ _used_ int memcmp(const void *p1, const void *p2, size_t n) {
+         const uint8_t *up1 = p1, *up2 = p2;
+         int r;
+diff --git a/src/boot/efi/efi-string.h b/src/boot/efi/efi-string.h
+index 477229bf60..3d035d7ead 100644
+--- a/src/boot/efi/efi-string.h
++++ b/src/boot/efi/efi-string.h
+@@ -142,6 +142,7 @@ _gnu_printf_(2, 0) _warn_unused_result_ char16_t *xvasprintf_status(EFI_STATUS s
+  * compiling with -ffreestanding. By referring to builtins, the compiler can check arguments and do
+  * optimizations again. Note that we still need to provide implementations as the compiler is free to not
+  * inline its own implementation and instead issue a library call. */
++#  define memchr __builtin_memchr
+ #  define memcmp __builtin_memcmp
+ #  define memcpy __builtin_memcpy
+ #  define memset __builtin_memset
+@@ -155,6 +156,7 @@ static inline void *mempcpy(void * restrict dest, const void * restrict src, siz
+ 
+ #else
+ /* For unit testing. */
++void *efi_memchr(const void *p, int c, size_t n);
+ int efi_memcmp(const void *p1, const void *p2, size_t n);
+ void *efi_memcpy(void * restrict dest, const void * restrict src, size_t n);
+ void *efi_memset(void *p, int c, size_t n);
+diff --git a/src/boot/efi/test-efi-string.c b/src/boot/efi/test-efi-string.c
+index be7f8f9b1c..d214b1536e 100644
+--- a/src/boot/efi/test-efi-string.c
++++ b/src/boot/efi/test-efi-string.c
+@@ -626,6 +626,19 @@ TEST(xvasprintf_status) {
+         s = mfree(s);
+ }
+ 
++TEST(efi_memchr) {
++        assert_se(streq8(efi_memchr("abcde", 'c', 5), "cde"));
++        assert_se(streq8(efi_memchr("abcde", 'c', 3), "cde"));
++        assert_se(streq8(efi_memchr("abcde", 'c', 2), NULL));
++        assert_se(streq8(efi_memchr("abcde", 'c', 7), "cde"));
++        assert_se(streq8(efi_memchr("abcde", 'q', 5), NULL));
++        assert_se(streq8(efi_memchr("abcde", 'q', 0), NULL));
++        /* Test that the character is interpreted as unsigned char. */
++        assert_se(streq8(efi_memchr("abcde", 'a', 6), efi_memchr("abcde", 'a' + 0x100, 6)));
++        assert_se(streq8(efi_memchr("abcde", 0, 6), ""));
++        assert_se(efi_memchr(NULL, 0, 0) == NULL);
++}
++
+ TEST(efi_memcmp) {
+         assert_se(efi_memcmp(NULL, NULL, 0) == 0);
+         assert_se(efi_memcmp(NULL, NULL, 1) == 0);

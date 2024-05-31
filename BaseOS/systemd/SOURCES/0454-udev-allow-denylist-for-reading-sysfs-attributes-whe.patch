@@ -1,0 +1,404 @@
+From 9cd7868bc7cb5bda25c0470a9b4e349d4f2004fe Mon Sep 17 00:00:00 2001
+From: Lukas Nykryn <lnykryn@redhat.com>
+Date: Fri, 8 Dec 2023 12:33:06 +0100
+Subject: [PATCH] udev: allow/denylist for reading sysfs attributes when
+ composing a NIC name
+
+Users can currently pick specific versions of NIC naming, but that
+does not guarantee that NIC names won't change after the kernel adds
+a new sysfs attribute.
+
+This patch allows for an allow/deny list of sysfs attributes
+that could be used when composing the name.
+
+These lists can be supplied as an hwdb entry in the form of
+/etc/udev/hwdb.d/50-net-naming-allowlist.hwdb
+net:naming:drvirtio_net
+  ID_NET_NAME_ALLOW=0
+  ID_NET_NAME_ALLOW_ACPI_INDEX=1
+  ID_NET_NAME_ALLOW_ADDR_ASSIGN_TYPE=1
+  ID_NET_NAME_ALLOW_ADDRESS=1
+  ID_NET_NAME_ALLOW_ARI_ENABLED=1
+  ID_NET_NAME_ALLOW_DEV_PORT=1
+  ID_NET_NAME_ALLOW_FUNCTION_ID=1
+  ID_NET_NAME_ALLOW_IFLINK=1
+  ID_NET_NAME_ALLOW_INDEX=1
+  ID_NET_NAME_ALLOW_LABEL=1
+  ID_NET_NAME_ALLOW_PHYS_PORT_NAME=1
+  ID_NET_NAME_ALLOW_TYPE=1
+
+(cherry picked from commit 3b2e7dc5a285edbbb1bf6aed2d88b889d801613f)
+
+Resolves: RHEL-1317
+---
+ man/systemd.net-naming-scheme.xml | 69 ++++++++++++++++++++++++++
+ rules.d/75-net-description.rules  |  2 +
+ src/shared/netif-naming-scheme.c  | 81 +++++++++++++++++++++++++++++++
+ src/shared/netif-naming-scheme.h  |  7 +++
+ src/udev/udev-builtin-net_id.c    | 34 ++++++-------
+ 5 files changed, 176 insertions(+), 17 deletions(-)
+
+diff --git a/man/systemd.net-naming-scheme.xml b/man/systemd.net-naming-scheme.xml
+index c6ab86906a..ec9f3da437 100644
+--- a/man/systemd.net-naming-scheme.xml
++++ b/man/systemd.net-naming-scheme.xml
+@@ -588,6 +588,45 @@
+     particular version of systemd).</para>
+   </refsect1>
+ 
++  <refsect1>
++    <title>Limiting the use of specific sysfs attributes</title>
++
++    <para>When creating names for network cards, some naming schemes use data from sysfs populated
++    by the kernel. This means that although a specific naming scheme in udev is picked,
++    the network card's name can still change when a new kernel version adds a new sysfs attribute.
++    For example if kernel starts setting the <constant>phys_port_name</constant>, udev will append the
++    "<constant>n</constant><replaceable>phys_port_name</replaceable>" suffix to the device name.</para>
++
++    <variablelist>
++      <varlistentry>
++        <term><varname>ID_NET_NAME_ALLOW=<replaceable>BOOL</replaceable></varname></term>
++
++        <listitem><para>This evironment value sets a fallback policy for reading a sysfs attribute.
++        If set to <constant>0</constant> udev will not read any sysfs attribute by default, unless it is
++        explicitly allowlisted, see below. If set to <constant>1</constant> udev can use any sysfs attribute
++        unless it is explicitly forbidden. The default value is <constant>1</constant>.</para>
++
++        </listitem>
++      </varlistentry>
++
++      <varlistentry>
++        <term><varname>ID_NET_NAME_ALLOW_<replaceable>sysfsattr</replaceable>=<replaceable>BOOL</replaceable></varname></term>
++
++        <listitem><para>This evironment value explicitly states if udev shall use the specified
++        <replaceable>sysfsattr</replaceable>, when composing the device name.</para>
++
++        </listitem>
++      </varlistentry>
++    </variablelist>
++
++    <para>With these options, users can set an allowlist or denylist for sysfs attributes. To create
++    an allowlist, the user needs to set <varname>ID_NET_NAME_ALLOW=0</varname> for the device and then list
++    the allowed attributes with the
++    <varname>ID_NET_NAME_ALLOW_<replaceable>sysfsattr</replaceable>=1</varname>
++    options. In case of a denylist, the user needs to provide the list of denied attributes with
++    the <varname>ID_NET_NAME_ALLOW_<replaceable>sysfsattr</replaceable>=0</varname> options.</para>
++  </refsect1>
++
+   <refsect1>
+     <title>Examples</title>
+ 
+@@ -674,6 +713,36 @@ ID_NET_NAME_PATH=enp0s29u1u2</programlisting>
+ ID_NET_NAME_MAC=enx026d3c00000a
+ ID_NET_NAME_PATH=encf5f0</programlisting>
+     </example>
++
++    <example>
++      <title>Set an allowlist for reading sysfs attributes for network card naming</title>
++
++      <programlisting><filename>/etc/udev/hwdb.d/50-net-naming-allowlist.hwdb</filename>
++net:naming:drvirtio_net:*
++  ID_NET_NAME_ALLOW=0
++  ID_NET_NAME_ALLOW_ACPI_INDEX=1
++  ID_NET_NAME_ALLOW_ADDR_ASSIGN_TYPE=1
++  ID_NET_NAME_ALLOW_ADDRESS=1
++  ID_NET_NAME_ALLOW_ARI_ENABLED=1
++  ID_NET_NAME_ALLOW_DEV_PORT=1
++  ID_NET_NAME_ALLOW_FUNCTION_ID=1
++  ID_NET_NAME_ALLOW_IFLINK=1
++  ID_NET_NAME_ALLOW_INDEX=1
++  ID_NET_NAME_ALLOW_LABEL=1
++  ID_NET_NAME_ALLOW_PHYS_PORT_NAME=1
++  ID_NET_NAME_ALLOW_TYPE=1</programlisting>
++    </example>
++
++    <example>
++      <title>Set a denylist so that specified sysfs attribute are ignored</title>
++
++      <programlisting><filename>/etc/udev/hwdb.d/50-net-naming-denylist.hwdb</filename>
++net:naming:drvirtio_net:*
++  ID_NET_NAME_ALLOW=1
++  ID_NET_NAME_ALLOW_DEV_PORT=0
++  ID_NET_NAME_ALLOW_PHYS_PORT_NAME=0
++      </programlisting>
++    </example>
+   </refsect1>
+ 
+   <refsect1>
+diff --git a/rules.d/75-net-description.rules b/rules.d/75-net-description.rules
+index 7e62f8b26b..5ba70a6545 100644
+--- a/rules.d/75-net-description.rules
++++ b/rules.d/75-net-description.rules
+@@ -3,6 +3,8 @@
+ ACTION=="remove", GOTO="net_end"
+ SUBSYSTEM!="net", GOTO="net_end"
+ 
++IMPORT{builtin}="hwdb 'net:naming:dr$env{ID_NET_DRIVER}:'"
++
+ IMPORT{builtin}="net_id"
+ 
+ SUBSYSTEMS=="usb", IMPORT{builtin}="usb_id", IMPORT{builtin}="hwdb --subsystem=usb"
+diff --git a/src/shared/netif-naming-scheme.c b/src/shared/netif-naming-scheme.c
+index 9cfa5ca8e6..e73c265371 100644
+--- a/src/shared/netif-naming-scheme.c
++++ b/src/shared/netif-naming-scheme.c
+@@ -1,6 +1,9 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
++#include "sd-device.h"
++
+ #include "alloc-util.h"
++#include "device-private.h"
+ #include "netif-naming-scheme.h"
+ #include "proc-cmdline.h"
+ #include "string-util.h"
+@@ -119,3 +122,81 @@ static const char* const alternative_names_policy_table[_NAMEPOLICY_MAX] = {
+ };
+ 
+ DEFINE_STRING_TABLE_LOOKUP(alternative_names_policy, NamePolicy);
++
++static int naming_sysattr_allowed_by_default(sd_device *dev) {
++        int r;
++
++        assert(dev);
++
++        r = device_get_property_bool(dev, "ID_NET_NAME_ALLOW");
++        if (r == -ENOENT)
++                return true;
++
++        return r;
++}
++
++static int naming_sysattr_allowed(sd_device *dev, const char *sysattr) {
++        char *sysattr_property;
++        int r;
++
++        assert(dev);
++        assert(sysattr);
++
++        sysattr_property = strjoina("ID_NET_NAME_ALLOW_", sysattr);
++        ascii_strupper(sysattr_property);
++
++        r = device_get_property_bool(dev, sysattr_property);
++        if (r == -ENOENT)
++                /* If ID_NET_NAME_ALLOW is not set or set to 1 default is to allow */
++                return naming_sysattr_allowed_by_default(dev);
++
++        return r;
++}
++
++int device_get_sysattr_int_filtered(sd_device *device, const char *sysattr, int *ret_value) {
++        int r;
++
++        r = naming_sysattr_allowed(device, sysattr);
++        if (r < 0)
++                return r;
++        if (r == 0)
++                return -ENOENT;
++
++        return device_get_sysattr_int(device, sysattr, ret_value);
++}
++
++int device_get_sysattr_unsigned_filtered(sd_device *device, const char *sysattr, unsigned *ret_value) {
++        int r;
++
++        r = naming_sysattr_allowed(device, sysattr);
++        if (r < 0)
++                return r;
++        if (r == 0)
++                return -ENOENT;
++
++        return device_get_sysattr_unsigned(device, sysattr, ret_value);
++}
++
++int device_get_sysattr_bool_filtered(sd_device *device, const char *sysattr) {
++        int r;
++
++        r = naming_sysattr_allowed(device, sysattr);
++        if (r < 0)
++                return r;
++        if (r == 0)
++                return -ENOENT;
++
++        return device_get_sysattr_bool(device, sysattr);
++}
++
++int device_get_sysattr_value_filtered(sd_device *device, const char *sysattr, const char **ret_value) {
++        int r;
++
++        r = naming_sysattr_allowed(device, sysattr);
++        if (r < 0)
++                return r;
++        if (r == 0)
++                return -ENOENT;
++
++        return sd_device_get_sysattr_value(device, sysattr, ret_value);
++}
+diff --git a/src/shared/netif-naming-scheme.h b/src/shared/netif-naming-scheme.h
+index ed45536f65..3baa7d5e72 100644
+--- a/src/shared/netif-naming-scheme.h
++++ b/src/shared/netif-naming-scheme.h
+@@ -3,6 +3,8 @@
+ 
+ #include <stdbool.h>
+ 
++#include "sd-device.h"
++
+ #include "macro.h"
+ 
+ /* So here's the deal: net_id is supposed to be an exercise in providing stable names for network devices. However, we
+@@ -103,3 +105,8 @@ NamePolicy name_policy_from_string(const char *p) _pure_;
+ 
+ const char *alternative_names_policy_to_string(NamePolicy p) _const_;
+ NamePolicy alternative_names_policy_from_string(const char *p) _pure_;
++
++int device_get_sysattr_int_filtered(sd_device *device, const char *sysattr, int *ret_value);
++int device_get_sysattr_unsigned_filtered(sd_device *device, const char *sysattr, unsigned *ret_value);
++int device_get_sysattr_bool_filtered(sd_device *device, const char *sysattr);
++int device_get_sysattr_value_filtered(sd_device *device, const char *sysattr, const char **ret_value);
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index cecf854b98..c20df41c37 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -177,11 +177,11 @@ static int dev_pci_onboard(sd_device *dev, const LinkInfo *info, NetNames *names
+         assert(names);
+ 
+         /* ACPI _DSM — device specific method for naming a PCI or PCI Express device */
+-        if (sd_device_get_sysattr_value(names->pcidev, "acpi_index", &attr) >= 0)
++        if (device_get_sysattr_value_filtered(names->pcidev, "acpi_index", &attr) >= 0)
+                 log_device_debug(names->pcidev, "acpi_index=%s", attr);
+         else {
+                 /* SMBIOS type 41 — Onboard Devices Extended Information */
+-                r = sd_device_get_sysattr_value(names->pcidev, "index", &attr);
++                r = device_get_sysattr_value_filtered(names->pcidev, "index", &attr);
+                 if (r < 0)
+                         return r;
+                 log_device_debug(names->pcidev, "index=%s", attr);
+@@ -199,7 +199,7 @@ static int dev_pci_onboard(sd_device *dev, const LinkInfo *info, NetNames *names
+                                               "Not a valid onboard index: %lu", idx);
+ 
+         /* kernel provided port index for multiple ports on a single PCI function */
+-        if (sd_device_get_sysattr_value(dev, "dev_port", &attr) >= 0) {
++        if (device_get_sysattr_value_filtered(dev, "dev_port", &attr) >= 0) {
+                 r = safe_atolu_full(attr, 10, &dev_port);
+                 if (r < 0)
+                         log_device_debug_errno(dev, r, "Failed to parse dev_port, ignoring: %m");
+@@ -223,7 +223,7 @@ static int dev_pci_onboard(sd_device *dev, const LinkInfo *info, NetNames *names
+                          idx, strempty(info->phys_port_name), dev_port,
+                          special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), empty_to_na(names->pci_onboard));
+ 
+-        if (sd_device_get_sysattr_value(names->pcidev, "label", &names->pci_onboard_label) >= 0)
++        if (device_get_sysattr_value_filtered(names->pcidev, "label", &names->pci_onboard_label) >= 0)
+                 log_device_debug(dev, "Onboard label from PCI device: %s", names->pci_onboard_label);
+         else
+                 names->pci_onboard_label = NULL;
+@@ -260,7 +260,7 @@ static int is_pci_multifunction(sd_device *dev) {
+ static bool is_pci_ari_enabled(sd_device *dev) {
+         const char *a;
+ 
+-        if (sd_device_get_sysattr_value(dev, "ari_enabled", &a) < 0)
++        if (device_get_sysattr_value_filtered(dev, "ari_enabled", &a) < 0)
+                 return false;
+ 
+         return streq(a, "1");
+@@ -269,7 +269,7 @@ static bool is_pci_ari_enabled(sd_device *dev) {
+ static bool is_pci_bridge(sd_device *dev) {
+         const char *v, *p;
+ 
+-        if (sd_device_get_sysattr_value(dev, "modalias", &v) < 0)
++        if (device_get_sysattr_value_filtered(dev, "modalias", &v) < 0)
+                 return false;
+ 
+         if (!startswith(v, "pci:"))
+@@ -309,7 +309,7 @@ static int parse_hotplug_slot_from_function_id(sd_device *dev, int slots_dirfd,
+         if (!naming_scheme_has(NAMING_SLOT_FUNCTION_ID))
+                 return 0;
+ 
+-        if (sd_device_get_sysattr_value(dev, "function_id", &attr) < 0)
++        if (device_get_sysattr_value_filtered(dev, "function_id", &attr) < 0)
+                 return 0;
+ 
+         r = safe_atou64(attr, &function_id);
+@@ -366,7 +366,7 @@ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+                 func += slot * 8;
+ 
+         /* kernel provided port index for multiple ports on a single PCI function */
+-        if (sd_device_get_sysattr_value(dev, "dev_port", &attr) >= 0) {
++        if (device_get_sysattr_value_filtered(dev, "dev_port", &attr) >= 0) {
+                 log_device_debug(dev, "dev_port=%s", attr);
+ 
+                 r = safe_atolu_full(attr, 10, &dev_port);
+@@ -378,7 +378,7 @@ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+                  * which thus stays initialized as 0. */
+                 if (dev_port == 0 &&
+                     info->iftype == ARPHRD_INFINIBAND &&
+-                    sd_device_get_sysattr_value(dev, "dev_id", &attr) >= 0) {
++                    device_get_sysattr_value_filtered(dev, "dev_id", &attr) >= 0) {
+                         log_device_debug(dev, "dev_id=%s", attr);
+ 
+                         r = safe_atolu_full(attr, 10, &dev_port);
+@@ -449,7 +449,7 @@ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+                         if (!path)
+                                 return -ENOMEM;
+ 
+-                        if (sd_device_get_sysattr_value(pci, path, &address) < 0)
++                        if (device_get_sysattr_value_filtered(pci, path, &address) < 0)
+                                 continue;
+ 
+                         /* match slot address with device by stripping the function */
+@@ -674,7 +674,7 @@ static int dev_devicetree_onboard(sd_device *dev, NetNames *names) {
+                 if (!alias_index)
+                         continue;
+ 
+-                if (sd_device_get_sysattr_value(aliases_dev, alias, &alias_path) < 0)
++                if (device_get_sysattr_value_filtered(aliases_dev, alias, &alias_path) < 0)
+                         continue;
+ 
+                 if (!path_equal(ofnode_path, alias_path))
+@@ -693,7 +693,7 @@ static int dev_devicetree_onboard(sd_device *dev, NetNames *names) {
+                 }
+ 
+                 /* ...but make sure we don't have an alias conflict */
+-                if (i == 0 && sd_device_get_sysattr_value(aliases_dev, conflict, NULL) >= 0)
++                if (i == 0 && device_get_sysattr_value_filtered(aliases_dev, conflict, NULL) >= 0)
+                         return log_device_debug_errno(dev, SYNTHETIC_ERRNO(EEXIST),
+                                         "Ethernet alias conflict: ethernet and ethernet0 both exist");
+ 
+@@ -944,7 +944,7 @@ static int names_mac(sd_device *dev, const LinkInfo *info) {
+                                               info->hw_addr.length);
+ 
+         /* check for NET_ADDR_PERM, skip random MAC addresses */
+-        r = sd_device_get_sysattr_value(dev, "addr_assign_type", &s);
++        r = device_get_sysattr_value_filtered(dev, "addr_assign_type", &s);
+         if (r < 0)
+                 return log_device_debug_errno(dev, r, "Failed to read addr_assign_type: %m");
+         r = safe_atou(s, &i);
+@@ -1080,11 +1080,11 @@ static int get_link_info(sd_device *dev, LinkInfo *info) {
+         if (r < 0)
+                 return r;
+ 
+-        r = device_get_sysattr_int(dev, "iflink", &info->iflink);
++        r = device_get_sysattr_int_filtered(dev, "iflink", &info->iflink);
+         if (r < 0)
+                 return r;
+ 
+-        r = device_get_sysattr_int(dev, "type", &info->iftype);
++        r = device_get_sysattr_int_filtered(dev, "type", &info->iftype);
+         if (r < 0)
+                 return r;
+ 
+@@ -1092,12 +1092,12 @@ static int get_link_info(sd_device *dev, LinkInfo *info) {
+         if (r < 0 && r != -ENOENT)
+                 return r;
+ 
+-        r = sd_device_get_sysattr_value(dev, "phys_port_name", &info->phys_port_name);
++        r = device_get_sysattr_value_filtered(dev, "phys_port_name", &info->phys_port_name);
+         if (r >= 0)
+                 /* Check if phys_port_name indicates virtual device representor */
+                 (void) sscanf(info->phys_port_name, "pf%*uvf%d", &info->vf_representor_id);
+ 
+-        r = sd_device_get_sysattr_value(dev, "address", &s);
++        r = device_get_sysattr_value_filtered(dev, "address", &s);
+         if (r < 0 && r != -ENOENT)
+                 return r;
+         if (r >= 0) {

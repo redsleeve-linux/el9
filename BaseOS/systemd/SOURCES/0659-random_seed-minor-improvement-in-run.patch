@@ -1,0 +1,34 @@
+From 20eeade12a2e914d9b5451dbb1f8807cd6719eac Mon Sep 17 00:00:00 2001
+From: Franck Bui <fbui@suse.com>
+Date: Thu, 20 Oct 2022 15:03:20 +0200
+Subject: [PATCH] random_seed: minor improvement in run()
+
+(cherry picked from commit 3f6fbfe6f1ae62b080c70dad6de5a65108e3d538)
+
+Related: RHEL-16952
+---
+ src/random-seed/random-seed.c | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/src/random-seed/random-seed.c b/src/random-seed/random-seed.c
+index 991e4b8ddd..05fb5bb157 100644
+--- a/src/random-seed/random-seed.c
++++ b/src/random-seed/random-seed.c
+@@ -410,12 +410,12 @@ static int run(int argc, char *argv[]) {
+                         seed_fd = open(RANDOM_SEED, O_RDONLY|O_CLOEXEC|O_NOCTTY);
+                         if (seed_fd < 0) {
+                                 bool missing = errno == ENOENT;
++                                int level = missing ? LOG_DEBUG : LOG_ERR;
+ 
+-                                log_full_errno(missing ? LOG_DEBUG : LOG_ERR,
+-                                               open_rw_error, "Failed to open " RANDOM_SEED " for writing: %m");
+-                                r = log_full_errno(missing ? LOG_DEBUG : LOG_ERR,
+-                                                   errno, "Failed to open " RANDOM_SEED " for reading: %m");
+-                                return missing ? 0 : r;
++                                log_full_errno(level, open_rw_error, "Failed to open " RANDOM_SEED " for writing: %m");
++                                log_full_errno(level, errno, "Failed to open " RANDOM_SEED " for reading: %m");
++
++                                return missing ? 0 : -errno;
+                         }
+                 } else
+                         write_seed_file = true;

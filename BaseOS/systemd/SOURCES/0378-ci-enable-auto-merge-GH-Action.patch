@@ -1,0 +1,84 @@
+From 34adeef90a0a8cc1210742e5623968cbb39222eb Mon Sep 17 00:00:00 2001
+From: Jan Macku <jamacku@redhat.com>
+Date: Fri, 3 Nov 2023 12:32:18 +0100
+Subject: [PATCH] ci: enable auto-merge GH Action
+
+rhel-only
+
+Related: RHEL-1086
+---
+ .github/auto-merge.yml                        |  4 ++++
+ .../source-git-automation-on-demand.yml       | 14 ++++++++++++
+ .github/workflows/source-git-automation.yml   | 22 +++++++++++++++++++
+ 3 files changed, 40 insertions(+)
+ create mode 100644 .github/auto-merge.yml
+
+diff --git a/.github/auto-merge.yml b/.github/auto-merge.yml
+new file mode 100644
+index 0000000000..35c2539295
+--- /dev/null
++++ b/.github/auto-merge.yml
+@@ -0,0 +1,4 @@
++labels:
++  dont-merge: dont-merge
++  manual-merge: pr/needs-manual-merge
++target-branch': ['main']
+diff --git a/.github/workflows/source-git-automation-on-demand.yml b/.github/workflows/source-git-automation-on-demand.yml
+index 2dd6af3113..2c506f2b3e 100644
+--- a/.github/workflows/source-git-automation-on-demand.yml
++++ b/.github/workflows/source-git-automation-on-demand.yml
+@@ -60,6 +60,7 @@ jobs:
+         pr-number: ${{ inputs.pr-number == 0 && fromJSON(needs.gather-pull-requests.outputs.pr-numbers) || fromJSON(needs.gather-pull-requests.outputs.pr-numbers-manual) }}
+ 
+     permissions:
++      contents: write
+       statuses: write
+       checks: write
+       pull-requests: write
+@@ -104,3 +105,16 @@ jobs:
+         with:
+           pr-metadata: ${{ steps.metadata.outputs.metadata }}
+           token: ${{ secrets.GITHUB_TOKEN }}
++
++      - id: auto-merge
++        name: Auto Merge
++        uses: redhat-plumbers-in-action/auto-merge@v1
++        with:
++          pr-metadata: ${{ steps.metadata.outputs.metadata }}
++          tracker: ${{ fromJSON(steps.commit-linter.outputs.validated-pr-metadata).validation.tracker.id }}
++          tracker-type: ${{ fromJSON(steps.commit-linter.outputs.validated-pr-metadata).validation.tracker.type }}
++          bugzilla-instance: https://bugzilla.redhat.com
++          bugzilla-api-token: ${{ secrets.BUGZILLA_API_TOKEN }}
++          jira-instance: https://issues.redhat.com
++          jira-api-token: ${{ secrets.JIRA_API_TOKEN }}
++          token: ${{ secrets.GITHUB_TOKEN }}
+diff --git a/.github/workflows/source-git-automation.yml b/.github/workflows/source-git-automation.yml
+index 214e72de6f..17135b590f 100644
+--- a/.github/workflows/source-git-automation.yml
++++ b/.github/workflows/source-git-automation.yml
+@@ -84,3 +84,25 @@ jobs:
+         with:
+           pr-metadata: ${{ needs.download-metadata.outputs.pr-metadata }}
+           token: ${{ secrets.GITHUB_TOKEN }}
++
++  auto-merge:
++    needs: [ download-metadata, commit-linter, tracker-validator, pull-request-validator ]
++    runs-on: ubuntu-latest
++
++    permissions:
++      contents: write
++      checks: write
++      pull-requests: write
++
++    steps:
++      - name: Auto Merge
++        uses: redhat-plumbers-in-action/auto-merge@v1
++        with:
++          pr-metadata: ${{ needs.download-metadata.outputs.pr-metadata }}
++          tracker: ${{ fromJSON(needs.commit-linter.outputs.validated-pr-metadata).validation.tracker.id }}
++          tracker-type: ${{ fromJSON(needs.commit-linter.outputs.validated-pr-metadata).validation.tracker.type }}
++          bugzilla-instance: https://bugzilla.redhat.com
++          bugzilla-api-token: ${{ secrets.BUGZILLA_API_TOKEN }}
++          jira-instance: https://issues.redhat.com
++          jira-api-token: ${{ secrets.JIRA_API_TOKEN }}
++          token: ${{ secrets.GITHUB_TOKEN }}

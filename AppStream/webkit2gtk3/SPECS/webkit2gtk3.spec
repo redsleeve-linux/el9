@@ -11,8 +11,8 @@
 %endif
 
 Name:           webkit2gtk3
-Version:        2.40.5
-Release:        1%{?dist}.1.redsleeve
+Version:        2.42.5
+Release:        1%{?dist}
 Summary:        GTK Web content engine library
 
 License:        LGPLv2
@@ -24,8 +24,8 @@ Source1:        https://webkitgtk.org/releases/webkitgtk-%{version}.tar.xz.asc
 # $ gpg --export --export-options export-minimal D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3 5AA3BC334FD7E3369E7C77B291C559DBE4C9123B > webkitgtk-keys.gpg
 Source2:        webkitgtk-keys.gpg
 
-Patch:          CVE-2023-42917.patch
-Patch100:	webkitgtk-arm-ANGLE-serial.patch
+# https://bugs.webkit.org/show_bug.cgi?id=268739
+Patch:          i686-build.patch
 
 BuildRequires:  bison
 BuildRequires:  bubblewrap
@@ -54,12 +54,11 @@ BuildRequires:  pkgconfig(atspi-2)
 BuildRequires:  pkgconfig(cairo)
 BuildRequires:  pkgconfig(egl)
 BuildRequires:  pkgconfig(enchant-2)
+BuildRequires:  pkgconfig(epoxy)
 BuildRequires:  pkgconfig(fontconfig)
 BuildRequires:  pkgconfig(freetype2)
 BuildRequires:  pkgconfig(gbm)
-BuildRequires:  pkgconfig(gl)
 BuildRequires:  pkgconfig(glib-2.0)
-BuildRequires:  pkgconfig(glesv2)
 BuildRequires:  pkgconfig(gobject-introspection-1.0)
 BuildRequires:  pkgconfig(gstreamer-1.0)
 BuildRequires:  pkgconfig(gstreamer-plugins-bad-1.0)
@@ -99,6 +98,9 @@ BuildRequires:  pkgconfig(xt)
 # These are hard requirements of WebKit's bubblewrap sandbox.
 Requires:       bubblewrap
 Requires:       xdg-dbus-proxy
+
+# libepoxy will crash when WebKit tries using GLES2 if it's not installed.
+Requires:       libGLES
 
 # If Geoclue is not running, the geolocation API will not work.
 Recommends:     geoclue2
@@ -217,6 +219,7 @@ rm -rf Source/ThirdParty/qunit/
   -DUSE_AVIF=OFF \
   -DENABLE_DOCUMENTATION=OFF \
   -DUSE_GSTREAMER_TRANSCODER=OFF \
+  -DUSE_JPEGXL=OFF \
 %if !0%{?with_gamepad}
   -DENABLE_GAMEPAD=OFF \
 %endif
@@ -294,12 +297,30 @@ export NINJA_STATUS="[%f/%t][%e] "
 %{_datadir}/gir-1.0/JavaScriptCore-4.0.gir
 
 %changelog
-* Wed Dec 27 2023 Jacco Ligthart <jacco@redsleeve.org> - 2.40.5-1.1.redsleeve
-- Add a patch to build on armv6
+* Mon Feb 05 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.42.5-1
+- Update to 2.42.5
+  Resolves: RHEL-3960
 
-* Tue Dec 05 2023 Michael Catanzaro <mcatanzaro@redhat.com> - 2.40.5-1.1
-- Add patch for CVE-2023-42917
-  Resolves: RHEL-18173
+* Fri Dec 15 2023 Michael Catanzaro <mcatanzaro@redhat.com> - 2.42.4-1
+- Update to 2.42.4
+  Resolves: RHEL-3960
+  Resolves: RHEL-19366
+
+* Tue Dec 05 2023 Michael Catanzaro <mcatanzaro@redhat.com> - 2.42.3-1
+- Update to 2.42.3
+  Resolves: RHEL-3960
+
+* Fri Nov 10 2023 Michael Catanzaro <mcatanzaro@redhat.com> - 2.42.2-1
+- Update to 2.42.2
+  Resolves: RHEL-3960
+
+* Wed Sep 27 2023 Michael Catanzaro <mcatanzaro@redhat.com> - 2.42.1-1
+- Update to 2.42.1
+  Resolves: RHEL-3960
+
+* Mon Sep 18 2023 Michael Catanzaro <mcatanzaro@redhat.com> - 2.42.0-1
+- Upgrade to 2.42.0
+  Resolves: RHEL-3960
 
 * Tue Aug 01 2023 Michael Catanzaro <mcatanzaro@redhat.com> - 2.40.5-1
 - Update to 2.40.5

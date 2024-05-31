@@ -1,0 +1,282 @@
+From f4a9a464838c75f76731c5e6800a35cc4ec62cad Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 17 Oct 2022 14:50:56 +0200
+Subject: [PATCH] tpm2: add common helper for checking if we are running on UKI
+ with TPM measurements
+
+Let's introduce a common implementation of a function that checks
+whether we are booted on a kernel with systemd-stub that has TPM PCR
+measurements enabled. Do our own userspace measurements only if we
+detect that.
+
+PCRs are scarce and most likely there are projects which already make
+use of them in other ways. Hence, instead of blindly stepping into their
+territory let's conditionalize things so that people have to explicitly
+buy into our PCR assignments before we start measuring things into them.
+Specifically bind everything to an UKI that reported measurements.
+
+This was previously already implemented in systemd-pcrphase, but with
+this change we expand this to all tools that process PCR measurement
+settings.
+
+The env var to override the check is renamed to SYSTEMD_FORCE_MEASURE,
+to make it more generic (since we'll use it at multiple places now).
+This is not a compat break, since the original env var for that was not
+included in any stable release yet.
+
+(cherry picked from commit 6c51b49ce0892ff923233a6031add4877100f5b0)
+
+Related: RHEL-16182
+---
+ docs/ENVIRONMENT.md                         |  9 +++--
+ src/boot/pcrphase.c                         | 38 +++++---------------
+ src/cryptsetup/cryptsetup.c                 |  9 +++++
+ src/fstab-generator/fstab-generator.c       | 12 +++++--
+ src/gpt-auto-generator/gpt-auto-generator.c | 10 +++---
+ src/shared/efi-loader.c                     | 39 +++++++++++++++++++++
+ src/shared/efi-loader.h                     |  2 ++
+ 7 files changed, 80 insertions(+), 39 deletions(-)
+
+diff --git a/docs/ENVIRONMENT.md b/docs/ENVIRONMENT.md
+index 7b2dd13673..51b1e851ff 100644
+--- a/docs/ENVIRONMENT.md
++++ b/docs/ENVIRONMENT.md
+@@ -484,7 +484,10 @@ SYSTEMD_HOME_DEBUG_SUFFIX=foo \
+   specified algorithm takes an effect immediately, you need to explicitly run
+   `journalctl --rotate`.
+ 
+-`systemd-pcrphase`:
++`systemd-pcrphase`, `systemd-cryptsetup`:
+ 
+-* `$SYSTEMD_PCRPHASE_STUB_VERIFY` – Takes a boolean. If false the requested
+-  measurement is done even if no EFI stub usage was reported via EFI variables.
++* `$SYSTEMD_FORCE_MEASURE=1` — If set, force measuring of resources (which are
++  marked for measurement) even if not booted on a kernel equipped with
++  systemd-stub. Normally, requested measurement of resources is conditionalized
++  on kernels that have booted with `systemd-stub`. With this environment
++  variable the test for that my be bypassed, for testing purposes.
+diff --git a/src/boot/pcrphase.c b/src/boot/pcrphase.c
+index 12629b2be3..fda9a8420d 100644
+--- a/src/boot/pcrphase.c
++++ b/src/boot/pcrphase.c
+@@ -8,15 +8,14 @@
+ #include "blkid-util.h"
+ #include "blockdev-util.h"
+ #include "chase-symlinks.h"
++#include "efi-loader.h"
+ #include "efivars.h"
+-#include "env-util.h"
+ #include "escape.h"
+ #include "fd-util.h"
+ #include "main-func.h"
+ #include "mountpoint-util.h"
+ #include "openssl-util.h"
+ #include "parse-argument.h"
+-#include "parse-util.h"
+ #include "pretty-print.h"
+ #include "tpm-pcr.h"
+ #include "tpm2-util.h"
+@@ -240,9 +239,9 @@ static int get_file_system_word(
+ }
+ 
+ static int run(int argc, char *argv[]) {
+-        _cleanup_free_ char *joined = NULL, *pcr_string = NULL, *word = NULL;
+         _cleanup_(tpm2_context_destroy) struct tpm2_context c = {};
+-        unsigned target_pcr_nr, efi_pcr_nr;
++        _cleanup_free_ char *joined = NULL, *word = NULL;
++        unsigned target_pcr_nr;
+         size_t length;
+         int r;
+ 
+@@ -333,32 +332,13 @@ static int run(int argc, char *argv[]) {
+ 
+         length = strlen(word);
+ 
+-        int b = getenv_bool("SYSTEMD_PCRPHASE_STUB_VERIFY");
+-        if (b < 0 && b != -ENXIO)
+-                log_warning_errno(b, "Unable to parse $SYSTEMD_PCRPHASE_STUB_VERIFY value, ignoring.");
+-
+         /* Skip logic if sd-stub is not used, after all PCR 11 might have a very different purpose then. */
+-        r = efi_get_variable_string(EFI_LOADER_VARIABLE(StubPcrKernelImage), &pcr_string);
+-        if (r == -ENOENT) {
+-                if (b != 0) {
+-                        log_info("Kernel stub did not measure kernel image into PCR %u, skipping measurement.", TPM_PCR_INDEX_KERNEL_IMAGE);
+-                        return EXIT_SUCCESS;
+-                } else
+-                        log_notice("Kernel stub did not measure kernel image into PCR %u, but told to measure anyway, hence proceeding.", TPM_PCR_INDEX_KERNEL_IMAGE);
+-        } else if (r < 0)
+-                return log_error_errno(r, "Failed to read StubPcrKernelImage EFI variable: %m");
+-        else {
+-                /* Let's validate that the stub announced PCR 11 as we expected. */
+-                r = safe_atou(pcr_string, &efi_pcr_nr);
+-                if (r < 0)
+-                        return log_error_errno(r, "Failed to parse StubPcrKernelImage EFI variable: %s", pcr_string);
+-                if (efi_pcr_nr != TPM_PCR_INDEX_KERNEL_IMAGE) {
+-                        if (b != 0)
+-                                return log_error_errno(SYNTHETIC_ERRNO(EREMOTE), "Kernel stub measured kernel image into PCR %u, which is different than expected %u.", efi_pcr_nr, TPM_PCR_INDEX_KERNEL_IMAGE);
+-                        else
+-                                log_notice("Kernel stub measured kernel image into PCR %u, which is different than expected %u, but told to measure anyway, hence proceeding.", efi_pcr_nr, TPM_PCR_INDEX_KERNEL_IMAGE);
+-                } else
+-                        log_debug("Kernel stub reported same PCR %u as we want to use, proceeding.", TPM_PCR_INDEX_KERNEL_IMAGE);
++        r = efi_stub_measured();
++        if (r < 0)
++                return log_error_errno(r, "Failed to detect if we are running on a kernel image with TPM measurement enabled: %m");
++        if (r == 0) {
++                log_info("Kernel stub did not measure kernel image into PCR %u, skipping userspace measurement, too.", TPM_PCR_INDEX_KERNEL_IMAGE);
++                return EXIT_SUCCESS;
+         }
+ 
+         r = dlopen_tpm2();
+diff --git a/src/cryptsetup/cryptsetup.c b/src/cryptsetup/cryptsetup.c
+index 20862e926d..4d587fed1e 100644
+--- a/src/cryptsetup/cryptsetup.c
++++ b/src/cryptsetup/cryptsetup.c
+@@ -19,6 +19,7 @@
+ #include "cryptsetup-util.h"
+ #include "device-util.h"
+ #include "efi-api.h"
++#include "efi-loader.h"
+ #include "env-util.h"
+ #include "escape.h"
+ #include "fileio.h"
+@@ -827,6 +828,14 @@ static int measure_volume_key(
+                 return 0;
+         }
+ 
++        r = efi_stub_measured();
++        if (r < 0)
++                return log_warning_errno(r, "Failed to detect if we are running on a kernel image with TPM measurement enabled: %m");
++        if (r == 0) {
++                log_debug("Kernel stub did not measure kernel image into the expected PCR, skipping userspace measurement, too.");
++                return 0;
++        }
++
+ #if HAVE_TPM2
+         r = dlopen_tpm2();
+         if (r < 0)
+diff --git a/src/fstab-generator/fstab-generator.c b/src/fstab-generator/fstab-generator.c
+index c4915a37d3..b9606a5341 100644
+--- a/src/fstab-generator/fstab-generator.c
++++ b/src/fstab-generator/fstab-generator.c
+@@ -8,6 +8,7 @@
+ #include "bus-error.h"
+ #include "bus-locator.h"
+ #include "chase-symlinks.h"
++#include "efi-loader.h"
+ #include "env-util.h"
+ #include "fd-util.h"
+ #include "fileio.h"
+@@ -646,9 +647,16 @@ static int add_mount(
+         }
+ 
+         if (flags & MOUNT_PCRFS) {
+-                r = generator_hook_up_pcrfs(dest, where, target_unit);
++                r = efi_stub_measured();
+                 if (r < 0)
+-                        return r;
++                        log_warning_errno(r, "Failed to detect if we are running on a kernel image with TPM measurement enabled, assuming not: %m");
++                else if (r == 0)
++                        log_debug("Kernel stub did not measure kernel image into PCR, skipping userspace measurement, too.");
++                else {
++                        r = generator_hook_up_pcrfs(dest, where, target_unit);
++                        if (r < 0)
++                                return r;
++                }
+         }
+ 
+         if (!FLAGS_SET(flags, MOUNT_AUTOMOUNT)) {
+diff --git a/src/gpt-auto-generator/gpt-auto-generator.c b/src/gpt-auto-generator/gpt-auto-generator.c
+index 2620a12f03..27139a624e 100644
+--- a/src/gpt-auto-generator/gpt-auto-generator.c
++++ b/src/gpt-auto-generator/gpt-auto-generator.c
+@@ -97,11 +97,11 @@ static int add_cryptsetup(
+                  * assignment, under the assumption that people who are fine to use sd-stub with its PCR
+                  * assignments are also OK with our PCR 15 use here. */
+ 
+-                r = efi_get_variable(EFI_LOADER_VARIABLE(StubPcrKernelImage), NULL, NULL, NULL); /* we don't actually care which PCR the UKI used for itself */
+-                if (r == -ENOENT)
+-                        log_debug_errno(r, "Will not measure volume key of volume '%s', because not booted via systemd-stub with measurements enabled.", id);
+-                else if (r < 0)
+-                        log_debug_errno(r, "Failed to determine whether booted via systemd-stub with measurements enabled, ignoring: %m");
++                r = efi_stub_measured();
++                if (r < 0)
++                        log_warning_errno(r, "Failed to determine whether booted via systemd-stub with measurements enabled, ignoring: %m");
++                else if (r == 0)
++                        log_debug("Will not measure volume key of volume '%s', because not booted via systemd-stub with measurements enabled.", id);
+                 else if (!strextend_with_separator(&options, ",", "tpm2-measure-pcr=yes"))
+                         return log_oom();
+         }
+diff --git a/src/shared/efi-loader.c b/src/shared/efi-loader.c
+index 1340412cda..621fa082ba 100644
+--- a/src/shared/efi-loader.c
++++ b/src/shared/efi-loader.c
+@@ -2,10 +2,12 @@
+ 
+ #include "alloc-util.h"
+ #include "efi-loader.h"
++#include "env-util.h"
+ #include "parse-util.h"
+ #include "path-util.h"
+ #include "stat-util.h"
+ #include "strv.h"
++#include "tpm-pcr.h"
+ #include "utf8.h"
+ 
+ #if ENABLE_EFI
+@@ -236,6 +238,43 @@ int efi_stub_get_features(uint64_t *ret) {
+         return 0;
+ }
+ 
++int efi_stub_measured(void) {
++        _cleanup_free_ char *pcr_string = NULL;
++        unsigned pcr_nr;
++        int r;
++
++        /* Checks if we are booted on a kernel with sd-stub which measured the kernel into PCR 11. Or in
++         * other words, if we are running on a TPM enabled UKI.
++         *
++         * Returns == 0 and > 0 depending on the result of the test. Returns -EREMOTE if we detected a stub
++         * being used, but it measured things into a different PCR than we are configured for in
++         * userspace. (i.e. we expect PCR 11 being used for this by both sd-stub and us) */
++
++        r = getenv_bool_secure("SYSTEMD_FORCE_MEASURE"); /* Give user a chance to override the variable test,
++                                                          * for debugging purposes */
++        if (r >= 0)
++                return r;
++        if (r != -ENXIO)
++                log_debug_errno(r, "Failed to parse $SYSTEMD_FORCE_MEASURE, ignoring: %m");
++
++        if (!is_efi_boot())
++                return 0;
++
++        r = efi_get_variable_string(EFI_LOADER_VARIABLE(StubPcrKernelImage), &pcr_string);
++        if (r == -ENOENT)
++                return 0;
++        if (r < 0)
++                return r;
++
++        r = safe_atou(pcr_string, &pcr_nr);
++        if (r < 0)
++                return log_debug_errno(r, "Failed to parse StubPcrKernelImage EFI variable: %s", pcr_string);
++        if (pcr_nr != TPM_PCR_INDEX_KERNEL_IMAGE)
++                return log_debug_errno(SYNTHETIC_ERRNO(EREMOTE), "Kernel stub measured kernel image into PCR %u, which is different than expected %u.", pcr_nr, TPM_PCR_INDEX_KERNEL_IMAGE);
++
++        return 1;
++}
++
+ int efi_loader_get_config_timeout_one_shot(usec_t *ret) {
+         _cleanup_free_ char *v = NULL;
+         static struct stat cache_stat = {};
+diff --git a/src/shared/efi-loader.h b/src/shared/efi-loader.h
+index 84968869ab..56ccdee9c1 100644
+--- a/src/shared/efi-loader.h
++++ b/src/shared/efi-loader.h
+@@ -18,6 +18,8 @@ int efi_loader_get_entries(char ***ret);
+ int efi_loader_get_features(uint64_t *ret);
+ int efi_stub_get_features(uint64_t *ret);
+ 
++int efi_stub_measured(void);
++
+ int efi_loader_get_config_timeout_one_shot(usec_t *ret);
+ int efi_loader_update_entry_one_shot_cache(char **cache, struct stat *cache_stat);
+ 

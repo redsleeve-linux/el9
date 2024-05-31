@@ -1,0 +1,184 @@
+From bcb4e65f7ab49fd94b002ff9e1bba24237082726 Mon Sep 17 00:00:00 2001
+From: Jacek Migacz <jmigacz@redhat.com>
+Date: Mon, 26 Feb 2024 14:05:37 +0100
+Subject: [PATCH] resolved: limit the number of signature validations in a
+ transaction
+
+It has been demonstrated that tolerating an unbounded number of dnssec
+signature validations is a bad idea. It is easy for a maliciously
+crafted DNS reply to contain as many keytag collisions as desired,
+causing us to iterate every dnskey and signature combination in vain.
+
+The solution is to impose a maximum number of validations we will
+tolerate. While collisions are not hard to craft, I still expect they
+are unlikely in the wild so it should be safe to pick fairly small
+values.
+
+Here two limits are imposed: one on the maximum number of invalid
+signatures encountered per rrset, and another on the total number of
+validations performed per transaction.
+
+(cherry picked from commit 67d0ce8843d612a2245d0966197d4f528b911b66)
+
+Resolves: RHEL-26643
+---
+ src/resolve/resolved-dns-dnssec.c      | 16 ++++++++++++++--
+ src/resolve/resolved-dns-dnssec.h      |  9 ++++++++-
+ src/resolve/resolved-dns-transaction.c | 19 ++++++++++++++++---
+ 3 files changed, 38 insertions(+), 6 deletions(-)
+
+diff --git a/src/resolve/resolved-dns-dnssec.c b/src/resolve/resolved-dns-dnssec.c
+index 426ea945ca..de2660e317 100644
+--- a/src/resolve/resolved-dns-dnssec.c
++++ b/src/resolve/resolved-dns-dnssec.c
+@@ -1176,6 +1176,7 @@ int dnssec_verify_rrset_search(
+                 DnsResourceRecord **ret_rrsig) {
+ 
+         bool found_rrsig = false, found_invalid = false, found_expired_rrsig = false, found_unsupported_algorithm = false;
++        unsigned nvalidations = 0;
+         DnsResourceRecord *rrsig;
+         int r;
+ 
+@@ -1221,6 +1222,14 @@ int dnssec_verify_rrset_search(
+                         if (realtime == USEC_INFINITY)
+                                 realtime = now(CLOCK_REALTIME);
+ 
++                        /* Have we seen an unreasonable number of invalid signaures? */
++                        if (nvalidations > DNSSEC_INVALID_MAX) {
++                                if (ret_rrsig)
++                                        *ret_rrsig = NULL;
++                                *result = DNSSEC_TOO_MANY_VALIDATIONS;
++                                return (int) nvalidations;
++                        }
++
+                         /* Yay, we found a matching RRSIG with a matching
+                          * DNSKEY, awesome. Now let's verify all entries of
+                          * the RRSet against the RRSIG and DNSKEY
+@@ -1230,6 +1239,8 @@ int dnssec_verify_rrset_search(
+                         if (r < 0)
+                                 return r;
+ 
++                        nvalidations++;
++
+                         switch (one_result) {
+ 
+                         case DNSSEC_VALIDATED:
+@@ -1240,7 +1251,7 @@ int dnssec_verify_rrset_search(
+                                         *ret_rrsig = rrsig;
+ 
+                                 *result = one_result;
+-                                return 0;
++                                return (int) nvalidations;
+ 
+                         case DNSSEC_INVALID:
+                                 /* If the signature is invalid, let's try another
+@@ -1287,7 +1298,7 @@ int dnssec_verify_rrset_search(
+         if (ret_rrsig)
+                 *ret_rrsig = NULL;
+ 
+-        return 0;
++        return (int) nvalidations;
+ }
+ 
+ int dnssec_has_rrsig(DnsAnswer *a, const DnsResourceKey *key) {
+@@ -2571,6 +2582,7 @@ static const char* const dnssec_result_table[_DNSSEC_RESULT_MAX] = {
+         [DNSSEC_FAILED_AUXILIARY]      = "failed-auxiliary",
+         [DNSSEC_NSEC_MISMATCH]         = "nsec-mismatch",
+         [DNSSEC_INCOMPATIBLE_SERVER]   = "incompatible-server",
++        [DNSSEC_TOO_MANY_VALIDATIONS]  = "too-many-validations",
+ };
+ DEFINE_STRING_TABLE_LOOKUP(dnssec_result, DnssecResult);
+ 
+diff --git a/src/resolve/resolved-dns-dnssec.h b/src/resolve/resolved-dns-dnssec.h
+index 954bb3ef9d..29b90130a3 100644
+--- a/src/resolve/resolved-dns-dnssec.h
++++ b/src/resolve/resolved-dns-dnssec.h
+@@ -9,12 +9,13 @@ typedef enum DnssecVerdict DnssecVerdict;
+ #include "resolved-dns-rr.h"
+ 
+ enum DnssecResult {
+-        /* These five are returned by dnssec_verify_rrset() */
++        /* These six are returned by dnssec_verify_rrset() */
+         DNSSEC_VALIDATED,
+         DNSSEC_VALIDATED_WILDCARD, /* Validated via a wildcard RRSIG, further NSEC/NSEC3 checks necessary */
+         DNSSEC_INVALID,
+         DNSSEC_SIGNATURE_EXPIRED,
+         DNSSEC_UNSUPPORTED_ALGORITHM,
++        DNSSEC_TOO_MANY_VALIDATIONS,
+ 
+         /* These two are added by dnssec_verify_rrset_search() */
+         DNSSEC_NO_SIGNATURE,
+@@ -45,6 +46,12 @@ enum DnssecVerdict {
+ /* The longest digest we'll ever generate, of all digest algorithms we support */
+ #define DNSSEC_HASH_SIZE_MAX (MAX(20, 32))
+ 
++/* The most invalid signatures we will tolerate for a single rrset */
++#define DNSSEC_INVALID_MAX 5
++
++/* The total number of signature validations we will tolerate for a single transaction */
++#define DNSSEC_VALIDATION_MAX 64
++
+ int dnssec_rrsig_match_dnskey(DnsResourceRecord *rrsig, DnsResourceRecord *dnskey, bool revoked_ok);
+ int dnssec_key_match_rrsig(const DnsResourceKey *key, DnsResourceRecord *rrsig);
+ 
+diff --git a/src/resolve/resolved-dns-transaction.c b/src/resolve/resolved-dns-transaction.c
+index 0306af84a2..ccca49d399 100644
+--- a/src/resolve/resolved-dns-transaction.c
++++ b/src/resolve/resolved-dns-transaction.c
+@@ -3140,11 +3140,14 @@ static int dnssec_validate_records(
+                 DnsTransaction *t,
+                 Phase phase,
+                 bool *have_nsec,
++                unsigned *nvalidations,
+                 DnsAnswer **validated) {
+ 
+         DnsResourceRecord *rr;
+         int r;
+ 
++        assert(nvalidations);
++
+         /* Returns negative on error, 0 if validation failed, 1 to restart validation, 2 when finished. */
+ 
+         DNS_ANSWER_FOREACH(rr, t->answer) {
+@@ -3186,6 +3189,7 @@ static int dnssec_validate_records(
+                                 &rrsig);
+                 if (r < 0)
+                         return r;
++                *nvalidations += r;
+ 
+                 log_debug("Looking at %s: %s", strna(dns_resource_record_to_string(rr)), dnssec_result_to_string(result));
+ 
+@@ -3383,7 +3387,8 @@ static int dnssec_validate_records(
+                                            DNSSEC_SIGNATURE_EXPIRED,
+                                            DNSSEC_NO_SIGNATURE))
+                                         manager_dnssec_verdict(t->scope->manager, DNSSEC_BOGUS, rr->key);
+-                                else /* DNSSEC_MISSING_KEY or DNSSEC_UNSUPPORTED_ALGORITHM */
++                                else /* DNSSEC_MISSING_KEY, DNSSEC_UNSUPPORTED_ALGORITHM,
++                                        or DNSSEC_TOO_MANY_VALIDATIONS */
+                                         manager_dnssec_verdict(t->scope->manager, DNSSEC_INDETERMINATE, rr->key);
+ 
+                                 /* This is a primary response to our question, and it failed validation.
+@@ -3476,13 +3481,21 @@ int dns_transaction_validate_dnssec(DnsTransaction *t) {
+                 return r;
+ 
+         phase = DNSSEC_PHASE_DNSKEY;
+-        for (;;) {
++        for (unsigned nvalidations = 0;;) {
+                 bool have_nsec = false;
+ 
+-                r = dnssec_validate_records(t, phase, &have_nsec, &validated);
++                r = dnssec_validate_records(t, phase, &have_nsec, &nvalidations, &validated);
+                 if (r <= 0)
+                         return r;
+ 
++                if (nvalidations > DNSSEC_VALIDATION_MAX) {
++                        /* This reply requires an onerous number of signature validations to verify. Let's
++                         * not waste our time trying, as this shouldn't happen for well-behaved domains
++                         * anyway. */
++                        t->answer_dnssec_result = DNSSEC_TOO_MANY_VALIDATIONS;
++                        return 0;
++                }
++
+                 /* Try again as long as we managed to achieve something */
+                 if (r == 1)
+                         continue;

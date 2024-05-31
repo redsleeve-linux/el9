@@ -1,0 +1,237 @@
+From 73fd8e125a5c22cd341c056b774ab6cb2122b951 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Fri, 9 Dec 2022 17:20:24 -0500
+Subject: [PATCH] tpm2: rename tpm2 alg id<->string functions
+
+The 'pcr_bank' functions operate on hash algs, and are not specific to the PCR
+banks, while the 'primary_alg' functions operate on asymmetric algs, and are
+not specific to primary keys.
+
+(cherry picked from commit 7bfe0a48d9df6e9488aaec2eeb5bfec051681e40)
+
+Related: RHEL-16182
+---
+ src/boot/measure.c                            |  2 +-
+ .../cryptsetup-token-systemd-tpm2.c           |  8 ++--
+ src/shared/creds-util.c                       |  4 +-
+ src/shared/tpm2-util.c                        | 44 +++++++++----------
+ src/shared/tpm2-util.h                        |  8 ++--
+ 5 files changed, 33 insertions(+), 33 deletions(-)
+
+diff --git a/src/boot/measure.c b/src/boot/measure.c
+index 84a7c357a4..8af3a337d6 100644
+--- a/src/boot/measure.c
++++ b/src/boot/measure.c
+@@ -837,7 +837,7 @@ static int verb_sign(int argc, char *argv[], void *userdata) {
+                         assert(sizeof(intermediate_digest.buffer) >= SHA256_DIGEST_SIZE);
+                         sha256_direct(p->value, p->value_size, intermediate_digest.buffer);
+ 
+-                        int tpmalg = tpm2_pcr_bank_from_string(EVP_MD_name(p->md));
++                        int tpmalg = tpm2_hash_alg_from_string(EVP_MD_name(p->md));
+                         if (tpmalg < 0) {
+                                 log_error_errno(tpmalg, "Unsupported PCR bank");
+                                 goto finish;
+diff --git a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+index 1eb924529c..98bcaac4d8 100644
+--- a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+@@ -220,10 +220,10 @@ _public_ void cryptsetup_token_dump(
+                 return (void) crypt_log_debug_errno(cd, r, "Can not dump " TOKEN_NAME " content: %m");
+ 
+         crypt_log(cd, "\ttpm2-hash-pcrs:   %s\n", strna(hash_pcrs_str));
+-        crypt_log(cd, "\ttpm2-pcr-bank:    %s\n", strna(tpm2_pcr_bank_to_string(pcr_bank)));
++        crypt_log(cd, "\ttpm2-pcr-bank:    %s\n", strna(tpm2_hash_alg_to_string(pcr_bank)));
+         crypt_log(cd, "\ttpm2-pubkey:" CRYPT_DUMP_LINE_SEP "%s\n", pubkey_str);
+         crypt_log(cd, "\ttpm2-pubkey-pcrs: %s\n", strna(pubkey_pcrs_str));
+-        crypt_log(cd, "\ttpm2-primary-alg: %s\n", strna(tpm2_primary_alg_to_string(primary_alg)));
++        crypt_log(cd, "\ttpm2-primary-alg: %s\n", strna(tpm2_asym_alg_to_string(primary_alg)));
+         crypt_log(cd, "\ttpm2-blob:        %s\n", blob_str);
+         crypt_log(cd, "\ttpm2-policy-hash:" CRYPT_DUMP_LINE_SEP "%s\n", policy_hash_str);
+         crypt_log(cd, "\ttpm2-pin:         %s\n", true_false(flags & TPM2_FLAGS_USE_PIN));
+@@ -281,7 +281,7 @@ _public_ int cryptsetup_token_validate(
+                         return 1;
+                 }
+ 
+-                if (tpm2_pcr_bank_from_string(json_variant_string(w)) < 0) {
++                if (tpm2_hash_alg_from_string(json_variant_string(w)) < 0) {
+                         crypt_log_debug(cd, "TPM2 PCR bank invalid or not supported: %s.", json_variant_string(w));
+                         return 1;
+                 }
+@@ -298,7 +298,7 @@ _public_ int cryptsetup_token_validate(
+                         return 1;
+                 }
+ 
+-                if (tpm2_primary_alg_from_string(json_variant_string(w)) < 0) {
++                if (tpm2_asym_alg_from_string(json_variant_string(w)) < 0) {
+                         crypt_log_debug(cd, "TPM2 primary key algorithm invalid or not supported: %s", json_variant_string(w));
+                         return 1;
+                 }
+diff --git a/src/shared/creds-util.c b/src/shared/creds-util.c
+index 9ac0320c58..e9cafb8097 100644
+--- a/src/shared/creds-util.c
++++ b/src/shared/creds-util.c
+@@ -944,9 +944,9 @@ int decrypt_credential_and_warn(
+ 
+                 if (!TPM2_PCR_MASK_VALID(t->pcr_mask))
+                         return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "TPM2 PCR mask out of range.");
+-                if (!tpm2_pcr_bank_to_string(le16toh(t->pcr_bank)))
++                if (!tpm2_hash_alg_to_string(le16toh(t->pcr_bank)))
+                         return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "TPM2 PCR bank invalid or not supported");
+-                if (!tpm2_primary_alg_to_string(le16toh(t->primary_alg)))
++                if (!tpm2_asym_alg_to_string(le16toh(t->primary_alg)))
+                         return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "TPM2 primary key algorithm invalid or not supported.");
+                 if (le32toh(t->blob_size) > CREDENTIAL_FIELD_SIZE_MAX)
+                         return log_error_errno(SYNTHETIC_ERRNO(EBADMSG), "Unexpected TPM2 blob size.");
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 278cdf3692..fe4d63b775 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -528,7 +528,7 @@ static int tpm2_bank_has24(const TPMS_PCR_SELECTION *selection) {
+          * TPM2 on a Client PC must have at least 24 PCRs. If this TPM has less, just skip over it. */
+         if (selection->sizeofSelect < TPM2_PCRS_MAX/8) {
+                 log_debug("Skipping TPM2 PCR bank %s with fewer than 24 PCRs.",
+-                          strna(tpm2_pcr_bank_to_string(selection->hash)));
++                          strna(tpm2_hash_alg_to_string(selection->hash)));
+                 return false;
+         }
+ 
+@@ -545,7 +545,7 @@ static int tpm2_bank_has24(const TPMS_PCR_SELECTION *selection) {
+ 
+         if (!valid)
+                 log_debug("TPM2 PCR bank %s has fewer than 24 PCR bits enabled, ignoring.",
+-                          strna(tpm2_pcr_bank_to_string(selection->hash)));
++                          strna(tpm2_hash_alg_to_string(selection->hash)));
+ 
+         return valid;
+ }
+@@ -747,7 +747,7 @@ int tpm2_get_good_pcr_banks_strv(
+                 const EVP_MD *implementation;
+                 const char *salg;
+ 
+-                salg = tpm2_pcr_bank_to_string(algs[i]);
++                salg = tpm2_hash_alg_to_string(algs[i]);
+                 if (!salg)
+                         return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "TPM2 operates with unknown PCR algorithm, can't measure.");
+ 
+@@ -971,7 +971,7 @@ static int find_signature(
+         if (!json_variant_is_object(v))
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Signature is not a JSON object.");
+ 
+-        k = tpm2_pcr_bank_to_string(pcr_bank);
++        k = tpm2_hash_alg_to_string(pcr_bank);
+         if (!k)
+                 return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "Don't know PCR bank %" PRIu16, pcr_bank);
+ 
+@@ -1956,7 +1956,7 @@ int tpm2_extend_bytes(
+                 if ((size_t) EVP_MD_size(implementation) > sizeof(values.digests[values.count].digest))
+                         return log_error_errno(SYNTHETIC_ERRNO(E2BIG), "Hash result too large for TPM2.");
+ 
+-                id = tpm2_pcr_bank_from_string(EVP_MD_name(implementation));
++                id = tpm2_hash_alg_from_string(EVP_MD_name(implementation));
+                 if (id < 0)
+                         return log_error_errno(id, "Can't map hash name to TPM2.");
+ 
+@@ -2140,8 +2140,8 @@ int tpm2_make_luks2_json(
+                                        JSON_BUILD_PAIR("keyslots", JSON_BUILD_ARRAY(JSON_BUILD_STRING(keyslot_as_string))),
+                                        JSON_BUILD_PAIR("tpm2-blob", JSON_BUILD_BASE64(blob, blob_size)),
+                                        JSON_BUILD_PAIR("tpm2-pcrs", JSON_BUILD_VARIANT(hmj)),
+-                                       JSON_BUILD_PAIR_CONDITION(!!tpm2_pcr_bank_to_string(pcr_bank), "tpm2-pcr-bank", JSON_BUILD_STRING(tpm2_pcr_bank_to_string(pcr_bank))),
+-                                       JSON_BUILD_PAIR_CONDITION(!!tpm2_primary_alg_to_string(primary_alg), "tpm2-primary-alg", JSON_BUILD_STRING(tpm2_primary_alg_to_string(primary_alg))),
++                                       JSON_BUILD_PAIR_CONDITION(!!tpm2_hash_alg_to_string(pcr_bank), "tpm2-pcr-bank", JSON_BUILD_STRING(tpm2_hash_alg_to_string(pcr_bank))),
++                                       JSON_BUILD_PAIR_CONDITION(!!tpm2_asym_alg_to_string(primary_alg), "tpm2-primary-alg", JSON_BUILD_STRING(tpm2_asym_alg_to_string(primary_alg))),
+                                        JSON_BUILD_PAIR("tpm2-policy-hash", JSON_BUILD_HEX(policy_hash, policy_hash_size)),
+                                        JSON_BUILD_PAIR("tpm2-pin", JSON_BUILD_BOOLEAN(flags & TPM2_FLAGS_USE_PIN)),
+                                        JSON_BUILD_PAIR_CONDITION(pubkey_pcr_mask != 0, "tpm2_pubkey_pcrs", JSON_BUILD_VARIANT(pkmj)),
+@@ -2209,7 +2209,7 @@ int tpm2_parse_luks2_json(
+                 if (!json_variant_is_string(w))
+                         return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "TPM2 PCR bank is not a string.");
+ 
+-                r = tpm2_pcr_bank_from_string(json_variant_string(w));
++                r = tpm2_hash_alg_from_string(json_variant_string(w));
+                 if (r < 0)
+                         return log_debug_errno(r, "TPM2 PCR bank invalid or not supported: %s", json_variant_string(w));
+ 
+@@ -2225,9 +2225,9 @@ int tpm2_parse_luks2_json(
+                 if (!json_variant_is_string(w))
+                         return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "TPM2 primary key algorithm is not a string.");
+ 
+-                r = tpm2_primary_alg_from_string(json_variant_string(w));
++                r = tpm2_asym_alg_from_string(json_variant_string(w));
+                 if (r < 0)
+-                        return log_debug_errno(r, "TPM2 primary key algorithm invalid or not supported: %s", json_variant_string(w));
++                        return log_debug_errno(r, "TPM2 asymmetric algorithm invalid or not supported: %s", json_variant_string(w));
+ 
+                 primary_alg = r;
+         }
+@@ -2299,31 +2299,31 @@ int tpm2_parse_luks2_json(
+         return 0;
+ }
+ 
+-const char *tpm2_pcr_bank_to_string(uint16_t bank) {
+-        if (bank == TPM2_ALG_SHA1)
++const char *tpm2_hash_alg_to_string(uint16_t alg) {
++        if (alg == TPM2_ALG_SHA1)
+                 return "sha1";
+-        if (bank == TPM2_ALG_SHA256)
++        if (alg == TPM2_ALG_SHA256)
+                 return "sha256";
+-        if (bank == TPM2_ALG_SHA384)
++        if (alg == TPM2_ALG_SHA384)
+                 return "sha384";
+-        if (bank == TPM2_ALG_SHA512)
++        if (alg == TPM2_ALG_SHA512)
+                 return "sha512";
+         return NULL;
+ }
+ 
+-int tpm2_pcr_bank_from_string(const char *bank) {
+-        if (strcaseeq_ptr(bank, "sha1"))
++int tpm2_hash_alg_from_string(const char *alg) {
++        if (strcaseeq_ptr(alg, "sha1"))
+                 return TPM2_ALG_SHA1;
+-        if (strcaseeq_ptr(bank, "sha256"))
++        if (strcaseeq_ptr(alg, "sha256"))
+                 return TPM2_ALG_SHA256;
+-        if (strcaseeq_ptr(bank, "sha384"))
++        if (strcaseeq_ptr(alg, "sha384"))
+                 return TPM2_ALG_SHA384;
+-        if (strcaseeq_ptr(bank, "sha512"))
++        if (strcaseeq_ptr(alg, "sha512"))
+                 return TPM2_ALG_SHA512;
+         return -EINVAL;
+ }
+ 
+-const char *tpm2_primary_alg_to_string(uint16_t alg) {
++const char *tpm2_asym_alg_to_string(uint16_t alg) {
+         if (alg == TPM2_ALG_ECC)
+                 return "ecc";
+         if (alg == TPM2_ALG_RSA)
+@@ -2331,7 +2331,7 @@ const char *tpm2_primary_alg_to_string(uint16_t alg) {
+         return NULL;
+ }
+ 
+-int tpm2_primary_alg_from_string(const char *alg) {
++int tpm2_asym_alg_from_string(const char *alg) {
+         if (strcaseeq_ptr(alg, "ecc"))
+                 return TPM2_ALG_ECC;
+         if (strcaseeq_ptr(alg, "rsa"))
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 96e6c31b0a..9e302021ab 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -125,11 +125,11 @@ static inline bool TPM2_PCR_MASK_VALID(uint64_t pcr_mask) {
+ #define TPM2_ALG_RSA 0x1
+ #endif
+ 
+-const char *tpm2_pcr_bank_to_string(uint16_t bank);
+-int tpm2_pcr_bank_from_string(const char *bank);
++const char *tpm2_hash_alg_to_string(uint16_t alg);
++int tpm2_hash_alg_from_string(const char *alg);
+ 
+-const char *tpm2_primary_alg_to_string(uint16_t alg);
+-int tpm2_primary_alg_from_string(const char *alg);
++const char *tpm2_asym_alg_to_string(uint16_t alg);
++int tpm2_asym_alg_from_string(const char *alg);
+ 
+ typedef struct {
+         uint32_t search_pcr_mask;

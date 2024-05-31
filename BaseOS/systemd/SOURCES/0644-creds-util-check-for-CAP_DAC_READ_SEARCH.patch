@@ -1,0 +1,57 @@
+From b052e96d1b8fb75ec2ae1e6da889de67fbbade7a Mon Sep 17 00:00:00 2001
+From: Alberto Planas <aplanas@suse.com>
+Date: Fri, 13 Jan 2023 15:31:39 +0100
+Subject: [PATCH] creds-util: check for CAP_DAC_READ_SEARCH
+
+In make_credential_host_secret, the credential.secret file is generated
+first as a temporary anonymous file that is later instantiated with
+linkat(2).  This system call requires CAP_DAC_READ_SEARCH capability
+when the flag AT_EMPTY_PATH is used.
+
+This patch check if the capability is effective, and if not uses the
+alternative codepath for creating named temporary files.
+
+Non-root users can now create per-user credentials with:
+
+  export SYSTEMD_CREDENTIAL_SECRET=$HOME/.config/systemd/credential.secret
+  systemd-creds setup
+
+Signed-off-by: Alberto Planas <aplanas@suse.com>
+(cherry picked from commit 1615578f2792fdeecaf65606861bd3db9eb949c3)
+
+Related: RHEL-16182
+---
+ src/shared/creds-util.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/src/shared/creds-util.c b/src/shared/creds-util.c
+index 27548a0eec..20b3b83369 100644
+--- a/src/shared/creds-util.c
++++ b/src/shared/creds-util.c
+@@ -9,6 +9,7 @@
+ #include "sd-id128.h"
+ 
+ #include "blockdev-util.h"
++#include "capability-util.h"
+ #include "chattr-util.h"
+ #include "creds-util.h"
+ #include "def.h"
+@@ -172,10 +173,15 @@ static int make_credential_host_secret(
+         assert(dfd >= 0);
+         assert(fn);
+ 
+-        fd = openat(dfd, ".", O_CLOEXEC|O_WRONLY|O_TMPFILE, 0400);
++        /* For non-root users creating a temporary file using the openat(2) over "." will fail later, in the
++         * linkat(2) step at the end.  The reason is that linkat(2) requires the CAP_DAC_READ_SEARCH
++         * capability when it uses the AT_EMPTY_PATH flag. */
++        if (have_effective_cap(CAP_DAC_READ_SEARCH) > 0) {
++                fd = openat(dfd, ".", O_CLOEXEC|O_WRONLY|O_TMPFILE, 0400);
++                if (fd < 0)
++                        log_debug_errno(errno, "Failed to create temporary credential file with O_TMPFILE, proceeding without: %m");
++        }
+         if (fd < 0) {
+-                log_debug_errno(errno, "Failed to create temporary credential file with O_TMPFILE, proceeding without: %m");
+-
+                 if (asprintf(&t, "credential.secret.%016" PRIx64, random_u64()) < 0)
+                         return -ENOMEM;
+ 

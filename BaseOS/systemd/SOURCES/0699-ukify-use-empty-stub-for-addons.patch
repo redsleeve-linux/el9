@@ -1,0 +1,78 @@
+From 7307ab86351846cb750f3fcd35db7d9de9aefdf0 Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Tue, 23 May 2023 01:45:40 +0100
+Subject: [PATCH] ukify: use empty stub for addons
+
+Instead of picking up sd-stub, which is runnable, add an empty
+addon stub that just returns an error if executed
+
+(cherry picked from commit f644ea3ed7ec22c28814b194e4e5bbbf2fa98560)
+
+Related: RHEL-16952
+---
+ src/boot/efi/addon.c     | 15 +++++++++++++++
+ src/boot/efi/meson.build | 13 ++++++++++---
+ 2 files changed, 25 insertions(+), 3 deletions(-)
+ create mode 100644 src/boot/efi/addon.c
+
+diff --git a/src/boot/efi/addon.c b/src/boot/efi/addon.c
+new file mode 100644
+index 0000000000..959e54b5cc
+--- /dev/null
++++ b/src/boot/efi/addon.c
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++
++#include "efi.h"
++#include "macro-fundamental.h"
++
++/* Magic string for recognizing our own binaries */
++_used_ _section_(".sdmagic") static const char magic[] =
++        "#### LoaderInfo: systemd-addon " GIT_VERSION " ####";
++
++/* This is intended to carry data, not to be executed */
++
++EFIAPI EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table);
++EFIAPI EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table) {
++    return EFI_UNSUPPORTED;
++}
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index 09c40a280b..9e5d535b5b 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -403,6 +403,8 @@ stub_sources = files(
+         'stub.c',
+ )
+ 
++addon_sources = files('addon.c')
++
+ if efi_arch[1] in ['ia32', 'x86_64']
+         stub_sources += files('linux_x86.c')
+ endif
+@@ -430,7 +432,8 @@ endif
+ 
+ systemd_boot_objects = []
+ stub_objects = []
+-foreach file : fundamental_source_paths + common_sources + systemd_boot_sources + stub_sources
++addon_objects = []
++foreach file : fundamental_source_paths + common_sources + systemd_boot_sources + stub_sources + addon_sources
+         # FIXME: replace ''.format(file) with fs.name(file) when meson_version requirement is >= 0.59.0
+         o_file = custom_target('@0@.o'.format(file).split('/')[-1],
+                                input : file,
+@@ -443,10 +446,14 @@ foreach file : fundamental_source_paths + common_sources + systemd_boot_sources
+         if (fundamental_source_paths + common_sources + stub_sources).contains(file)
+                 stub_objects += o_file
+         endif
++        if (fundamental_source_paths + common_sources + addon_sources).contains(file)
++                addon_objects += o_file
++        endif
+ endforeach
+ 
+-foreach tuple : [['systemd-boot@0@.@1@', systemd_boot_objects, false, 'systemd-boot'],
+-                 ['linux@0@.@1@.stub', stub_objects, true, 'systemd-stub']]
++foreach tuple : [['systemd-boot@0@.@1@', systemd_boot_objects, false, 'systemd-boot',],
++                 ['linux@0@.@1@.stub', stub_objects, true, 'systemd-stub'],
++                 ['addon@0@.@1@.stub', addon_objects, true, 'addon']]
+         elf = custom_target(
+                 tuple[0].format(efi_arch[0], 'elf'),
+                 input : tuple[1],

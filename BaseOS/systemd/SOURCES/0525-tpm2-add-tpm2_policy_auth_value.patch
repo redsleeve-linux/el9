@@ -1,0 +1,145 @@
+From 4bdaf980b4c5eb519b0c762179015c7b96d51037 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Fri, 9 Dec 2022 14:59:05 -0500
+Subject: [PATCH] tpm2: add tpm2_policy_auth_value()
+
+This adds functions to get the digest for a PolicyAuthValue operation. For
+building a policy hash, this provides a function to calculate the hash; and for
+building a policy hash to satisfy the authPolicy for an existing object, this
+provides a function to perform PolicyAuthValue with an existing session.
+
+(cherry picked from commit 8a716354bb97c9a220cf95aef0e78f66abd33584)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c | 75 +++++++++++++++++++++++++++++++++++-------
+ src/shared/tpm2-util.h |  1 +
+ src/test/test-tpm2.c   | 10 ++++++
+ 3 files changed, 74 insertions(+), 12 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 1aa49a7232..35dfa3f371 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -1922,6 +1922,66 @@ static int tpm2_get_name(
+         return 0;
+ }
+ 
++/* Extend 'digest' with the PolicyAuthValue calculated hash. */
++int tpm2_calculate_policy_auth_value(TPM2B_DIGEST *digest) {
++        TPM2_CC command = TPM2_CC_PolicyAuthValue;
++        TSS2_RC rc;
++        int r;
++
++        assert(digest);
++        assert(digest->size == SHA256_DIGEST_SIZE);
++
++        r = dlopen_tpm2();
++        if (r < 0)
++                return log_error_errno(r, "TPM2 support not installed: %m");
++
++        uint8_t buf[sizeof(command)];
++        size_t offset = 0;
++
++        rc = sym_Tss2_MU_TPM2_CC_Marshal(command, buf, sizeof(buf), &offset);
++        if (rc != TSS2_RC_SUCCESS)
++                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
++                                       "Failed to marshal PolicyAuthValue command: %s", sym_Tss2_RC_Decode(rc));
++
++        if (offset != sizeof(command))
++                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
++                                       "Offset 0x%zx wrong after marshalling PolicyAuthValue command", offset);
++
++        r = tpm2_digest_buffer(TPM2_ALG_SHA256, digest, buf, offset, /* extend= */ true);
++        if (r < 0)
++                return r;
++
++        tpm2_log_debug_digest(digest, "PolicyAuthValue calculated digest");
++
++        return 0;
++}
++
++static int tpm2_policy_auth_value(
++                Tpm2Context *c,
++                const Tpm2Handle *session,
++                TPM2B_DIGEST **ret_policy_digest) {
++
++        TSS2_RC rc;
++
++        assert(c);
++        assert(session);
++
++        log_debug("Adding authValue policy.");
++
++        rc = sym_Esys_PolicyAuthValue(
++                        c->esys_context,
++                        session->esys_handle,
++                        ESYS_TR_NONE,
++                        ESYS_TR_NONE,
++                        ESYS_TR_NONE);
++        if (rc != TSS2_RC_SUCCESS)
++                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
++                                       "Failed to add authValue policy to TPM: %s",
++                                       sym_Tss2_RC_Decode(rc));
++
++        return tpm2_get_policy_digest(c, session, ret_policy_digest);
++}
++
+ /* Extend 'digest' with the PolicyPCR calculated hash. */
+ int tpm2_calculate_policy_pcr(
+                 const TPML_PCR_SELECTION *pcr_selection,
+@@ -2170,18 +2230,9 @@ static int tpm2_build_sealing_policy(
+         }
+ 
+         if (use_pin) {
+-                log_debug("Configuring PIN policy.");
+-
+-                rc = sym_Esys_PolicyAuthValue(
+-                                c->esys_context,
+-                                session->esys_handle,
+-                                ESYS_TR_NONE,
+-                                ESYS_TR_NONE,
+-                                ESYS_TR_NONE);
+-                if (rc != TSS2_RC_SUCCESS)
+-                        return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+-                                               "Failed to add authValue policy to TPM: %s",
+-                                               sym_Tss2_RC_Decode(rc));
++                r = tpm2_policy_auth_value(c, session, NULL);
++                if (r < 0)
++                        return r;
+         }
+ 
+         r = tpm2_get_policy_digest(c, session, ret_policy_digest);
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 80c00af141..706d228073 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -90,6 +90,7 @@ static inline int tpm2_digest_init(TPMI_ALG_HASH alg, TPM2B_DIGEST *digest) {
+ }
+ 
+ int tpm2_calculate_name(const TPMT_PUBLIC *public, TPM2B_NAME *ret_name);
++int tpm2_calculate_policy_auth_value(TPM2B_DIGEST *digest);
+ int tpm2_calculate_policy_pcr(const TPML_PCR_SELECTION *pcr_selection, const TPM2B_DIGEST pcr_values[], size_t pcr_values_count, TPM2B_DIGEST *digest);
+ 
+ int tpm2_seal(const char *device, uint32_t hash_pcr_mask, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, void **ret_pcr_hash, size_t *ret_pcr_hash_size, uint16_t *ret_pcr_bank, uint16_t *ret_primary_alg, void **ret_srk_buf, size_t *ret_srk_buf_size);
+diff --git a/src/test/test-tpm2.c b/src/test/test-tpm2.c
+index c2e074b5f9..3fbb31bae0 100644
+--- a/src/test/test-tpm2.c
++++ b/src/test/test-tpm2.c
+@@ -643,6 +643,16 @@ TEST(calculate_name) {
+         assert_se(streq(expect, h));
+ }
+ 
++TEST(calculate_policy_auth_value) {
++        TPM2B_DIGEST d;
++
++        digest_init_sha256(&d, "0000000000000000000000000000000000000000000000000000000000000000");
++        assert_se(tpm2_calculate_policy_auth_value(&d) == 0);
++        assert_se(digest_check(&d, "8fcd2169ab92694e0c633f1ab772842b8241bbc20288981fc7ac1eddc1fddb0e"));
++        assert_se(tpm2_calculate_policy_auth_value(&d) == 0);
++        assert_se(digest_check(&d, "759ebd5ed65100e0b4aa2d04b4b789c2672d92ecc9cdda4b5fa16a303132e008"));
++}
++
+ TEST(calculate_policy_pcr) {
+         TPML_PCR_SELECTION pcr_selection;
+         TPM2B_DIGEST pcr_values[16];

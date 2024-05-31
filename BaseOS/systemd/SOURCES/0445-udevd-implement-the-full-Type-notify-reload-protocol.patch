@@ -1,0 +1,127 @@
+From daa0a0268e9ed03b8e3c39f003266d0b14cae120 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 2 Jan 2023 17:21:16 +0100
+Subject: [PATCH] udevd: implement the full Type=notify-reload protocol
+
+We are basically already there, just need to add MONOTONIC_USEC= to the
+RELOADING=1 message, and make sure the message is generated in really
+all cases.
+
+(cherry picked from commit f84331539deae28fbeb42d45ad0c8d583b3372a3)
+
+Related: RHEL-6090
+---
+ src/udev/udevd.c               | 47 +++++++++++++++++++---------------
+ units/systemd-udevd.service.in |  3 +--
+ 2 files changed, 28 insertions(+), 22 deletions(-)
+
+diff --git a/src/udev/udevd.c b/src/udev/udevd.c
+index ccc3c0eece..6d82a6eff2 100644
+--- a/src/udev/udevd.c
++++ b/src/udev/udevd.c
+@@ -32,6 +32,7 @@
+ #include "cgroup-setup.h"
+ #include "cgroup-util.h"
+ #include "cpu-set-util.h"
++#include "daemon-util.h"
+ #include "dev-setup.h"
+ #include "device-monitor-private.h"
+ #include "device-private.h"
+@@ -331,9 +332,7 @@ static void manager_exit(Manager *manager) {
+ 
+         manager->exit = true;
+ 
+-        sd_notify(false,
+-                  "STOPPING=1\n"
+-                  "STATUS=Starting shutdown...");
++        (void) sd_notify(/* unset= */ false, NOTIFY_STOPPING);
+ 
+         /* close sources of new events and discard buffered events */
+         manager->ctrl = udev_ctrl_unref(manager->ctrl);
+@@ -351,7 +350,7 @@ static void manager_exit(Manager *manager) {
+ static void notify_ready(void) {
+         int r;
+ 
+-        r = sd_notifyf(false,
++        r = sd_notifyf(/* unset= */ false,
+                        "READY=1\n"
+                        "STATUS=Processing with %u children at max", arg_children_max);
+         if (r < 0)
+@@ -376,23 +375,33 @@ static void manager_reload(Manager *manager, bool force) {
+         mac_selinux_maybe_reload();
+ 
+         /* Nothing changed. It is not necessary to reload. */
+-        if (!udev_rules_should_reload(manager->rules) && !udev_builtin_should_reload())
+-                return;
++        if (!udev_rules_should_reload(manager->rules) && !udev_builtin_should_reload()) {
+ 
+-        sd_notify(false,
+-                  "RELOADING=1\n"
+-                  "STATUS=Flushing configuration...");
++                if (!force)
++                        return;
+ 
+-        manager_kill_workers(manager, false);
++                /* If we eat this up, then tell our service manager to just continue */
++                (void) sd_notifyf(/* unset= */ false,
++                                  "RELOADING=1\n"
++                                  "STATUS=Skipping configuration reloading, nothing changed.\n"
++                                  "MONOTONIC_USEC=" USEC_FMT, now(CLOCK_MONOTONIC));
++        } else {
++                (void) sd_notifyf(/* unset= */ false,
++                                  "RELOADING=1\n"
++                                  "STATUS=Flushing configuration...\n"
++                                  "MONOTONIC_USEC=" USEC_FMT, now(CLOCK_MONOTONIC));
+ 
+-        udev_builtin_exit();
+-        udev_builtin_init();
++                manager_kill_workers(manager, false);
+ 
+-        r = udev_rules_load(&rules, arg_resolve_name_timing);
+-        if (r < 0)
+-                log_warning_errno(r, "Failed to read udev rules, using the previously loaded rules, ignoring: %m");
+-        else
+-                udev_rules_free_and_replace(manager->rules, rules);
++                udev_builtin_exit();
++                udev_builtin_init();
++
++                r = udev_rules_load(&rules, arg_resolve_name_timing);
++                if (r < 0)
++                        log_warning_errno(r, "Failed to read udev rules, using the previously loaded rules, ignoring: %m");
++                else
++                        udev_rules_free_and_replace(manager->rules, rules);
++        }
+ 
+         notify_ready();
+ }
+@@ -1982,9 +1991,7 @@ static int main_loop(Manager *manager) {
+         if (r < 0)
+                 log_error_errno(r, "Event loop failed: %m");
+ 
+-        sd_notify(false,
+-                  "STOPPING=1\n"
+-                  "STATUS=Shutting down...");
++        (void) sd_notify(/* unset= */ false, NOTIFY_STOPPING);
+         return r;
+ }
+ 
+diff --git a/units/systemd-udevd.service.in b/units/systemd-udevd.service.in
+index e9dbe85ef4..dfc2a0e341 100644
+--- a/units/systemd-udevd.service.in
++++ b/units/systemd-udevd.service.in
+@@ -18,14 +18,13 @@ ConditionPathIsReadWrite=/sys
+ [Service]
+ CapabilityBoundingSet=~CAP_SYS_TIME CAP_WAKE_ALARM
+ Delegate=pids
+-Type=notify
++Type=notify-reload
+ # Note that udev will reset the value internally for its workers
+ OOMScoreAdjust=-1000
+ Sockets=systemd-udevd-control.socket systemd-udevd-kernel.socket
+ Restart=always
+ RestartSec=0
+ ExecStart={{ROOTLIBEXECDIR}}/systemd-udevd
+-ExecReload=udevadm control --reload --timeout 0
+ KillMode=mixed
+ TasksMax=infinity
+ PrivateMounts=yes

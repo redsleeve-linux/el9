@@ -1,0 +1,53 @@
+From 3ffb4462e0f3db78db5c1cf0cf8b14781c72d8e6 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Mon, 21 Aug 2023 17:29:28 -0400
+Subject: [PATCH] tpm2: put !isempty() check inside previous !isempty() check
+
+(cherry picked from commit 2b2ee3f265957e4dda9f82b1b6e8138117a90502)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c | 26 +++++++++++++-------------
+ 1 file changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 4da2143360..d5dde21b05 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -1725,23 +1725,23 @@ int tpm2_pcr_value_from_string(const char *arg, Tpm2PCRValue *ret_pcr_value) {
+                 if (r < 0)
+                         return log_error_errno(r, "Invalid pcr hash algorithm '%s': %m", hash);
+                 pcr_value.hash = (TPMI_ALG_HASH) r;
+-        }
+ 
+-        if (!isempty(p)) {
+-                /* Remove leading 0x if present */
+-                p = startswith_no_case(p, "0x") ?: p;
++                if (!isempty(p)) {
++                        /* Remove leading 0x if present */
++                        p = startswith_no_case(p, "0x") ?: p;
+ 
+-                _cleanup_free_ void *buf = NULL;
+-                size_t buf_size = 0;
+-                r = unhexmem(p, SIZE_MAX, &buf, &buf_size);
+-                if (r < 0)
+-                        return log_error_errno(r, "Invalid pcr hash value '%s': %m", p);
++                        _cleanup_free_ void *buf = NULL;
++                        size_t buf_size = 0;
++                        r = unhexmem(p, SIZE_MAX, &buf, &buf_size);
++                        if (r < 0)
++                                return log_error_errno(r, "Invalid pcr hash value '%s': %m", p);
+ 
+-                r = TPM2B_DIGEST_CHECK_SIZE(buf_size);
+-                if (r < 0)
+-                        return log_error_errno(r, "PCR hash value size %zu too large.", buf_size);
++                        r = TPM2B_DIGEST_CHECK_SIZE(buf_size);
++                        if (r < 0)
++                                return log_error_errno(r, "PCR hash value size %zu too large.", buf_size);
+ 
+-                pcr_value.value = TPM2B_DIGEST_MAKE(buf, buf_size);
++                        pcr_value.value = TPM2B_DIGEST_MAKE(buf, buf_size);
++                }
+         }
+ 
+         *ret_pcr_value = pcr_value;

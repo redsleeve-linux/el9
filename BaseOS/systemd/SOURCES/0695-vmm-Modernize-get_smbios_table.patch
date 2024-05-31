@@ -1,0 +1,46 @@
+From 47fd30b95f506beaef5640ad61b40b180c7ac47b Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Wed, 22 Feb 2023 17:04:58 +0100
+Subject: [PATCH] vmm: Modernize get_smbios_table()
+
+(cherry picked from commit c8e5d82c97a1478b15d2f97ffebd9591e81663ba)
+
+Related: RHEL-16952
+---
+ src/boot/efi/vmm.c | 18 +++++++-----------
+ 1 file changed, 7 insertions(+), 11 deletions(-)
+
+diff --git a/src/boot/efi/vmm.c b/src/boot/efi/vmm.c
+index 19b66a3974..f9a59dca0a 100644
+--- a/src/boot/efi/vmm.c
++++ b/src/boot/efi/vmm.c
+@@ -258,22 +258,18 @@ static const SmbiosHeader *get_smbios_table(uint8_t type, uint64_t *ret_size_lef
+ 
+                 /* Skip over string table. */
+                 for (;;) {
+-                        while (size > 0 && *p != '\0') {
+-                                p++;
+-                                size--;
+-                        }
+-                        if (size == 0)
++                        const uint8_t *e = memchr(p, 0, size);
++                        if (!e)
+                                 return NULL;
+-                        p++;
+-                        size--;
+ 
+-                        /* Double NUL terminates string table. */
+-                        if (*p == '\0') {
+-                                if (size == 0)
+-                                        return NULL;
++                        if (e == p) {/* Double NUL byte means we've reached the end of the string table. */
+                                 p++;
++                                size--;
+                                 break;
+                         }
++
++                        size -= e + 1 - p;
++                        p = e + 1;
+                 }
+         }
+ 

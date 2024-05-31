@@ -18,52 +18,57 @@
 %bcond_without tests
 %bcond_without lto
 
-Name:           systemd
-Url:            https://systemd.io
-Version:        252
-Release:        18%{?dist}.redsleeve
+Name: systemd
+Url: https://systemd.io
+Version: 252
+Release: 32%{?dist}
 # For a breakdown of the licensing, see README
-License:        LGPLv2+ and MIT and GPLv2+
-Summary:        System and Service Manager
+License: LGPLv2+ and MIT and GPLv2+
+Summary: System and Service Manager
 
 # download tarballs with "spectool -g systemd.spec"
 %if %{defined commit}
-Source0:        https://github.com/systemd/systemd%{?stable:-stable}/archive/%{commit}/%{name}-%{shortcommit}.tar.gz
+Source0: https://github.com/systemd/systemd%{?stable:-stable}/archive/%{commit}/%{name}-%{shortcommit}.tar.gz
 %else
 %if 0%{?stable}
-Source0:        https://github.com/systemd/systemd-stable/archive/v%{version_no_tilde}/%{name}-%{version_no_tilde}.tar.gz
+Source0: https://github.com/systemd/systemd-stable/archive/v%{version_no_tilde}/%{name}-%{version_no_tilde}.tar.gz
 %else
-Source0:        https://github.com/systemd/systemd/archive/v%{version_no_tilde}/%{name}-%{version_no_tilde}.tar.gz
+Source0: https://github.com/systemd/systemd/archive/v%{version_no_tilde}/%{name}-%{version_no_tilde}.tar.gz
 %endif
 %endif
 # This file must be available before %%prep.
 # It is generated during systemd build and can be found in build/src/core/.
-Source1:        triggers.systemd
-Source2:        split-files.py
-Source3:        purge-nobody-user
+Source1: triggers.systemd
+Source2: split-files.py
+Source3: purge-nobody-user
 
 # Prevent accidental removal of the systemd package
-Source4:        yum-protect-systemd.conf
+Source4: yum-protect-systemd.conf
 
-Source5:        inittab
-Source6:        sysctl.conf.README
-Source7:        systemd-journal-remote.xml
-Source8:        systemd-journal-gatewayd.xml
-Source9:        20-yama-ptrace.conf
-Source10:       systemd-udev-trigger-no-reload.conf
-Source11:       20-grubby.install
-Source12:       systemd-user
-Source13:       libsystemd-shared.abignore
+Source5: inittab
+Source6: sysctl.conf.README
+Source7: systemd-journal-remote.xml
+Source8: systemd-journal-gatewayd.xml
+Source9: 20-yama-ptrace.conf
+Source10: systemd-udev-trigger-no-reload.conf
+Source11: 20-grubby.install
+Source12: systemd-user
+Source13: libsystemd-shared.abignore
 
-Source14:       10-oomd-defaults.conf
-Source15:       10-oomd-root-slice-defaults.conf
-Source16:       10-oomd-user-service-defaults.conf
+Source14: 10-oomd-defaults.conf
+Source15: 10-oomd-root-slice-defaults.conf
+Source16: 10-oomd-user-service-defaults.conf
 
-Source21:       macros.sysusers
-Source22:       sysusers.attr
-Source23:       sysusers.prov
-Source24:       sysusers.generate-pre.sh
-Source25:       rc.local
+Source21: macros.sysusers
+Source22: sysusers.attr
+Source23: sysusers.prov
+Source24: sysusers.generate-pre.sh
+Source25: rc.local
+
+# Download hwdb of RHEL net naming scheme; this is a temporary it will be later moved to kernel
+# see: https://issues.redhat.com/browse/RHELBU-2374
+%global rhel_nns_version 0.5
+Source26: https://gitlab.com/mschmidt2/rhel-net-naming-sysattrs/-/archive/v%{rhel_nns_version}/rhel-net-naming-sysattrs-v%{rhel_nns_version}.tar.gz
 
 %if 0
 GIT_DIR=../../src/systemd/.git git format-patch-ab --no-signature -M -N v235..v235-stable
@@ -447,6 +452,353 @@ Patch0366: 0366-dissect-image-add-probe_sector_size-helper-for-detec.patch
 Patch0367: 0367-loop-util-always-tell-kernel-explicitly-about-loopba.patch
 Patch0368: 0368-Revert-Treat-EPERM-as-not-available-too.patch
 Patch0369: 0369-Revert-test-accept-EPERM-for-unavailable-idmapped-mo.patch
+Patch0370: 0370-ci-Extend-source-git-automation.patch
+Patch0371: 0371-netif-naming-scheme-let-s-also-include-rhel8-schemes.patch
+Patch0372: 0372-systemd-analyze-Add-table-and-JSON-output-implementa.patch
+Patch0373: 0373-systemd-analyze-Update-man-systemd-analyze.xml-with-.patch
+Patch0374: 0374-systemd-analyze-Add-tab-complete-logic-for-plot.patch
+Patch0375: 0375-systemd-analyze-Add-json-table-and-no-legend-tests-f.patch
+Patch0376: 0376-ci-enable-source-git-automation-to-validate-reviews-.patch
+Patch0377: 0377-ci-remove-Mergify-config-replaced-by-Pull-Request-Va.patch
+Patch0378: 0378-ci-enable-auto-merge-GH-Action.patch
+Patch0379: 0379-ci-add-missing-permissions.patch
+Patch0380: 0380-ci-permissions-write-all.patch
+Patch0381: 0381-ci-lint-exclude-.in-files-from-ShellCheck-lint.patch
+Patch0382: 0382-udev-raise-RLIMIT_NOFILE-as-high-as-we-can.patch
+Patch0383: 0383-udev-net-allow-new-link-name-as-an-altname-before-re.patch
+Patch0384: 0384-sd-netlink-do-not-swap-old-name-and-alternative-name.patch
+Patch0385: 0385-sd-netlink-restore-altname-on-error-in-rtnl_set_link.patch
+Patch0386: 0386-udev-attempt-device-rename-even-if-interface-is-up.patch
+Patch0387: 0387-sd-netlink-add-a-test-for-rtnl_set_link_name.patch
+Patch0388: 0388-test-network-add-a-test-for-renaming-device-to-curre.patch
+Patch0389: 0389-udev-align-table.patch
+Patch0390: 0390-sd-device-make-device_set_syspath-clear-sysname-and-.patch
+Patch0391: 0391-sd-device-do-not-directly-access-entry-in-sd-device-.patch
+Patch0392: 0392-udev-move-device_rename-from-device-private.c.patch
+Patch0393: 0393-udev-restore-syspath-and-properties-on-failure.patch
+Patch0394: 0394-sd-device-introduce-device_get_property_int.patch
+Patch0395: 0395-core-device-downgrade-log-level-for-ignored-errors.patch
+Patch0396: 0396-core-device-ignore-failed-uevents.patch
+Patch0397: 0397-test-add-tests-for-failure-in-renaming-network-inter.patch
+Patch0398: 0398-test-modernize-test-netlink.c.patch
+Patch0399: 0399-test-netlink-use-dummy-interface-to-test-assigning-n.patch
+Patch0400: 0400-udev-use-SYNTHETIC_ERRNO-at-one-more-place.patch
+Patch0401: 0401-udev-make-udev_builtin_run-take-UdevEvent.patch
+Patch0402: 0402-udev-net-verify-ID_NET_XYZ-before-trying-to-assign-i.patch
+Patch0403: 0403-udev-net-generate-new-network-interface-name-only-on.patch
+Patch0404: 0404-sd-netlink-make-rtnl_set_link_name-optionally-append.patch
+Patch0405: 0405-udev-net-assign-alternative-names-only-on-add-uevent.patch
+Patch0406: 0406-test-add-tests-for-renaming-network-interface.patch
+Patch0407: 0407-Backport-ukify-from-upstream.patch
+Patch0408: 0408-bootctl-make-json-output-normal-json.patch
+Patch0409: 0409-test-replace-readfp-with-read_file.patch
+Patch0410: 0410-stub-measure-document-and-measure-.uname-UKI-section.patch
+Patch0411: 0411-boot-measure-.sbat-section.patch
+Patch0412: 0412-Revert-test_ukify-no-stinky-root-needed-for-signing.patch
+Patch0413: 0413-ukify-move-to-usr-bin-and-mark-as-non-non-experiment.patch
+Patch0414: 0414-kernel-install-Add-uki-layout.patch
+Patch0415: 0415-kernel-install-remove-math-slang-from-man-page.patch
+Patch0416: 0416-kernel-install-handle-uki-installs-automatically.patch
+Patch0417: 0417-90-uki-copy.install-create-BOOT-EFI-Linux-directory-.patch
+Patch0418: 0418-kernel-install-Log-location-that-uki-is-installed-in.patch
+Patch0419: 0419-bootctl-fix-errno-logging.patch
+Patch0420: 0420-bootctl-add-kernel-identity-command.patch
+Patch0421: 0421-bootctl-add-kernel-inspect-command.patch
+Patch0422: 0422-bootctl-add-kernel-inspect-to-help-text.patch
+Patch0423: 0423-bootctl-drop-full-stop-at-end-of-help-texts.patch
+Patch0424: 0424-bootctl-change-section-title-for-kernel-image-comman.patch
+Patch0425: 0425-bootctl-remove-space-that-should-not-be-there.patch
+Patch0426: 0426-bootctl-kernel-inspect-print-os-info.patch
+Patch0427: 0427-bootctl-uki-several-coding-style-fixlets.patch
+Patch0428: 0428-tree-wide-unify-how-we-pick-OS-pretty-name-to-displa.patch
+Patch0429: 0429-bootctl-uki-several-follow-ups-for-inspect_osrel.patch
+Patch0430: 0430-bootctl-Add-missing-m.patch
+Patch0431: 0431-bootctl-tweak-DOS-header-magic-check.patch
+Patch0432: 0432-meson-fix-installation-of-ukify.patch
+Patch0433: 0433-sd-id128-introduce-id128_hash_ops_free.patch
+Patch0434: 0434-udevadm-trigger-allow-to-fallback-without-synthetic-.patch
+Patch0435: 0435-udevadm-trigger-settle-with-synthetic-UUID-if-the-ke.patch
+Patch0436: 0436-udevadm-trigger-also-check-with-the-original-syspath.patch
+Patch0437: 0437-test-use-udevadm-trigger-settle-even-if-device-is-re.patch
+Patch0438: 0438-sd-event-don-t-mistake-USEC_INFINITY-passed-in-for-o.patch
+Patch0439: 0439-pid1-rework-service_arm_timer-to-optionally-take-a-r.patch
+Patch0440: 0440-manager-add-one-more-assert.patch
+Patch0441: 0441-pid1-add-new-Type-notify-reload-service-type.patch
+Patch0442: 0442-man-document-Type-notify-reload.patch
+Patch0443: 0443-pid1-make-sure-we-send-our-calling-service-manager-R.patch
+Patch0444: 0444-networkd-implement-Type-notify-reload-protocol.patch
+Patch0445: 0445-udevd-implement-the-full-Type-notify-reload-protocol.patch
+Patch0446: 0446-logind-implement-Type-notify-reload-protocol-properl.patch
+Patch0447: 0447-notify-add-stopping-reloading-switches.patch
+Patch0448: 0448-test-add-Type-notify-reload-testcase.patch
+Patch0449: 0449-update-TODO.patch
+Patch0450: 0450-core-check-for-SERVICE_RELOAD_NOTIFY-in-manager_dbus.patch
+Patch0451: 0451-Revert-man-mention-System-Administrator-s-Guide-in-s.patch
+Patch0452: 0452-man-mention-RHEL-documentation-in-systemctl-s-man-pa.patch
+Patch0453: 0453-resolved-actually-check-authenticated-flag-of-SOA-tr.patch
+Patch0454: 0454-udev-allow-denylist-for-reading-sysfs-attributes-whe.patch
+Patch0455: 0455-man-environment-value-udev-property.patch
+Patch0456: 0456-logind-don-t-setup-idle-session-watch-for-lock-scree.patch
+Patch0457: 0457-logind-don-t-make-idle-action-timer-accuracy-more-co.patch
+Patch0458: 0458-logind-do-TTY-idle-logic-only-for-sessions-marked-as.patch
+Patch0459: 0459-meson-Properly-install-90-uki-copy.install.patch
+Patch0460: 0460-ci-use-source-git-automation-composite-Action.patch
+Patch0461: 0461-ci-increase-the-cron-interval-to-45-minutes.patch
+Patch0462: 0462-ci-add-all-Z-Stream-versions-to-array-of-allowed-ver.patch
+Patch0463: 0463-udev-net_id-introduce-naming-scheme-for-RHEL-9.4.patch
+Patch0464: 0464-basic-errno-util-add-wrappers-which-only-accept-nega.patch
+Patch0465: 0465-errno-util-allow-ERRNO_IS_-to-accept-types-wider-tha.patch
+Patch0466: 0466-udev-add-new-builtin-net_driver.patch
+Patch0467: 0467-udev-net_id-introduce-naming-scheme-for-RHEL-8.10.patch
+Patch0468: 0468-test-merge-TEST-20-MAINPIDGAMES-into-TEST-07-PID1-fi.patch
+Patch0469: 0469-test-use-the-default-nsec3-iterations-value.patch
+Patch0470: 0470-test-explicitly-set-nsec3-iterations-to-0.patch
+Patch0471: 0471-core-mount-namespaces-Remove-auxiliary-bind-mounts-d.patch
+Patch0472: 0472-ci-deploy-systemd-man-to-GitHub-Pages.patch
+Patch0473: 0473-doc-add-missing-listitem-to-systemd.net-naming-schem.patch
+Patch0474: 0474-man-reorder-the-list-of-supported-naming-schemes.patch
+Patch0475: 0475-tree-wide-fix-return-value-handling-of-base64mem.patch
+Patch0476: 0476-Consolidate-various-TAKE_-into-TAKE_GENERIC-add-TAKE.patch
+Patch0477: 0477-pcrphase-add-SYSTEMD_PCRPHASE_STUB_VERIFY-env-var-fo.patch
+Patch0478: 0478-pcrphase-gracefully-exit-if-TPM2-support-is-incomple.patch
+Patch0479: 0479-tpm2-util-split-out-code-that-derives-good-TPM2-bank.patch
+Patch0480: 0480-tpm2-util-split-out-code-that-extends-a-PCR-from-pcr.patch
+Patch0481: 0481-tpm2-util-optionally-do-HMAC-in-tpm2_extend_bytes-in.patch
+Patch0482: 0482-cryptsetup-add-tpm2-measure-pcr-and-tpm2-measure-ban.patch
+Patch0483: 0483-man-document-the-new-crypttab-measurement-options.patch
+Patch0484: 0484-gpt-auto-generator-automatically-measure-root-var-vo.patch
+Patch0485: 0485-blkid-util-define-enum-for-blkid_do_safeprobe-return.patch
+Patch0486: 0486-pcrphase-make-tool-more-generic-reuse-for-measuring-.patch
+Patch0487: 0487-units-measure-etc-machine-id-into-PCR-15-during-earl.patch
+Patch0488: 0488-generators-optionally-measure-file-systems-at-boot.patch
+Patch0489: 0489-tpm2-add-common-helper-for-checking-if-we-are-runnin.patch
+Patch0490: 0490-man-document-new-machine-id-fs-measurement-options.patch
+Patch0491: 0491-test-add-simple-integration-test-for-checking-PCR-ex.patch
+Patch0492: 0492-update-TODO.patch
+Patch0493: 0493-cryptsetup-retry-TPM2-unseal-operation-if-it-fails-w.patch
+Patch0494: 0494-boot-Simplify-object-erasure.patch
+Patch0495: 0495-tree-wide-use-CLEANUP_ERASE-at-various-places.patch
+Patch0496: 0496-dlfcn-add-new-safe_dclose-helper.patch
+Patch0497: 0497-tpm2-rename-tpm2-alg-id-string-functions.patch
+Patch0498: 0498-tpm2-rename-struct-tpm2_context-to-Tpm2Context.patch
+Patch0499: 0499-tpm2-use-ref-counter-for-Tpm2Context.patch
+Patch0500: 0500-tpm2-use-Tpm2Context-instead-of-ESYS_CONTEXT.patch
+Patch0501: 0501-tpm2-add-Tpm2Handle-with-automatic-cleanup.patch
+Patch0502: 0502-tpm2-simplify-tpm2_seal-blob-creation.patch
+Patch0503: 0503-tpm2-add-salt-to-pin.patch
+Patch0504: 0504-basic-macro-add-macro-to-iterate-variadic-args.patch
+Patch0505: 0505-test-test-macro-add-tests-for-FOREACH_VA_ARGS.patch
+Patch0506: 0506-basic-bitfield-add-bitfield-operations.patch
+Patch0507: 0507-test-test-bitfield-add-tests-for-bitfield-macros.patch
+Patch0508: 0508-tpm2-add-tpm2_get_policy_digest.patch
+Patch0509: 0509-tpm2-add-TPM2_PCR_VALID.patch
+Patch0510: 0510-tpm2-add-rename-functions-to-manage-pcr-selections.patch
+Patch0511: 0511-test-test-tpm2-add-tests-for-pcr-selection-functions.patch
+Patch0512: 0512-tpm2-add-tpm2_pcr_read.patch
+Patch0513: 0513-tpm2-move-openssl-required-ifdef-code-out-of-policy-.patch
+Patch0514: 0514-tpm2-add-tpm2_is_encryption_session.patch
+Patch0515: 0515-tpm2-move-policy-building-out-of-policy-session-crea.patch
+Patch0516: 0516-tpm2-add-support-for-a-trusted-SRK.patch
+Patch0517: 0517-tpm2-fix-nits-from-PR-26185.patch
+Patch0518: 0518-tpm2-replace-magic-number.patch
+Patch0519: 0519-tpm2-add-tpm2_digest_-functions.patch
+Patch0520: 0520-tpm2-replace-hash_pin-with-tpm2_digest_-functions.patch
+Patch0521: 0521-tpm2-add-tpm2_set_auth.patch
+Patch0522: 0522-tpm2-add-tpm2_get_name.patch
+Patch0523: 0523-tpm2-rename-pcr_values_size-vars-to-n_pcr_values.patch
+Patch0524: 0524-tpm2-add-tpm2_policy_pcr.patch
+Patch0525: 0525-tpm2-add-tpm2_policy_auth_value.patch
+Patch0526: 0526-tpm2-add-tpm2_policy_authorize.patch
+Patch0527: 0527-tpm2-use-tpm2_policy_authorize.patch
+Patch0528: 0528-tpm2-add-tpm2_calculate_sealing_policy.patch
+Patch0529: 0529-tpm-remove-external-calls-to-dlopen_tpm2.patch
+Patch0530: 0530-tpm2-remove-all-extern-tpm2-tss-symbols.patch
+Patch0531: 0531-tpm2-add-tpm2_get_capability-tpm2_cache_capabilities.patch
+Patch0532: 0532-tpm2-verify-symmetric-parms-in-tpm2_context_new.patch
+Patch0533: 0533-tpm2-replace-_cleanup_tpm2_-macros-with-_cleanup_.patch
+Patch0534: 0534-tpm2-util-use-compound-initialization-when-allocatin.patch
+Patch0535: 0535-tpm2-add-tpm2_get_capability_handle-tpm2_esys_handle.patch
+Patch0536: 0536-tpm2-add-tpm2_read_public.patch
+Patch0537: 0537-tpm2-add-tpm2_get_legacy_template-and-tpm2_get_srk_t.patch
+Patch0538: 0538-tpm2-add-tpm2_load.patch
+Patch0539: 0539-tpm2-add-tpm2_load_external.patch
+Patch0540: 0540-tpm2-move-local-vars-in-tpm2_seal-to-point-of-use.patch
+Patch0541: 0541-tpm2-replace-magic-number-in-hmac_sensitive-initiali.patch
+Patch0542: 0542-tpm2-add-tpm2_create.patch
+Patch0543: 0543-tpm2-replace-tpm2_capability_pcrs-macro-with-direct-.patch
+Patch0544: 0544-basic-alloc-util-add-greedy_realloc_append.patch
+Patch0545: 0545-tpm2-cache-the-TPM-supported-commands-add-tpm2_suppo.patch
+Patch0546: 0546-tpm2-cache-TPM-algorithms.patch
+Patch0547: 0547-tpm2-add-tpm2_persist_handle.patch
+Patch0548: 0548-tpm2-add-tpm2_get_or_create_srk.patch
+Patch0549: 0549-tpm2-move-local-vars-in-tpm2_unseal-to-point-of-use.patch
+Patch0550: 0550-tpm2-remove-tpm2_make_primary.patch
+Patch0551: 0551-tpm2-use-CreatePrimary-to-create-primary-keys-instea.patch
+Patch0552: 0552-cryptsetup-downgrade-a-bunch-of-log-messages-that-to.patch
+Patch0553: 0553-boot-measure-replace-TPM-PolicyPCR-session-with-calc.patch
+Patch0554: 0554-core-imply-DeviceAllow-dev-tpmrm0-with-LoadCredentia.patch
+Patch0555: 0555-added-more-test-cases.patch
+Patch0556: 0556-test-fixed-negative-checks-in-TEST-70-TPM2.patch
+Patch0557: 0557-systemd-cryptenroll-add-string-aliases-for-tpm2-PCRs.patch
+Patch0558: 0558-cryptenroll-fix-an-assertion-with-weak-passwords.patch
+Patch0559: 0559-man-systemd-cryptenroll-update-list-of-PCRs-link-to-.patch
+Patch0560: 0560-tpm2-add-debug-logging-to-functions-converting-hash-.patch
+Patch0561: 0561-tpm2-add-tpm2_hash_alg_to_size.patch
+Patch0562: 0562-tpm2-change-tpm2_tpm-_pcr_selection_to_mask-to-retur.patch
+Patch0563: 0563-tpm2-add-more-helper-functions-for-managing-TPML_PCR.patch
+Patch0564: 0564-tpm2-add-Tpm2PCRValue-struct-and-associated-function.patch
+Patch0565: 0565-tpm2-move-declared-functions-in-header-lower-down.patch
+Patch0566: 0566-tpm2-declare-tpm2_log_debug_-functions-in-tpm2_util..patch
+Patch0567: 0567-tpm2-change-tpm2_calculate_policy_pcr-tpm2_calculate.patch
+Patch0568: 0568-tpm2-change-tpm2_parse_pcr_argument-parameters-to-pa.patch
+Patch0569: 0569-tpm2-add-TPM2B_-_MAKE-TPM2B_-_CHECK_SIZE-macros.patch
+Patch0570: 0570-tpm2-add-tpm2_pcr_read_missing_values.patch
+Patch0571: 0571-openssl-add-openssl_pkey_from_pem.patch
+Patch0572: 0572-openssl-add-rsa_pkey_new-rsa_pkey_from_n_e-rsa_pkey_.patch
+Patch0573: 0573-openssl-add-ecc_pkey_new-ecc_pkey_from_curve_x_y-ecc.patch
+Patch0574: 0574-test-add-DEFINE_HEX_PTR-helper-function.patch
+Patch0575: 0575-openssl-add-test-openssl.patch
+Patch0576: 0576-tpm2-add-functions-to-convert-TPM2B_PUBLIC-to-from-o.patch
+Patch0577: 0577-tpm2-move-policy-calculation-out-of-tpm2_seal.patch
+Patch0578: 0578-man-update-systemd-cryptenroll-man-page-with-details.patch
+Patch0579: 0579-tpm2-update-TEST-70-TPM2-to-test-passing-PCR-value-t.patch
+Patch0580: 0580-tpm2-change-alg_to_-functions-to-use-switch.patch
+Patch0581: 0581-tpm2-lowercase-TPM2_PCR_VALUE-S-_VALID-functions.patch
+Patch0582: 0582-tpm2-move-cast-from-lhs-to-rhs-in-uint16_t-int-compa.patch
+Patch0583: 0583-tpm2-in-validator-functions-return-false-instead-of-.patch
+Patch0584: 0584-tpm2-in-tpm2_pcr_values_valid-use-FOREACH_ARRAY.patch
+Patch0585: 0585-tpm2-use-SIZE_MAX-instead-of-strlen-for-unhexmem.patch
+Patch0586: 0586-tpm2-put-isempty-check-inside-previous-isempty-check.patch
+Patch0587: 0587-tpm2-simplify-call-to-asprintf.patch
+Patch0588: 0588-tpm2-check-pcr-value-hash-0-before-looking-up-hash-a.patch
+Patch0589: 0589-tpm2-use-strempty.patch
+Patch0590: 0590-tpm2-split-TPM2_PCR_VALUE_MAKE-over-multiple-lines.patch
+Patch0591: 0591-tpm2-remove-ret_-prefix-from-input-output-params.patch
+Patch0592: 0592-tpm2-use-memcpy_safe-instead-of-memcpy.patch
+Patch0593: 0593-openssl-use-new-char-size-instead-of-malloc-size.patch
+Patch0594: 0594-tpm2-use-table-for-openssl-tpm2-ecc-curve-id-mapping.patch
+Patch0595: 0595-tpm2-use-switch-instead-of-if-else.patch
+Patch0596: 0596-tpm2-make-logging-level-consistent-at-debug-for-some.patch
+Patch0597: 0597-tpm2-remove-unnecessary-void-cast.patch
+Patch0598: 0598-tpm2-add-tpm2_pcr_values_has_-any-all-_values-functi.patch
+Patch0599: 0599-tpm2-wrap-7-in-UINT32_C.patch
+Patch0600: 0600-cryptenroll-change-man-page-example-to-remove-leadin.patch
+Patch0601: 0601-openssl-add-log_openssl_errors.patch
+Patch0602: 0602-openssl-add-openssl_digest_size.patch
+Patch0603: 0603-openssl-add-openssl_digest_many.patch
+Patch0604: 0604-openssl-replace-openssl_hash-with-openssl_digest.patch
+Patch0605: 0605-openssl-add-openssl_hmac_many.patch
+Patch0606: 0606-openssl-add-rsa_oaep_encrypt_bytes.patch
+Patch0607: 0607-openssl-add-kdf_kb_hmac_derive.patch
+Patch0608: 0608-openssl-add-openssl_cipher_many.patch
+Patch0609: 0609-openssl-add-ecc_edch.patch
+Patch0610: 0610-openssl-add-kdf_ss_derive.patch
+Patch0611: 0611-dlfcn-util-add-static-asserts-ensuring-our-sym_xyz-f.patch
+Patch0612: 0612-tpm2-add-tpm2_marshal_blob-and-tpm2_unmarshal_blob.patch
+Patch0613: 0613-tpm2-add-tpm2_serialize-and-tpm2_deserialize.patch
+Patch0614: 0614-tpm2-add-tpm2_index_to_handle-and-tpm2_index_from_ha.patch
+Patch0615: 0615-tpm2-fix-build-failure-without-openssl.patch
+Patch0616: 0616-tpm2-util-look-for-tpm2-pcr-signature.json-directly-.patch
+Patch0617: 0617-tpm2-downgrade-most-log-functions-from-error-to-debu.patch
+Patch0618: 0618-tpm2-handle-older-tpm-enrollments-without-a-saved-pc.patch
+Patch0619: 0619-tpm2-allow-tpm2_make_encryption_session-without-bind.patch
+Patch0620: 0620-tpm2-update-tpm2-test-for-supported-commands.patch
+Patch0621: 0621-tpm2-use-GREEDY_REALLOC_APPEND-in-tpm2_get_capabilit.patch
+Patch0622: 0622-tpm2-change-tpm2_unseal-to-accept-Tpm2Context-instea.patch
+Patch0623: 0623-tpm2-cache-TPM-s-supported-ECC-curves.patch
+Patch0624: 0624-tpm2-util-make-tpm2_marshal_blob-tpm2_unmarshal_blob.patch
+Patch0625: 0625-tpm2-util-make-tpm2_read_public-static-as-we-use-it-.patch
+Patch0626: 0626-cryptenroll-allow-specifying-handle-index-of-key-to-.patch
+Patch0627: 0627-test-add-tests-for-systemd-cryptenroll-tpm2-seal-key.patch
+Patch0628: 0628-tpm2-do-not-call-Esys_TR_Close.patch
+Patch0629: 0629-tpm2-don-t-use-GetCapability-to-check-transient-hand.patch
+Patch0630: 0630-tpm2-util-pick-up-a-few-new-symbols-from-tpm2-tss.patch
+Patch0631: 0631-tpm2-add-tpm2_get_pin_auth.patch
+Patch0632: 0632-tpm2-instead-of-adjusting-authValue-trailing-0-s-tri.patch
+Patch0633: 0633-tpm2-util-rename-tpm2_calculate_name-tpm2_calculate_.patch
+Patch0634: 0634-cryptenroll-do-not-implicitly-verify-with-default-tp.patch
+Patch0635: 0635-cryptenroll-drop-deadcode.patch
+Patch0636: 0636-tpm2-allow-using-tpm2_get_srk_template-without-tpm.patch
+Patch0637: 0637-tpm2-add-test-to-verify-srk-templates.patch
+Patch0638: 0638-tpm2-add-tpm2_sym_alg_-_string-and-tpm2_sym_mode_-_s.patch
+Patch0639: 0639-tpm2-add-tpm2_calculate_seal-and-helper-functions.patch
+Patch0640: 0640-tpm2-update-test-tpm2-for-tpm2_calculate_seal.patch
+Patch0641: 0641-cryptenroll-add-support-for-calculated-TPM2-enrollme.patch
+Patch0642: 0642-test-update-TEST-70-with-systemd-cryptenroll-calcula.patch
+Patch0643: 0643-openssl-util-avoid-freeing-invalid-pointer.patch
+Patch0644: 0644-creds-util-check-for-CAP_DAC_READ_SEARCH.patch
+Patch0645: 0645-creds-util-do-not-try-TPM2-if-there-is-not-support.patch
+Patch0646: 0646-creds-util-merge-the-TPM2-detection-for-initrd.patch
+Patch0647: 0647-cryptenroll-fix-a-memory-leak.patch
+Patch0648: 0648-sd-journal-introduce-sd_journal_step_one.patch
+Patch0649: 0649-test-modernize-test-journal-flush.patch
+Patch0650: 0650-journal-file-util-do-not-fail-when-journal_file_set_.patch
+Patch0651: 0651-journal-file-util-Prefer-punching-holes-instead-of-t.patch
+Patch0652: 0652-test-add-reproducer-for-SIGBUS-issue-caused-by-journ.patch
+Patch0653: 0653-random-seed-shorten-a-bit-may_credit.patch
+Patch0654: 0654-random-seed-make-one-more-use-of-random_write_entrop.patch
+Patch0655: 0655-random-seed-use-getopt.patch
+Patch0656: 0656-random-seed-make-the-logic-to-calculate-the-number-o.patch
+Patch0657: 0657-random-seed-no-need-to-pass-mode-argument-when-openi.patch
+Patch0658: 0658-random-seed-split-out-run.patch
+Patch0659: 0659-random_seed-minor-improvement-in-run.patch
+Patch0660: 0660-random-seed-downgrade-some-messages.patch
+Patch0661: 0661-random-seed-clarify-one-comment.patch
+Patch0662: 0662-random-seed-make-sure-to-load-machine-id-even-if-the.patch
+Patch0663: 0663-chase-symlinks-add-new-flag-for-prohibiting-any-foll.patch
+Patch0664: 0664-bootctl-bootspec-make-use-of-CHASE_PROHIBIT_SYMLINKS.patch
+Patch0665: 0665-boot-implement-kernel-EFI-RNG-seed-protocol-with-pro.patch
+Patch0666: 0666-random-seed-refresh-EFI-boot-seed-when-writing-a-new.patch
+Patch0667: 0667-random-seed-handle-post-merge-review-nits.patch
+Patch0668: 0668-boot-do-not-truncate-random-seed-file.patch
+Patch0669: 0669-bootctl-install-system-token-on-virtualized-systems.patch
+Patch0670: 0670-boot-remove-random-seed-mode.patch
+Patch0671: 0671-stub-handle-random-seed-like-sd-boot-does.patch
+Patch0672: 0672-efi-add-efi_guid_equal-helper.patch
+Patch0673: 0673-efi-add-common-implementation-for-loop-finding-EFI-c.patch
+Patch0674: 0674-boot-Detect-hypervisors-using-SMBIOS-info.patch
+Patch0675: 0675-boot-Skip-soft-brick-warning-when-in-a-VM.patch
+Patch0676: 0676-boot-Replace-UINTN-with-size_t.patch
+Patch0677: 0677-boot-Use-unsigned-for-beep-counting.patch
+Patch0678: 0678-boot-Use-unicode-literals.patch
+Patch0679: 0679-macro-add-generic-IS_ALIGNED32-anf-friends.patch
+Patch0680: 0680-meson-use-0-1-for-SD_BOOT.patch
+Patch0681: 0681-boot-Add-printf-functions.patch
+Patch0682: 0682-boot-Use-printf-for-error-logging.patch
+Patch0683: 0683-boot-Introduce-log_wait.patch
+Patch0684: 0684-boot-Add-log_trace-debugging-helper.patch
+Patch0685: 0685-tree-wide-Use-__func__-in-asserts.patch
+Patch0686: 0686-boot-Drop-use-of-xpool_print-SPrint.patch
+Patch0687: 0687-boot-Drop-use-of-Print.patch
+Patch0688: 0688-boot-Rework-GUID-handling.patch
+Patch0689: 0689-efi-string-Fix-strchr-null-byte-handling.patch
+Patch0690: 0690-efi-string-Add-startswith8.patch
+Patch0691: 0691-efi-string-Add-efi_memchr.patch
+Patch0692: 0692-vmm-Add-more-const.patch
+Patch0693: 0693-vmm-Add-smbios_find_oem_string.patch
+Patch0694: 0694-stub-Read-extra-kernel-command-line-items-from-SMBIO.patch
+Patch0695: 0695-vmm-Modernize-get_smbios_table.patch
+Patch0696: 0696-stub-measure-SMBIOS-kernel-cmdline-extra-in-PCR12.patch
+Patch0697: 0697-efi-support-passing-empty-cmdline-to-mangle_stub_cmd.patch
+Patch0698: 0698-efi-set-EFIVAR-to-stop-Shim-from-uninstalling-its-pr.patch
+Patch0699: 0699-ukify-use-empty-stub-for-addons.patch
+Patch0700: 0700-stub-allow-loading-and-verifying-cmdline-addons.patch
+Patch0701: 0701-TODO-remove-fixed-item.patch
+Patch0702: 0702-fix-do-not-check-verify-slice-units-if-recursive-err.patch
+Patch0703: 0703-units-fix-typo-in-Condition-in-systemd-boot-system-t.patch
+Patch0704: 0704-resolved-limit-the-number-of-signature-validations-i.patch
+Patch0705: 0705-resolved-reduce-the-maximum-nsec3-iterations-to-100.patch
+Patch0706: 0706-efi-alignment-of-the-PE-file-has-to-be-at-least-512-.patch
+Patch0707: 0707-units-change-assert-to-condition-to-skip-running-in-.patch
+Patch0708: 0708-ci-add-configuration-for-regression-sniffer-GA.patch
+Patch0709: 0709-bootctl-rework-random-seed-logic-to-use-open_mkdir_a.patch
+Patch0710: 0710-bootctl-properly-sync-fs-before-after-moving-random-.patch
+Patch0711: 0711-bootctl-when-updating-EFI-random-seed-file-hash-old-.patch
+Patch0712: 0712-sha256-add-helper-than-hashes-a-buffer-and-its-size.patch
+Patch0713: 0713-random-seed-don-t-refresh-EFI-random-seed-from-rando.patch
+Patch0714: 0714-bootctl-downgrade-graceful-messages-to-LOG_NOTICE.patch
+Patch0715: 0715-units-rename-rework-systemd-boot-system-token.servic.patch
+Patch0716: 0716-bootctl-split-out-setting-of-system-token-into-funct.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -454,64 +806,66 @@ Patch0369: 0369-Revert-test-accept-EPERM-for-unavailable-idmapped-mo.patch
 %global have_gnu_efi 1
 %endif
 
-BuildRequires:  gcc
-BuildRequires:  gcc-c++
-BuildRequires:  coreutils
-BuildRequires:  libcap-devel
-BuildRequires:  libmount-devel
-BuildRequires:  libfdisk-devel
-BuildRequires:  pam-devel
-BuildRequires:  libselinux-devel
-BuildRequires:  audit-libs-devel
+BuildRequires: gcc
+BuildRequires: gcc-c++
+BuildRequires: coreutils
+BuildRequires: libcap-devel
+BuildRequires: libmount-devel
+BuildRequires: libfdisk-devel
+BuildRequires: pam-devel
+BuildRequires: libselinux-devel
+BuildRequires: audit-libs-devel
 %if %{without bootstrap}
-BuildRequires:  cryptsetup-devel
+BuildRequires: cryptsetup-devel
 %endif
-BuildRequires:  dbus-devel
+BuildRequires: dbus-devel
 # /usr/bin/getfacl is needed by test-acl-util
-BuildRequires:  acl
-BuildRequires:  libacl-devel
-BuildRequires:  gobject-introspection-devel
-BuildRequires:  libblkid-devel
-BuildRequires:  xz-devel
-BuildRequires:  xz
-BuildRequires:  lz4-devel
-BuildRequires:  lz4
-BuildRequires:  bzip2-devel
-BuildRequires:  libzstd-devel
-BuildRequires:  libidn2-devel
-BuildRequires:  libcurl-devel
-BuildRequires:  kmod-devel
-BuildRequires:  elfutils-devel
-BuildRequires:  openssl-devel
-BuildRequires:  libgcrypt-devel
-BuildRequires:  libgpg-error-devel
-BuildRequires:  gnutls-devel
-BuildRequires:  libmicrohttpd-devel
-BuildRequires:  libxkbcommon-devel
-BuildRequires:  libxslt
-BuildRequires:  docbook-style-xsl
-BuildRequires:  pkgconfig
-BuildRequires:  gperf
-BuildRequires:  gawk
-BuildRequires:  tree
-BuildRequires:  hostname
-BuildRequires:  python3dist(lxml)
-BuildRequires:  python3dist(jinja2)
-BuildRequires:  firewalld-filesystem
-BuildRequires:  libseccomp-devel
-BuildRequires:  meson >= 0.43
-BuildRequires:  gettext
+BuildRequires: acl
+BuildRequires: libacl-devel
+BuildRequires: gobject-introspection-devel
+BuildRequires: libblkid-devel
+BuildRequires: xz-devel
+BuildRequires: xz
+BuildRequires: lz4-devel
+BuildRequires: lz4
+BuildRequires: bzip2-devel
+BuildRequires: libzstd-devel
+BuildRequires: libidn2-devel
+BuildRequires: libcurl-devel
+BuildRequires: kmod-devel
+BuildRequires: elfutils-devel
+BuildRequires: openssl-devel
+BuildRequires: libgcrypt-devel
+BuildRequires: libgpg-error-devel
+BuildRequires: gnutls-devel
+BuildRequires: libmicrohttpd-devel
+BuildRequires: libxkbcommon-devel
+BuildRequires: libxslt
+BuildRequires: docbook-style-xsl
+BuildRequires: pkgconfig
+BuildRequires: gperf
+BuildRequires: gawk
+BuildRequires: tree
+BuildRequires: hostname
+BuildRequires: python3dist(lxml)
+BuildRequires: python3dist(jinja2)
+BuildRequires: python3dist(pefile)
+BuildRequires: python3dist(cryptography)
+BuildRequires: firewalld-filesystem
+BuildRequires: libseccomp-devel
+BuildRequires: meson >= 0.43
+BuildRequires: gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires:  valgrind-devel
-BuildRequires:  pkgconfig(bash-completion)
-BuildRequires:  pkgconfig(tss2-esys)
-BuildRequires:  pkgconfig(tss2-rc)
-BuildRequires:  pkgconfig(tss2-mu)
-BuildRequires:  perl
-BuildRequires:  perl(IPC::SysV)
-BuildRequires:  git-core
+BuildRequires: valgrind-devel
+BuildRequires: pkgconfig(bash-completion)
+BuildRequires: pkgconfig(tss2-esys)
+BuildRequires: pkgconfig(tss2-rc)
+BuildRequires: pkgconfig(tss2-mu)
+BuildRequires: perl
+BuildRequires: perl(IPC::SysV)
+BuildRequires: git-core
 %if 0%{?have_gnu_efi}
-BuildRequires:  gnu-efi gnu-efi-devel
+BuildRequires: gnu-efi gnu-efi-devel
 %endif
 
 Requires(post): coreutils
@@ -523,35 +877,35 @@ Requires(post): openssl-libs
 Requires(pre):  coreutils
 Requires(pre):  /usr/bin/getent
 Requires(pre):  /usr/sbin/groupadd
-Requires:       dbus >= 1.9.18
-Requires:       %{name}-pam = %{version}-%{release}
-Requires:       %{name}-rpm-macros = %{version}-%{release}
-Requires:       %{name}-libs = %{version}-%{release}
-Requires:       util-linux
-Provides:       /bin/systemctl
-Provides:       /sbin/shutdown
-Provides:       syslog
-Provides:       systemd-units = %{version}-%{release}
-Obsoletes:      system-setup-keyboard < 0.9
-Provides:       system-setup-keyboard = 0.9
+Requires: dbus >= 1.9.18
+Requires: %{name}-pam = %{version}-%{release}
+Requires: %{name}-rpm-macros = %{version}-%{release}
+Requires: %{name}-libs = %{version}-%{release}
+Requires: util-linux
+Provides: /bin/systemctl
+Provides: /sbin/shutdown
+Provides: syslog
+Provides: systemd-units = %{version}-%{release}
+Obsoletes: system-setup-keyboard < 0.9
+Provides: system-setup-keyboard = 0.9
 # systemd-sysv-convert was removed in f20: https://fedorahosted.org/fpc/ticket/308
-Obsoletes:      systemd-sysv < 206
+Obsoletes: systemd-sysv < 206
 # self-obsoletes so that dnf will install new subpackages on upgrade (#1260394)
-Obsoletes:      %{name} < 246.6-2
-Provides:       systemd-sysv = 206
-Conflicts:      initscripts < 9.56.1
+Obsoletes: %{name} < 246.6-2
+Provides: systemd-sysv = 206
+Conflicts: initscripts < 9.56.1
 %if 0%{?fedora}
-Conflicts:      fedora-release < 23-0.12
+Conflicts: fedora-release < 23-0.12
 %endif
-Obsoletes:      timedatex < 0.6-3
-Provides:       timedatex = 0.6-3
-Conflicts:      %{name}-standalone-tmpfiles < %{version}-%{release}^
-Obsoletes:      %{name}-standalone-tmpfiles < %{version}-%{release}^
-Conflicts:      %{name}-standalone-sysusers < %{version}-%{release}^
-Obsoletes:      %{name}-standalone-sysusers < %{version}-%{release}^
+Obsoletes: timedatex < 0.6-3
+Provides: timedatex = 0.6-3
+Conflicts: %{name}-standalone-tmpfiles < %{version}-%{release}^
+Obsoletes: %{name}-standalone-tmpfiles < %{version}-%{release}^
+Conflicts: %{name}-standalone-sysusers < %{version}-%{release}^
+Obsoletes: %{name}-standalone-sysusers < %{version}-%{release}^
 
 # Requires deps for stuff that is dlopen()ed
-Requires:       pcre2%{?_isa}
+Requires: pcre2%{?_isa}
 
 %description
 systemd is a system and service manager that runs as PID 1 and starts
@@ -572,15 +926,15 @@ This package was built from the %{version}-stable branch of systemd.
 %endif
 
 %package libs
-Summary:        systemd libraries
-License:        LGPLv2+ and MIT
-Obsoletes:      libudev < 183
-Obsoletes:      systemd < 185-4
-Conflicts:      systemd < 185-4
-Obsoletes:      systemd-compat-libs < 230
-Obsoletes:      nss-myhostname < 0.4
-Provides:       nss-myhostname = 0.4
-Provides:       nss-myhostname%{_isa} = 0.4
+Summary: systemd libraries
+License: LGPLv2+ and MIT
+Obsoletes: libudev < 183
+Obsoletes: systemd < 185-4
+Conflicts: systemd < 185-4
+Obsoletes: systemd-compat-libs < 230
+Obsoletes: nss-myhostname < 0.4
+Provides: nss-myhostname = 0.4
+Provides: nss-myhostname%{_isa} = 0.4
 Requires(post): coreutils
 Requires(post): sed
 Requires(post): grep
@@ -590,32 +944,32 @@ Requires(post): /usr/bin/getent
 Libraries for systemd and udev.
 
 %package pam
-Summary:        systemd PAM module
-Requires:       %{name} = %{version}-%{release}
+Summary: systemd PAM module
+Requires: %{name} = %{version}-%{release}
 
 %description pam
 Systemd PAM module registers the session with systemd-logind.
 
 %package rpm-macros
-Summary:        Macros that define paths and scriptlets related to systemd
-BuildArch:      noarch
+Summary: Macros that define paths and scriptlets related to systemd
+BuildArch: noarch
 
 %description rpm-macros
 Just the definitions of rpm macros.
 
 See
-https://docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/#_systemd
+https: //docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/#_systemd
 for information how to use those macros.
 
 %package devel
-Summary:        Development headers for systemd
-License:        LGPLv2+ and MIT
-Requires:       %{name}-libs%{?_isa} = %{version}-%{release}
-Provides:       libudev-devel = %{version}
-Provides:       libudev-devel%{_isa} = %{version}
-Obsoletes:      libudev-devel < 183
+Summary: Development headers for systemd
+License: LGPLv2+ and MIT
+Requires: %{name}-libs%{?_isa} = %{version}-%{release}
+Provides: libudev-devel = %{version}
+Provides: libudev-devel%{_isa} = %{version}
+Obsoletes: libudev-devel < 183
 # Fake dependency to make sure systemd-pam is pulled into multilib (#1414153)
-Requires:       %{name}-pam = %{version}-%{release}
+Requires: %{name}-pam = %{version}-%{release}
 
 %description devel
 Development headers and auxiliary files for developing applications linking
@@ -623,41 +977,56 @@ to libudev or libsystemd.
 
 %package udev
 Summary: Rule-based device node and kernel event manager
-License:        LGPLv2+
+License: LGPLv2+
 
-Requires:       systemd%{?_isa} = %{version}-%{release}
+Requires: systemd%{?_isa} = %{version}-%{release}
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd
 Requires(post): grep
-Requires:       kmod >= 18-4
+Requires: kmod >= 18-4
 # https://bodhi.fedoraproject.org/updates/FEDORA-2020-dd43dd05b1
-Obsoletes:      systemd < 245.6-1
-Provides:       udev = %{version}
-Provides:       udev%{_isa} = %{version}
-Obsoletes:      udev < 183
+Obsoletes: systemd < 245.6-1
+Provides: udev = %{version}
+Provides: udev%{_isa} = %{version}
+Obsoletes: udev < 183
 
 # https://bugzilla.redhat.com/show_bug.cgi?id=1377733#c9
-Suggests:       systemd-bootchart
+Suggests: systemd-bootchart
 # https://bugzilla.redhat.com/show_bug.cgi?id=1408878
-Requires:       kbd
+Requires: kbd
 
 # Requires deps for stuff that is dlopen()ed
-Requires:       cryptsetup-libs%{?_isa}
+Requires: cryptsetup-libs%{?_isa}
 # https://bugzilla.redhat.com/show_bug.cgi?id=2017541
-Requires:       tpm2-tss%{?_isa}
+Requires: tpm2-tss%{?_isa}
 
 # https://bugzilla.redhat.com/show_bug.cgi?id=1753381
-Provides:       u2f-hidraw-policy = 1.0.2-40
-Obsoletes:      u2f-hidraw-policy < 1.0.2-40
+Provides: u2f-hidraw-policy = 1.0.2-40
+Obsoletes: u2f-hidraw-policy < 1.0.2-40
 
 # self-obsoletes to install both packages after split of systemd-boot
-Obsoletes:      systemd-udev < 252-8
+Obsoletes: systemd-udev < 252-8
 
 %description udev
 This package contains systemd-udev and the rules and hardware database
 needed to manage device nodes. This package is necessary on physical
 machines and in virtual machines, but not in containers.
+
+%package ukify
+Summary: Tool to build Unified Kernel Images
+Requires: %{name} = %{version}-%{release}
+
+Requires: python3dist(cryptography)
+Requires: python3dist(pefile)
+
+BuildArch: noarch
+
+%description ukify
+This package provides ukify, a script that combines a kernel image, an initrd,
+with a command line, and possibly PCR measurements and other metadata, into a
+Unified Kernel Image (UKI).
+
 
 %if 0%{?have_gnu_efi}
 %package boot-unsigned
@@ -671,7 +1040,7 @@ Provides: version(systemd-boot-unsigned) = %version
 Provides: version(systemd-boot-unsigned)%{_isa} = %version
 
 # self-obsoletes to install both packages after split of systemd-boot
-Obsoletes:      systemd-udev < 252-8
+Obsoletes: systemd-udev < 252-8
 
 %description boot-unsigned
 systemd-boot (short: sd-boot) is a simple UEFI boot manager. It provides a
@@ -685,13 +1054,13 @@ the version that works with Secure Boot.
 %package container
 # Name is the same as in Debian
 Summary: Tools for containers and VMs
-Requires:       %{name}%{?_isa} = %{version}-%{release}
+Requires: %{name}%{?_isa} = %{version}-%{release}
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd
 # obsolete parent package so that dnf will install new subpackage on upgrade (#1260394)
-Obsoletes:      %{name} < 229-5
-License:        LGPLv2+
+Obsoletes: %{name} < 229-5
+License: LGPLv2+
 
 %description container
 Systemd tools to spawn and manage containers and virtual machines.
@@ -701,17 +1070,17 @@ and systemd-importd.
 
 %package journal-remote
 # Name is the same as in Debian
-Summary:        Tools to send journal events over the network
-Requires:       %{name}%{?_isa} = %{version}-%{release}
-License:        LGPLv2+
+Summary: Tools to send journal events over the network
+Requires: %{name}%{?_isa} = %{version}-%{release}
+License: LGPLv2+
 Requires(pre):    /usr/bin/getent
 Requires(post):   systemd
 Requires(preun):  systemd
 Requires(postun): systemd
-Requires:       firewalld-filesystem
-Provides:       %{name}-journal-gateway = %{version}-%{release}
-Provides:       %{name}-journal-gateway%{_isa} = %{version}-%{release}
-Obsoletes:      %{name}-journal-gateway < 227-7
+Requires: firewalld-filesystem
+Provides: %{name}-journal-gateway = %{version}-%{release}
+Provides: %{name}-journal-gateway%{_isa} = %{version}-%{release}
+Obsoletes: %{name}-journal-gateway < 227-7
 
 %description journal-remote
 Programs to forward journal entries over the network, using encrypted HTTP,
@@ -721,9 +1090,9 @@ This package contains systemd-journal-gatewayd,
 systemd-journal-remote, and systemd-journal-upload.
 
 %package resolved
-Summary:        System daemon that provides network name resolution to local applications
-Requires:       %{name}%{?_isa} = %{version}-%{release}
-License:        LGPLv2+
+Summary: System daemon that provides network name resolution to local applications
+Requires: %{name}%{?_isa} = %{version}-%{release}
+License: LGPLv2+
 
 %description resolved
 systemd-resolved is a system service that provides network name
@@ -732,10 +1101,10 @@ validating DNS/DNSSEC stub resolver, as well as an LLMNR and
 MulticastDNS resolver and responder.
 
 %package oomd
-Summary:        A userspace out-of-memory (OOM) killer
-Requires:       %{name}%{?_isa} = %{version}-%{release}
-License:        LGPLv2+
-Provides:       %{name}-oomd-defaults = %{version}-%{release}
+Summary: A userspace out-of-memory (OOM) killer
+Requires: %{name}%{?_isa} = %{version}-%{release}
+License: LGPLv2+
+Provides: %{name}-oomd-defaults = %{version}-%{release}
 
 %description oomd
 systemd-oomd is a system service that uses cgroups-v2 and pressure stall
@@ -743,7 +1112,7 @@ information (PSI) to monitor and take action on processes before an OOM
 occurs in kernel space.
 
 %package standalone-tmpfiles
-Summary:       Standalone tmpfiles binary for use in non-systemd systems
+Summary: Standalone tmpfiles binary for use in non-systemd systems
 RemovePathPostfixes: .standalone
 
 %description standalone-tmpfiles
@@ -752,7 +1121,7 @@ or other libraries from systemd-libs. This package conflicts with the main
 systemd package and is meant for use in non-systemd systems.
 
 %package standalone-sysusers
-Summary:       Standalone sysusers binary for use in non-systemd systems
+Summary: Standalone sysusers binary for use in non-systemd systems
 RemovePathPostfixes: .standalone
 
 %description standalone-sysusers
@@ -760,8 +1129,18 @@ Standalone sysusers binary with no dependencies on the systemd-shared library
 or other libraries from systemd-libs. This package conflicts with the main
 systemd package and is meant for use in non-systemd systems.
 
+%package -n rhel-net-naming-sysattrs
+Summary: RHEL-specific network naming sysattrs
+BuildRequires: pkgconfig(dracut)
+BuildArch: noarch
+
+%description -n rhel-net-naming-sysattrs
+rhel-net-naming-sysattrs package provides hwdb and udev rule needed for stable
+network naming scheme across RHEL releases.
+
 %prep
 %autosetup -n %{?commit:%{name}%{?stable:-stable}-%{commit}}%{!?commit:%{name}%{?stable:-stable}-%{version_no_tilde}} -S git_am -p1
+%setup -T -D -a 26
 
 %build
 %define ntpvendor %(source /etc/os-release; echo ${ID})
@@ -853,8 +1232,11 @@ CONFIGURE_OPTS=(
         -Duserdb=false
         -Dportabled=false
         -Dnetworkd=false
-        -Dsupport-url=https://access.redhat.com/support
+        -Dsupport-url=https://wiki.rockylinux.org/rocky/support
+        # https://issues.redhat.com/browse/RHEL-16810
+        -Dsbat-distro-url=mailto:security@rockylinux.org
         -Ddefault-net-naming-scheme=rhel-9.0
+        -Dukify=true
 )
 
 %if %{without lto}
@@ -1020,6 +1402,9 @@ python3 %{SOURCE2} %buildroot <<EOF
 %ghost %attr(0700,root,root) %dir /var/log/private
 EOF
 
+# Install rhel-net-naming-sysattrs
+%make_install -C rhel-net-naming-sysattrs-v%{rhel_nns_version}
+
 %check
 %if %{with tests}
 meson test -C %{_vpath_builddir} -t 6 --print-errorlogs
@@ -1148,7 +1533,7 @@ fi
 mv %{_localstatedir}/lib/random-seed %{_localstatedir}/lib/systemd/random-seed &>/dev/null
 mv %{_localstatedir}/lib/backlight %{_localstatedir}/lib/systemd/backlight &>/dev/null
 
-udevadm hwdb --update &>/dev/null
+systemd-hwdb update &>/dev/null || :
 
 %systemd_post %udev_services
 
@@ -1217,6 +1602,9 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 %postun oomd
 %systemd_postun_with_restart systemd-oomd.service
 
+%post -n rhel-net-naming-sysattrs
+systemd-hwdb update &>/dev/null || :
+
 %global _docdir_fmt %{name}
 
 %files -f %{name}.lang -f .file-list-main
@@ -1251,6 +1639,8 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 
 %files udev -f .file-list-udev
 
+%files ukify -f .file-list-ukify
+
 %if 0%{?have_gnu_efi}
 %files boot-unsigned -f .file-list-boot
 %endif
@@ -1267,9 +1657,394 @@ getent passwd systemd-oom &>/dev/null || useradd -r -l -g systemd-oom -d / -s /s
 
 %files standalone-sysusers -f .file-list-standalone-sysusers
 
+%files -n rhel-net-naming-sysattrs
+%{_udevrulesdir}/70-rhel-net-naming-sysattrs.rules
+%{_udevhwdbdir}/50-net-naming-sysattr-allowlist.hwdb
+%dir %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs
+%{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
+
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 252-18.redsleeve
-- removed valgrind
+* Sun Apr 07 2024 Release Engineering <releng@rockylinux.org> - 252-32
+- Set support URL to the wiki
+- Set sbat mail to security@rockylinux.org
+
+* Mon Mar 18 2024 Jan Macku <jamacku@redhat.com> - 252-32
+- rebase rhel-net-naming-sysattrs to v0.5
+
+* Fri Mar 15 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-31
+- bootctl: rework random seed logic to use open_mkdir_at() and openat() (RHEL-16952)
+- bootctl: properly sync fs before/after moving random seed file into place (RHEL-16952)
+- bootctl: when updating EFI random seed file, hash old seed with new one (RHEL-16952)
+- sha256: add helper than hashes a buffer *and* its size (RHEL-16952)
+- random-seed: don't refresh EFI random seed from random-seed.c anymore (RHEL-16952)
+- bootctl: downgrade graceful messages to LOG_NOTICE (RHEL-16952)
+- units: rename/rework systemd-boot-system-token.service → systemd-boot-random-seed.service (RHEL-16952)
+- bootctl: split out setting of system token into function of its own (RHEL-16952)
+
+* Mon Mar 11 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-30
+- resolved: limit the number of signature validations in a transaction (RHEL-26643)
+- resolved: reduce the maximum nsec3 iterations to 100 (RHEL-26643)
+- efi: alignment of the PE file has to be at least 512 bytes (RHEL-26133)
+- units: change assert to condition to skip running in initrd/os (RHEL-16182)
+- ci: add configuration for regression sniffer GA (RHEL-1086)
+
+* Mon Feb 26 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-29
+- units: fix typo in Condition in systemd-boot-system-token (RHEL-16952)
+
+* Tue Feb 20 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-28
+- random-seed: shorten a bit may_credit() (RHEL-16952)
+- random-seed: make one more use of random_write_entropy() (RHEL-16952)
+- random-seed: use getopt() (RHEL-16952)
+- random-seed: make the logic to calculate the number of bytes read from the random seed file clearer (RHEL-16952)
+- random-seed: no need to pass 'mode' argument when opening /dev/urandom (RHEL-16952)
+- random-seed: split out run() (RHEL-16952)
+- random_seed: minor improvement in run() (RHEL-16952)
+- random-seed: downgrade some messages (RHEL-16952)
+- random-seed: clarify one comment (RHEL-16952)
+- random-seed: make sure to load machine id even if the seed file is missing (RHEL-16952)
+- chase-symlinks: add new flag for prohibiting any following of symlinks (RHEL-16952)
+- bootctl,bootspec: make use of CHASE_PROHIBIT_SYMLINKS whenever we access the ESP/XBOOTLDR (RHEL-16952)
+- boot: implement kernel EFI RNG seed protocol with proper hashing (RHEL-16952)
+- random-seed: refresh EFI boot seed when writing a new seed (RHEL-16952)
+- random-seed: handle post-merge review nits (RHEL-16952)
+- boot: do not truncate random seed file (RHEL-16952)
+- bootctl: install system token on virtualized systems (RHEL-16952)
+- boot: remove random-seed-mode (RHEL-16952)
+- stub: handle random seed like sd-boot does (RHEL-16952)
+- efi: add efi_guid_equal() helper (RHEL-16952)
+- efi: add common implementation for loop finding EFI configuration tables (RHEL-16952)
+- boot: Detect hypervisors using SMBIOS info (RHEL-16952)
+- boot: Skip soft-brick warning when in a VM (RHEL-16952)
+- boot: Replace UINTN with size_t (RHEL-16952)
+- boot: Use unsigned for beep counting (RHEL-16952)
+- boot: Use unicode literals (RHEL-16952)
+- macro: add generic IS_ALIGNED32() anf friends (RHEL-16952)
+- meson: use 0|1 for SD_BOOT (RHEL-16952)
+- boot: Add printf functions (RHEL-16952)
+- boot: Use printf for error logging (RHEL-16952)
+- boot: Introduce log_wait (RHEL-16952)
+- boot: Add log_trace debugging helper (RHEL-16952)
+- tree-wide: Use __func__ in asserts (RHEL-16952)
+- boot: Drop use of xpool_print/SPrint (RHEL-16952)
+- boot: Drop use of Print (RHEL-16952)
+- boot: Rework GUID handling (RHEL-16952)
+- efi-string: Fix strchr() null byte handling (RHEL-16952)
+- efi-string: Add startswith8() (RHEL-16952)
+- efi-string: Add efi_memchr() (RHEL-16952)
+- vmm: Add more const (RHEL-16952)
+- vmm: Add smbios_find_oem_string() (RHEL-16952)
+- stub: Read extra kernel command line items from SMBIOS (RHEL-16952)
+- vmm: Modernize get_smbios_table() (RHEL-16952)
+- stub: measure SMBIOS kernel-cmdline-extra in PCR12 (RHEL-16952)
+- efi: support passing empty cmdline to mangle_stub_cmdline() (RHEL-16952)
+- efi: set EFIVAR to stop Shim from uninstalling its protocol (RHEL-16952)
+- ukify: use empty stub for addons (RHEL-16952)
+- stub: allow loading and verifying cmdline addons (RHEL-16952)
+- TODO: remove fixed item (RHEL-16952)
+- fix: do not check/verify slice units if recursive errors are to be ignored (RHEL-1086)
+
+* Thu Feb 15 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-27
+- test: merge TEST-20-MAINPIDGAMES into TEST-07-PID1 (fixup) (RHEL-1086)
+- test: use the default nsec3-iterations value (RHEL-1086)
+- test: explicitly set nsec3-iterations to 0 (RHEL-1086)
+- core: mount namespaces: Remove auxiliary bind mounts directory after unit termination (RHEL-19483)
+- ci: deploy systemd man to GitHub Pages (RHEL-1086)
+- doc: add missing `<listitem>` to `systemd.net-naming-scheme.xml` (RHEL-7026)
+- man: reorder the list of supported naming schemes (RHEL-7026)
+- tree-wide: fix return value handling of base64mem() (RHEL-16182)
+- Consolidate various TAKE_* into TAKE_GENERIC(), add TAKE_STRUCT() (RHEL-16182)
+- pcrphase: add $SYSTEMD_PCRPHASE_STUB_VERIFY env var for overriding stub check (RHEL-16182)
+- pcrphase: gracefully exit if TPM2 support is incomplete (RHEL-16182)
+- tpm2-util: split out code that derives "good" TPM2 banks into an strv from pcrphase and generalize it in tpm2-util.c (RHEL-16182)
+- tpm2-util: split out code that extends a PCR from pcrphase (RHEL-16182)
+- tpm2-util: optionally do HMAC in tpm2_extend_bytes() in case we process sensitive data (RHEL-16182)
+- cryptsetup: add tpm2-measure-pcr= and tpm2-measure-bank= crypttab options (RHEL-16182)
+- man: document the new crypttab measurement options (RHEL-16182)
+- gpt-auto-generator: automatically measure root/var volume keys into PCR 15 (RHEL-16182)
+- blkid-util: define enum for blkid_do_safeprobe() return values (RHEL-16182)
+- pcrphase: make tool more generic, reuse for measuring machine id/fs uuids (RHEL-16182)
+- units: measure /etc/machine-id into PCR 15 during early boot (RHEL-16182)
+- generators: optionally, measure file systems at boot (RHEL-16182)
+- tpm2: add common helper for checking if we are running on UKI with TPM measurements (RHEL-16182)
+- man: document new machine-id/fs measurement options (RHEL-16182)
+- test: add simple integration test for checking PCR extension works as it should (RHEL-16182)
+- update TODO (RHEL-16182)
+- cryptsetup: retry TPM2 unseal operation if it fails with TPM2_RC_PCR_CHANGED (RHEL-16182)
+- boot: Simplify object erasure (RHEL-16182)
+- tree-wide: use CLEANUP_ERASE() at various places (RHEL-16182)
+- dlfcn: add new safe_dclose() helper (RHEL-16182)
+- tpm2: rename tpm2 alg id<->string functions (RHEL-16182)
+- tpm2: rename struct tpm2_context to Tpm2Context (RHEL-16182)
+- tpm2: use ref counter for Tpm2Context (RHEL-16182)
+- tpm2: use Tpm2Context* instead of ESYS_CONTEXT* (RHEL-16182)
+- tpm2: add Tpm2Handle with automatic cleanup (RHEL-16182)
+- tpm2: simplify tpm2_seal() blob creation (RHEL-16182)
+- tpm2: add salt to pin (RHEL-16182)
+- basic/macro: add macro to iterate variadic args (RHEL-16182)
+- test/test-macro: add tests for FOREACH_VA_ARGS() (RHEL-16182)
+- basic/bitfield: add bitfield operations (RHEL-16182)
+- test/test-bitfield: add tests for bitfield macros (RHEL-16182)
+- tpm2: add tpm2_get_policy_digest() (RHEL-16182)
+- tpm2: add TPM2_PCR_VALID() (RHEL-16182)
+- tpm2: add/rename functions to manage pcr selections (RHEL-16182)
+- test/test-tpm2: add tests for pcr selection functions (RHEL-16182)
+- tpm2: add tpm2_pcr_read() (RHEL-16182)
+- tpm2: move openssl-required ifdef code out of policy-building function (RHEL-16182)
+- tpm2: add tpm2_is_encryption_session() (RHEL-16182)
+- tpm2: move policy building out of policy session creation (RHEL-16182)
+- tpm2: add support for a trusted SRK (RHEL-16182)
+- tpm2: fix nits from PR #26185 (RHEL-16182)
+- tpm2: replace magic number (RHEL-16182)
+- tpm2: add tpm2_digest_*() functions (RHEL-16182)
+- tpm2: replace hash_pin() with tpm2_digest_*() functions (RHEL-16182)
+- tpm2: add tpm2_set_auth() (RHEL-16182)
+- tpm2: add tpm2_get_name() (RHEL-16182)
+- tpm2: rename pcr_values_size vars to n_pcr_values (RHEL-16182)
+- tpm2: add tpm2_policy_pcr() (RHEL-16182)
+- tpm2: add tpm2_policy_auth_value() (RHEL-16182)
+- tpm2: add tpm2_policy_authorize() (RHEL-16182)
+- tpm2: use tpm2_policy_authorize() (RHEL-16182)
+- tpm2: add tpm2_calculate_sealing_policy() (RHEL-16182)
+- tpm: remove external calls to dlopen_tpm2() (RHEL-16182)
+- tpm2: remove all extern tpm2-tss symbols (RHEL-16182)
+- tpm2: add tpm2_get_capability(), tpm2_cache_capabilities(), tpm2_capability_pcrs() (RHEL-16182)
+- tpm2: verify symmetric parms in tpm2_context_new() (RHEL-16182)
+- tpm2: replace _cleanup_tpm2_* macros with _cleanup_() (RHEL-16182)
+- tpm2-util: use compound initialization when allocating tpm2 objects (RHEL-16182)
+- tpm2: add tpm2_get_capability_handle(), tpm2_esys_handle_from_tpm_handle() (RHEL-16182)
+- tpm2: add tpm2_read_public() (RHEL-16182)
+- tpm2: add tpm2_get_legacy_template() and tpm2_get_srk_template() (RHEL-16182)
+- tpm2: add tpm2_load() (RHEL-16182)
+- tpm2: add tpm2_load_external() (RHEL-16182)
+- tpm2: move local vars in tpm2_seal() to point of use (RHEL-16182)
+- tpm2: replace magic number in hmac_sensitive initialization (RHEL-16182)
+- tpm2: add tpm2_create() (RHEL-16182)
+- tpm2: replace tpm2_capability_pcrs() macro with direct c->capaiblity_pcrs use (RHEL-16182)
+- basic/alloc-util: add greedy_realloc_append() (RHEL-16182)
+- tpm2: cache the TPM supported commands, add tpm2_supports_command() (RHEL-16182)
+- tpm2: cache TPM algorithms (RHEL-16182)
+- tpm2: add tpm2_persist_handle() (RHEL-16182)
+- tpm2: add tpm2_get_or_create_srk() (RHEL-16182)
+- tpm2: move local vars in tpm2_unseal() to point of use (RHEL-16182)
+- tpm2: remove tpm2_make_primary() (RHEL-16182)
+- tpm2: use CreatePrimary() to create primary keys instead of Create() (RHEL-16182)
+- cryptsetup: downgrade a bunch of log messages that to LOG_WARNING (RHEL-16182)
+- boot/measure: replace TPM PolicyPCR session with calculation (RHEL-16182)
+- core: imply DeviceAllow=/dev/tpmrm0 with LoadCredentialEncrypted (RHEL-16182)
+- added more test cases (RHEL-16182)
+- test: fixed negative checks in TEST-70-TPM2. Use in-line error handling rather than redirections. Follow up on #27020 (RHEL-16182)
+- systemd-cryptenroll: add string aliases for tpm2 PCRs Fixes #26697. RFE. (RHEL-16182)
+- cryptenroll: fix an assertion with weak passwords (RHEL-16182)
+- man/systemd-cryptenroll: update list of PCRs, link to uapi docs (RHEL-16182)
+- tpm2: add debug logging to functions converting hash or asym algs to/from strings or ids (RHEL-16182)
+- tpm2: add tpm2_hash_alg_to_size() (RHEL-16182)
+- tpm2: change tpm2_tpm*_pcr_selection_to_mask() to return mask (RHEL-16182)
+- tpm2: add more helper functions for managing TPML_PCR_SELECTION and TPMS_PCR_SELECTION (RHEL-16182)
+- tpm2: add Tpm2PCRValue struct and associated functions (RHEL-16182)
+- tpm2: move declared functions in header lower down (RHEL-16182)
+- tpm2: declare tpm2_log_debug_*() functions in tpm2_util.h (RHEL-16182)
+- tpm2: change tpm2_calculate_policy_pcr(), tpm2_calculate_sealing_policy() to use Tpm2PCRValue array (RHEL-16182)
+- tpm2: change tpm2_parse_pcr_argument() parameters to parse to Tpm2PCRValue array (RHEL-16182)
+- tpm2: add TPM2B_*_MAKE(), TPM2B_*_CHECK_SIZE() macros (RHEL-16182)
+- tpm2: add tpm2_pcr_read_missing_values() (RHEL-16182)
+- openssl: add openssl_pkey_from_pem() (RHEL-16182)
+- openssl: add rsa_pkey_new(), rsa_pkey_from_n_e(), rsa_pkey_to_n_e() (RHEL-16182)
+- openssl: add ecc_pkey_new(), ecc_pkey_from_curve_x_y(), ecc_pkey_to_curve_x_y() (RHEL-16182)
+- test: add DEFINE_HEX_PTR() helper function (RHEL-16182)
+- openssl: add test-openssl (RHEL-16182)
+- tpm2: add functions to convert TPM2B_PUBLIC to/from openssl pkey or PEM (RHEL-16182)
+- tpm2: move policy calculation out of tpm2_seal() (RHEL-16182)
+- man: update systemd-cryptenroll man page with details on --tpm2-pcrs format change (RHEL-16182)
+- tpm2: update TEST-70-TPM2 to test passing PCR value to systemd-cryptenroll (RHEL-16182)
+- tpm2: change *alg_to_* functions to use switch() (RHEL-16182)
+- tpm2: lowercase TPM2_PCR_VALUE[S]_VALID functions (RHEL-16182)
+- tpm2: move cast from lhs to rhs in uint16_t/int comparison (RHEL-16182)
+- tpm2: in validator functions, return false instead of assert failure (RHEL-16182)
+- tpm2: in tpm2_pcr_values_valid() use FOREACH_ARRAY() (RHEL-16182)
+- tpm2: use SIZE_MAX instead of strlen() for unhexmem() (RHEL-16182)
+- tpm2: put !isempty() check inside previous !isempty() check (RHEL-16182)
+- tpm2: simplify call to asprintf() (RHEL-16182)
+- tpm2: check pcr value hash != 0 before looking up hash algorithm name (RHEL-16182)
+- tpm2: use strempty() (RHEL-16182)
+- tpm2: split TPM2_PCR_VALUE_MAKE() over multiple lines (RHEL-16182)
+- tpm2: remove ret_ prefix from input/output params (RHEL-16182)
+- tpm2: use memcpy_safe() instead of memcpy() (RHEL-16182)
+- openssl: use new(char, size) instead of malloc(size) (RHEL-16182)
+- tpm2: use table for openssl<->tpm2 ecc curve id mappings (RHEL-16182)
+- tpm2: use switch() instead of if-else (RHEL-16182)
+- tpm2: make logging level consistent at debug for some functions (RHEL-16182)
+- tpm2: remove unnecessary void* cast (RHEL-16182)
+- tpm2: add tpm2_pcr_values_has_(any|all)_values() functions (RHEL-16182)
+- tpm2: wrap (7) in UINT32_C() (RHEL-16182)
+- cryptenroll: change man page example to remove leading 0x and lowercase hex (RHEL-16182)
+- openssl: add log_openssl_errors() (RHEL-16182)
+- openssl: add openssl_digest_size() (RHEL-16182)
+- openssl: add openssl_digest_many() (RHEL-16182)
+- openssl: replace openssl_hash() with openssl_digest() (RHEL-16182)
+- openssl: add openssl_hmac_many() (RHEL-16182)
+- openssl: add rsa_oaep_encrypt_bytes() (RHEL-16182)
+- openssl: add kdf_kb_hmac_derive() (RHEL-16182)
+- openssl: add openssl_cipher_many() (RHEL-16182)
+- openssl: add ecc_edch() (RHEL-16182)
+- openssl: add kdf_ss_derive() (RHEL-16182)
+- dlfcn-util: add static asserts ensuring our sym_xyz() func ptrs match the types from the official headers (RHEL-16182)
+- tpm2: add tpm2_marshal_blob() and tpm2_unmarshal_blob() (RHEL-16182)
+- tpm2: add tpm2_serialize() and tpm2_deserialize() (RHEL-16182)
+- tpm2: add tpm2_index_to_handle() and tpm2_index_from_handle() (RHEL-16182)
+- tpm2: fix build failure without openssl (RHEL-16182)
+- tpm2-util: look for tpm2-pcr-signature.json directly in /.extra/ (RHEL-16182)
+- tpm2: downgrade most log functions from error to debug (RHEL-16182)
+- tpm2: handle older tpm enrollments without a saved pcr bank (RHEL-16182)
+- tpm2: allow tpm2_make_encryption_session() without bind key (RHEL-16182)
+- tpm2: update tpm2 test for supported commands (RHEL-16182)
+- tpm2: use GREEDY_REALLOC_APPEND() in tpm2_get_capability_handles(), cap max value (RHEL-16182)
+- tpm2: change tpm2_unseal() to accept Tpm2Context instead of device string (RHEL-16182)
+- tpm2: cache TPM's supported ECC curves (RHEL-16182)
+- tpm2-util: make tpm2_marshal_blob()/tpm2_unmarshal_blob() static (RHEL-16182)
+- tpm2-util: make tpm2_read_public() static, as we use it only internally in tpm2-util.c (RHEL-16182)
+- cryptenroll: allow specifying handle index of key to use for sealing (RHEL-16182)
+- test: add tests for systemd-cryptenroll --tpm2-seal-key-handle (RHEL-16182)
+- tpm2: do not call Esys_TR_Close() (RHEL-16182)
+- tpm2: don't use GetCapability() to check transient handles (RHEL-16182)
+- tpm2-util: pick up a few new symbols from tpm2-tss (RHEL-16182)
+- tpm2: add tpm2_get_pin_auth() (RHEL-16182)
+- tpm2: instead of adjusting authValue trailing 0(s), trim them as required by tpm spec (RHEL-16182)
+- tpm2-util: rename tpm2_calculate_name() → tpm2_calculate_pubkey_name() (RHEL-16182)
+- cryptenroll: do not implicitly verify with default tpm policy signature (RHEL-16182)
+- cryptenroll: drop deadcode (RHEL-16182)
+- tpm2: allow using tpm2_get_srk_template() without tpm (RHEL-16182)
+- tpm2: add test to verify srk templates (RHEL-16182)
+- tpm2: add tpm2_sym_alg_*_string() and tpm2_sym_mode_*_string() (RHEL-16182)
+- tpm2: add tpm2_calculate_seal() and helper functions (RHEL-16182)
+- tpm2: update test-tpm2 for tpm2_calculate_seal() (RHEL-16182)
+- cryptenroll: add support for calculated TPM2 enrollment (RHEL-16182)
+- test: update TEST-70 with systemd-cryptenroll calculated TPM2 enrollment (RHEL-16182)
+- openssl-util: avoid freeing invalid pointer (RHEL-16182)
+- creds-util: check for CAP_DAC_READ_SEARCH (RHEL-16182)
+- creds-util: do not try TPM2 if there is not support (RHEL-16182)
+- creds-util: merge the TPM2 detection for initrd (RHEL-16182)
+- cryptenroll: fix a memory leak (RHEL-16182)
+- sd-journal: introduce sd_journal_step_one() (RHEL-11591)
+- test: modernize test-journal-flush (RHEL-11591)
+- journal-file-util: do not fail when journal_file_set_offline() called more than once (RHEL-11591)
+- journal-file-util: Prefer punching holes instead of truncating (RHEL-11591)
+- test: add reproducer for SIGBUS issue caused by journal truncation (RHEL-11591)
+
+* Wed Jan 31 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-26
+- spec: update rhel-net-naming-sysattrs to v0.4 (RHEL-22278)
+
+* Tue Jan 30 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-25
+- spec: add new package with RHEL-specific network naming sysattrs (RHEL-22278)
+
+* Wed Jan 24 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-24
+- ci: use source-git-automation composite Action (RHEL-1086)
+- ci: increase the cron interval to 45 minutes (RHEL-1086)
+- ci: add all Z-Stream versions to array of allowed versions (RHEL-1086)
+- udev/net_id: introduce naming scheme for RHEL-9.4 (RHEL-22427)
+- basic/errno-util: add wrappers which only accept negative errno (RHEL-22443)
+- errno-util: allow ERRNO_IS_* to accept types wider than int (RHEL-22443)
+- udev: add new builtin net_driver (RHEL-22443)
+- udev/net_id: introduce naming scheme for RHEL-8.10 (RHEL-22427)
+
+* Fri Jan 12 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-23
+- logind: don't setup idle session watch for lock-screen and greeter (RHEL-20757)
+- logind: don't make idle action timer accuracy more coarse than timeout (RHEL-20757)
+- logind: do TTY idle logic only for sessions marked as "tty" (RHEL-20757)
+- meson: Properly install 90-uki-copy.install (RHEL-16354)
+
+* Mon Jan 08 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-22
+- Revert "man: mention System Administrator's Guide in systemctl manpage" (RHEL-19436)
+- man: mention RHEL documentation in systemctl's man page (RHEL-19436)
+- resolved: actually check authenticated flag of SOA transaction (RHEL-6216)
+- udev: allow/denylist for reading sysfs attributes when composing a NIC name (RHEL-1317)
+- man: environment value -> udev property (RHEL-1317)
+
+* Mon Dec 11 2023 systemd maintenance team <systemd-maint@redhat.com> - 252-21
+- meson: fix installation of ukify (RHEL-13199)
+- sd-id128: introduce id128_hash_ops_free (RHEL-5988)
+- udevadm-trigger: allow to fallback without synthetic UUID only first time (RHEL-5988)
+- udevadm-trigger: settle with synthetic UUID if the kernel support it (RHEL-5988)
+- udevadm-trigger: also check with the original syspath if device is renamed (RHEL-5988)
+- test: use 'udevadm trigger --settle' even if device is renamed (RHEL-5988)
+- sd-event: don't mistake USEC_INFINITY passed in for overflow (RHEL-6090)
+- pid1: rework service_arm_timer() to optionally take a relative time value (RHEL-6090)
+- manager: add one more assert() (RHEL-6090)
+- pid1: add new Type=notify-reload service type (RHEL-6090)
+- man: document Type=notify-reload (RHEL-6090)
+- pid1: make sure we send our calling service manager RELOADING=1 when reloading (RHEL-6090)
+- networkd: implement Type=notify-reload protocol (RHEL-6090)
+- udevd: implement the full Type=notify-reload protocol (RHEL-6090)
+- logind: implement Type=notify-reload protocol properly (RHEL-6090)
+- notify: add --stopping + --reloading switches (RHEL-6090)
+- test: add Type=notify-reload testcase (RHEL-6090)
+- update TODO (RHEL-6090)
+- core: check for SERVICE_RELOAD_NOTIFY in manager_dbus_is_running (RHEL-6090)
+
+* Fri Dec 08 2023 systemd maintenance team <systemd-maint@redhat.com> - 252-20
+- udev/net: allow new link name as an altname before renaming happens (RHEL-5988)
+- sd-netlink: do not swap old name and alternative name (RHEL-5988)
+- sd-netlink: restore altname on error in rtnl_set_link_name (RHEL-5988)
+- udev: attempt device rename even if interface is up (RHEL-5988)
+- sd-netlink: add a test for rtnl_set_link_name() (RHEL-5988)
+- test-network: add a test for renaming device to current altname (RHEL-5988)
+- udev: align table (RHEL-5988)
+- sd-device: make device_set_syspath() clear sysname and sysnum (RHEL-5988)
+- sd-device: do not directly access entry in sd-device object (RHEL-5988)
+- udev: move device_rename() from device-private.c (RHEL-5988)
+- udev: restore syspath and properties on failure (RHEL-5988)
+- sd-device: introduce device_get_property_int() (RHEL-5988)
+- core/device: downgrade log level for ignored errors (RHEL-5988)
+- core/device: ignore failed uevents (RHEL-5988)
+- test: add tests for failure in renaming network interface (RHEL-5988)
+- test: modernize test-netlink.c (RHEL-5988)
+- test-netlink: use dummy interface to test assigning new interface name (RHEL-5988)
+- udev: use SYNTHETIC_ERRNO() at one more place (RHEL-5988)
+- udev: make udev_builtin_run() take UdevEvent* (RHEL-5988)
+- udev/net: verify ID_NET_XYZ before trying to assign it as an alternative name (RHEL-5988)
+- udev/net: generate new network interface name only on add uevent (RHEL-5988)
+- sd-netlink: make rtnl_set_link_name() optionally append alternative names (RHEL-5988)
+- udev/net: assign alternative names only on add uevent (RHEL-5988)
+- test: add tests for renaming network interface (RHEL-5988)
+- Backport ukify from upstream (RHEL-13199)
+- bootctl: make --json output normal json (RHEL-13199)
+- test: replace readfp() with read_file() (RHEL-13199)
+- stub/measure: document and measure .uname UKI section (RHEL-13199)
+- boot: measure .sbat section (RHEL-13199)
+- Revert "test_ukify: no stinky root needed for signing" (RHEL-13199)
+- ukify: move to /usr/bin and mark as non non-experimental (RHEL-13199)
+- kernel-install: Add uki layout (RHEL-16354)
+- kernel-install: remove math slang from man page (RHEL-16354)
+- kernel-install: handle uki installs automatically (RHEL-16354)
+- 90-uki-copy.install: create $BOOT/EFI/Linux directory if needed (RHEL-16354)
+- kernel-install: Log location that uki is installed in (RHEL-16354)
+- bootctl: fix errno logging (RHEL-16354)
+- bootctl: add kernel-identity command (RHEL-16354)
+- bootctl: add kernel-inspect command (RHEL-16354)
+- bootctl: add kernel-inspect to --help text (RHEL-16354)
+- bootctl: drop full stop at end of --help texts (RHEL-16354)
+- bootctl: change section title for kernel image commands (RHEL-16354)
+- bootctl: remove space that should not be there (RHEL-16354)
+- bootctl: kernel-inspect: print os info (RHEL-16354)
+- bootctl-uki: several coding style fixlets (RHEL-16354)
+- tree-wide: unify how we pick OS pretty name to display (RHEL-16354)
+- bootctl-uki: several follow-ups for inspect_osrel() (RHEL-16354)
+- bootctl: Add missing %m (RHEL-16354)
+- bootctl: tweak DOS header magic check (RHEL-16354)
+
+* Mon Nov 13 2023 systemd maintenance team <systemd-maint@redhat.com> - 252-19
+- ci: Extend source-git-automation (RHEL-1086)
+- netif-naming-scheme: let's also include rhel8 schemes (RHEL-7026)
+- systemd-analyze: Add table and JSON output implementation to plot (RHEL-5070)
+- systemd-analyze: Update man/systemd-analyze.xml with Plot JSON and table (RHEL-5070)
+- systemd-analyze: Add tab complete logic for plot (RHEL-5070)
+- systemd-analyze: Add --json=, --table and -no-legend tests for plot (RHEL-5070)
+- ci: enable source-git automation to validate reviews and ci results (RHEL-1086)
+- ci: remove Mergify config - replaced by Pull Request Validator (RHEL-1086)
+- ci: enable auto-merge GH Action (RHEL-1086)
+- ci: add missing permissions (RHEL-1086)
+- ci: `permissions: write-all` (RHEL-1086)
+- ci(lint): exclude `.in` files from ShellCheck lint (RHEL-1086)
+- udev: raise RLIMIT_NOFILE as high as we can (RHEL-11040)
 
 * Tue Aug 22 2023 systemd maintenance team <systemd-maint@redhat.com> - 252-18
 - doc: add downstream CONTRIBUTING document (#2170883)

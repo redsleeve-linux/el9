@@ -1,36 +1,67 @@
-%global toolchain clang
-%bcond_without check
+%bcond_with snapshot_build
 
-%global lld_srcdir lld-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
-%global cmake_srcdir cmake-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
-%global maj_ver 16
+%if %{with snapshot_build}
+# Unlock LLVM Snapshot LUA functions
+%{llvm_sb_verbose}
+%{llvm_sb}
+%endif
+
+%global toolchain clang
+
+# Opt out of https://fedoraproject.org/wiki/Changes/fno-omit-frame-pointer
+# https://bugzilla.redhat.com/show_bug.cgi?id=2158587
+%undefine _include_frame_pointers
+
+%bcond_without check
+%bcond_with compat_build
+
+%global maj_ver 17
 %global min_ver 0
 %global patch_ver 6
+#global rc_ver 4
 
+%if %{with snapshot_build}
+%undefine rc_ver
+%global maj_ver %{llvm_snapshot_version_major}
+%global min_ver %{llvm_snapshot_version_minor}
+%global patch_ver %{llvm_snapshot_version_patch}
+%endif
+
+%global lld_version %{maj_ver}.%{min_ver}.%{patch_ver}
+
+%global lld_srcdir lld-%{lld_version}%{?rc_ver:rc%{rc_ver}}.src
+
+%if %{with compat_build}
+%global pkg_name lld%{maj_ver}
+%global install_prefix %{_libdir}/llvm%{maj_ver}
+%global install_includedir %{install_prefix}/include
+%global install_libdir %{install_prefix}/lib
+%global install_datadir %{install_prefix}/share
+%else
 %global pkg_name lld
 %global install_prefix /usr
 %global install_includedir %{_includedir}
 %global install_libdir %{_libdir}
+%global install_datadir %{_datadir}
+%endif
 
 Name:		%{pkg_name}
-Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}
-Release:	1%{?dist}.redsleeve
+Version:	%{lld_version}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
+Release:	1%{?dist}
 Summary:	The LLVM Linker
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
 URL:		http://llvm.org
+%if %{with snapshot_build}
+Source0:	%{llvm_snapshot_source_prefix}lld-%{llvm_snapshot_yyyymmdd}.src.tar.xz
+%{llvm_snapshot_extra_source_tags}
+%else
 Source0:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{lld_srcdir}.tar.xz
 Source1:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{lld_srcdir}.tar.xz.sig
-Source2:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz
-Source3:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:-rc%{rc_ver}}/%{cmake_srcdir}.tar.xz.sig
-Source4:	release-keys.asc
+Source2:	release-keys.asc
+%endif
 
 ExcludeArch:	s390x
-
-# Backport from LLVM 17.
-Patch0:     0001-lld-Use-installed-llvm_gtest-in-standalone-builds.patch
-
-Patch1000:	1000_patch_atomic_arm.patch
 
 # Bundle libunwind header need during build for MachO support
 Patch1:		0002-PATCH-lld-Import-compact_unwind_encoding.h-from-libu.patch
@@ -38,16 +69,21 @@ Patch1:		0002-PATCH-lld-Import-compact_unwind_encoding.h-from-libu.patch
 BuildRequires:	clang
 BuildRequires:	cmake
 BuildRequires:	ninja-build
+%if %{with compat_build}
+BuildRequires:	llvm%{maj_ver}-devel = %{version}
+BuildRequires:	llvm%{maj_ver}-cmake-utils = %{version}
+%else
 BuildRequires:	llvm-devel = %{version}
+BuildRequires:	llvm-cmake-utils = %{version}
 BuildRequires:	llvm-test = %{version}
 BuildRequires:	llvm-googletest = %{version}
+%endif
 BuildRequires:	ncurses-devel
 BuildRequires:	zlib-devel
 
 # For make check:
 BuildRequires:	python3-rpm-macros
 BuildRequires:	python3-lit
-
 
 # For gpg source verification
 BuildRequires:	gnupg2
@@ -65,9 +101,11 @@ The LLVM project linker.
 %package devel
 Summary:	Libraries and header files for LLD
 Requires: %{name}-libs%{?_isa} = %{version}-%{release}
+%if %{without compat_build}
 # lld tools are referenced in the cmake files, so we need to add lld as a
 # dependency.
 Requires: %{name}%{?_isa} = %{version}-%{release}
+%endif
 
 %description devel
 This package contains library and header files needed to develop new native
@@ -79,17 +117,21 @@ Summary:	LLD shared libraries
 %description libs
 Shared libraries for LLD.
 
-
 %prep
-%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
-%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE3}' --data='%{SOURCE2}'
-%setup -T -q -b 2 -n %{cmake_srcdir}
-# TODO: It would be more elegant to set -DLLVM_COMMON_CMAKE_UTILS=%{_builddir}/%{cmake_srcdir},
-# but this is not a CACHED variable, so we can't actually set it externally :(
-cd ..
-mv %{cmake_srcdir} cmake
+%if %{without snapshot_build}
+%{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
+%endif
+
 %autosetup -n %{lld_srcdir} -p2
 
+%if %{with compat_build}
+# For compat builds, we don't want to build the actual lld binary. While there is an
+# LLD_BUILD_TOOLS cmake option, it is incomplete in various ways (e.g. still leaves install
+# targets and symlinks), so instead skip the tools/lld build entirely.
+# We can't simply delete the binaries after the fact, because this would leave checks for
+# their existence in the cmake exports.
+sed 's/add_subdirectory(tools\/lld)//' -i CMakeLists.txt
+%endif
 
 %build
 
@@ -99,16 +141,25 @@ mv %{cmake_srcdir} cmake
 	-DCMAKE_INSTALL_PREFIX=%{install_prefix} \
 	-DLLVM_LINK_LLVM_DYLIB:BOOL=ON \
 	-DLLVM_DYLIB_COMPONENTS="all" \
+	-DLLVM_COMMON_CMAKE_UTILS=%{install_datadir}/llvm/cmake \
 	-DCMAKE_SKIP_RPATH:BOOL=ON \
 	-DPYTHON_EXECUTABLE=%{__python3} \
+%if %{with compat_build}
+	-DLLVM_CMAKE_DIR=%{install_libdir}/cmake/llvm \
+	-DLLVM_INCLUDE_TESTS=OFF \
+%else
 	-DLLVM_INCLUDE_TESTS=ON \
 	-DLLVM_EXTERNAL_LIT=%{_bindir}/lit \
 	-DLLVM_LIT_ARGS="-sv \
-	--path %{install_libdir}/llvm" \
+	--path %{_libdir}/llvm" \
+%if %{with snapshot_build}
+	-DLLVM_VERSION_SUFFIX="%{llvm_snapshot_version_suffix}" \
+%endif
 %if 0%{?__isa_bits} == 64
 	-DLLVM_LIBDIR_SUFFIX=64 \
 %else
 	-DLLVM_LIBDIR_SUFFIX= \
+%endif
 %endif
 	-DLLVM_MAIN_SRC_DIR=%{_datadir}/llvm/src
 
@@ -122,6 +173,7 @@ mv %{cmake_srcdir} cmake
 # This is generated by Patch1 during build and (probably) must be removed afterward
 rm %{buildroot}%{install_includedir}/mach-o/compact_unwind_encoding.h
 
+%if %{without compat_build}
 # Required when using update-alternatives:
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/Alternatives/
 touch %{buildroot}%{_bindir}/ld
@@ -135,15 +187,19 @@ install -D -m 644 -t  %{buildroot}%{_mandir}/man1/ docs/ld.lld.1
 if [ $1 -eq 0 ] ; then
   %{_sbindir}/update-alternatives --remove ld %{_bindir}/ld.lld
 fi
+%endif
 
 %check
 
+%if %{without compat_build}
 %if %{with check}
 %cmake_build --target check-lld
 %endif
 
 %ldconfig_scriptlets libs
+%endif
 
+%if %{without compat_build}
 %files
 %license LICENSE.TXT
 %ghost %{_bindir}/ld
@@ -152,6 +208,7 @@ fi
 %{_bindir}/ld64.lld
 %{_bindir}/wasm-ld
 %{_mandir}/man1/ld.lld.1*
+%endif
 
 %files devel
 %{install_includedir}/lld
@@ -161,10 +218,14 @@ fi
 %files libs
 %{install_libdir}/liblld*.so.*
 
-
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart < jacco@redsleeve.org> - 16.0.6-1.redsleeve
-- link COFF with atomic
+%{?llvm_snapshot_changelog_entry}
+
+* Mon Dec 11 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.6-1
+- Update to 17.0.6
+
+* Thu Sep 28 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.1-1
+- Update to 17.0.1
 
 * Wed Jul 05 2023 Nikita Popov <npopov@redhat.com> - 16.0.6-1
 - Update to LLVM 16.0.6

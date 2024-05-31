@@ -1,0 +1,47 @@
+commit c3b023a7822185c9176cfb96eeca4ada3d662c4b
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Wed Nov 24 12:57:57 2021 -0300
+
+    linux: Only build fstatat fallback if required
+    
+    For 32-bit architecture with __ASSUME_STATX there is no need to
+    build fstatat64_time64_stat.
+    
+    Checked on i686-linux-gnu.
+
+diff --git a/sysdeps/unix/sysv/linux/fstatat64.c b/sysdeps/unix/sysv/linux/fstatat64.c
+index f968e4ef0594852e..50ae5ad74832efe1 100644
+--- a/sysdeps/unix/sysv/linux/fstatat64.c
++++ b/sysdeps/unix/sysv/linux/fstatat64.c
+@@ -74,6 +74,17 @@ fstatat64_time64_statx (int fd, const char *file, struct __stat64_t64 *buf,
+   return r;
+ }
+ 
++#if (__WORDSIZE == 32 \
++     && (!defined __SYSCALL_WORDSIZE || __SYSCALL_WORDSIZE == 32)) \
++     || defined STAT_HAS_TIME32
++# define FSTATAT_USE_STATX 1
++#else
++# define FSTATAT_USE_STATX 0
++#endif
++
++/* Only statx supports 64-bit timestamps for 32-bit architectures with
++   __ASSUME_STATX, so there is no point in building the fallback.  */
++#if !FSTATAT_USE_STATX || (FSTATAT_USE_STATX && !defined __ASSUME_STATX)
+ static inline int
+ fstatat64_time64_stat (int fd, const char *file, struct __stat64_t64 *buf,
+ 		       int flag)
+@@ -134,13 +145,6 @@ fstatat64_time64_stat (int fd, const char *file, struct __stat64_t64 *buf,
+ 
+   return r;
+ }
+-
+-#if (__WORDSIZE == 32 \
+-     && (!defined __SYSCALL_WORDSIZE || __SYSCALL_WORDSIZE == 32)) \
+-     || defined STAT_HAS_TIME32
+-# define FSTATAT_USE_STATX 1
+-#else
+-# define FSTATAT_USE_STATX 0
+ #endif
+ 
+ int

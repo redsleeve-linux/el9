@@ -1,0 +1,54 @@
+From 27e95f2513e24a6abc26c56f05c67c34492442d7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 15 Nov 2022 15:00:57 +0100
+Subject: [PATCH] bootctl: make --json output normal json
+
+We would output a sequence of concatenated JSON strings. 'jq' accepts such
+output without fuss, and can even automatically build an array with --slurp/-s.
+Nevertheless, parsing this format is more effort for the reader, since it's not
+"standard JSON". E.g. Python's json module cannot do this out-of-the-box, but
+needs some loop with json.JSONDecoder.raw_decode() and then collecting the
+objects into an array. Such streaming output make sense in case of logs, where
+we stream the output and it has no predefined length. But here we expect at
+most a few dozen entries, so it's nicer to write normal JSON that is trivial to
+parse.
+
+I'm treating this is a bugfix and not attempting to provide compatibility
+backwards. I don't think the previous format was seeing much use, and it's
+trivial to adapt to the new one.
+
+(cherry picked from commit b570204a97bccfbfce8fc4ffa65306f8a06fe16e)
+
+Related: RHEL-13199
+---
+ src/shared/bootspec.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/shared/bootspec.c b/src/shared/bootspec.c
+index d3cfb41a12..fe44b5e9d2 100644
+--- a/src/shared/bootspec.c
++++ b/src/shared/bootspec.c
+@@ -1408,6 +1408,8 @@ int show_boot_entries(const BootConfig *config, JsonFormatFlags json_format) {
+         assert(config);
+ 
+         if (!FLAGS_SET(json_format, JSON_FORMAT_OFF)) {
++                _cleanup_(json_variant_unrefp) JsonVariant *array = NULL;
++
+                 for (size_t i = 0; i < config->n_entries; i++) {
+                         _cleanup_free_ char *opts = NULL;
+                         const BootEntry *e = config->entries + i;
+@@ -1447,9 +1449,13 @@ int show_boot_entries(const BootConfig *config, JsonFormatFlags json_format) {
+                         if (r < 0)
+                                 return log_oom();
+ 
+-                        json_variant_dump(v, json_format, stdout, NULL);
++                        r = json_variant_append_array(&array, v);
++                        if (r < 0)
++                                return log_oom();
+                 }
+ 
++                json_variant_dump(array, json_format, NULL, NULL);
++
+         } else {
+                 for (size_t n = 0; n < config->n_entries; n++) {
+                         r = show_boot_entry(

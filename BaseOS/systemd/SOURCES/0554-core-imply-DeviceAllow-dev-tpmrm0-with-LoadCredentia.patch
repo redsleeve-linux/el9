@@ -1,0 +1,77 @@
+From 8d11c92de8644e5f090018933bad25be0f2adebb Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Wed, 8 Feb 2023 00:25:00 +0000
+Subject: [PATCH] core: imply DeviceAllow=/dev/tpmrm0 with
+ LoadCredentialEncrypted
+
+If the device access policy is restricted, add implicitly access to the TPM
+if at least one encrypted credential needs to be loaded.
+
+Fixes https://github.com/systemd/systemd/issues/26042
+
+(cherry picked from commit 398dc7d39b9a877e71529f0e0b139329e4c6992e)
+
+Related: RHEL-16182
+---
+ man/systemd.exec.xml       |  8 +++++++-
+ src/core/unit.c            | 10 ++++++++++
+ test/units/testsuite-70.sh |  6 ++++++
+ 3 files changed, 23 insertions(+), 1 deletion(-)
+
+diff --git a/man/systemd.exec.xml b/man/systemd.exec.xml
+index 29666b102b..4927764b9b 100644
+--- a/man/systemd.exec.xml
++++ b/man/systemd.exec.xml
+@@ -3113,7 +3113,13 @@ StandardInputData=V2XigLJyZSBubyBzdHJhbmdlcnMgdG8gbG92ZQpZb3Uga25vdyB0aGUgcnVsZX
+         authenticated credentials improves security as credentials are not stored in plaintext and only
+         authenticated and decrypted into plaintext the moment a service requiring them is started. Moreover,
+         credentials may be bound to the local hardware and installations, so that they cannot easily be
+-        analyzed offline, or be generated externally.</para>
++        analyzed offline, or be generated externally. When <varname>DevicePolicy=</varname> is set to
++        <literal>closed</literal> or <literal>strict</literal>, or set to <literal>auto</literal> and
++        <varname>DeviceAllow=</varname> is set, or <varname>PrivateDevices=</varname> is set, then this
++        setting adds <filename>/dev/tpmrm0</filename> with <constant>rw</constant> mode to
++        <varname>DeviceAllow=</varname>. See
++        <citerefentry><refentrytitle>systemd.resource-control</refentrytitle><manvolnum>5</manvolnum></citerefentry>
++        for the details about <varname>DevicePolicy=</varname> or <varname>DeviceAllow=</varname>.</para>
+ 
+         <para>The credential files/IPC sockets must be accessible to the service manager, but don't have to
+         be directly accessible to the unit's processes: the credential data is read and copied into separate,
+diff --git a/src/core/unit.c b/src/core/unit.c
+index c9a42ee3d7..f109d16eb3 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -4191,6 +4191,16 @@ int unit_patch_contexts(Unit *u) {
+                                 if (r < 0)
+                                         return r;
+                         }
++
++                        /* If there are encrypted credentials we might need to access the TPM. */
++                        ExecLoadCredential *cred;
++                        HASHMAP_FOREACH(cred, ec->load_credentials)
++                                if (cred->encrypted) {
++                                        r = cgroup_add_device_allow(cc, "/dev/tpmrm0", "rw");
++                                        if (r < 0)
++                                                return r;
++                                        break;
++                                }
+                 }
+         }
+ 
+diff --git a/test/units/testsuite-70.sh b/test/units/testsuite-70.sh
+index 3b4d66b686..2c405bccbb 100755
+--- a/test/units/testsuite-70.sh
++++ b/test/units/testsuite-70.sh
+@@ -185,6 +185,12 @@ else
+     echo "/usr/lib/systemd/systemd-pcrphase or PCR sysfs files not found, skipping PCR extension test case"
+ fi
+ 
++# Ensure that sandboxing doesn't stop creds from being accessible
++echo "test" > /tmp/testdata
++systemd-creds encrypt /tmp/testdata /tmp/testdata.encrypted --with-key=tpm2
++systemd-run -p PrivateDevices=yes -p LoadCredentialEncrypted=testdata.encrypted:/tmp/testdata.encrypted --pipe --wait systemd-creds cat testdata.encrypted | cmp - /tmp/testdata
++rm /tmp/testdata
++
+ echo OK >/testok
+ 
+ exit 0

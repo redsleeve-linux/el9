@@ -1,0 +1,79 @@
+From 3684d9be497c5cb5164435238b970931c93b41e6 Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Mon, 30 Jan 2023 16:25:23 +0100
+Subject: [PATCH] efi-string: Add startswith8()
+
+startswith() from string-util-fundamental.h is defined for sd_char
+which is char16_t, so let's add an implementation for char as well.
+
+(cherry picked from commit ad36d31ea578622883c3b5297c971374096a504a)
+
+Related: RHEL-16952
+---
+ src/boot/efi/efi-string.c      | 15 +++++++++++++++
+ src/boot/efi/efi-string.h      |  2 ++
+ src/boot/efi/test-efi-string.c | 12 ++++++++++++
+ 3 files changed, 29 insertions(+)
+
+diff --git a/src/boot/efi/efi-string.c b/src/boot/efi/efi-string.c
+index cf0d71e986..6b84af69e6 100644
+--- a/src/boot/efi/efi-string.c
++++ b/src/boot/efi/efi-string.c
+@@ -216,6 +216,21 @@ char16_t *xstrn8_to_16(const char *str8, size_t n) {
+         return str16;
+ }
+ 
++char *startswith8(const char *s, const char *prefix) {
++        size_t l;
++
++        assert(prefix);
++
++        if (!s)
++                return NULL;
++
++        l = strlen8(prefix);
++        if (!strneq8(s, prefix, l))
++                return NULL;
++
++        return (char*) s + l;
++}
++
+ static bool efi_fnmatch_prefix(const char16_t *p, const char16_t *h, const char16_t **ret_p, const char16_t **ret_h) {
+         assert(p);
+         assert(h);
+diff --git a/src/boot/efi/efi-string.h b/src/boot/efi/efi-string.h
+index 2a28db3593..477229bf60 100644
+--- a/src/boot/efi/efi-string.h
++++ b/src/boot/efi/efi-string.h
+@@ -105,6 +105,8 @@ static inline char16_t *xstr8_to_16(const char *str8) {
+         return xstrn8_to_16(str8, strlen8(str8));
+ }
+ 
++char *startswith8(const char *s, const char *prefix);
++
+ bool efi_fnmatch(const char16_t *pattern, const char16_t *haystack);
+ 
+ bool parse_number8(const char *s, uint64_t *ret_u, const char **ret_tail);
+diff --git a/src/boot/efi/test-efi-string.c b/src/boot/efi/test-efi-string.c
+index c7e42c7b94..be7f8f9b1c 100644
+--- a/src/boot/efi/test-efi-string.c
++++ b/src/boot/efi/test-efi-string.c
+@@ -355,6 +355,18 @@ TEST(xstrn8_to_16) {
+         free(s);
+ }
+ 
++TEST(startswith8) {
++        assert_se(streq8(startswith8("", ""), ""));
++        assert_se(streq8(startswith8("x", ""), "x"));
++        assert_se(!startswith8("", "x"));
++        assert_se(!startswith8("", "xxxxxxxx"));
++        assert_se(streq8(startswith8("xxx", "x"), "xx"));
++        assert_se(streq8(startswith8("xxx", "xx"), "x"));
++        assert_se(streq8(startswith8("xxx", "xxx"), ""));
++        assert_se(!startswith8("xxx", "xxxx"));
++        assert_se(!startswith8(NULL, ""));
++}
++
+ #define TEST_FNMATCH_ONE(pattern, haystack, expect)                                     \
+         ({                                                                              \
+                 assert_se(fnmatch(pattern, haystack, 0) == (expect ? 0 : FNM_NOMATCH)); \

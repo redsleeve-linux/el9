@@ -1,0 +1,34 @@
+commit cc4544ef8069a14c67a46b7e8e28eff1dc102050
+Author: Siddhesh Poyarekar <siddhesh@sourceware.org>
+Date:   Wed Mar 2 11:45:29 2022 +0530
+
+    gethosts: Return EAI_MEMORY on allocation failure
+    
+    All other cases of failures due to lack of memory return EAI_MEMORY, so
+    it seems wrong to return EAI_SYSTEM here.  The only reason
+    convert_hostent_to_gaih_addrtuple could fail is on calloc failure.
+    
+    Signed-off-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+    (cherry picked from commit b587456c0e7b59dcfdbd2d44db000a3bc8244e57)
+
+diff --git a/sysdeps/posix/getaddrinfo.c b/sysdeps/posix/getaddrinfo.c
+index 1008f247365ea009..37260d6e6f292186 100644
+--- a/sysdeps/posix/getaddrinfo.c
++++ b/sysdeps/posix/getaddrinfo.c
+@@ -303,13 +303,13 @@ gethosts (nss_gethostbyname3_r fct, int family, const char *name,
+   else if (status == NSS_STATUS_SUCCESS)
+     {
+       if (!convert_hostent_to_gaih_addrtuple (req, family, &th, res))
+-	return -EAI_SYSTEM;
++	return -EAI_MEMORY;
+ 
+       if (localcanon != NULL && res->canon == NULL)
+ 	{
+ 	  char *canonbuf = __strdup (localcanon);
+ 	  if (canonbuf == NULL)
+-	    return  -EAI_SYSTEM;
++	    return  -EAI_MEMORY;
+ 	  res->canon = canonbuf;
+ 	}
+     }

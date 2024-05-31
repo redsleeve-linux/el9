@@ -1,0 +1,90 @@
+From a30f647ef87e352502dde5ca67ad99927611108a Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 11 Nov 2022 16:05:03 +0100
+Subject: [PATCH] efi: add efi_guid_equal() helper
+
+(cherry picked from commit 50b0b0d351e892d57a562a28dd8362b1e8cd76a9)
+
+Related: RHEL-16952
+---
+ src/boot/efi/devicetree.c     | 2 +-
+ src/boot/efi/part-discovery.c | 2 +-
+ src/boot/efi/random-seed.c    | 3 +--
+ src/boot/efi/util.h           | 4 ++++
+ src/boot/efi/vmm.c            | 4 ++--
+ 5 files changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/src/boot/efi/devicetree.c b/src/boot/efi/devicetree.c
+index 0312670613..daba5582aa 100644
+--- a/src/boot/efi/devicetree.c
++++ b/src/boot/efi/devicetree.c
+@@ -10,7 +10,7 @@
+ 
+ static void *get_dtb_table(void) {
+         for (UINTN i = 0; i < ST->NumberOfTableEntries; i++)
+-                if (memcmp(&EfiDtbTableGuid, &ST->ConfigurationTable[i].VendorGuid, sizeof(EfiDtbTableGuid)) == 0)
++                if (efi_guid_equal(&ST->ConfigurationTable[i].VendorGuid, &EfiDtbTableGuid))
+                         return ST->ConfigurationTable[i].VendorTable;
+         return NULL;
+ }
+diff --git a/src/boot/efi/part-discovery.c b/src/boot/efi/part-discovery.c
+index 14479c06ea..2659a5b6b4 100644
+--- a/src/boot/efi/part-discovery.c
++++ b/src/boot/efi/part-discovery.c
+@@ -134,7 +134,7 @@ static EFI_STATUS try_gpt(
+                 EFI_PARTITION_ENTRY *entry =
+                                 (EFI_PARTITION_ENTRY *) ((uint8_t *) entries + gpt.gpt_header.SizeOfPartitionEntry * i);
+ 
+-                if (memcmp(&entry->PartitionTypeGUID, type, sizeof(entry->PartitionTypeGUID)) != 0)
++                if (!efi_guid_equal(&entry->PartitionTypeGUID, type))
+                         continue;
+ 
+                 if (entry->EndingLBA < entry->StartingLBA) /* Bogus? */
+diff --git a/src/boot/efi/random-seed.c b/src/boot/efi/random-seed.c
+index 4fc56d9356..6070145778 100644
+--- a/src/boot/efi/random-seed.c
++++ b/src/boot/efi/random-seed.c
+@@ -147,8 +147,7 @@ EFI_STATUS process_random_seed(EFI_FILE *root_dir) {
+         sha256_process_bytes(HASH_LABEL, sizeof(HASH_LABEL) - 1, &hash);
+ 
+         for (size_t i = 0; i < ST->NumberOfTableEntries; ++i)
+-                if (memcmp(&(const EFI_GUID)LINUX_EFI_RANDOM_SEED_TABLE_GUID,
+-                           &ST->ConfigurationTable[i].VendorGuid, sizeof(EFI_GUID)) == 0) {
++                if (efi_guid_equal(&ST->ConfigurationTable[i].VendorGuid, &(const EFI_GUID) LINUX_EFI_RANDOM_SEED_TABLE_GUID)) {
+                         previous_seed_table = ST->ConfigurationTable[i].VendorTable;
+                         break;
+                 }
+diff --git a/src/boot/efi/util.h b/src/boot/efi/util.h
+index f58d24fce1..a076f48dba 100644
+--- a/src/boot/efi/util.h
++++ b/src/boot/efi/util.h
+@@ -217,3 +217,7 @@ static inline bool in_hypervisor(void) {
+         return false;
+ }
+ #endif
++
++static inline bool efi_guid_equal(const EFI_GUID *a, const EFI_GUID *b) {
++        return memcmp(a, b, sizeof(EFI_GUID)) == 0;
++}
+diff --git a/src/boot/efi/vmm.c b/src/boot/efi/vmm.c
+index 2260b217b7..10d4a75ab2 100644
+--- a/src/boot/efi/vmm.c
++++ b/src/boot/efi/vmm.c
+@@ -18,7 +18,7 @@
+ /* detect direct boot */
+ bool is_direct_boot(EFI_HANDLE device) {
+         EFI_STATUS err;
+-        VENDOR_DEVICE_PATH *dp;
++        VENDOR_DEVICE_PATH *dp; /* NB: Alignment of this structure might be quirky! */
+ 
+         err = BS->HandleProtocol(device, &DevicePathProtocol, (void **) &dp);
+         if (err != EFI_SUCCESS)
+@@ -27,7 +27,7 @@ bool is_direct_boot(EFI_HANDLE device) {
+         /* 'qemu -kernel systemd-bootx64.efi' */
+         if (dp->Header.Type == MEDIA_DEVICE_PATH &&
+             dp->Header.SubType == MEDIA_VENDOR_DP &&
+-            memcmp(&dp->Guid, &(EFI_GUID)QEMU_KERNEL_LOADER_FS_MEDIA_GUID, sizeof(EFI_GUID)) == 0)
++            memcmp(&dp->Guid, &(EFI_GUID)QEMU_KERNEL_LOADER_FS_MEDIA_GUID, sizeof(EFI_GUID)) == 0) /* Don't change to efi_guid_equal() because EFI device path objects are not necessarily aligned! */
+                 return true;
+ 
+         /* loaded from firmware volume (sd-boot added to ovmf) */

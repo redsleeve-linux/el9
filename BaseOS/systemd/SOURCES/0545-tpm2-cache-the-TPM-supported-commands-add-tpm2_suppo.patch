@@ -1,0 +1,150 @@
+From b5409900792af67d30b80d8088a853c01fdfdc5f Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Fri, 17 Feb 2023 12:59:18 -0500
+Subject: [PATCH] tpm2: cache the TPM supported commands, add
+ tpm2_supports_command()
+
+Cache the TPM's supported commands and provide a function to check if a command
+is supported.
+
+(cherry picked from commit adbf0c8cfb5d8635133ce9e2be088f9489b54694)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c | 60 ++++++++++++++++++++++++++++++++++++++++++
+ src/shared/tpm2-util.h |  3 +++
+ src/test/test-tpm2.c   |  9 +++++++
+ 3 files changed, 72 insertions(+)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index cbdae73759..d38e260f9a 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -191,12 +191,47 @@ static int tpm2_get_capability(
+         return more == TPM2_YES;
+ }
+ 
++#define TPMA_CC_TO_TPM2_CC(cca) (((cca) & TPMA_CC_COMMANDINDEX_MASK) >> TPMA_CC_COMMANDINDEX_SHIFT)
++
+ static int tpm2_cache_capabilities(Tpm2Context *c) {
+         TPMU_CAPABILITIES capability;
+         int r;
+ 
+         assert(c);
+ 
++        /* Cache the command capabilities. The spec isn't actually clear if commands can be added/removed
++         * while running, but that would be crazy, so let's hope it is not possbile. */
++        TPM2_CC current_cc = TPM2_CC_FIRST;
++        for (;;) {
++                r = tpm2_get_capability(
++                                c,
++                                TPM2_CAP_COMMANDS,
++                                current_cc,
++                                TPM2_MAX_CAP_CC,
++                                &capability);
++                if (r < 0)
++                        return r;
++
++                TPML_CCA commands = capability.command;
++
++                /* We should never get 0; the TPM must support some commands, and it must not set 'more' if
++                 * there are no more. */
++                assert(commands.count > 0);
++
++                if (!GREEDY_REALLOC_APPEND(
++                                c->capability_commands,
++                                c->n_capability_commands,
++                                commands.commandAttributes,
++                                commands.count))
++                        return log_oom();
++
++                if (r == 0)
++                        break;
++
++                /* Set current_cc to index after last cc the TPM provided */
++                current_cc = TPMA_CC_TO_TPM2_CC(commands.commandAttributes[commands.count - 1]) + 1;
++        }
++
+         /* Cache the PCR capabilities, which are safe to cache, as the only way they can change is
+          * TPM2_PCR_Allocate(), which changes the allocation after the next _TPM_Init(). If the TPM is
+          * reinitialized while we are using it, all our context and sessions will be invalid, so we can
+@@ -252,6 +287,29 @@ int tpm2_supports_alg(Tpm2Context *c, TPM2_ALG_ID alg) {
+         return tpm2_get_capability_alg(c, alg, NULL);
+ }
+ 
++/* Get the TPMA_CC for a TPM2_CC. Returns true if the TPM supports the command and the TPMA_CC is provided,
++ * otherwise false. */
++static bool tpm2_get_capability_command(Tpm2Context *c, TPM2_CC command, TPMA_CC *ret) {
++        assert(c);
++
++        FOREACH_ARRAY(cca, c->capability_commands, c->n_capability_commands)
++                if (TPMA_CC_TO_TPM2_CC(*cca) == command) {
++                        if (ret)
++                                *ret = *cca;
++                        return true;
++                }
++
++        log_debug("TPM does not support command 0x%04" PRIx32 ".", command);
++        if (ret)
++                *ret = 0;
++
++        return false;
++}
++
++bool tpm2_supports_command(Tpm2Context *c, TPM2_CC command) {
++        return tpm2_get_capability_command(c, command, NULL);
++}
++
+ /* Returns 1 if the TPM supports the ECC curve, 0 if not, or < 0 for any error. */
+ static int tpm2_supports_ecc_curve(Tpm2Context *c, TPM2_ECC_CURVE curve) {
+         TPMU_CAPABILITIES capability;
+@@ -415,6 +473,8 @@ static Tpm2Context *tpm2_context_free(Tpm2Context *c) {
+         c->tcti_context = mfree(c->tcti_context);
+         c->tcti_dl = safe_dlclose(c->tcti_dl);
+ 
++        c->capability_commands = mfree(c->capability_commands);
++
+         return mfree(c);
+ }
+ 
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 1f20aadc98..1ca1a2e503 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -62,6 +62,8 @@ typedef struct {
+         ESYS_CONTEXT *esys_context;
+ 
+         /* Some selected cached capabilities of the TPM */
++        TPMA_CC *capability_commands;
++        size_t n_capability_commands;
+         TPML_PCR_SELECTION capability_pcrs;
+ } Tpm2Context;
+ 
+@@ -85,6 +87,7 @@ Tpm2Handle *tpm2_handle_free(Tpm2Handle *handle);
+ DEFINE_TRIVIAL_CLEANUP_FUNC(Tpm2Handle*, tpm2_handle_free);
+ 
+ int tpm2_supports_alg(Tpm2Context *c, TPM2_ALG_ID alg);
++bool tpm2_supports_command(Tpm2Context *c, TPM2_CC command);
+ 
+ bool tpm2_test_parms(Tpm2Context *c, TPMI_ALG_PUBLIC alg, const TPMU_PUBLIC_PARMS *parms);
+ 
+diff --git a/src/test/test-tpm2.c b/src/test/test-tpm2.c
+index af06085af6..dfc8b98e08 100644
+--- a/src/test/test-tpm2.c
++++ b/src/test/test-tpm2.c
+@@ -658,6 +658,15 @@ TEST(tpm_required_tests) {
+         assert_se(tpm2_supports_alg(c, TPM2_ALG_RSA) == 1);
+         assert_se(tpm2_supports_alg(c, TPM2_ALG_AES) == 1);
+         assert_se(tpm2_supports_alg(c, TPM2_ALG_CFB) == 1);
++
++        /* Test invalid commands */
++        assert_se(!tpm2_supports_command(c, TPM2_CC_FIRST - 1));
++        assert_se(!tpm2_supports_command(c, TPM2_CC_LAST + 1));
++
++        /* Test valid commands */
++        assert_se(tpm2_supports_command(c, TPM2_CC_Create));
++        assert_se(tpm2_supports_command(c, TPM2_CC_CreatePrimary));
++        assert_se(tpm2_supports_command(c, TPM2_CC_Unseal));
+ }
+ 
+ #endif /* HAVE_TPM2 */

@@ -1,0 +1,26 @@
+From 87a2e6ccd7989f2b271f557c6303a4eb412a03cb Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 16 May 2023 11:46:11 +0900
+Subject: [PATCH] udev/net: verify ID_NET_XYZ before trying to assign it as an
+ alternative name
+
+(cherry picked from commit e65c6c1baa8ea905f7e5bad3b8486d509775ec6a)
+
+Related: RHEL-5988
+---
+ src/udev/net/link-config.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/udev/net/link-config.c b/src/udev/net/link-config.c
+index 5d28526527..4fcf373f8e 100644
+--- a/src/udev/net/link-config.c
++++ b/src/udev/net/link-config.c
+@@ -834,7 +834,7 @@ static int link_apply_alternative_names(Link *link, sd_netlink **rtnl) {
+                         default:
+                                 assert_not_reached();
+                         }
+-                        if (!isempty(n)) {
++                        if (ifname_valid_full(n, IFNAME_VALID_ALTERNATIVE)) {
+                                 r = strv_extend(&altnames, n);
+                                 if (r < 0)
+                                         return log_oom();

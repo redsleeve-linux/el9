@@ -1,0 +1,157 @@
+From e632ee86bcf9af68af5775a772e954aabc4cfc4e Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Fri, 7 Jul 2023 10:13:27 -0400
+Subject: [PATCH] openssl: add kdf_ss_derive()
+
+Add function to perform KDF-SS ("concat" KDF).
+
+While Openssl allows a digest, HMAC, or KMAC for the auxiliary function H, this
+currently only allows using a digest for H.
+
+(cherry picked from commit 8c2205bb1c4ac8024d9a51b4bdf73677b75b7a13)
+
+Related: RHEL-16182
+---
+ src/shared/openssl-util.c | 66 +++++++++++++++++++++++++++++++++++++++
+ src/shared/openssl-util.h |  2 ++
+ src/test/test-openssl.c   | 37 ++++++++++++++++++++++
+ 3 files changed, 105 insertions(+)
+
+diff --git a/src/shared/openssl-util.c b/src/shared/openssl-util.c
+index c8eadd9c63..d863729708 100644
+--- a/src/shared/openssl-util.c
++++ b/src/shared/openssl-util.c
+@@ -338,6 +338,72 @@ int openssl_cipher_many(
+         return 0;
+ }
+ 
++/* Perform Single-Step (aka "Concat") KDF. Currently, this only supports using the digest for the auxiliary
++ * function. The derive_size parameter specifies how many bytes are derived.
++ *
++ * For more details see: https://www.openssl.org/docs/manmaster/man7/EVP_KDF-SS.html */
++int kdf_ss_derive(
++                const char *digest,
++                const void *key,
++                size_t key_size,
++                const void *salt,
++                size_t salt_size,
++                const void *info,
++                size_t info_size,
++                size_t derive_size,
++                void **ret) {
++
++#if OPENSSL_VERSION_MAJOR >= 3
++        assert(digest);
++        assert(key);
++        assert(derive_size > 0);
++        assert(ret);
++
++        _cleanup_(EVP_KDF_freep) EVP_KDF *kdf = EVP_KDF_fetch(NULL, "SSKDF", NULL);
++        if (!kdf)
++                return log_openssl_errors("Failed to create new EVP_KDF");
++
++        _cleanup_(EVP_KDF_CTX_freep) EVP_KDF_CTX *ctx = EVP_KDF_CTX_new(kdf);
++        if (!ctx)
++                return log_openssl_errors("Failed to create new EVP_KDF_CTX");
++
++        _cleanup_(OSSL_PARAM_BLD_freep) OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
++        if (!bld)
++                return log_openssl_errors("Failed to create new OSSL_PARAM_BLD");
++
++        _cleanup_free_ void *buf = malloc(derive_size);
++        if (!buf)
++                return log_oom_debug();
++
++        if (!OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_KDF_PARAM_DIGEST, (char*) digest, 0))
++                return log_openssl_errors("Failed to add KDF-SS OSSL_KDF_PARAM_DIGEST");
++
++        if (!OSSL_PARAM_BLD_push_octet_string(bld, OSSL_KDF_PARAM_KEY, (char*) key, key_size))
++                return log_openssl_errors("Failed to add KDF-SS OSSL_KDF_PARAM_KEY");
++
++        if (salt)
++                if (!OSSL_PARAM_BLD_push_octet_string(bld, OSSL_KDF_PARAM_SALT, (char*) salt, salt_size))
++                        return log_openssl_errors("Failed to add KDF-SS OSSL_KDF_PARAM_SALT");
++
++        if (info)
++                if (!OSSL_PARAM_BLD_push_octet_string(bld, OSSL_KDF_PARAM_INFO, (char*) info, info_size))
++                        return log_openssl_errors("Failed to add KDF-SS OSSL_KDF_PARAM_INFO");
++
++        _cleanup_(OSSL_PARAM_freep) OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(bld);
++        if (!params)
++                return log_openssl_errors("Failed to build KDF-SS OSSL_PARAM");
++
++        if (EVP_KDF_derive(ctx, buf, derive_size, params) <= 0)
++                return log_openssl_errors("Openssl KDF-SS derive failed");
++
++        *ret = TAKE_PTR(buf);
++
++        return 0;
++#else
++        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "KDF-SS requires openssl >= 3.");
++#endif
++}
++
+ /* Perform Key-Based HMAC KDF. The mode must be "COUNTER" or "FEEDBACK". The parameter naming is from the
+  * Openssl api, and maps to SP800-108 naming as "...key, salt, info, and seed correspond to KI, Label,
+  * Context, and IV (respectively)...". The derive_size parameter specifies how many bytes are derived.
+diff --git a/src/shared/openssl-util.h b/src/shared/openssl-util.h
+index 0fea0c5df0..0715aebb42 100644
+--- a/src/shared/openssl-util.h
++++ b/src/shared/openssl-util.h
+@@ -84,6 +84,8 @@ static inline int openssl_cipher(const char *alg, size_t bits, const char *mode,
+         return openssl_cipher_many(alg, bits, mode, key, key_size, iv, iv_size, &IOVEC_MAKE((void*) buf, len), 1, ret, ret_size);
+ }
+ 
++int kdf_ss_derive(const char *digest, const void *key, size_t key_size, const void *salt, size_t salt_size, const void *info, size_t info_size, size_t derive_size, void **ret);
++
+ int kdf_kb_hmac_derive(const char *mode, const char *digest, const void *key, size_t key_size, const void *salt, size_t salt_size, const void *info, size_t info_size, const void *seed, size_t seed_size, size_t derive_size, void **ret);
+ 
+ int rsa_encrypt_bytes(EVP_PKEY *pkey, const void *decrypted_key, size_t decrypted_key_size, void **ret_encrypt_key, size_t *ret_encrypt_key_size);
+diff --git a/src/test/test-openssl.c b/src/test/test-openssl.c
+index 1653c0dc9d..82d384bcb0 100644
+--- a/src/test/test-openssl.c
++++ b/src/test/test-openssl.c
+@@ -313,6 +313,43 @@ TEST(kdf_kb_hmac_derive) {
+ #endif
+ }
+ 
++#if OPENSSL_VERSION_MAJOR >= 3
++static void check_ss_derive(const char *hex_key, const char *hex_salt, const char *hex_info, const char *hex_expected) {
++        DEFINE_HEX_PTR(key, hex_key);
++        DEFINE_HEX_PTR(salt, hex_salt);
++        DEFINE_HEX_PTR(info, hex_info);
++        DEFINE_HEX_PTR(expected, hex_expected);
++
++        _cleanup_free_ void *derived_key = NULL;
++        assert_se(kdf_ss_derive("SHA256", key, key_len, salt, salt_len, info, info_len, expected_len, &derived_key) >= 0);
++        assert_se(memcmp_nn(derived_key, expected_len, expected, expected_len) == 0);
++}
++#endif
++
++TEST(kdf_ss_derive) {
++#if OPENSSL_VERSION_MAJOR >= 3
++        check_ss_derive(
++                "01166ad6b05d1fad8cdb50d1902170e9",
++                "feea805789dc8d0b57da5d4d61886b1a",
++                "af4cb6d1d0a996e21e3788584165e2ae",
++                "46CECAB4544E11EF986641BA6F843FAFFD111D3974C34E3B9592311E8579C6BD");
++
++        check_ss_derive(
++                "d1c39e37260d79d6e766f1d1412c4b61fc0801db469b97c897b0fbcaebea5178",
++                "b75e3b65d1bb845dee581c7e14cfebc6e882946e90273b77ebe289faaf7de248",
++                "ed25a0043d6c1eb28296da1f9ab138dafee18f4c937bfc43601d4ee6e7634199",
++                "30EB1A1E9DEA7DE4DDB8F3FDF50A01E3");
++        /* Same inputs as above, but derive more bytes */
++        check_ss_derive(
++                "d1c39e37260d79d6e766f1d1412c4b61fc0801db469b97c897b0fbcaebea5178",
++                "b75e3b65d1bb845dee581c7e14cfebc6e882946e90273b77ebe289faaf7de248",
++                "ed25a0043d6c1eb28296da1f9ab138dafee18f4c937bfc43601d4ee6e7634199",
++                "30EB1A1E9DEA7DE4DDB8F3FDF50A01E30581D606C1228D98AFF691DF743AC2EE9D99EFD2AE1946C079AA18C9524877FA65D5065F0DAED058AB3416AF80EB2B73");
++#else
++        log_tests_skipped("KDF-SS requires Openssl >= 3");
++#endif
++}
++
+ static void check_cipher(
+                 const char *alg,
+                 size_t bits,

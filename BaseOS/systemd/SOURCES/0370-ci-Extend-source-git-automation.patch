@@ -1,0 +1,223 @@
+From 55d337de1940076855c1687ffd588498d068724e Mon Sep 17 00:00:00 2001
+From: Jan Macku <jamacku@redhat.com>
+Date: Mon, 18 Sep 2023 13:51:43 +0200
+Subject: [PATCH] ci: Extend source-git-automation
+
+* on schedule and on demand workflows
+* Added Tracker validation for Bugzilla and Jira
+
+rhel-only
+
+Resolves: RHEL-1086
+---
+ .github/advanced-commit-linter.yml            |   2 +
+ .github/tracker-validator.yml                 |  18 ++++
+ .../source-git-automation-on-demand.yml       | 100 ++++++++++++++++++
+ .github/workflows/source-git-automation.yml   |  29 ++++-
+ 4 files changed, 147 insertions(+), 2 deletions(-)
+ create mode 100644 .github/tracker-validator.yml
+ create mode 100644 .github/workflows/source-git-automation-on-demand.yml
+
+diff --git a/.github/advanced-commit-linter.yml b/.github/advanced-commit-linter.yml
+index 0fb74a9dc8..86f0e911f2 100644
+--- a/.github/advanced-commit-linter.yml
++++ b/.github/advanced-commit-linter.yml
+@@ -11,6 +11,7 @@ policy:
+         - 'Resolves: #?'
+         - 'Related: #?'
+         - 'Reverts: #?'
++      type: bugzilla
+       issue-format:
+         - '\d+$'
+       url: 'https://bugzilla.redhat.com/show_bug.cgi?id='
+@@ -18,6 +19,7 @@ policy:
+         - 'Resolves: '
+         - 'Related: '
+         - 'Reverts: '
++      type: jira
+       issue-format:
+         - 'RHEL-\d+$'
+       url: 'https://issues.redhat.com/browse/'
+diff --git a/.github/tracker-validator.yml b/.github/tracker-validator.yml
+new file mode 100644
+index 0000000000..9e43e4e7d5
+--- /dev/null
++++ b/.github/tracker-validator.yml
+@@ -0,0 +1,18 @@
++labels:
++  missing-tracker: tracker/missing
++  invalid-product: tracker/invalid-product
++  invalid-component: tracker/invalid-component
++  unapproved: tracker/unapproved
++products:
++  - Red Hat Enterprise Linux 9
++  - CentOS Stream 9
++  - rhel-9.0.0
++  - rhel-9.2.0
++  - rhel-9.3.0
++  - rhel-9.4.0
++  - rhel-9.5.0
++  - rhel-9.6.0
++  - rhel-9.7.0
++  - rhel-9.8.0
++  - rhel-9.9.0
++  - rhel-9.10.0
+diff --git a/.github/workflows/source-git-automation-on-demand.yml b/.github/workflows/source-git-automation-on-demand.yml
+new file mode 100644
+index 0000000000..60d7bcf32d
+--- /dev/null
++++ b/.github/workflows/source-git-automation-on-demand.yml
+@@ -0,0 +1,100 @@
++---
++
++name: Source git Automation Scheduled/On Demand
++on:
++  schedule:
++    # Workflow runs every 15 minutes
++    - cron: '*/15 * * * *'
++  workflow_dispatch:
++    inputs:
++      pr-number:
++        description: 'Pull Request number/s ; when not provided, the workflow will run for all open PRs'
++        required: true
++        default: '0'
++
++permissions:
++  contents: read
++
++jobs:
++  # Get all open PRs
++  gather-pull-requests:
++    if: github.repository == 'redhat-plumbers/systemd-rhel9'
++    runs-on: ubuntu-latest
++
++    outputs:
++      pr-numbers: ${{ steps.get-pr-numbers.outputs.result }}
++      pr-numbers-manual: ${{ steps.parse-manual-input.outputs.result }}
++
++    steps:
++      - id: get-pr-numbers
++        if: inputs.pr-number == '0'
++        name: Get all open PRs
++        uses: actions/github-script@v6
++        with:
++          # !FIXME: this is not working if there is more than 100 PRs opened
++          script: |
++            const { data: pullRequests } = await github.rest.pulls.list({
++              owner: context.repo.owner,
++              repo: context.repo.repo,
++              state: 'open',
++              per_page: 100
++            });
++            return pullRequests.map(pr => pr.number);
++
++      - id: parse-manual-input
++        if: inputs.pr-number != '0'
++        name: Parse manual input
++        run: |
++          # shellcheck disable=SC2086
++          echo "result="[ ${{ inputs.pr-number }} ]"" >> $GITHUB_OUTPUT
++        shell: bash
++
++  validate-pr:
++    name: 'Validation of Pull Request #${{ matrix.pr-number }}'
++    needs: [ gather-pull-requests ]
++    runs-on: ubuntu-latest
++
++    strategy:
++      fail-fast: false
++      matrix:
++        pr-number: ${{ inputs.pr-number == 0 && fromJSON(needs.gather-pull-requests.outputs.pr-numbers) || fromJSON(needs.gather-pull-requests.outputs.pr-numbers-manual) }}
++
++    permissions:
++      statuses: write
++      checks: write
++      pull-requests: write
++
++    steps:
++      - name: Repository checkout
++        uses: actions/checkout@v3
++
++      - id: metadata
++        name: Gather Pull Request Metadata
++        uses: redhat-plumbers-in-action/gather-pull-request-metadata@v1
++        with:
++          pr-number: ${{ matrix.pr-number }}
++
++      - id: commit-linter
++        name: Lint Commits
++        uses: redhat-plumbers-in-action/advanced-commit-linter@v2
++        with:
++          pr-metadata: ${{ steps.metadata.outputs.metadata }}
++          token: ${{ secrets.GITHUB_TOKEN }}
++
++      # Validates tracker, changes tracker status, updates PR title
++      - id: tracker-validator
++        name: Validate Tracker
++        uses: redhat-plumbers-in-action/tracker-validator@v1
++        with:
++          pr-metadata: ${{ steps.metadata.outputs.metadata }}
++          component: systemd
++          tracker: ${{ fromJSON(steps.commit-linter.outputs.validated-pr-metadata).validation.tracker.id }}
++          tracker-type: ${{ fromJSON(steps.commit-linter.outputs.validated-pr-metadata).validation.tracker.type }}
++          bugzilla-instance: https://bugzilla.redhat.com
++          bugzilla-api-token: ${{ secrets.BUGZILLA_API_TOKEN }}
++          jira-instance: https://issues.redhat.com
++          jira-api-token: ${{ secrets.JIRA_API_TOKEN }}
++          token: ${{ secrets.GITHUB_TOKEN }}
++
++      # TODO: merge PR if all checks passed
++      # TODO: add comment to Tracker that PR was merged ...
+diff --git a/.github/workflows/source-git-automation.yml b/.github/workflows/source-git-automation.yml
+index e653e28a7f..7fabb88a83 100644
+--- a/.github/workflows/source-git-automation.yml
++++ b/.github/workflows/source-git-automation.yml
+@@ -12,7 +12,8 @@ jobs:
+   download-metadata:
+     if: >
+       github.event.workflow_run.event == 'pull_request' &&
+-      github.event.workflow_run.conclusion == 'success'
++      github.event.workflow_run.conclusion == 'success' &&
++      github.repository == 'redhat-plumbers/systemd-rhel9'
+     runs-on: ubuntu-latest
+ 
+     outputs:
+@@ -33,13 +34,37 @@ jobs:
+       validated-pr-metadata: ${{ steps.commit-linter.outputs.validated-pr-metadata }}
+ 
+     permissions:
++      statuses: write
+       checks: write
+       pull-requests: write
+ 
+     steps:
+       - id: commit-linter
+         name: Lint Commits
+-        uses: redhat-plumbers-in-action/advanced-commit-linter@v1
++        uses: redhat-plumbers-in-action/advanced-commit-linter@v2
+         with:
+           pr-metadata: ${{ needs.download-metadata.outputs.pr-metadata }}
+           token: ${{ secrets.GITHUB_TOKEN }}
++
++  # Validates tracker, changes tracker status, updates PR title
++  tracker-validation:
++    needs: [ download-metadata, commit-linter ]
++    runs-on: ubuntu-latest
++
++    permissions:
++      checks: write
++      pull-requests: write
++
++    steps:
++      - name: Validate Tracker
++        uses: redhat-plumbers-in-action/tracker-validator@v1
++        with:
++          pr-metadata: ${{ needs.download-metadata.outputs.pr-metadata }}
++          component: systemd
++          tracker: ${{ fromJSON(needs.commit-linter.outputs.validated-pr-metadata).validation.tracker.id }}
++          tracker-type: ${{ fromJSON(needs.commit-linter.outputs.validated-pr-metadata).validation.tracker.type }}
++          bugzilla-instance: https://bugzilla.redhat.com
++          bugzilla-api-token: ${{ secrets.BUGZILLA_API_TOKEN }}
++          jira-instance: https://issues.redhat.com
++          jira-api-token: ${{ secrets.JIRA_API_TOKEN }}
++          token: ${{ secrets.GITHUB_TOKEN }}

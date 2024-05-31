@@ -1,0 +1,29 @@
+commit 5eabdb6a6ac1599d23dd5966a37417215950245f
+Author: Andreas Schwab <schwab@suse.de>
+Date:   Wed Dec 6 14:48:22 2023 +0100
+
+    getaddrinfo: translate ENOMEM to EAI_MEMORY (bug 31163)
+    
+    When __resolv_context_get returns NULL due to out of memory, translate it
+    to a return value of EAI_MEMORY.
+
+diff --git a/sysdeps/posix/getaddrinfo.c b/sysdeps/posix/getaddrinfo.c
+index 321a6679d46494a3..8fe879c5420337a4 100644
+--- a/sysdeps/posix/getaddrinfo.c
++++ b/sysdeps/posix/getaddrinfo.c
+@@ -615,7 +615,14 @@ get_nss_addresses (const char *name, const struct addrinfo *req,
+      function variant.  */
+   res_ctx = __resolv_context_get ();
+   if (res_ctx == NULL)
+-    no_more = 1;
++    {
++      if (errno == ENOMEM)
++	{
++	  result = -EAI_MEMORY;
++	  goto out;
++	}
++      no_more = 1;
++    }
+ 
+   while (!no_more)
+     {

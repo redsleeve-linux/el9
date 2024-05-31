@@ -1,0 +1,368 @@
+From f898f9d1290a25d70f2be99f4cf142060ca7ae63 Mon Sep 17 00:00:00 2001
+From: Joshua Zivkovic <joshua.zivkovic@codethink.co.uk>
+Date: Wed, 2 Nov 2022 08:55:50 +0000
+Subject: [PATCH] systemd-analyze: Add table and JSON output implementation to
+ plot
+
+(cherry picked from commit ff46b2f97c42d73401ca3ffaaef54a017dc23923)
+
+Resolves: RHEL-5070
+---
+ src/analyze/analyze-plot.c | 168 ++++++++++++++++++++++++++-----------
+ src/analyze/analyze.c      |  36 ++++++--
+ src/analyze/analyze.h      |   2 +
+ 3 files changed, 154 insertions(+), 52 deletions(-)
+
+diff --git a/src/analyze/analyze-plot.c b/src/analyze/analyze-plot.c
+index 100bdc3787..24f4add099 100644
+--- a/src/analyze/analyze-plot.c
++++ b/src/analyze/analyze-plot.c
+@@ -5,6 +5,7 @@
+ #include "analyze-time-data.h"
+ #include "bus-error.h"
+ #include "bus-map-properties.h"
++#include "format-table.h"
+ #include "sort-util.h"
+ #include "version.h"
+ 
+@@ -37,7 +38,7 @@ typedef struct HostInfo {
+         char *architecture;
+ } HostInfo;
+ 
+-static HostInfo* free_host_info(HostInfo *hi) {
++static HostInfo *free_host_info(HostInfo *hi) {
+         if (!hi)
+                 return NULL;
+ 
+@@ -87,7 +88,7 @@ static int acquire_host_info(sd_bus *bus, HostInfo **hi) {
+         }
+ 
+         r = bus_map_all_properties(
+-                        system_bus ?: bus,
++                        system_bus ? : bus,
+                         "org.freedesktop.hostname1",
+                         "/org/freedesktop/hostname1",
+                         hostname_map,
+@@ -156,15 +157,14 @@ static void svg_graph_box(double height, double begin, double end) {
+                             SCALE_Y * height);
+         }
+ }
+-
+ static int plot_unit_times(UnitTimes *u, double width, int y) {
+         bool b;
+ 
+         if (!u->name)
+                 return 0;
+ 
+-        svg_bar("activating",   u->activating, u->activated, y);
+-        svg_bar("active",       u->activated, u->deactivating, y);
++        svg_bar("activating", u->activating, u->activated, y);
++        svg_bar("active", u->activated, u->deactivating, y);
+         svg_bar("deactivating", u->deactivating, u->deactivated, y);
+ 
+         /* place the text on the left if we have passed the half of the svg width */
+@@ -178,41 +178,27 @@ static int plot_unit_times(UnitTimes *u, double width, int y) {
+         return 1;
+ }
+ 
+-int verb_plot(int argc, char *argv[], void *userdata) {
+-        _cleanup_(free_host_infop) HostInfo *host = NULL;
+-        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
+-        _cleanup_(unit_times_free_arrayp) UnitTimes *times = NULL;
+-        _cleanup_free_ char *pretty_times = NULL;
+-        bool use_full_bus = arg_scope == LOOKUP_SCOPE_SYSTEM;
+-        BootTimes *boot;
++static void limit_times_to_boot(const BootTimes *boot, UnitTimes *u) {
++        if (u->deactivated > u->activating && u->deactivated <= boot->finish_time && u->activated == 0
++            && u->deactivating == 0)
++                u->activated = u->deactivating = u->deactivated;
++        if (u->activated < u->activating || u->activated > boot->finish_time)
++                u->activated = boot->finish_time;
++        if (u->deactivating < u->activated || u->deactivating > boot->finish_time)
++                u->deactivating = boot->finish_time;
++        if (u->deactivated < u->deactivating || u->deactivated > boot->finish_time)
++                u->deactivated = boot->finish_time;
++}
++
++static int produce_plot_as_svg(
++                UnitTimes *times,
++                const HostInfo *host,
++                const BootTimes *boot,
++                const char *pretty_times) {
++        int m = 1, y = 0;
+         UnitTimes *u;
+-        int n, m = 1, y = 0, r;
+         double width;
+ 
+-        r = acquire_bus(&bus, &use_full_bus);
+-        if (r < 0)
+-                return bus_log_connect_error(r, arg_transport);
+-
+-        n = acquire_boot_times(bus, &boot);
+-        if (n < 0)
+-                return n;
+-
+-        n = pretty_boot_time(bus, &pretty_times);
+-        if (n < 0)
+-                return n;
+-
+-        if (use_full_bus || arg_scope != LOOKUP_SCOPE_SYSTEM) {
+-                n = acquire_host_info(bus, &host);
+-                if (n < 0)
+-                        return n;
+-        }
+-
+-        n = acquire_time_data(bus, &times);
+-        if (n <= 0)
+-                return n;
+-
+-        typesafe_qsort(times, n, compare_unit_start);
+-
+         width = SCALE_X * (boot->firmware_time + boot->finish_time);
+         if (width < 800.0)
+                 width = 800.0;
+@@ -245,16 +231,8 @@ int verb_plot(int argc, char *argv[], void *userdata) {
+                 if (text_width > text_start && text_width + text_start > width)
+                         width = text_width + text_start;
+ 
+-                if (u->deactivated > u->activating &&
+-                    u->deactivated <= boot->finish_time &&
+-                    u->activated == 0 && u->deactivating == 0)
+-                        u->activated = u->deactivating = u->deactivated;
+-                if (u->activated < u->activating || u->activated > boot->finish_time)
+-                        u->activated = boot->finish_time;
+-                if (u->deactivating < u->activated || u->deactivating > boot->finish_time)
+-                        u->deactivating = boot->finish_time;
+-                if (u->deactivated < u->deactivating || u->deactivated > boot->finish_time)
+-                        u->deactivated = boot->finish_time;
++                limit_times_to_boot(boot, u);
++
+                 m++;
+         }
+ 
+@@ -391,5 +369,101 @@ int verb_plot(int argc, char *argv[], void *userdata) {
+ 
+         svg("</svg>\n");
+ 
++        return 0;
++}
++
++static int show_table(Table *table, const char *word) {
++        int r;
++
++        assert(table);
++        assert(word);
++
++        if (table_get_rows(table) > 1) {
++                table_set_header(table, arg_legend);
++
++                if (!FLAGS_SET(arg_json_format_flags, JSON_FORMAT_OFF))
++                        r = table_print_json(table, NULL, arg_json_format_flags | JSON_FORMAT_COLOR_AUTO);
++                else
++                        r = table_print(table, NULL);
++                if (r < 0)
++                        return table_log_print_error(r);
++        }
++
++        if (arg_legend) {
++                if (table_get_rows(table) > 1)
++                        printf("\n%zu %s listed.\n", table_get_rows(table) - 1, word);
++                else
++                        printf("No %s.\n", word);
++        }
++
++        return 0;
++}
++
++static int produce_plot_as_text(UnitTimes *times, const BootTimes *boot) {
++        _cleanup_(table_unrefp) Table *table = NULL;
++        int r;
++
++        table = table_new("name", "activated", "activating", "time", "deactivated", "deactivating");
++        if (!table)
++                return log_oom();
++
++        for (; times->has_data; times++) {
++                limit_times_to_boot(boot, times);
++
++                r = table_add_many(
++                                table,
++                                TABLE_STRING, times->name,
++                                TABLE_TIMESPAN_MSEC, times->activated,
++                                TABLE_TIMESPAN_MSEC, times->activating,
++                                TABLE_TIMESPAN_MSEC, times->time,
++                                TABLE_TIMESPAN_MSEC, times->deactivated,
++                                TABLE_TIMESPAN_MSEC, times->deactivating);
++                if (r < 0)
++                        return table_log_add_error(r);
++        }
++
++        return show_table(table, "Units");
++}
++
++int verb_plot(int argc, char *argv[], void *userdata) {
++        _cleanup_(free_host_infop) HostInfo *host = NULL;
++        _cleanup_(sd_bus_flush_close_unrefp) sd_bus *bus = NULL;
++        _cleanup_(unit_times_free_arrayp) UnitTimes *times = NULL;
++        _cleanup_free_ char *pretty_times = NULL;
++        bool use_full_bus = arg_scope == LOOKUP_SCOPE_SYSTEM;
++        BootTimes *boot;
++        int n, r;
++
++        r = acquire_bus(&bus, &use_full_bus);
++        if (r < 0)
++                return bus_log_connect_error(r, arg_transport);
++
++        n = acquire_boot_times(bus, &boot);
++        if (n < 0)
++                return n;
++
++        n = pretty_boot_time(bus, &pretty_times);
++        if (n < 0)
++                return n;
++
++        if (use_full_bus || arg_scope != LOOKUP_SCOPE_SYSTEM) {
++                n = acquire_host_info(bus, &host);
++                if (n < 0)
++                        return n;
++        }
++
++        n = acquire_time_data(bus, &times);
++        if (n <= 0)
++                return n;
++
++        typesafe_qsort(times, n, compare_unit_start);
++
++        if (!FLAGS_SET(arg_json_format_flags, JSON_FORMAT_OFF) || arg_table)
++                r = produce_plot_as_text(times, boot);
++        else
++                r = produce_plot_as_svg(times, host, boot, pretty_times);
++        if (r < 0)
++                return r;
++
+         return EXIT_SUCCESS;
+ }
+diff --git a/src/analyze/analyze.c b/src/analyze/analyze.c
+index 6e47357a11..825c19c6f4 100644
+--- a/src/analyze/analyze.c
++++ b/src/analyze/analyze.c
+@@ -105,6 +105,8 @@ char *arg_unit = NULL;
+ JsonFormatFlags arg_json_format_flags = JSON_FORMAT_OFF;
+ bool arg_quiet = false;
+ char *arg_profile = NULL;
++bool arg_legend = true;
++bool arg_table = false;
+ 
+ STATIC_DESTRUCTOR_REGISTER(arg_dot_from_patterns, strv_freep);
+ STATIC_DESTRUCTOR_REGISTER(arg_dot_to_patterns, strv_freep);
+@@ -217,8 +219,10 @@ static int help(int argc, char *argv[], void *userdata) {
+                "     --security-policy=PATH  Use custom JSON security policy instead\n"
+                "                             of built-in one\n"
+                "     --json=pretty|short|off Generate JSON output of the security\n"
+-               "                             analysis table\n"
++               "                             analysis table, or plot's raw time data\n"
+                "     --no-pager              Do not pipe output into a pager\n"
++               "     --no-legend             Disable column headers and hints in plot\n"
++               "                             with either --table or --json=\n"
+                "     --system                Operate on system systemd instance\n"
+                "     --user                  Operate on user systemd instance\n"
+                "     --global                Operate on global user configuration\n"
+@@ -238,6 +242,7 @@ static int help(int argc, char *argv[], void *userdata) {
+                "                             specified time\n"
+                "     --profile=name|PATH     Include the specified profile in the\n"
+                "                             security review of the unit(s)\n"
++               "     --table                 Output plot's raw time data as a table\n"
+                "  -h --help                  Show this help\n"
+                "     --version               Show package version\n"
+                "  -q --quiet                 Do not emit hints\n"
+@@ -280,6 +285,8 @@ static int parse_argv(int argc, char *argv[]) {
+                 ARG_SECURITY_POLICY,
+                 ARG_JSON,
+                 ARG_PROFILE,
++                ARG_TABLE,
++                ARG_NO_LEGEND,
+         };
+ 
+         static const struct option options[] = {
+@@ -310,6 +317,8 @@ static int parse_argv(int argc, char *argv[]) {
+                 { "unit",             required_argument, NULL, 'U'                  },
+                 { "json",             required_argument, NULL, ARG_JSON             },
+                 { "profile",          required_argument, NULL, ARG_PROFILE          },
++                { "table",            optional_argument, NULL, ARG_TABLE            },
++                { "no-legend",        optional_argument, NULL, ARG_NO_LEGEND        },
+                 {}
+         };
+ 
+@@ -448,14 +457,12 @@ static int parse_argv(int argc, char *argv[]) {
+                         r = safe_atou(optarg, &arg_iterations);
+                         if (r < 0)
+                                 return log_error_errno(r, "Failed to parse iterations: %s", optarg);
+-
+                         break;
+ 
+                 case ARG_BASE_TIME:
+                         r = parse_timestamp(optarg, &arg_base_time);
+                         if (r < 0)
+                                 return log_error_errno(r, "Failed to parse --base-time= parameter: %s", optarg);
+-
+                         break;
+ 
+                 case ARG_PROFILE:
+@@ -486,6 +493,15 @@ static int parse_argv(int argc, char *argv[]) {
+                         free_and_replace(arg_unit, mangled);
+                         break;
+                 }
++
++                case ARG_TABLE:
++                        arg_table = true;
++                        break;
++
++                case ARG_NO_LEGEND:
++                        arg_legend = false;
++                        break;
++
+                 case '?':
+                         return -EINVAL;
+ 
+@@ -497,9 +513,9 @@ static int parse_argv(int argc, char *argv[]) {
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+                                        "Option --offline= is only supported for security right now.");
+ 
+-        if (arg_json_format_flags != JSON_FORMAT_OFF && !STRPTR_IN_SET(argv[optind], "security", "inspect-elf"))
++        if (arg_json_format_flags != JSON_FORMAT_OFF && !STRPTR_IN_SET(argv[optind], "security", "inspect-elf", "plot"))
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+-                                       "Option --json= is only supported for security and inspect-elf right now.");
++                                       "Option --json= is only supported for security, inspect-elf, and plot right now.");
+ 
+         if (arg_threshold != 100 && !streq_ptr(argv[optind], "security"))
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+@@ -536,6 +552,16 @@ static int parse_argv(int argc, char *argv[]) {
+         if (streq_ptr(argv[optind], "condition") && arg_unit && optind < argc - 1)
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "No conditions can be passed if --unit= is used.");
+ 
++        if ((!arg_legend && !streq_ptr(argv[optind], "plot")) ||
++           (streq_ptr(argv[optind], "plot") && !arg_legend && !arg_table && FLAGS_SET(arg_json_format_flags, JSON_FORMAT_OFF)))
++                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Option --no-legend is only supported for plot with either --table or --json=.");
++
++        if (arg_table && !streq_ptr(argv[optind], "plot"))
++                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Option --table is only supported for plot right now.");
++
++        if (arg_table && !FLAGS_SET(arg_json_format_flags, JSON_FORMAT_OFF))
++                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "--table and --json= are mutually exclusive.");
++
+         return 1; /* work to do */
+ }
+ 
+diff --git a/src/analyze/analyze.h b/src/analyze/analyze.h
+index da12058c43..e4af7b47e0 100644
+--- a/src/analyze/analyze.h
++++ b/src/analyze/analyze.h
+@@ -36,6 +36,8 @@ extern char *arg_unit;
+ extern JsonFormatFlags arg_json_format_flags;
+ extern bool arg_quiet;
+ extern char *arg_profile;
++extern bool arg_legend;
++extern bool arg_table;
+ 
+ int acquire_bus(sd_bus **bus, bool *use_full_bus);
+ 

@@ -1,0 +1,52 @@
+From e62ee4deaa4c3e333c9895c43b939276335e116b Mon Sep 17 00:00:00 2001
+From: Alberto Planas <aplanas@suse.com>
+Date: Mon, 16 Jan 2023 13:35:49 +0100
+Subject: [PATCH] creds-util: merge the TPM2 detection for initrd
+
+This patch merge the TPM2 detection paths when we are inside and outside
+an initrd.
+
+Signed-off-by: Alberto Planas <aplanas@suse.com>
+(cherry picked from commit e37dfcec528b43e203d198f978f9eaa87787c762)
+
+Related: RHEL-16182
+---
+ src/shared/creds-util.c | 11 ++---------
+ 1 file changed, 2 insertions(+), 9 deletions(-)
+
+diff --git a/src/shared/creds-util.c b/src/shared/creds-util.c
+index 075fd2327a..027ad96640 100644
+--- a/src/shared/creds-util.c
++++ b/src/shared/creds-util.c
+@@ -608,7 +608,7 @@ int encrypt_credential_and_warn(
+ 
+ #if HAVE_TPM2
+         bool try_tpm2;
+-        if (sd_id128_equal(with_key, _CRED_AUTO)) {
++        if (sd_id128_in_set(with_key, _CRED_AUTO, _CRED_AUTO_INITRD)) {
+                 /* If automatic mode is selected lets see if a TPM2 it is present. If we are running in a
+                  * container tpm2_support will detect this, and will return a different flag combination of
+                  * TPM2_SUPPORT_FULL, effectively skipping the use of TPM2 when inside one. */
+@@ -616,13 +616,6 @@ int encrypt_credential_and_warn(
+                 try_tpm2 = tpm2_support() == TPM2_SUPPORT_FULL;
+                 if (!try_tpm2)
+                         log_debug("System lacks TPM2 support or running in a container, not attempting to use TPM2.");
+-        } else if (sd_id128_equal(with_key, _CRED_AUTO_INITRD)) {
+-                /* If automatic mode for initrds is selected, we'll use the TPM2 key if the firmware does it,
+-                 * otherwise we'll use a fixed key */
+-
+-                try_tpm2 = efi_has_tpm2();
+-                if (!try_tpm2)
+-                        log_debug("Firmware lacks TPM2 support, not attempting to use TPM2.");
+         } else
+                 try_tpm2 = sd_id128_in_set(with_key,
+                                            CRED_AES256_GCM_BY_TPM2_HMAC,
+@@ -697,7 +690,7 @@ int encrypt_credential_and_warn(
+                               /* ret_srk_buf_size= */ NULL);
+                 if (r < 0) {
+                         if (sd_id128_equal(with_key, _CRED_AUTO_INITRD))
+-                                log_warning("Firmware reported a TPM2 being present and used, but we didn't manage to talk to it. Credential will be refused if SecureBoot is enabled.");
++                                log_warning("TPM2 present and used, but we didn't manage to talk to it. Credential will be refused if SecureBoot is enabled.");
+                         else if (!sd_id128_equal(with_key, _CRED_AUTO))
+                                 return log_error_errno(r, "Failed to seal to TPM2: %m");
+ 

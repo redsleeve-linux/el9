@@ -1,0 +1,124 @@
+From 90d73383f5ade7b9a320b7636187cd846d60c9a4 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 28 May 2023 14:20:27 +0900
+Subject: [PATCH] sd-journal: introduce sd_journal_step_one()
+
+After the commit 7a4ee861615101ddd2f95056cf30e69e41da86ce,
+sd_journal_next() following sd_journal_seek_tail() takes no-op,
+and we need to call sd_journal_previous(). This may be useful in
+some cases, e.g. to fix the issue explained in the previous commit.
+
+(cherry picked from commit b78f9481bc03455eafd9239c33fc2f124779760c)
+
+Related: RHEL-11591
+---
+ man/rules/meson.build                  |  3 ++-
+ man/sd_journal_next.xml                | 17 +++++++++++++++++
+ src/libsystemd/libsystemd.sym          |  6 ++++++
+ src/libsystemd/sd-journal/sd-journal.c | 10 ++++++++++
+ src/systemd/sd-journal.h               |  1 +
+ 5 files changed, 36 insertions(+), 1 deletion(-)
+
+diff --git a/man/rules/meson.build b/man/rules/meson.build
+index 65a16b1e2a..9c0d773e51 100644
+--- a/man/rules/meson.build
++++ b/man/rules/meson.build
+@@ -726,7 +726,8 @@ manpages = [
+    'SD_JOURNAL_FOREACH_BACKWARDS',
+    'sd_journal_next_skip',
+    'sd_journal_previous',
+-   'sd_journal_previous_skip'],
++   'sd_journal_previous_skip',
++   'sd_journal_step_one'],
+   ''],
+  ['sd_journal_open',
+   '3',
+diff --git a/man/sd_journal_next.xml b/man/sd_journal_next.xml
+index 628abb296c..cc267fa1bd 100644
+--- a/man/sd_journal_next.xml
++++ b/man/sd_journal_next.xml
+@@ -18,6 +18,7 @@
+   <refnamediv>
+     <refname>sd_journal_next</refname>
+     <refname>sd_journal_previous</refname>
++    <refname>sd_journal_step_one</refname>
+     <refname>sd_journal_next_skip</refname>
+     <refname>sd_journal_previous_skip</refname>
+     <refname>SD_JOURNAL_FOREACH</refname>
+@@ -39,6 +40,12 @@
+         <paramdef>sd_journal *<parameter>j</parameter></paramdef>
+       </funcprototype>
+ 
++      <funcprototype>
++        <funcdef>int <function>sd_journal_step_one</function></funcdef>
++        <paramdef>sd_journal *<parameter>j</parameter></paramdef>
++        <paramdef>int <parameter>advanced</parameter></paramdef>
++      </funcprototype>
++
+       <funcprototype>
+         <funcdef>int <function>sd_journal_next_skip</function></funcdef>
+         <paramdef>sd_journal *<parameter>j</parameter></paramdef>
+@@ -77,6 +84,16 @@
+     <para>Similarly, <function>sd_journal_previous()</function> sets
+     the read pointer back one entry.</para>
+ 
++    <para><function>sd_journal_step_one()</function> also moves the read pointer. If the current location
++    is the head of the journal, e.g. when this is called following
++    <function>sd_journal_seek_head()</function>, then this is equivalent to
++    <function>sd_journal_next()</function>, and the argument <varname>advanced</varname> will be ignored.
++    Similary, if the current location is the tail of the journal, e.g. when this is called following
++    <function>sd_journal_seek_tail()</function>, then this is equivalent to
++    <function>sd_journal_previous()</function>, and <varname>advanced</varname> will be ignored. Otherwise,
++    this is equivalent to <function>sd_journal_next()</function> when <varname>advanced</varname> is
++    non-zero, and <function>sd_journal_previous()</function> when <varname>advanced</varname> is zero.</para>
++
+     <para><function>sd_journal_next_skip()</function> and
+     <function>sd_journal_previous_skip()</function> advance/set back the read pointer by multiple
+     entries at once, as specified in the <varname>skip</varname> parameter. The <varname>skip</varname>
+diff --git a/src/libsystemd/libsystemd.sym b/src/libsystemd/libsystemd.sym
+index 3b72320f0c..26054ed2d4 100644
+--- a/src/libsystemd/libsystemd.sym
++++ b/src/libsystemd/libsystemd.sym
+@@ -796,3 +796,9 @@ global:
+ 
+         sd_hwdb_new_from_path;
+ } LIBSYSTEMD_251;
++
++
++LIBSYSTEMD_254 {
++global:
++        sd_journal_step_one;
++} LIBSYSTEMD_252;
+diff --git a/src/libsystemd/sd-journal/sd-journal.c b/src/libsystemd/sd-journal/sd-journal.c
+index 1e4d128f05..9ab31fbbc8 100644
+--- a/src/libsystemd/sd-journal/sd-journal.c
++++ b/src/libsystemd/sd-journal/sd-journal.c
+@@ -874,6 +874,16 @@ _public_ int sd_journal_previous(sd_journal *j) {
+         return real_journal_next(j, DIRECTION_UP);
+ }
+ 
++_public_ int sd_journal_step_one(sd_journal *j, int advanced) {
++        assert_return(j, -EINVAL);
++
++        if (j->current_location.type == LOCATION_HEAD)
++                return sd_journal_next(j);
++        if (j->current_location.type == LOCATION_TAIL)
++                return sd_journal_previous(j);
++        return real_journal_next(j, advanced ? DIRECTION_DOWN : DIRECTION_UP);
++}
++
+ static int real_journal_next_skip(sd_journal *j, direction_t direction, uint64_t skip) {
+         int c = 0, r;
+ 
+diff --git a/src/systemd/sd-journal.h b/src/systemd/sd-journal.h
+index 24638f1e0a..e34abc3a65 100644
+--- a/src/systemd/sd-journal.h
++++ b/src/systemd/sd-journal.h
+@@ -93,6 +93,7 @@ void sd_journal_close(sd_journal *j);
+ 
+ int sd_journal_previous(sd_journal *j);
+ int sd_journal_next(sd_journal *j);
++int sd_journal_step_one(sd_journal *j, int advanced);
+ 
+ int sd_journal_previous_skip(sd_journal *j, uint64_t skip);
+ int sd_journal_next_skip(sd_journal *j, uint64_t skip);

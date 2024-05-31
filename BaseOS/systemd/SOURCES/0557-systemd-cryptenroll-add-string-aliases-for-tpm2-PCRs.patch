@@ -1,0 +1,358 @@
+From d91f027b44b32703fbd6bcf9a28aadde2549b8fd Mon Sep 17 00:00:00 2001
+From: OMOJOLA JOSHUA DAMILOLA <omojolajoshua@gmail.com>
+Date: Thu, 30 Mar 2023 07:55:41 +0000
+Subject: [PATCH] systemd-cryptenroll: add string aliases for tpm2 PCRs Fixes
+ #26697. RFE.
+
+(cherry picked from commit 96ead603b80339a4cf047ab2d2ab03d4b26271af)
+
+Related: RHEL-16182
+---
+ man/systemd-cryptenroll.xml | 46 +++++++++++++++++++++++++++++-------
+ src/basic/string-table.h    |  1 +
+ src/shared/tpm2-util.c      | 32 +++++++++++++++++++------
+ src/shared/tpm2-util.h      | 27 +++++++++++++++++++++
+ src/test/test-tpm2.c        | 47 +++++++++++++++++++++++++++++++++++++
+ test/units/testsuite-70.sh  |  8 +++++++
+ 6 files changed, 146 insertions(+), 15 deletions(-)
+
+diff --git a/man/systemd-cryptenroll.xml b/man/systemd-cryptenroll.xml
+index f08d95c6fb..af5269aa7a 100644
+--- a/man/systemd-cryptenroll.xml
++++ b/man/systemd-cryptenroll.xml
+@@ -225,7 +225,12 @@
+         <listitem><para>Configures the TPM2 PCRs (Platform Configuration Registers) to bind the enrollment
+         requested via <option>--tpm2-device=</option> to. Takes a <literal>+</literal> separated list of
+         numeric PCR indexes in the range 0…23. If not used, defaults to PCR 7 only. If an empty string is
+-        specified, binds the enrollment to no PCRs at all. PCRs allow binding the enrollment to specific
++        specified, binds the enrollment to no PCRs at all.
++        Registers may also be specified using string aliases.</para>
++        <para>For instance <option>--tpm2-pcrs=boot-loader-code+platform-config+boot-loader-config</option> to bind to the registers
++         4, 1, and 5. Check the PCR definitions table below for a full list
++        of available string aliases.
++        PCRs allow binding the enrollment to specific
+         software versions and system state, so that the enrolled unlocking key is only accessible (may be
+         "unsealed") if specific trusted software and/or configuration is used.</para>
+ 
+@@ -239,13 +244,15 @@
+           <!-- See: https://github.com/tianocore-docs/edk2-TrustedBootChain/blob/main/4_Other_Trusted_Boot_Chains.md -->
+           <!-- See: https://wiki.archlinux.org/title/Trusted_Platform_Module#Accessing_PCR_registers -->
+ 
+-          <tgroup cols='2' align='left' colsep='1' rowsep='1'>
++          <tgroup cols='3' align='left' colsep='1' rowsep='1'>
+             <colspec colname="pcr" />
++            <colspec colname="string_alias" />
+             <colspec colname="definition" />
+ 
+             <thead>
+               <row>
+                 <entry>PCR</entry>
++                <entry>alias</entry>
+                 <entry>Explanation</entry>
+               </row>
+             </thead>
+@@ -253,41 +260,43 @@
+             <tbody>
+               <row>
+                 <entry>0</entry>
++                <entry>platform-code</entry>
+                 <entry>Core system firmware executable code; changes on firmware updates</entry>
+               </row>
+ 
+               <row>
+                 <entry>1</entry>
++                <entry>platform-config</entry>
+                 <entry>Core system firmware data/host platform configuration; typically contains serial and model numbers, changes on basic hardware/CPU/RAM replacements</entry>
+               </row>
+ 
+               <row>
+                 <entry>2</entry>
++                <entry>external-code</entry>
+                 <entry>Extended or pluggable executable code; includes option ROMs on pluggable hardware</entry>
+               </row>
+ 
+               <row>
+                 <entry>3</entry>
++                <entry>external-config</entry>
+                 <entry>Extended or pluggable firmware data; includes information about pluggable hardware</entry>
+               </row>
+ 
+               <row>
+                 <entry>4</entry>
++                <entry>boot-loader-code</entry>
+                 <entry>Boot loader and additional drivers; changes on boot loader updates. The shim project will measure the PE binary it chain loads into this PCR. If the Linux kernel is invoked as UEFI PE binary, it is measured here, too. <citerefentry><refentrytitle>sd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry> measures system extension images read from the ESP here too (see <citerefentry><refentrytitle>systemd-sysext</refentrytitle><manvolnum>8</manvolnum></citerefentry>).</entry>
+               </row>
+ 
+               <row>
+                 <entry>5</entry>
++                <entry>boot-loader-config</entry>
+                 <entry>GPT/Partition table; changes when the partitions are added, modified or removed</entry>
+               </row>
+ 
+-              <row>
+-                <entry>6</entry>
+-                <entry>Power state events; changes on system suspend/sleep</entry>
+-              </row>
+-
+               <row>
+                 <entry>7</entry>
++                <entry>secure-boot-policy</entry>
+                 <entry>Secure boot state; changes when UEFI SecureBoot mode is enabled/disabled, or firmware certificates (PK, KEK, db, dbx, …) changes. The shim project will measure most of its (non-MOK) certificates and SBAT data into this PCR.</entry>
+               </row>
+ 
+@@ -296,39 +305,58 @@
+ 
+               <row>
+                 <entry>9</entry>
++                <entry>kernel-initrd</entry>
+                 <entry>The Linux kernel measures all initrds it receives into this PCR.</entry>
+                 <!-- Strictly speaking only Linux >= 5.17 using the LOAD_FILE2 protocol, see https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=f046fff8bc4c4d8f8a478022e76e40b818f692df -->
+               </row>
+ 
+               <row>
+                 <entry>10</entry>
++                <entry>ima</entry>
+                 <entry>The IMA project measures its runtime state into this PCR.</entry>
+               </row>
+ 
+               <row>
+                 <entry>11</entry>
++                <entry>kernel-boot</entry>
+                 <entry><citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry> measures the ELF kernel image, embedded initrd and other payload of the PE image it is placed in into this PCR. Unlike PCR 4 (where the same data should be measured into), this PCR value should be easy to pre-calculate, as this only contains static parts of the PE binary. Use this PCR to bind TPM policies to a specific kernel image, possibly with an embedded initrd. <citerefentry><refentrytitle>systemd-pcrphase.service</refentrytitle><manvolnum>8</manvolnum></citerefentry> measures boot phase strings into this PCR at various milestones of the boot process.</entry>
+               </row>
+ 
+               <row>
+                 <entry>12</entry>
++                <entry>kernel-config</entry>
+                 <entry><citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry> measures any specified kernel command line into this PCR. <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry> measures any manually specified kernel command line (i.e. a kernel command line that overrides the one embedded in the unified PE image) and loaded credentials into this PCR. (Note that if <command>systemd-boot</command> and <command>systemd-stub</command> are used in combination the command line might be measured twice!)</entry>
+               </row>
+ 
+               <row>
+                 <entry>13</entry>
++                <entry>sysexts</entry>
+                 <entry><citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry> measures any <citerefentry><refentrytitle>systemd-sysext</refentrytitle><manvolnum>8</manvolnum></citerefentry> images it loads and passed to the booted kernel into this PCR.</entry>
+               </row>
+ 
+               <row>
+                 <entry>14</entry>
++                <entry>shim-policy</entry>
+                 <entry>The shim project measures its "MOK" certificates and hashes into this PCR.</entry>
+               </row>
+ 
+               <row>
+                 <entry>15</entry>
++                <entry>system-identity</entry>
+                 <entry><citerefentry><refentrytitle>systemd-cryptsetup</refentrytitle><manvolnum>7</manvolnum></citerefentry> optionally measures the volume key of activated LUKS volumes into this PCR.</entry>
+               </row>
++
++              <row>
++                <entry>16</entry>
++                <entry>debug</entry>
++                <entry>Debug</entry>
++              </row>
++
++              <row>
++                <entry>23</entry>
++                <entry>application-support</entry>
++                <entry>Application Support</entry>
++              </row>
+             </tbody>
+           </tgroup>
+         </table>
+@@ -382,7 +410,9 @@
+         <option>--tpm2-public-key-pcrs=</option>: the former binds decryption to the current, specific PCR
+         values; the latter binds decryption to any set of PCR values for which a signature by the specified
+         public key can be provided. The latter is hence more useful in scenarios where software updates shell
+-        be possible without losing access to all previously encrypted LUKS2 volumes.</para>
++        be possible without losing access to all previously encrypted LUKS2 volumes.
++        Like with <option>--tpm2-pcrs=</option>, string aliases as defined in the table above can also be used
++        to specify the registers, for instance <option>--tpm2-public-key-pcrs=boot-loader-code+system-identity</option>.</para>
+ 
+         <para>The <option>--tpm2-signature=</option> option takes a path to a TPM2 PCR signature file
+         as generated by the
+diff --git a/src/basic/string-table.h b/src/basic/string-table.h
+index e3a26a623c..3be70dfade 100644
+--- a/src/basic/string-table.h
++++ b/src/basic/string-table.h
+@@ -95,6 +95,7 @@ ssize_t string_table_lookup(const char * const *table, size_t len, const char *k
+ #define DEFINE_STRING_TABLE_LOOKUP_WITH_FALLBACK(name,type,max)         \
+         _DEFINE_STRING_TABLE_LOOKUP_TO_STRING_FALLBACK(name,type,max,)  \
+         _DEFINE_STRING_TABLE_LOOKUP_FROM_STRING_FALLBACK(name,type,max,)
++#define DEFINE_STRING_TABLE_LOOKUP_FROM_STRING_WITH_FALLBACK(name,type,max) _DEFINE_STRING_TABLE_LOOKUP_FROM_STRING_FALLBACK(name,type,max,)
+ 
+ #define DEFINE_PRIVATE_STRING_TABLE_LOOKUP_TO_STRING_FALLBACK(name,type,max) \
+         _DEFINE_STRING_TABLE_LOOKUP_TO_STRING_FALLBACK(name,type,max,static)
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index e889d4c0fe..dd22f94dc0 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -20,6 +20,7 @@
+ #include "random-util.h"
+ #include "sha256.h"
+ #include "stat-util.h"
++#include "string-table.h"
+ #include "time-util.h"
+ #include "tpm2-util.h"
+ #include "virt.h"
+@@ -3869,14 +3870,10 @@ int tpm2_pcr_mask_from_string(const char *arg, uint32_t *ret_mask) {
+                 if (r < 0)
+                         return log_error_errno(r, "Failed to parse PCR list: %s", arg);
+ 
+-                r = safe_atou(pcr, &n);
++                r = pcr_index_from_string(pcr);
+                 if (r < 0)
+-                        return log_error_errno(r, "Failed to parse PCR number: %s", pcr);
+-                if (n >= TPM2_PCRS_MAX)
+-                        return log_error_errno(SYNTHETIC_ERRNO(ERANGE),
+-                                               "PCR number out of range (valid range 0…%u): %u",
+-                                               TPM2_PCRS_MAX - 1, n);
+-
++                        return log_error_errno(r, "Failed to parse specified PCR or specified PCR is out of range: %s", pcr);
++                n = r;
+                 SET_BIT(mask, n);;
+         }
+ 
+@@ -4373,3 +4370,24 @@ int tpm2_util_pbkdf2_hmac_sha256(const void *pass,
+ 
+         return 0;
+ }
++
++static const char* const pcr_index_table[_PCR_INDEX_MAX_DEFINED] = {
++        [PCR_PLATFORM_CODE]       = "platform-code",
++        [PCR_PLATFORM_CONFIG]     = "platform-config",
++        [PCR_EXTERNAL_CODE]       = "external-code",
++        [PCR_EXTERNAL_CONFIG]     = "external-config",
++        [PCR_BOOT_LOADER_CODE]    = "boot-loader-code",
++        [PCR_BOOT_LOADER_CONFIG]  = "boot-loader-config",
++        [PCR_SECURE_BOOT_POLICY]  = "secure-boot-policy",
++        [PCR_KERNEL_INITRD]       = "kernel-initrd",
++        [PCR_IMA]                 = "ima",
++        [PCR_KERNEL_BOOT]         = "kernel-boot",
++        [PCR_KERNEL_CONFIG]       = "kernel-config",
++        [PCR_SYSEXTS]             = "sysexts",
++        [PCR_SHIM_POLICY]         = "shim-policy",
++        [PCR_SYSTEM_IDENTITY]     = "system-identity",
++        [PCR_DEBUG]               = "debug",
++        [PCR_APPLICATION_SUPPORT] = "application-support",
++};
++
++DEFINE_STRING_TABLE_LOOKUP_FROM_STRING_WITH_FALLBACK(pcr_index, int, TPM2_PCRS_MAX);
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index e059f95790..97dae85fcb 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -190,6 +190,31 @@ typedef enum Tpm2Support {
+         TPM2_SUPPORT_FULL      = TPM2_SUPPORT_FIRMWARE|TPM2_SUPPORT_DRIVER|TPM2_SUPPORT_SYSTEM|TPM2_SUPPORT_SUBSYSTEM,
+ } Tpm2Support;
+ 
++typedef enum PcrIndex {
++/* The following names for PCRs 0…7 are based on the names in the "TCG PC Client Specific Platform Firmware Profile Specification" (https://trustedcomputinggroup.org/resource/pc-client-specific-platform-firmware-profile-specification/) */
++   PCR_PLATFORM_CODE       = 0,
++        PCR_PLATFORM_CONFIG     = 1,
++        PCR_EXTERNAL_CODE       = 2,
++        PCR_EXTERNAL_CONFIG     = 3,
++        PCR_BOOT_LOADER_CODE    = 4,
++        PCR_BOOT_LOADER_CONFIG  = 5,
++        PCR_SECURE_BOOT_POLICY  = 7,
++/* The following names for PCRs 9…15 are based on the "Linux TPM PCR Registry"
++(https://uapi-group.org/specifications/specs/linux_tpm_pcr_registry/) */
++        PCR_KERNEL_INITRD       = 9,
++        PCR_IMA                 = 10,
++        PCR_KERNEL_BOOT         = 11,
++        PCR_KERNEL_CONFIG       = 12,
++        PCR_SYSEXTS             = 13,
++        PCR_SHIM_POLICY         = 14,
++        PCR_SYSTEM_IDENTITY     = 15,
++/* As per "TCG PC Client Specific Platform Firmware Profile Specification" again, see above */
++        PCR_DEBUG               = 16,
++        PCR_APPLICATION_SUPPORT = 23,
++        _PCR_INDEX_MAX_DEFINED  = TPM2_PCRS_MAX,
++        _PCR_INDEX_INVALID      = -EINVAL,
++} PcrIndex;
++
+ Tpm2Support tpm2_support(void);
+ 
+ int tpm2_parse_pcr_argument(const char *arg, uint32_t *mask);
+@@ -202,3 +227,5 @@ int tpm2_util_pbkdf2_hmac_sha256(const void *pass,
+                     const void *salt,
+                     size_t saltlen,
+                     uint8_t res[static SHA256_DIGEST_SIZE]);
++
++int pcr_index_from_string(const char *s);
+diff --git a/src/test/test-tpm2.c b/src/test/test-tpm2.c
+index 8fd859b83d..87c8f6f421 100644
+--- a/src/test/test-tpm2.c
++++ b/src/test/test-tpm2.c
+@@ -27,6 +27,53 @@ TEST(tpm2_mask_from_string) {
+         test_tpm2_pcr_mask_from_string_one("0,2", 5, 0);
+         test_tpm2_pcr_mask_from_string_one("0+2", 5, 0);
+         test_tpm2_pcr_mask_from_string_one("foo", 0, -EINVAL);
++        test_tpm2_pcr_mask_from_string_one("7+application-support", 8388736, 0);
++        test_tpm2_pcr_mask_from_string_one("8+boot-loader-code", 272, 0);
++        test_tpm2_pcr_mask_from_string_one("6+boot-loader-code,44", 0, -EINVAL);
++        test_tpm2_pcr_mask_from_string_one("7,shim-policy,4", 16528, 0);
++        test_tpm2_pcr_mask_from_string_one("sysexts,shim-policy+kernel-boot", 26624, 0);
++        test_tpm2_pcr_mask_from_string_one("sysexts,shim+kernel-boot", 0, -EINVAL);
++        test_tpm2_pcr_mask_from_string_one("sysexts+17+23", 8527872, 0);
++        test_tpm2_pcr_mask_from_string_one("debug+24", 16842752, 0);
++}
++
++TEST(pcr_index_from_string) {
++        assert_se(pcr_index_from_string("platform-code") == 0);
++        assert_se(pcr_index_from_string("0") == 0);
++        assert_se(pcr_index_from_string("platform-config") == 1);
++        assert_se(pcr_index_from_string("1") == 1);
++        assert_se(pcr_index_from_string("external-code") == 2);
++        assert_se(pcr_index_from_string("2") == 2);
++        assert_se(pcr_index_from_string("external-config") == 3);
++        assert_se(pcr_index_from_string("3") == 3);
++        assert_se(pcr_index_from_string("boot-loader-code") == 4);
++        assert_se(pcr_index_from_string("4") == 4);
++        assert_se(pcr_index_from_string("boot-loader-config") == 5);
++        assert_se(pcr_index_from_string("5") == 5);
++        assert_se(pcr_index_from_string("secure-boot-policy") == 7);
++        assert_se(pcr_index_from_string("7") == 7);
++        assert_se(pcr_index_from_string("kernel-initrd") == 9);
++        assert_se(pcr_index_from_string("9") == 9);
++        assert_se(pcr_index_from_string("ima") == 10);
++        assert_se(pcr_index_from_string("10") == 10);
++        assert_se(pcr_index_from_string("kernel-boot") == 11);
++        assert_se(pcr_index_from_string("11") == 11);
++        assert_se(pcr_index_from_string("kernel-config") == 12);
++        assert_se(pcr_index_from_string("12") == 12);
++        assert_se(pcr_index_from_string("sysexts") == 13);
++        assert_se(pcr_index_from_string("13") == 13);
++        assert_se(pcr_index_from_string("shim-policy") == 14);
++        assert_se(pcr_index_from_string("14") == 14);
++        assert_se(pcr_index_from_string("system-identity") == 15);
++        assert_se(pcr_index_from_string("15") == 15);
++        assert_se(pcr_index_from_string("debug") == 16);
++        assert_se(pcr_index_from_string("16") == 16);
++        assert_se(pcr_index_from_string("application-support") == 23);
++        assert_se(pcr_index_from_string("23") == 23);
++        assert_se(pcr_index_from_string("hello") == -EINVAL);
++        assert_se(pcr_index_from_string("8") == 8);
++        assert_se(pcr_index_from_string("44") == -EINVAL);
++        assert_se(pcr_index_from_string("-5") == -EINVAL);
+ }
+ 
+ TEST(tpm2_util_pbkdf2_hmac_sha256) {
+diff --git a/test/units/testsuite-70.sh b/test/units/testsuite-70.sh
+index 1bfa14e01a..5d4b155286 100755
+--- a/test/units/testsuite-70.sh
++++ b/test/units/testsuite-70.sh
+@@ -242,6 +242,14 @@ systemd-cryptenroll --tpm2-public-key-pcrs=key $img_2 && { echo 'unexpected succ
+ 
+ systemd-cryptenroll --tpm2-pcrs=key $img_2 && { echo 'unexpected success'; exit 1; }
+ 
++systemd-cryptenroll --tpm2-pcrs=44+8 $img_2 && { echo 'unexpected success'; exit 1; }
++
++systemd-cryptenroll --tpm2-pcrs=8 $img_2
++
++systemd-cryptenroll --tpm2-pcrs=hello $img_2 && { echo 'unexpected success'; exit 1; }
++
++systemd-cryptenroll --tpm2-pcrs=boot-loader-code+boot-loader-config $img_2
++
+ #wipe_slots
+ systemd-cryptenroll --wipe-slot $img_2 && { echo 'unexpected success'; exit 1; }
+ 

@@ -1,0 +1,44 @@
+From a85607dfc7fc09898780dda5a93feed4559e8e22 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Wed, 2 Aug 2023 13:35:46 -0400
+Subject: [PATCH] tpm2: update tpm2 test for supported commands
+
+The test expects TPM2_CC_FIRST - 1 and TPM2_CC_LAST + 1 to be unsupported, but
+those are not necessarily invalid commands. Instead test known-invalid
+commands. Also add some more valid commands.
+
+(cherry picked from commit 171d5b69c025c4a86a5100e9437b934ad84daca4)
+
+Related: RHEL-16182
+---
+ src/test/test-tpm2.c | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/src/test/test-tpm2.c b/src/test/test-tpm2.c
+index a3a2700a8a..b8bddcc4f0 100644
+--- a/src/test/test-tpm2.c
++++ b/src/test/test-tpm2.c
+@@ -986,11 +986,18 @@ TEST(tpm_required_tests) {
+         assert_se(tpm2_supports_alg(c, TPM2_ALG_AES));
+         assert_se(tpm2_supports_alg(c, TPM2_ALG_CFB));
+ 
+-        /* Test invalid commands */
+-        assert_se(!tpm2_supports_command(c, TPM2_CC_FIRST - 1));
+-        assert_se(!tpm2_supports_command(c, TPM2_CC_LAST + 1));
+-
+-        /* Test valid commands */
++        /* Test invalid commands. TPM specification Part 2 ("Structures") section "TPM_CC (Command Codes)"
++         * states bits 31:30 and 28:16 are reserved and must be 0. */
++        assert_se(!tpm2_supports_command(c, UINT32_C(0x80000000)));
++        assert_se(!tpm2_supports_command(c, UINT32_C(0x40000000)));
++        assert_se(!tpm2_supports_command(c, UINT32_C(0x00100000)));
++        assert_se(!tpm2_supports_command(c, UINT32_C(0x80000144)));
++        assert_se(!tpm2_supports_command(c, UINT32_C(0x40000144)));
++        assert_se(!tpm2_supports_command(c, UINT32_C(0x00100144)));
++
++        /* Test valid commands. We should be able to expect all TPMs support these. */
++        assert_se(tpm2_supports_command(c, TPM2_CC_Startup));
++        assert_se(tpm2_supports_command(c, TPM2_CC_StartAuthSession));
+         assert_se(tpm2_supports_command(c, TPM2_CC_Create));
+         assert_se(tpm2_supports_command(c, TPM2_CC_CreatePrimary));
+         assert_se(tpm2_supports_command(c, TPM2_CC_Unseal));

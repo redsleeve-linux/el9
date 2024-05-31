@@ -1,0 +1,102 @@
+From 5374c8fb7c32e79f9dcd24333e5c117bd8963a1a Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 25 Jan 2023 11:05:46 +0900
+Subject: [PATCH] bootctl-uki: several follow-ups for inspect_osrel()
+
+Follow-ups for #26124 and #26158.
+
+- use os_release_pretty_name(),
+- constify the buffer passed to inspect_osrel(),
+- propagate errors in inspect_osrele(), and ignore them in the caller
+  side,
+- and several coding style fixlets.
+
+(cherry picked from commit 1b7586df976d7b033b4901a099337d83578bb8f1)
+
+Related: RHEL-16354
+---
+ src/boot/bootctl-uki.c | 36 ++++++++++++++++++++----------------
+ 1 file changed, 20 insertions(+), 16 deletions(-)
+
+diff --git a/src/boot/bootctl-uki.c b/src/boot/bootctl-uki.c
+index 3492fa548f..fd249c43fb 100644
+--- a/src/boot/bootctl-uki.c
++++ b/src/boot/bootctl-uki.c
+@@ -3,6 +3,7 @@
+ #include "bootctl-uki.h"
+ #include "env-file.h"
+ #include "fd-util.h"
++#include "os-util.h"
+ #include "parse-util.h"
+ #include "pe-header.h"
+ 
+@@ -158,50 +159,53 @@ static int read_pe_section(
+         return 0;
+ }
+ 
+-static void inspect_osrel(char *osrel, size_t osrel_size) {
++static int inspect_osrel(const void *osrel, size_t osrel_size) {
+         _cleanup_fclose_ FILE *s = NULL;
+         _cleanup_free_ char *pname = NULL, *name = NULL;
+         int r;
+ 
+-        assert(osrel);
+-        s = fmemopen(osrel, osrel_size, "r");
++        assert(osrel || osrel_size == 0);
++
++        if (!osrel)
++                return 0;
++
++        s = fmemopen((void*) osrel, osrel_size, "r");
+         if (!s)
+-                return (void) log_warning_errno(errno, "Failed to open embedded os-release file, ignoring: %m");
++                return log_warning_errno(errno, "Failed to open embedded os-release file, ignoring: %m");
+ 
+         r = parse_env_file(s, NULL,
+                            "PRETTY_NAME", &pname,
+                            "NAME",        &name);
+         if (r < 0)
+-                return (void) log_warning_errno(r, "Failed to parse embedded os-release file, ignoring: %m");
++                return log_warning_errno(r, "Failed to parse embedded os-release file, ignoring: %m");
+ 
+-        if (pname || name)
+-                printf("         OS: %s\n", pname ?: name);
++        printf("         OS: %s\n", os_release_pretty_name(pname, name));
++        return 0;
+ }
+ 
+ static void inspect_uki(FILE *uki, struct PeSectionHeader *sections, size_t scount) {
+-        _cleanup_free_ char *cmdline = NULL;
+-        _cleanup_free_ char *uname = NULL;
+-        _cleanup_free_ char *osrel = NULL;
+-        size_t osrel_size, idx;
++        _cleanup_free_ char *cmdline = NULL, *uname = NULL;
++        _cleanup_free_ void *osrel = NULL;
++        size_t osrel_size = 0, idx;
+ 
+         assert(uki);
+         assert(sections || scount == 0);
+ 
+         if (find_pe_section(sections, scount, name_cmdline, sizeof(name_cmdline), &idx))
+-                read_pe_section(uki, sections + idx, (void**)&cmdline, NULL);
++                read_pe_section(uki, sections + idx, (void**) &cmdline, NULL);
+ 
+         if (find_pe_section(sections, scount, name_uname, sizeof(name_uname), &idx))
+-                read_pe_section(uki, sections + idx, (void**)&uname, NULL);
++                read_pe_section(uki, sections + idx, (void**) &uname, NULL);
+ 
+         if (find_pe_section(sections, scount, name_osrel, sizeof(name_osrel), &idx))
+-                read_pe_section(uki, sections + idx, (void**)&osrel, &osrel_size);
++                read_pe_section(uki, sections + idx, &osrel, &osrel_size);
+ 
+         if (cmdline)
+                 printf("    Cmdline: %s\n", cmdline);
+         if (uname)
+                 printf("    Version: %s\n", uname);
+-        if (osrel)
+-                inspect_osrel(osrel, osrel_size);
++
++        (void) inspect_osrel(osrel, osrel_size);
+ }
+ 
+ int verb_kernel_inspect(int argc, char *argv[], void *userdata) {

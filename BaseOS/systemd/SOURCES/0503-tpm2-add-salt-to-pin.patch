@@ -1,0 +1,620 @@
+From ec44604785b325481cb7d25d29dc991d0e4109e2 Mon Sep 17 00:00:00 2001
+From: William Roberts <william.c.roberts@intel.com>
+Date: Wed, 18 Jan 2023 08:45:53 -0600
+Subject: [PATCH] tpm2: add salt to pin
+
+Add a salt to the pin and store it in the TPM2 LUKS header for future
+this. This adds entropy to user supplied pins and helps brute forcing
+the passphrase on the key residing in the TPM or brute forcing bind key
+encrypted sessions with low entropy passphrases.
+
+Signed-off-by: malikabhi05 <abhishek.malik@intel.com>
+Signed-off-by: William Roberts <william.c.roberts@intel.com>
+(cherry picked from commit aae6eb96117acd54ce5ac572aac6a11b34c4ad99)
+
+Related: RHEL-16182
+---
+ src/cryptenroll/cryptenroll-tpm2.c            | 28 +++++++
+ .../cryptsetup-token-systemd-tpm2.c           | 15 +++-
+ src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c | 21 +++++
+ src/cryptsetup/cryptsetup-tokens/luks2-tpm2.h |  2 +
+ src/cryptsetup/cryptsetup-tpm2.c              | 31 ++++++-
+ src/cryptsetup/cryptsetup-tpm2.h              |  8 ++
+ src/cryptsetup/cryptsetup.c                   |  7 +-
+ src/partition/repart.c                        |  1 +
+ src/shared/tpm2-util.c                        | 80 ++++++++++++++++++-
+ src/shared/tpm2-util.h                        | 11 ++-
+ src/test/test-tpm2.c                          | 41 ++++++++++
+ 11 files changed, 230 insertions(+), 15 deletions(-)
+
+diff --git a/src/cryptenroll/cryptenroll-tpm2.c b/src/cryptenroll/cryptenroll-tpm2.c
+index 96d5fc0695..3098b2e7ac 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.c
++++ b/src/cryptenroll/cryptenroll-tpm2.c
+@@ -8,6 +8,8 @@
+ #include "hexdecoct.h"
+ #include "json.h"
+ #include "memory-util.h"
++#include "random-util.h"
++#include "sha256.h"
+ #include "tpm2-util.h"
+ 
+ static int search_policy_hash(
+@@ -148,6 +150,14 @@ int enroll_tpm2(struct crypt_device *cd,
+         ssize_t base64_encoded_size;
+         int r, keyslot;
+         TPM2Flags flags = 0;
++        uint8_t binary_salt[SHA256_DIGEST_SIZE] = {};
++        /*
++         * erase the salt, we'd rather attempt to not have this in a coredump
++         * as an attacker would have all the parameters but pin used to create
++         * the session key. This problem goes away when we move to a trusted
++         * primary key, aka the SRK.
++         */
++        CLEANUP_ERASE(binary_salt);
+ 
+         assert(cd);
+         assert(volume_key);
+@@ -161,6 +171,22 @@ int enroll_tpm2(struct crypt_device *cd,
+                 r = get_pin(&pin_str, &flags);
+                 if (r < 0)
+                         return r;
++
++                r = crypto_random_bytes(binary_salt, sizeof(binary_salt));
++                if (r < 0)
++                        return log_error_errno(r, "Failed to acquire random salt: %m");
++
++                uint8_t salted_pin[SHA256_DIGEST_SIZE] = {};
++                CLEANUP_ERASE(salted_pin);
++                r = tpm2_util_pbkdf2_hmac_sha256(pin_str, strlen(pin_str), binary_salt, sizeof(binary_salt), salted_pin);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to perform PBKDF2: %m");
++
++                pin_str = erase_and_free(pin_str);
++                /* re-stringify pin_str */
++                base64_encoded_size = base64mem(salted_pin, sizeof(salted_pin), &pin_str);
++                if (base64_encoded_size < 0)
++                        return log_error_errno(base64_encoded_size, "Failed to base64 encode salted pin: %m");
+         }
+ 
+         r = tpm2_load_pcr_public_key(pubkey_path, &pubkey, &pubkey_size);
+@@ -258,6 +284,8 @@ int enroll_tpm2(struct crypt_device *cd,
+                         primary_alg,
+                         blob, blob_size,
+                         hash, hash_size,
++                        use_pin ? binary_salt : NULL,
++                        use_pin ? sizeof(binary_salt) : 0,
+                         flags,
+                         &v);
+         if (r < 0)
+diff --git a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+index 98bcaac4d8..319b0ca64d 100644
+--- a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+@@ -42,8 +42,8 @@ _public_ int cryptsetup_token_open_pin(
+                 void *usrptr /* plugin defined parameter passed to crypt_activate_by_token*() API */) {
+ 
+         _cleanup_(erase_and_freep) char *base64_encoded = NULL, *pin_string = NULL;
+-        _cleanup_free_ void *blob = NULL, *pubkey = NULL, *policy_hash = NULL;
+-        size_t blob_size, policy_hash_size, decrypted_key_size, pubkey_size;
++        _cleanup_free_ void *blob = NULL, *pubkey = NULL, *policy_hash = NULL, *salt = NULL;
++        size_t blob_size, policy_hash_size, decrypted_key_size, pubkey_size, salt_size = 0;
+         _cleanup_(erase_and_freep) void *decrypted_key = NULL;
+         _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
+         uint32_t hash_pcr_mask, pubkey_pcr_mask;
+@@ -90,6 +90,8 @@ _public_ int cryptsetup_token_open_pin(
+                         &blob_size,
+                         &policy_hash,
+                         &policy_hash_size,
++                        &salt,
++                        &salt_size,
+                         &flags);
+         if (r < 0)
+                 return log_debug_open_error(cd, r);
+@@ -110,6 +112,8 @@ _public_ int cryptsetup_token_open_pin(
+                         blob_size,
+                         policy_hash,
+                         policy_hash_size,
++                        salt,
++                        salt_size,
+                         flags,
+                         &decrypted_key,
+                         &decrypted_key_size);
+@@ -168,9 +172,9 @@ _public_ void cryptsetup_token_dump(
+                 const char *json /* validated 'systemd-tpm2' token if cryptsetup_token_validate is defined */) {
+ 
+         _cleanup_free_ char *hash_pcrs_str = NULL, *pubkey_pcrs_str = NULL, *blob_str = NULL, *policy_hash_str = NULL, *pubkey_str = NULL;
+-        _cleanup_free_ void *blob = NULL, *pubkey = NULL, *policy_hash = NULL;
++        _cleanup_free_ void *blob = NULL, *pubkey = NULL, *policy_hash = NULL, *salt = NULL;
+         _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
+-        size_t blob_size, policy_hash_size, pubkey_size;
++        size_t blob_size, policy_hash_size, pubkey_size, salt_size = 0;
+         uint32_t hash_pcr_mask, pubkey_pcr_mask;
+         uint16_t pcr_bank, primary_alg;
+         TPM2Flags flags = 0;
+@@ -195,6 +199,8 @@ _public_ void cryptsetup_token_dump(
+                         &blob_size,
+                         &policy_hash,
+                         &policy_hash_size,
++                        &salt,
++                        &salt_size,
+                         &flags);
+         if (r < 0)
+                 return (void) crypt_log_debug_errno(cd, r, "Failed to parse " TOKEN_NAME " JSON fields: %m");
+@@ -227,6 +233,7 @@ _public_ void cryptsetup_token_dump(
+         crypt_log(cd, "\ttpm2-blob:        %s\n", blob_str);
+         crypt_log(cd, "\ttpm2-policy-hash:" CRYPT_DUMP_LINE_SEP "%s\n", policy_hash_str);
+         crypt_log(cd, "\ttpm2-pin:         %s\n", true_false(flags & TPM2_FLAGS_USE_PIN));
++        crypt_log(cd, "\ttpm2-salt:        %s\n", true_false(salt));
+ }
+ 
+ /*
+diff --git a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
+index be496d4949..80a2c0d316 100644
+--- a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
+@@ -9,6 +9,7 @@
+ #include "luks2-tpm2.h"
+ #include "parse-util.h"
+ #include "random-util.h"
++#include "sha256.h"
+ #include "strv.h"
+ #include "tpm2-util.h"
+ 
+@@ -26,12 +27,15 @@ int acquire_luks2_key(
+                 size_t key_data_size,
+                 const void *policy_hash,
+                 size_t policy_hash_size,
++                const void *salt,
++                size_t salt_size,
+                 TPM2Flags flags,
+                 void **ret_decrypted_key,
+                 size_t *ret_decrypted_key_size) {
+ 
+         _cleanup_(json_variant_unrefp) JsonVariant *signature_json = NULL;
+         _cleanup_free_ char *auto_device = NULL;
++        _cleanup_(erase_and_freep) char *b64_salted_pin = NULL;
+         int r;
+ 
+         assert(ret_decrypted_key);
+@@ -50,6 +54,23 @@ int acquire_luks2_key(
+         if ((flags & TPM2_FLAGS_USE_PIN) && !pin)
+                 return -ENOANO;
+ 
++        /* If we're using a PIN, and the luks header has a salt, it better have a pin too */
++        if ((flags & TPM2_FLAGS_USE_PIN) && salt && !pin)
++                return -ENOANO;
++
++        if (pin) {
++                uint8_t salted_pin[SHA256_DIGEST_SIZE] = {};
++                CLEANUP_ERASE(salted_pin);
++                r = tpm2_util_pbkdf2_hmac_sha256(pin, strlen(pin), salt, salt_size, salted_pin);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to perform PBKDF2: %m");
++
++                r = base64mem(salted_pin, sizeof(salted_pin), &b64_salted_pin);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to base64 encode salted pin: %m");
++                pin = b64_salted_pin;
++        }
++
+         if (pubkey_pcr_mask != 0) {
+                 r = tpm2_load_pcr_signature(signature_path, &signature_json);
+                 if (r < 0)
+diff --git a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.h b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.h
+index f3625124e5..36d514caa0 100644
+--- a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.h
++++ b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.h
+@@ -20,6 +20,8 @@ int acquire_luks2_key(
+                 size_t key_data_size,
+                 const void *policy_hash,
+                 size_t policy_hash_size,
++                const void *salt,
++                size_t salt_size,
+                 TPM2Flags flags,
+                 void **ret_decrypted_key,
+                 size_t *ret_decrypted_key_size);
+diff --git a/src/cryptsetup/cryptsetup-tpm2.c b/src/cryptsetup/cryptsetup-tpm2.c
+index 838c02bfc9..2a8a38c593 100644
+--- a/src/cryptsetup/cryptsetup-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tpm2.c
+@@ -9,6 +9,7 @@
+ #include "json.h"
+ #include "parse-util.h"
+ #include "random-util.h"
++#include "sha256.h"
+ #include "tpm2-util.h"
+ 
+ static int get_pin(usec_t until, AskPasswordFlags ask_password_flags, bool headless, char **ret_pin_str) {
+@@ -69,6 +70,8 @@ int acquire_tpm2_key(
+                 size_t key_data_size,
+                 const void *policy_hash,
+                 size_t policy_hash_size,
++                const void *salt,
++                size_t salt_size,
+                 TPM2Flags flags,
+                 usec_t until,
+                 bool headless,
+@@ -140,7 +143,7 @@ int acquire_tpm2_key(
+                                 ret_decrypted_key_size);
+ 
+         for (int i = 5;; i--) {
+-                _cleanup_(erase_and_freep) char *pin_str = NULL;
++                _cleanup_(erase_and_freep) char *pin_str = NULL, *b64_salted_pin = NULL;
+ 
+                 if (i <= 0)
+                         return -EACCES;
+@@ -149,13 +152,28 @@ int acquire_tpm2_key(
+                 if (r < 0)
+                         return r;
+ 
++                if (salt) {
++                        uint8_t salted_pin[SHA256_DIGEST_SIZE] = {};
++                        CLEANUP_ERASE(salted_pin);
++
++                        r = tpm2_util_pbkdf2_hmac_sha256(pin_str, strlen(pin_str), salt, salt_size, salted_pin);
++                        if (r < 0)
++                                return log_error_errno(r, "Failed to perform PBKDF2: %m");
++
++                        r = base64mem(salted_pin, sizeof(salted_pin), &b64_salted_pin);
++                        if (r < 0)
++                                return log_error_errno(r, "Failed to base64 encode salted pin: %m");
++                } else
++                        /* no salting needed, backwards compat with non-salted pins */
++                        b64_salted_pin = TAKE_PTR(pin_str);
++
+                 r = tpm2_unseal(device,
+                                 hash_pcr_mask,
+                                 pcr_bank,
+                                 pubkey, pubkey_size,
+                                 pubkey_pcr_mask,
+                                 signature_json,
+-                                pin_str,
++                                b64_salted_pin,
+                                 primary_alg,
+                                 blob,
+                                 blob_size,
+@@ -188,6 +206,8 @@ int find_tpm2_auto_data(
+                 size_t *ret_blob_size,
+                 void **ret_policy_hash,
+                 size_t *ret_policy_hash_size,
++                void **ret_salt,
++                size_t *ret_salt_size,
+                 TPM2Flags *ret_flags,
+                 int *ret_keyslot,
+                 int *ret_token) {
+@@ -197,9 +217,9 @@ int find_tpm2_auto_data(
+         assert(cd);
+ 
+         for (token = start_token; token < sym_crypt_token_max(CRYPT_LUKS2); token++) {
+-                _cleanup_free_ void *blob = NULL, *policy_hash = NULL, *pubkey = NULL;
++                _cleanup_free_ void *blob = NULL, *policy_hash = NULL, *pubkey = NULL, *salt = NULL;
+                 _cleanup_(json_variant_unrefp) JsonVariant *v = NULL;
+-                size_t blob_size, policy_hash_size, pubkey_size;
++                size_t blob_size, policy_hash_size, pubkey_size, salt_size = 0;
+                 uint32_t hash_pcr_mask, pubkey_pcr_mask;
+                 uint16_t pcr_bank, primary_alg;
+                 TPM2Flags flags;
+@@ -221,6 +241,7 @@ int find_tpm2_auto_data(
+                                 &primary_alg,
+                                 &blob, &blob_size,
+                                 &policy_hash, &policy_hash_size,
++                                &salt, &salt_size,
+                                 &flags);
+                 if (r == -EUCLEAN) /* Gracefully handle issues in JSON fields not owned by us */
+                         continue;
+@@ -243,6 +264,8 @@ int find_tpm2_auto_data(
+                         *ret_blob_size = blob_size;
+                         *ret_policy_hash = TAKE_PTR(policy_hash);
+                         *ret_policy_hash_size = policy_hash_size;
++                        *ret_salt = TAKE_PTR(salt);
++                        *ret_salt_size = salt_size;
+                         *ret_keyslot = keyslot;
+                         *ret_token = token;
+                         *ret_flags = flags;
+diff --git a/src/cryptsetup/cryptsetup-tpm2.h b/src/cryptsetup/cryptsetup-tpm2.h
+index a34eb8443d..f6549b7d1d 100644
+--- a/src/cryptsetup/cryptsetup-tpm2.h
++++ b/src/cryptsetup/cryptsetup-tpm2.h
+@@ -28,6 +28,8 @@ int acquire_tpm2_key(
+                 size_t key_data_size,
+                 const void *policy_hash,
+                 size_t policy_hash_size,
++                const void *salt,
++                size_t salt_size,
+                 TPM2Flags flags,
+                 usec_t until,
+                 bool headless,
+@@ -49,6 +51,8 @@ int find_tpm2_auto_data(
+                 size_t *ret_blob_size,
+                 void **ret_policy_hash,
+                 size_t *ret_policy_hash_size,
++                void **ret_salt,
++                size_t *ret_salt_size,
+                 TPM2Flags *ret_flags,
+                 int *ret_keyslot,
+                 int *ret_token);
+@@ -72,6 +76,8 @@ static inline int acquire_tpm2_key(
+                 size_t key_data_size,
+                 const void *policy_hash,
+                 size_t policy_hash_size,
++                const void *salt,
++                size_t salt_size,
+                 TPM2Flags flags,
+                 usec_t until,
+                 bool headless,
+@@ -97,6 +103,8 @@ static inline int find_tpm2_auto_data(
+                 size_t *ret_blob_size,
+                 void **ret_policy_hash,
+                 size_t *ret_policy_hash_size,
++                void **ret_salt,
++                size_t *ret_salt_size,
+                 TPM2Flags *ret_flags,
+                 int *ret_keyslot,
+                 int *ret_token) {
+diff --git a/src/cryptsetup/cryptsetup.c b/src/cryptsetup/cryptsetup.c
+index a78272bc11..d5ce252e57 100644
+--- a/src/cryptsetup/cryptsetup.c
++++ b/src/cryptsetup/cryptsetup.c
+@@ -1674,6 +1674,7 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
+                                         key_file, arg_keyfile_size, arg_keyfile_offset,
+                                         key_data, key_data_size,
+                                         /* policy_hash= */ NULL, /* policy_hash_size= */ 0, /* we don't know the policy hash */
++                                        /* salt= */ NULL, /* salt_size= */ 0,
+                                         arg_tpm2_pin ? TPM2_FLAGS_USE_PIN : 0,
+                                         until,
+                                         arg_headless,
+@@ -1719,8 +1720,8 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
+                          * works. */
+ 
+                         for (;;) {
+-                                _cleanup_free_ void *pubkey = NULL;
+-                                size_t pubkey_size = 0;
++                                _cleanup_free_ void *pubkey = NULL, *salt = NULL;
++                                size_t pubkey_size = 0, salt_size = 0;
+                                 uint32_t hash_pcr_mask, pubkey_pcr_mask;
+                                 uint16_t pcr_bank, primary_alg;
+                                 TPM2Flags tpm2_flags;
+@@ -1736,6 +1737,7 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
+                                                 &primary_alg,
+                                                 &blob, &blob_size,
+                                                 &policy_hash, &policy_hash_size,
++                                                &salt, &salt_size,
+                                                 &tpm2_flags,
+                                                 &keyslot,
+                                                 &token);
+@@ -1765,6 +1767,7 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
+                                                 /* key_file= */ NULL, /* key_file_size= */ 0, /* key_file_offset= */ 0, /* no key file */
+                                                 blob, blob_size,
+                                                 policy_hash, policy_hash_size,
++                                                salt, salt_size,
+                                                 tpm2_flags,
+                                                 until,
+                                                 arg_headless,
+diff --git a/src/partition/repart.c b/src/partition/repart.c
+index cbd900969e..0075932c09 100644
+--- a/src/partition/repart.c
++++ b/src/partition/repart.c
+@@ -3077,6 +3077,7 @@ static int partition_encrypt(
+                                 primary_alg,
+                                 blob, blob_size,
+                                 hash, hash_size,
++                                NULL, 0, /* no salt because tpm2_seal has no pin */
+                                 0,
+                                 &v);
+                 if (r < 0)
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 6620f365d9..c22a200a5c 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -12,6 +12,7 @@
+ #include "format-table.h"
+ #include "fs-util.h"
+ #include "hexdecoct.h"
++#include "hmac.h"
+ #include "memory-util.h"
+ #include "openssl-util.h"
+ #include "parse-util.h"
+@@ -2080,6 +2081,8 @@ int tpm2_make_luks2_json(
+                 size_t blob_size,
+                 const void *policy_hash,
+                 size_t policy_hash_size,
++                const void *salt,
++                size_t salt_size,
+                 TPM2Flags flags,
+                 JsonVariant **ret) {
+ 
+@@ -2119,7 +2122,8 @@ int tpm2_make_luks2_json(
+                                        JSON_BUILD_PAIR("tpm2-policy-hash", JSON_BUILD_HEX(policy_hash, policy_hash_size)),
+                                        JSON_BUILD_PAIR("tpm2-pin", JSON_BUILD_BOOLEAN(flags & TPM2_FLAGS_USE_PIN)),
+                                        JSON_BUILD_PAIR_CONDITION(pubkey_pcr_mask != 0, "tpm2_pubkey_pcrs", JSON_BUILD_VARIANT(pkmj)),
+-                                       JSON_BUILD_PAIR_CONDITION(pubkey_pcr_mask != 0, "tpm2_pubkey", JSON_BUILD_BASE64(pubkey, pubkey_size))));
++                                       JSON_BUILD_PAIR_CONDITION(pubkey_pcr_mask != 0, "tpm2_pubkey", JSON_BUILD_BASE64(pubkey, pubkey_size)),
++                                       JSON_BUILD_PAIR_CONDITION(salt, "tpm2_salt", JSON_BUILD_BASE64(salt, salt_size))));
+         if (r < 0)
+                 return r;
+ 
+@@ -2142,10 +2146,12 @@ int tpm2_parse_luks2_json(
+                 size_t *ret_blob_size,
+                 void **ret_policy_hash,
+                 size_t *ret_policy_hash_size,
++                void **ret_salt,
++                size_t *ret_salt_size,
+                 TPM2Flags *ret_flags) {
+ 
+-        _cleanup_free_ void *blob = NULL, *policy_hash = NULL, *pubkey = NULL;
+-        size_t blob_size = 0, policy_hash_size = 0, pubkey_size = 0;
++        _cleanup_free_ void *blob = NULL, *policy_hash = NULL, *pubkey = NULL, *salt = NULL;
++        size_t blob_size = 0, policy_hash_size = 0, pubkey_size = 0, salt_size = 0;
+         uint32_t hash_pcr_mask = 0, pubkey_pcr_mask = 0;
+         uint16_t primary_alg = TPM2_ALG_ECC; /* ECC was the only supported algorithm in systemd < 250, use that as implied default, for compatibility */
+         uint16_t pcr_bank = UINT16_MAX; /* default: pick automatically */
+@@ -2230,6 +2236,13 @@ int tpm2_parse_luks2_json(
+                 SET_FLAG(flags, TPM2_FLAGS_USE_PIN, json_variant_boolean(w));
+         }
+ 
++        w = json_variant_by_key(v, "tpm2_salt");
++        if (w) {
++                r = json_variant_unbase64(w, &salt, &salt_size);
++                if (r < 0)
++                        return log_debug_errno(r, "Invalid base64 data in 'tpm2_salt' field.");
++        }
++
+         w = json_variant_by_key(v, "tpm2_pubkey_pcrs");
+         if (w) {
+                 r = tpm2_parse_pcr_json_array(w, &pubkey_pcr_mask);
+@@ -2267,6 +2280,10 @@ int tpm2_parse_luks2_json(
+                 *ret_policy_hash = TAKE_PTR(policy_hash);
+         if (ret_policy_hash_size)
+                 *ret_policy_hash_size = policy_hash_size;
++        if (ret_salt)
++                *ret_salt = TAKE_PTR(salt);
++        if (ret_salt_size)
++                *ret_salt_size = salt_size;
+         if (ret_flags)
+                 *ret_flags = flags;
+ 
+@@ -2431,3 +2448,60 @@ int pcr_mask_to_string(uint32_t mask, char **ret) {
+         *ret = TAKE_PTR(buf);
+         return 0;
+ }
++
++#define PBKDF2_HMAC_SHA256_ITERATIONS 10000
++
++/*
++ * Implements PBKDF2 HMAC SHA256 for a derived keylen of 32
++ * bytes and for PBKDF2_HMAC_SHA256_ITERATIONS count.
++ * I found the wikipedia entry relevant and it contains links to
++ * relevant RFCs:
++ *   - https://en.wikipedia.org/wiki/PBKDF2
++ *   - https://www.rfc-editor.org/rfc/rfc2898#section-5.2
++ */
++int tpm2_util_pbkdf2_hmac_sha256(const void *pass,
++                    size_t passlen,
++                    const void *salt,
++                    size_t saltlen,
++                    uint8_t ret_key[static SHA256_DIGEST_SIZE]) {
++
++        uint8_t _cleanup_(erase_and_freep) *buffer = NULL;
++        uint8_t u[SHA256_DIGEST_SIZE];
++
++        /* To keep this simple, since derived KeyLen (dkLen in docs)
++         * Is the same as the hash output, we don't need multiple
++         * blocks. Part of the algorithm is to add the block count
++         * in, but this can be hardcoded to 1.
++         */
++        static const uint8_t block_cnt[] = { 0, 0, 0, 1 };
++
++        assert (saltlen > 0);
++        assert (saltlen <= (SIZE_MAX - sizeof(block_cnt)));
++        assert (passlen > 0);
++
++        /*
++         * Build a buffer of salt + block_cnt and hmac_sha256 it we
++         * do this as we don't have a context builder for HMAC_SHA256.
++         */
++        buffer = malloc(saltlen + sizeof(block_cnt));
++        if (!buffer)
++                return -ENOMEM;
++
++        memcpy(buffer, salt, saltlen);
++        memcpy(&buffer[saltlen], block_cnt, sizeof(block_cnt));
++
++        hmac_sha256(pass, passlen, buffer, saltlen + sizeof(block_cnt), u);
++
++        /* dk needs to be an unmodified u as u gets modified in the loop */
++        memcpy(ret_key, u, SHA256_DIGEST_SIZE);
++        uint8_t *dk = ret_key;
++
++        for (size_t i = 1; i < PBKDF2_HMAC_SHA256_ITERATIONS; i++) {
++                hmac_sha256(pass, passlen, u, sizeof(u), u);
++
++                for (size_t j=0; j < sizeof(u); j++)
++                        dk[j] ^= u[j];
++        }
++
++        return 0;
++}
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 9819a33569..d26a945a90 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -5,6 +5,7 @@
+ 
+ #include "json.h"
+ #include "macro.h"
++#include "sha256.h"
+ 
+ typedef enum TPM2Flags {
+         TPM2_FLAGS_USE_PIN = 1 << 0,
+@@ -104,8 +105,8 @@ int tpm2_parse_pcrs(const char *s, uint32_t *ret);
+ int tpm2_make_pcr_json_array(uint32_t pcr_mask, JsonVariant **ret);
+ int tpm2_parse_pcr_json_array(JsonVariant *v, uint32_t *ret);
+ 
+-int tpm2_make_luks2_json(int keyslot, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, TPM2Flags flags, JsonVariant **ret);
+-int tpm2_parse_luks2_json(JsonVariant *v, int *ret_keyslot, uint32_t *ret_hash_pcr_mask, uint16_t *ret_pcr_bank, void **ret_pubkey, size_t *ret_pubkey_size, uint32_t *ret_pubkey_pcr_mask, uint16_t *ret_primary_alg, void **ret_blob, size_t *ret_blob_size, void **ret_policy_hash, size_t *ret_policy_hash_size, TPM2Flags *ret_flags);
++int tpm2_make_luks2_json(int keyslot, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, const void *salt, size_t salt_size, TPM2Flags flags, JsonVariant **ret);
++int tpm2_parse_luks2_json(JsonVariant *v, int *ret_keyslot, uint32_t *ret_hash_pcr_mask, uint16_t *ret_pcr_bank, void **ret_pubkey, size_t *ret_pubkey_size, uint32_t *ret_pubkey_pcr_mask, uint16_t *ret_primary_alg, void **ret_blob, size_t *ret_blob_size, void **ret_policy_hash, size_t *ret_policy_hash_size, void **ret_salt, size_t *ret_salt_size, TPM2Flags *ret_flags);
+ 
+ #define TPM2_PCRS_MAX 24U
+ 
+@@ -173,3 +174,9 @@ int tpm2_load_pcr_signature(const char *path, JsonVariant **ret);
+ int tpm2_load_pcr_public_key(const char *path, void **ret_pubkey, size_t *ret_pubkey_size);
+ 
+ int pcr_mask_to_string(uint32_t mask, char **ret);
++
++int tpm2_util_pbkdf2_hmac_sha256(const void *pass,
++                    size_t passlen,
++                    const void *salt,
++                    size_t saltlen,
++                    uint8_t res[static SHA256_DIGEST_SIZE]);
+diff --git a/src/test/test-tpm2.c b/src/test/test-tpm2.c
+index c5f3d41da9..04e08490b3 100644
+--- a/src/test/test-tpm2.c
++++ b/src/test/test-tpm2.c
+@@ -28,4 +28,45 @@ TEST(tpm2_parse_pcrs) {
+         test_tpm2_parse_pcrs_one("foo", 0, -EINVAL);
+ }
+ 
++TEST(tpm2_util_pbkdf2_hmac_sha256) {
++
++        /*
++         * The test vectors from RFC 6070 [1] are for dkLen of 20 as it's SHA1
++         * other RFCs I bumped into had various differing dkLen and iter counts,
++         * so this was generated using Python's hmacmodule.
++         *
++         * 1. https://www.rfc-editor.org/rfc/rfc6070.html#page-2
++         */
++        static const struct {
++                const uint8_t pass[256];
++                size_t passlen;
++                const uint8_t salt[256];
++                size_t saltlen;
++                uint8_t expected[SHA256_DIGEST_SIZE];
++        } test_vectors[] = {
++                { .pass={'f', 'o', 'o', 'p', 'a', 's', 's'},                                                                        .passlen=7,  .salt={'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '1', '2', '3', '4', '5'}, .saltlen=16, .expected={0xCB, 0xEA, 0x27, 0x23, 0x9A, 0x65, 0x99, 0xF6, 0x8C, 0x26, 0x54, 0x80, 0x5C, 0x63, 0x61, 0xD2, 0x91, 0x0A, 0x60, 0x3F, 0xC2, 0xF5, 0xF0, 0xAB, 0x55, 0x8B, 0x46, 0x07, 0x60, 0x93, 0xAB, 0xCB} },
++                { .pass={'f', 'o', 'o', 'p', 'a', 's', 's'},                                                                        .passlen=7,  .salt={0x00, 'h', 'f', 's', 'd', 'j', 'h', 'f', 'd', 'j', 'h', 'j', 'd', 'f', 's'},     .saltlen=15, .expected={0x2B, 0xDF, 0x52, 0x29, 0x48, 0x3F, 0x98, 0x25, 0x01, 0x19, 0xB4, 0x42, 0xBC, 0xA7, 0x38, 0x5D, 0xCD, 0x08, 0xBD, 0xDC, 0x33, 0xBF, 0x32, 0x5E, 0x31, 0x87, 0x54, 0xFF, 0x2C, 0x23, 0x68, 0xFF} },
++                { .pass={'f', 'o', 'o', 'p', 'a', 's', 's'},                                                                        .passlen=7,  .salt={'m', 'y', 's', 'a', 0x00, 'l', 't'},                                             .saltlen=7,  .expected={0x7C, 0x24, 0xB4, 0x4D, 0x30, 0x11, 0x53, 0x24, 0x87, 0x56, 0x24, 0x10, 0xBA, 0x9F, 0xF2, 0x4E, 0xBB, 0xF5, 0x03, 0x56, 0x2B, 0xB1, 0xA1, 0x92, 0x8B, 0x5F, 0x32, 0x02, 0x23, 0x1F, 0x79, 0xE6} },
++                { .pass={'p', 'a', 's', 's', 'w', 'i', 't', 'h', 'n', 'u', 'l', 'l', 0x00, 'p', 'a', 's', 's', 'w', 'o', 'r', 'd'}, .passlen=21, .salt={'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '1', '2', '3', '4', '5'}, .saltlen=16, .expected={0xE9, 0x53, 0xB7, 0x1D, 0xAB, 0xD1, 0xC1, 0xF3, 0xC4, 0x7F, 0x18, 0x96, 0xDD, 0xD7, 0x6B, 0xC6, 0x6A, 0xBD, 0xFB, 0x12, 0x7C, 0xF8, 0x68, 0xDC, 0x6E, 0xEF, 0x29, 0xCC, 0x1B, 0x30, 0x5B, 0x74} },
++                { .pass={'p', 'a', 's', 's', 'w', 'i', 't', 'h', 'n', 'u', 'l', 'l', 0x00, 'p', 'a', 's', 's', 'w', 'o', 'r', 'd'}, .passlen=21, .salt={0x00, 'h', 'f', 's', 'd', 'j', 'h', 'f', 'd', 'j', 'h', 'j', 'd', 'f', 's'},     .saltlen=15, .expected={0x51, 0xA3, 0x82, 0xA5, 0x2F, 0x48, 0x84, 0xB3, 0x02, 0x0D, 0xC2, 0x42, 0x9A, 0x8F, 0x86, 0xCC, 0x66, 0xFD, 0x65, 0x87, 0x89, 0x07, 0x2B, 0x07, 0x82, 0x42, 0xD6, 0x6D, 0x43, 0xB8, 0xFD, 0xCF} },
++                { .pass={'p', 'a', 's', 's', 'w', 'i', 't', 'h', 'n', 'u', 'l', 'l', 0x00, 'p', 'a', 's', 's', 'w', 'o', 'r', 'd'}, .passlen=21, .salt={'m', 'y', 's', 'a', 0x00, 'l', 't'},                                             .saltlen=7,  .expected={0xEC, 0xFB, 0x5D, 0x5F, 0xF6, 0xA6, 0xE0, 0x79, 0x50, 0x64, 0x36, 0x64, 0xA3, 0x9A, 0x5C, 0xF3, 0x7A, 0x87, 0x0B, 0x64, 0x51, 0x59, 0x75, 0x64, 0x8B, 0x78, 0x2B, 0x62, 0x8F, 0x68, 0xD9, 0xCC} },
++                { .pass={0x00, 'p', 'a', 's', 's'},                                                                                 .passlen=5,  .salt={'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '1', '2', '3', '4', '5'}, .saltlen=16, .expected={0x8A, 0x9A, 0x47, 0x9A, 0x91, 0x22, 0x2F, 0x56, 0x29, 0x4F, 0x26, 0x00, 0xE7, 0xB3, 0xEB, 0x63, 0x6D, 0x51, 0xF2, 0x60, 0x17, 0x08, 0x20, 0x70, 0x82, 0x8F, 0xA3, 0xD7, 0xBE, 0x2B, 0xD5, 0x5D} },
++                { .pass={0x00, 'p', 'a', 's', 's'},                                                                                 .passlen=5,  .salt={0x00, 'h', 'f', 's', 'd', 'j', 'h', 'f', 'd', 'j', 'h', 'j', 'd', 'f', 's'},     .saltlen=15, .expected={0x72, 0x3A, 0xF5, 0xF7, 0xCD, 0x6C, 0x12, 0xDD, 0x53, 0x28, 0x46, 0x0C, 0x19, 0x0E, 0xF2, 0x91, 0xDE, 0xEA, 0xF9, 0x6F, 0x74, 0x32, 0x34, 0x3F, 0x84, 0xED, 0x8D, 0x2A, 0xDE, 0xC9, 0xC6, 0x34} },
++                { .pass={0x00, 'p', 'a', 's', 's'},                                                                                 .passlen=5,  .salt={'m', 'y', 's', 'a', 0x00, 'l', 't'},                                             .saltlen=7,  .expected={0xE3, 0x07, 0x12, 0xBE, 0xEE, 0xF5, 0x5D, 0x18, 0x72, 0xF4, 0xCF, 0xF1, 0x20, 0x6B, 0xD6, 0x66, 0xCD, 0x7C, 0xE7, 0x4F, 0xC2, 0x16, 0x70, 0x5B, 0x9B, 0x2F, 0x7D, 0xE2, 0x3B, 0x42, 0x3A, 0x1B} },
++        };
++
++        uint8_t res[SHA256_DIGEST_SIZE];
++        for(size_t i = 0; i < sizeof(test_vectors)/sizeof(test_vectors[0]); i++) {
++
++                int rc = tpm2_util_pbkdf2_hmac_sha256(
++                                test_vectors[i].pass,
++                                test_vectors[i].passlen,
++                                test_vectors[i].salt,
++                                test_vectors[i].saltlen,
++                                res);
++                assert_se(rc == 0);
++                assert_se(memcmp(test_vectors[i].expected, res, SHA256_DIGEST_SIZE) == 0);
++        }
++}
++
+ DEFINE_TEST_MAIN(LOG_DEBUG);

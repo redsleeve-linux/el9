@@ -1,0 +1,42 @@
+From 3c235c8d26813ae428053c284b67ddfe70d9caed Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 22 Nov 2023 15:38:47 +0100
+Subject: [PATCH] Revert "test_ukify: no stinky root needed for signing"
+
+This reverts commit 0d66468243d888dd721ba0072cbad742ab6fc690.
+
+There was a huge rewrite of the tpm2 code that removed the requirement for
+device access, but backporting that would be a huge effort. Let's instead skip
+the tests for now. (They pass under root.)
+
+Related: RHEL-13199
+---
+ src/ukify/test/test_ukify.py | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/src/ukify/test/test_ukify.py b/src/ukify/test/test_ukify.py
+index b12c09d4bf..5a42a94799 100755
+--- a/src/ukify/test/test_ukify.py
++++ b/src/ukify/test/test_ukify.py
+@@ -661,6 +661,10 @@ def test_pcr_signing(kernel_initrd, tmpdir):
+         pytest.skip('linux+initrd not found')
+     if systemd_measure() is None:
+         pytest.skip('systemd-measure not found')
++    if os.getuid() != 0:
++        pytest.skip('must be root to access tpm2')
++    if subprocess.call(['systemd-creds', 'has-tpm2', '-q']) != 0:
++        pytest.skip('tpm2 is not available')
+ 
+     ourdir = pathlib.Path(__file__).parent
+     pub = unbase64(ourdir / 'example.tpm2-pcr-public.pem.base64')
+@@ -724,6 +728,10 @@ def test_pcr_signing2(kernel_initrd, tmpdir):
+         pytest.skip('linux+initrd not found')
+     if systemd_measure() is None:
+         pytest.skip('systemd-measure not found')
++    if os.getuid() != 0:
++        pytest.skip('must be root to access tpm2')
++    if subprocess.call(['systemd-creds', 'has-tpm2', '-q']) != 0:
++        pytest.skip('tpm2 is not available')
+ 
+     ourdir = pathlib.Path(__file__).parent
+     pub = unbase64(ourdir / 'example.tpm2-pcr-public.pem.base64')

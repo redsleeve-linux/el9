@@ -1,0 +1,297 @@
+From 2b5c9fceaaa30ec9c2d031c9ca32b71c43f22f98 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 3 Jan 2023 12:55:50 +0100
+Subject: [PATCH] notify: add --stopping + --reloading switches
+
+These wrap RELOADING=1 and STOPPING=1 messages. The former is
+particularly useful, since we want to insert the MONOTONIC_USEC= field
+into the message automatically, which is easy from C but harder from
+shell.
+
+(cherry picked from commit fd0f4da5457fbf7136f2d1888142d5fea75fd45a)
+
+Related: RHEL-6090
+---
+ man/systemd-notify.xml | 107 ++++++++++++++++++++++++-----------------
+ src/notify/notify.c    |  39 +++++++++++++--
+ 2 files changed, 97 insertions(+), 49 deletions(-)
+
+diff --git a/man/systemd-notify.xml b/man/systemd-notify.xml
+index 1327d23155..a275123d40 100644
+--- a/man/systemd-notify.xml
++++ b/man/systemd-notify.xml
+@@ -30,34 +30,35 @@
+   <refsect1>
+     <title>Description</title>
+ 
+-    <para><command>systemd-notify</command> may be called by daemon
+-    scripts to notify the init system about status changes. It can be
+-    used to send arbitrary information, encoded in an
+-    environment-block-like list of strings. Most importantly, it can be
+-    used for start-up completion notification.</para>
+-
+-    <para>This is mostly just a wrapper around
+-    <function>sd_notify()</function> and makes this functionality
++    <para><command>systemd-notify</command> may be called by service scripts to notify the invoking service
++    manager about status changes. It can be used to send arbitrary information, encoded in an
++    environment-block-like list of strings. Most importantly, it can be used for start-up completion
++    notification.</para>
++
++    <para>This is mostly just a wrapper around <function>sd_notify()</function> and makes this functionality
+     available to shell scripts. For details see
+     <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>.
+     </para>
+ 
+-    <para>The command line may carry a list of environment variables
+-    to send as part of the status update.</para>
++    <para>The command line may carry a list of environment variables to send as part of the status
++    update.</para>
+ 
+     <para>Note that systemd will refuse reception of status updates from this command unless
+     <varname>NotifyAccess=</varname> is set for the service unit this command is called from.</para>
+ 
+-    <para>Note that <function>sd_notify()</function> notifications may be attributed to units correctly only if either
+-    the sending process is still around at the time PID 1 processes the message, or if the sending process is
+-    explicitly runtime-tracked by the service manager. The latter is the case if the service manager originally forked
+-    off the process, i.e. on all processes that match <varname>NotifyAccess=</varname><option>main</option> or
+-    <varname>NotifyAccess=</varname><option>exec</option>. Conversely, if an auxiliary process of the unit sends an
+-    <function>sd_notify()</function> message and immediately exits, the service manager might not be able to properly
+-    attribute the message to the unit, and thus will ignore it, even if <varname>NotifyAccess=</varname><option>all
+-    </option> is set for it. When <option>--no-block</option> is used, all synchronization for reception of notifications
+-    is disabled, and hence the aforementioned race may occur if the invoking process is not the service manager or spawned
+-    by the service manager.</para>
++    <para>Note that <function>sd_notify()</function> notifications may be attributed to units correctly only
++    if either the sending process is still around at the time the service manager processes the message, or
++    if the sending process is explicitly runtime-tracked by the service manager. The latter is the case if
++    the service manager originally forked off the process, i.e. on all processes that match
++    <varname>NotifyAccess=</varname><option>main</option> or
++    <varname>NotifyAccess=</varname><option>exec</option>. Conversely, if an auxiliary process of the unit
++    sends an <function>sd_notify()</function> message and immediately exits, the service manager might not be
++    able to properly attribute the message to the unit, and thus will ignore it, even if
++    <varname>NotifyAccess=</varname><option>all</option> is set for it. To address this
++    <command>systemd-notify</command> will wait until the notification message has been processed by the
++    service manager. When <option>--no-block</option> is used, this synchronization for reception of
++    notifications is disabled, and hence the aforementioned race may occur if the invoking process is not the
++    service manager or spawned by the service manager.</para>
+ 
+     <para>Hence, <command>systemd-notify</command> will first attempt to invoke <function>sd_notify()</function>
+     pretending to have the PID of the invoking process. This will only succeed when invoked with sufficient privileges.
+@@ -66,7 +67,6 @@
+     — appears as sender of the message, which in turn is helpful if the shell process is the main process of a service,
+     due to the limitations of <varname>NotifyAccess=</varname><option>all</option>. Use the <option>--pid=</option>
+     switch to tweak this behaviour.</para>
+-
+   </refsect1>
+ 
+   <refsect1>
+@@ -78,22 +78,42 @@
+       <varlistentry>
+         <term><option>--ready</option></term>
+ 
+-        <listitem><para>Inform the init system about service start-up
+-        completion. This is equivalent to <command>systemd-notify
+-        READY=1</command>. For details about the semantics of this
+-        option see
++        <listitem><para>Inform the invoking service manager about service start-up or configuration reload
++        completion. This is equivalent to <command>systemd-notify READY=1</command>. For details about the
++        semantics of this option see
++        <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>.</para></listitem>
++      </varlistentry>
++
++      <varlistentry>
++        <term><option>--reloading</option></term>
++
++        <listitem><para>Inform the invoking service manager about the beginning of a configuration reload
++        cycle. This is equivalent to <command>systemd-notify RELOADING=1</command> (but implicitly also sets
++        a <varname>MONOTONIC_USEC=</varname> field as required for <varname>Type=notify-reload</varname>
++        services, see
++        <citerefentry><refentrytitle>systemd.service</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
++        for details). For details about the semantics of this option see
++        <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>.</para></listitem>
++      </varlistentry>
++
++      <varlistentry>
++        <term><option>--stopping</option></term>
++
++        <listitem><para>Inform the invoking service manager about the beginning of the shutdown phase of the
++        service. This is equivalent to <command>systemd-notify STOPPING=1</command>. For details about the
++        semantics of this option see
+         <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>.</para></listitem>
+       </varlistentry>
+ 
+       <varlistentry>
+         <term><option>--pid=</option></term>
+ 
+-        <listitem><para>Inform the service manager about the main PID of the daemon. Takes a PID as
++        <listitem><para>Inform the service manager about the main PID of the service. Takes a PID as
+         argument. If the argument is specified as <literal>auto</literal> or omitted, the PID of the process
+         that invoked <command>systemd-notify</command> is used, except if that's the service manager. If the
+         argument is specified as <literal>self</literal>, the PID of the <command>systemd-notify</command>
+         command itself is used, and if <literal>parent</literal> is specified the calling process' PID is
+-        used — even if it is the service manager. This is equivalent to <command>systemd-notify
++        used — even if it is the service manager. The latter is equivalent to <command>systemd-notify
+         MAINPID=$PID</command>. For details about the semantics of this option see
+         <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>.</para></listitem>
+       </varlistentry>
+@@ -110,27 +130,26 @@
+       <varlistentry>
+         <term><option>--status=</option></term>
+ 
+-        <listitem><para>Send a free-form status string for the daemon
+-        to the init systemd. This option takes the status string as
+-        argument. This is equivalent to <command>systemd-notify
+-        STATUS=…</command>. For details about the semantics of this
+-        option see
+-        <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>.</para></listitem>
++        <listitem><para>Send a free-form human readable status string for the daemon to the service
++        manager. This option takes the status string as argument. This is equivalent to
++        <command>systemd-notify STATUS=…</command>. For details about the semantics of this option see
++        <citerefentry><refentrytitle>sd_notify</refentrytitle><manvolnum>3</manvolnum></citerefentry>. This
++        information is shown in
++        <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>'s
++        <command>status</command> output, among other places.</para></listitem>
+       </varlistentry>
+ 
+       <varlistentry>
+         <term><option>--booted</option></term>
+ 
+-        <listitem><para>Returns 0 if the system was booted up with
+-        systemd, non-zero otherwise. If this option is passed, no
+-        message is sent. This option is hence unrelated to the other
+-        options. For details about the semantics of this option, see
++        <listitem><para>Returns 0 if the system was booted up with systemd, non-zero otherwise. If this
++        option is passed, no message is sent. This option is hence unrelated to the other options. For
++        details about the semantics of this option, see
+         <citerefentry><refentrytitle>sd_booted</refentrytitle><manvolnum>3</manvolnum></citerefentry>. An
+         alternate way to check for this state is to call
+-        <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
+-        with the <command>is-system-running</command> command. It will
+-        return <literal>offline</literal> if the system was not booted
+-        with systemd.  </para></listitem>
++        <citerefentry><refentrytitle>systemctl</refentrytitle><manvolnum>1</manvolnum></citerefentry> with
++        the <command>is-system-running</command> command. It will return <literal>offline</literal> if the
++        system was not booted with systemd.  </para></listitem>
+       </varlistentry>
+ 
+       <varlistentry>
+@@ -162,9 +181,8 @@
+     <example>
+       <title>Start-up Notification and Status Updates</title>
+ 
+-      <para>A simple shell daemon that sends start-up notifications
+-      after having set up its communication channel. During runtime it
+-      sends further status updates to the init system:</para>
++      <para>A simple shell daemon that sends start-up notifications after having set up its communication
++      channel. During runtime it sends further status updates to the init system:</para>
+ 
+       <programlisting>#!/bin/sh
+ 
+@@ -192,5 +210,4 @@ done</programlisting>
+       <citerefentry><refentrytitle>sd_booted</refentrytitle><manvolnum>3</manvolnum></citerefentry>
+     </para>
+   </refsect1>
+-
+ </refentry>
+diff --git a/src/notify/notify.c b/src/notify/notify.c
+index 7b23e7bdb0..2d4900a110 100644
+--- a/src/notify/notify.c
++++ b/src/notify/notify.c
+@@ -23,6 +23,8 @@
+ #include "util.h"
+ 
+ static bool arg_ready = false;
++static bool arg_reloading = false;
++static bool arg_stopping = false;
+ static pid_t arg_pid = 0;
+ static const char *arg_status = NULL;
+ static bool arg_booted = false;
+@@ -42,7 +44,10 @@ static int help(void) {
+                "\n%sNotify the init system about service status updates.%s\n\n"
+                "  -h --help            Show this help\n"
+                "     --version         Show package version\n"
+-               "     --ready           Inform the init system about service start-up completion\n"
++               "     --ready           Inform the service manager about service start-up/reload\n"
++               "                       completion\n"
++               "     --reloading       Inform the service manager about configuration reloading\n"
++               "     --stopping        Inform the service manager about service shutdown\n"
+                "     --pid[=PID]       Set main PID of daemon\n"
+                "     --uid=USER        Set user to send from\n"
+                "     --status=TEXT     Set status text\n"
+@@ -81,6 +86,8 @@ static int parse_argv(int argc, char *argv[]) {
+ 
+         enum {
+                 ARG_READY = 0x100,
++                ARG_RELOADING,
++                ARG_STOPPING,
+                 ARG_VERSION,
+                 ARG_PID,
+                 ARG_STATUS,
+@@ -93,6 +100,8 @@ static int parse_argv(int argc, char *argv[]) {
+                 { "help",      no_argument,       NULL, 'h'           },
+                 { "version",   no_argument,       NULL, ARG_VERSION   },
+                 { "ready",     no_argument,       NULL, ARG_READY     },
++                { "reloading", no_argument,       NULL, ARG_RELOADING },
++                { "stopping",  no_argument,       NULL, ARG_STOPPING  },
+                 { "pid",       optional_argument, NULL, ARG_PID       },
+                 { "status",    required_argument, NULL, ARG_STATUS    },
+                 { "booted",    no_argument,       NULL, ARG_BOOTED    },
+@@ -120,6 +129,14 @@ static int parse_argv(int argc, char *argv[]) {
+                         arg_ready = true;
+                         break;
+ 
++                case ARG_RELOADING:
++                        arg_reloading = true;
++                        break;
++
++                case ARG_STOPPING:
++                        arg_stopping = true;
++                        break;
++
+                 case ARG_PID:
+                         if (isempty(optarg) || streq(optarg, "auto")) {
+                                 arg_pid = getppid();
+@@ -176,6 +193,8 @@ static int parse_argv(int argc, char *argv[]) {
+ 
+         if (optind >= argc &&
+             !arg_ready &&
++            !arg_stopping &&
++            !arg_reloading &&
+             !arg_status &&
+             !arg_pid &&
+             !arg_booted) {
+@@ -187,10 +206,10 @@ static int parse_argv(int argc, char *argv[]) {
+ }
+ 
+ static int run(int argc, char* argv[]) {
+-        _cleanup_free_ char *status = NULL, *cpid = NULL, *n = NULL;
++        _cleanup_free_ char *status = NULL, *cpid = NULL, *n = NULL, *monotonic_usec = NULL;
+         _cleanup_strv_free_ char **final_env = NULL;
+-        char* our_env[4];
+-        unsigned i = 0;
++        char* our_env[7];
++        size_t i = 0;
+         pid_t source_pid;
+         int r;
+ 
+@@ -212,9 +231,21 @@ static int run(int argc, char* argv[]) {
+                 return r <= 0;
+         }
+ 
++        if (arg_reloading) {
++                our_env[i++] = (char*) "RELOADING=1";
++
++                if (asprintf(&monotonic_usec, "MONOTONIC_USEC=" USEC_FMT, now(CLOCK_MONOTONIC)) < 0)
++                        return log_oom();
++
++                our_env[i++] = monotonic_usec;
++        }
++
+         if (arg_ready)
+                 our_env[i++] = (char*) "READY=1";
+ 
++        if (arg_stopping)
++                our_env[i++] = (char*) "STOPPING=1";
++
+         if (arg_status) {
+                 status = strjoin("STATUS=", arg_status);
+                 if (!status)

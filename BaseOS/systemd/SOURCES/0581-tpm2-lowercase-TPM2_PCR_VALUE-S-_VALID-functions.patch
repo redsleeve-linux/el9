@@ -1,0 +1,121 @@
+From 8408676704f6e0c79445fdb1224e60ce31617c43 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Mon, 21 Aug 2023 10:38:48 -0400
+Subject: [PATCH] tpm2: lowercase TPM2_PCR_VALUE[S]_VALID functions
+
+As these are not macros, they should be lowercase.
+
+(cherry picked from commit cc1a78d5c48a0100169a847da0e252f2b01b05e6)
+
+Related: RHEL-16182
+---
+ src/cryptenroll/cryptenroll-tpm2.c |  2 +-
+ src/shared/tpm2-util.c             | 16 ++++++++--------
+ src/shared/tpm2-util.h             |  4 ++--
+ 3 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/src/cryptenroll/cryptenroll-tpm2.c b/src/cryptenroll/cryptenroll-tpm2.c
+index 8a26ec692c..7c1946c3b1 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.c
++++ b/src/cryptenroll/cryptenroll-tpm2.c
+@@ -163,7 +163,7 @@ int enroll_tpm2(struct crypt_device *cd,
+         assert(cd);
+         assert(volume_key);
+         assert(volume_key_size > 0);
+-        assert(TPM2_PCR_VALUES_VALID(hash_pcr_values, n_hash_pcr_values));
++        assert(tpm2_pcr_values_valid(hash_pcr_values, n_hash_pcr_values));
+         assert(TPM2_PCR_MASK_VALID(pubkey_pcr_mask));
+ 
+         assert_se(node = crypt_get_device_name(cd));
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 491e8885d3..2dbd4eae8b 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -1516,7 +1516,7 @@ size_t tpm2_tpml_pcr_selection_weight(const TPML_PCR_SELECTION *l) {
+         return weight;
+ }
+ 
+-bool TPM2_PCR_VALUE_VALID(const Tpm2PCRValue *pcr_value) {
++bool tpm2_pcr_value_valid(const Tpm2PCRValue *pcr_value) {
+         int r;
+ 
+         assert(pcr_value);
+@@ -1547,13 +1547,13 @@ bool TPM2_PCR_VALUE_VALID(const Tpm2PCRValue *pcr_value) {
+  * 1) all entries must be sorted in ascending order (e.g. using tpm2_sort_pcr_values())
+  * 2) all entries must be unique, i.e. there cannot be 2 entries with the same hash and index
+  */
+-bool TPM2_PCR_VALUES_VALID(const Tpm2PCRValue *pcr_values, size_t n_pcr_values) {
++bool tpm2_pcr_values_valid(const Tpm2PCRValue *pcr_values, size_t n_pcr_values) {
+         assert(pcr_values || n_pcr_values == 0);
+ 
+         for (size_t i = 0; i < n_pcr_values; i++) {
+                 const Tpm2PCRValue *v = &pcr_values[i];
+ 
+-                if (!TPM2_PCR_VALUE_VALID(v))
++                if (!tpm2_pcr_value_valid(v))
+                         return false;
+ 
+                 if (i == 0)
+@@ -1628,7 +1628,7 @@ int tpm2_pcr_values_to_mask(const Tpm2PCRValue *pcr_values, size_t n_pcr_values,
+         assert(pcr_values || n_pcr_values == 0);
+         assert(ret_mask);
+ 
+-        if (!TPM2_PCR_VALUES_VALID(pcr_values, n_pcr_values))
++        if (!tpm2_pcr_values_valid(pcr_values, n_pcr_values))
+                 return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "Invalid PCR values.");
+ 
+         for (size_t i = 0; i < n_pcr_values; i++)
+@@ -1653,7 +1653,7 @@ int tpm2_tpml_pcr_selection_from_pcr_values(
+ 
+         assert(pcr_values || n_pcr_values == 0);
+ 
+-        if (!TPM2_PCR_VALUES_VALID(pcr_values, n_pcr_values))
++        if (!tpm2_pcr_values_valid(pcr_values, n_pcr_values))
+                 return log_debug_errno(SYNTHETIC_ERRNO(EINVAL), "PCR values are not valid.");
+ 
+         for (size_t i = 0; i < n_pcr_values; i++) {
+@@ -2310,7 +2310,7 @@ int tpm2_pcr_read(
+ 
+         tpm2_sort_pcr_values(pcr_values, n_pcr_values);
+ 
+-        if (!TPM2_PCR_VALUES_VALID(pcr_values, n_pcr_values))
++        if (!tpm2_pcr_values_valid(pcr_values, n_pcr_values))
+                 return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "PCR values read from TPM are not valid.");
+ 
+         *ret_pcr_values = TAKE_PTR(pcr_values);
+@@ -4723,7 +4723,7 @@ int tpm2_parse_pcr_argument(const char *arg, Tpm2PCRValue **ret_pcr_values, size
+ 
+         tpm2_sort_pcr_values(pcr_values, n_pcr_values);
+ 
+-        if (!TPM2_PCR_VALUES_VALID(pcr_values, n_pcr_values))
++        if (!tpm2_pcr_values_valid(pcr_values, n_pcr_values))
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Parsed PCR values are not valid.");
+ 
+         *ret_pcr_values = TAKE_PTR(pcr_values);
+@@ -4765,7 +4765,7 @@ int tpm2_parse_pcr_argument_append(const char *arg, Tpm2PCRValue **ret_pcr_value
+ 
+         tpm2_sort_pcr_values(pcr_values, n_pcr_values);
+ 
+-        if (!TPM2_PCR_VALUES_VALID(pcr_values, n_pcr_values))
++        if (!tpm2_pcr_values_valid(pcr_values, n_pcr_values))
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Parsed PCR values are not valid.");
+ 
+         SWAP_TWO(*ret_pcr_values, pcr_values);
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 2e03eb85ab..ff90f034fe 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -76,11 +76,11 @@ typedef struct {
+ } Tpm2PCRValue;
+ 
+ #define TPM2_PCR_VALUE_MAKE(i, h, v) (Tpm2PCRValue) { .index = (i), .hash = (h), .value = ((TPM2B_DIGEST) v), }
+-bool TPM2_PCR_VALUE_VALID(const Tpm2PCRValue *pcr_value);
++bool tpm2_pcr_value_valid(const Tpm2PCRValue *pcr_value);
+ int tpm2_pcr_value_from_string(const char *arg, Tpm2PCRValue *ret_pcr_value);
+ char *tpm2_pcr_value_to_string(const Tpm2PCRValue *pcr_value);
+ 
+-bool TPM2_PCR_VALUES_VALID(const Tpm2PCRValue *pcr_values, size_t n_pcr_values);
++bool tpm2_pcr_values_valid(const Tpm2PCRValue *pcr_values, size_t n_pcr_values);
+ void tpm2_sort_pcr_values(Tpm2PCRValue *pcr_values, size_t n_pcr_values);
+ int tpm2_pcr_values_from_mask(uint32_t mask, TPMI_ALG_HASH hash, Tpm2PCRValue **ret_pcr_values, size_t *ret_n_pcr_values);
+ int tpm2_pcr_values_to_mask(const Tpm2PCRValue *pcr_values, size_t n_pcr_values, TPMI_ALG_HASH hash, uint32_t *ret_mask);

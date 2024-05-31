@@ -1,0 +1,95 @@
+From 16f06c8cfbdf660e1c4e2052b7dd121f3497ff0f Mon Sep 17 00:00:00 2001
+From: Jan Macku <jamacku@redhat.com>
+Date: Wed, 18 Oct 2023 15:24:23 +0200
+Subject: [PATCH] ci: enable source-git automation to validate reviews and ci
+ results
+
+rhel-only
+
+Related: RHEL-1086
+---
+ .github/pull-request-validator.yml             |  4 ++++
+ .../source-git-automation-on-demand.yml        | 14 ++++++++++----
+ .github/workflows/source-git-automation.yml    | 18 +++++++++++++++++-
+ 3 files changed, 31 insertions(+), 5 deletions(-)
+ create mode 100644 .github/pull-request-validator.yml
+
+diff --git a/.github/pull-request-validator.yml b/.github/pull-request-validator.yml
+new file mode 100644
+index 0000000000..4bb5bbec12
+--- /dev/null
++++ b/.github/pull-request-validator.yml
+@@ -0,0 +1,4 @@
++labels:
++  missing-review: pr/needs-review
++  changes-requested: pr/changes-requested
++  missing-failing-ci: pr/needs-ci
+diff --git a/.github/workflows/source-git-automation-on-demand.yml b/.github/workflows/source-git-automation-on-demand.yml
+index 60d7bcf32d..2dd6af3113 100644
+--- a/.github/workflows/source-git-automation-on-demand.yml
++++ b/.github/workflows/source-git-automation-on-demand.yml
+@@ -74,7 +74,8 @@ jobs:
+         with:
+           pr-number: ${{ matrix.pr-number }}
+ 
+-      - id: commit-linter
++      - if: ${{ !cancelled() }}
++        id: commit-linter
+         name: Lint Commits
+         uses: redhat-plumbers-in-action/advanced-commit-linter@v2
+         with:
+@@ -82,7 +83,8 @@ jobs:
+           token: ${{ secrets.GITHUB_TOKEN }}
+ 
+       # Validates tracker, changes tracker status, updates PR title
+-      - id: tracker-validator
++      - if: ${{ !cancelled() }}
++        id: tracker-validator
+         name: Validate Tracker
+         uses: redhat-plumbers-in-action/tracker-validator@v1
+         with:
+@@ -96,5 +98,9 @@ jobs:
+           jira-api-token: ${{ secrets.JIRA_API_TOKEN }}
+           token: ${{ secrets.GITHUB_TOKEN }}
+ 
+-      # TODO: merge PR if all checks passed
+-      # TODO: add comment to Tracker that PR was merged ...
++      - if: ${{ !cancelled() }}
++        name: Pull Request Validator
++        uses: redhat-plumbers-in-action/pull-request-validator@v1
++        with:
++          pr-metadata: ${{ steps.metadata.outputs.metadata }}
++          token: ${{ secrets.GITHUB_TOKEN }}
+diff --git a/.github/workflows/source-git-automation.yml b/.github/workflows/source-git-automation.yml
+index 7fabb88a83..214e72de6f 100644
+--- a/.github/workflows/source-git-automation.yml
++++ b/.github/workflows/source-git-automation.yml
+@@ -47,7 +47,8 @@ jobs:
+           token: ${{ secrets.GITHUB_TOKEN }}
+ 
+   # Validates tracker, changes tracker status, updates PR title
+-  tracker-validation:
++  tracker-validator:
++    if: ${{ !cancelled() }}
+     needs: [ download-metadata, commit-linter ]
+     runs-on: ubuntu-latest
+ 
+@@ -68,3 +69,18 @@ jobs:
+           jira-instance: https://issues.redhat.com
+           jira-api-token: ${{ secrets.JIRA_API_TOKEN }}
+           token: ${{ secrets.GITHUB_TOKEN }}
++
++  pull-request-validator:
++    needs: [ download-metadata ]
++    runs-on: ubuntu-latest
++
++    permissions:
++      checks: write
++      pull-requests: write
++
++    steps:
++      - name: Pull Request Validator
++        uses: redhat-plumbers-in-action/pull-request-validator@v1
++        with:
++          pr-metadata: ${{ needs.download-metadata.outputs.pr-metadata }}
++          token: ${{ secrets.GITHUB_TOKEN }}

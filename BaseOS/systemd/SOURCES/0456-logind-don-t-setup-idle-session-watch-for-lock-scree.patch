@@ -1,0 +1,50 @@
+From 58b968fc319f227fde22725f862063010c1c4138 Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekleta@redhat.com>
+Date: Tue, 12 Dec 2023 19:03:39 +0100
+Subject: [PATCH] logind: don't setup idle session watch for lock-screen and
+ greeter
+
+Reason to skip the idle session logic for these session classes is that
+they are idle by default.
+
+(cherry picked from commit 508b4786e8592e82eb4832549f74aaa54335d14c)
+
+Related: RHEL-20757
+---
+ man/logind.conf.xml        | 9 +++++----
+ src/login/logind-session.c | 2 +-
+ 2 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/man/logind.conf.xml b/man/logind.conf.xml
+index 1a87cf6baf..55cbabaafb 100644
+--- a/man/logind.conf.xml
++++ b/man/logind.conf.xml
+@@ -348,10 +348,11 @@
+         <term><varname>StopIdleSessionSec=</varname></term>
+ 
+         <listitem><para>Specifies a timeout in seconds, or a time span value after which
+-        <filename>systemd-logind</filename> checks the idle state of all sessions. Every session that is idle for
+-        longer then the timeout will be stopped. Defaults to <literal>infinity</literal>
+-        (<filename>systemd-logind</filename> is not checking the idle state of sessions). For details about the syntax
+-        of time spans, see
++        <filename>systemd-logind</filename> checks the idle state of all sessions. Every session that is idle
++        for longer than the timeout will be stopped. Note that this option doesn't apply to
++        <literal>greeter</literal> or <literal>lock-screen</literal> sessions. Defaults to
++        <literal>infinity</literal> (<filename>systemd-logind</filename> is not checking the idle state
++        of sessions). For details about the syntax of time spans, see
+         <citerefentry><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
+         </para></listitem>
+       </varlistentry>
+diff --git a/src/login/logind-session.c b/src/login/logind-session.c
+index 709a585013..68c2aa9670 100644
+--- a/src/login/logind-session.c
++++ b/src/login/logind-session.c
+@@ -735,7 +735,7 @@ static int session_setup_stop_on_idle_timer(Session *s) {
+ 
+         assert(s);
+ 
+-        if (s->manager->stop_idle_session_usec == USEC_INFINITY)
++        if (s->manager->stop_idle_session_usec == USEC_INFINITY || IN_SET(s->class, SESSION_GREETER, SESSION_LOCK_SCREEN))
+                 return 0;
+ 
+         r = sd_event_add_time_relative(

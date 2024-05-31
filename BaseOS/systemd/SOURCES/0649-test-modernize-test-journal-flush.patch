@@ -1,0 +1,78 @@
+From 4c4170bc379ff7c89326ece892db93f12340dd81 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 5 Oct 2023 17:15:54 +0900
+Subject: [PATCH] test: modernize test-journal-flush
+
+(cherry picked from commit ff95b60d1abddf01a57c7e39d30142326e2373e8)
+
+Related: RHEL-11591
+---
+ src/journal/test-journal-flush.c | 29 +++++++++++++++--------------
+ 1 file changed, 15 insertions(+), 14 deletions(-)
+
+diff --git a/src/journal/test-journal-flush.c b/src/journal/test-journal-flush.c
+index c734aa02ca..015604780f 100644
+--- a/src/journal/test-journal-flush.c
++++ b/src/journal/test-journal-flush.c
+@@ -12,14 +12,15 @@
+ #include "managed-journal-file.h"
+ #include "path-util.h"
+ #include "string-util.h"
++#include "tests.h"
+ 
+-static void test_journal_flush(int argc, char *argv[]) {
++static void test_journal_flush_one(int argc, char *argv[]) {
+         _cleanup_(mmap_cache_unrefp) MMapCache *m = NULL;
+         _cleanup_free_ char *fn = NULL;
+         char dn[] = "/var/tmp/test-journal-flush.XXXXXX";
+-        ManagedJournalFile *new_journal = NULL;
+-        sd_journal *j = NULL;
+-        unsigned n = 0;
++        _cleanup_(managed_journal_file_closep) ManagedJournalFile *new_journal = NULL;
++        _cleanup_(sd_journal_closep) sd_journal *j = NULL;
++        unsigned n, limit;
+         int r;
+ 
+         m = mmap_cache_new();
+@@ -40,6 +41,8 @@ static void test_journal_flush(int argc, char *argv[]) {
+ 
+         sd_journal_set_data_threshold(j, 0);
+ 
++        n = 0;
++        limit = slow_tests_enabled() ? 10000 : 1000;
+         SD_JOURNAL_FOREACH(j) {
+                 Object *o;
+                 JournalFile *f;
+@@ -60,24 +63,22 @@ static void test_journal_flush(int argc, char *argv[]) {
+                                     -EPROTONOSUPPORT, /* unsupported compression */
+                                     -EIO));           /* file rotated */
+ 
+-                if (++n >= 10000)
++                if (++n >= limit)
+                         break;
+         }
+ 
+-        sd_journal_close(j);
+-
+-        (void) managed_journal_file_close(new_journal);
+-
+         unlink(fn);
+         assert_se(rmdir(dn) == 0);
+ }
+ 
+-int main(int argc, char *argv[]) {
++TEST(journal_flush) {
+         assert_se(setenv("SYSTEMD_JOURNAL_COMPACT", "0", 1) >= 0);
+-        test_journal_flush(argc, argv);
++        test_journal_flush_one(saved_argc, saved_argv);
++}
+ 
++TEST(journal_flush_compact) {
+         assert_se(setenv("SYSTEMD_JOURNAL_COMPACT", "1", 1) >= 0);
+-        test_journal_flush(argc, argv);
+-
+-        return 0;
++        test_journal_flush_one(saved_argc, saved_argv);
+ }
++
++DEFINE_TEST_MAIN(LOG_INFO);

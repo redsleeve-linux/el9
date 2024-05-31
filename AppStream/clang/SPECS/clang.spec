@@ -1,3 +1,9 @@
+%bcond_with snapshot_build
+
+%if %{with snapshot_build}
+%{llvm_sb}
+%endif
+
 # We are building with clang for faster/lower memory LTO builds.
 # See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
 %global toolchain clang
@@ -8,9 +14,18 @@
 %bcond_with bundle_compat_lib
 %bcond_without check
 
-%global maj_ver 16
+%global maj_ver 17
 %global min_ver 0
 %global patch_ver 6
+#global rc_ver 4
+
+%if %{with snapshot_build}
+%undefine rc_ver
+%global maj_ver %{llvm_snapshot_version_major}
+%global min_ver %{llvm_snapshot_version_minor}
+%global patch_ver %{llvm_snapshot_version_patch}
+%endif
+
 %global clang_version %{maj_ver}.%{min_ver}.%{patch_ver}
 
 %if %{with compat_build}
@@ -21,19 +36,19 @@
 %global install_bindir %{install_prefix}/bin
 %global install_includedir %{install_prefix}/include
 %global install_libdir %{install_prefix}/lib
+%global install_datadir %{install_prefix}/share
 
-%global pkg_bindir %{install_bindir}
 %global pkg_includedir %{install_includedir}
-%global pkg_libdir %{install_libdir}
 %else
 %global pkg_name clang
 %global install_prefix /usr
-%global pkg_libdir %{_libdir}
+%global install_datadir %{_datadir}
+%global install_libdir %{_libdir}
 %endif
 
 %if %{with bundle_compat_lib}
-%global compat_maj_ver 15
-%global compat_ver %{compat_maj_ver}.0.7
+%global compat_maj_ver 16
+%global compat_ver %{compat_maj_ver}.0.6
 %endif
 
 
@@ -46,17 +61,23 @@
 %global clang_tools_srcdir clang-tools-extra-%{clang_version}%{?rc_ver:rc%{rc_ver}}.src
 
 Name:		%pkg_name
-Version:	%{clang_version}%{?rc_ver:~rc%{rc_ver}}
-Release:	1%{?dist}.redsleeve
+Version:	%{clang_version}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
+Release:	5%{?dist}
 Summary:	A C language family front-end for LLVM
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
 URL:		http://llvm.org
+%if %{with snapshot_build}
+Source0:    %{llvm_snapshot_source_prefix}clang-%{llvm_snapshot_yyyymmdd}.src.tar.xz
+Source1:    %{llvm_snapshot_source_prefix}clang-tools-extra-%{llvm_snapshot_yyyymmdd}.src.tar.xz
+%{llvm_snapshot_extra_source_tags}
+
+%else
 Source0:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{clang_version}%{?rc_ver:-rc%{rc_ver}}/%{clang_srcdir}.tar.xz
-Source1:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{clang_version}%{?rc_ver:-rc%{rc_ver}}/%{clang_srcdir}.tar.xz.sig
+Source3:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{clang_version}%{?rc_ver:-rc%{rc_ver}}/%{clang_srcdir}.tar.xz.sig
 %if %{without compat_build}
-Source2:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{clang_version}%{?rc_ver:-rc%{rc_ver}}/%{clang_tools_srcdir}.tar.xz
-Source3:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{clang_version}%{?rc_ver:-rc%{rc_ver}}/%{clang_tools_srcdir}.tar.xz.sig
+Source1:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{clang_version}%{?rc_ver:-rc%{rc_ver}}/%{clang_tools_srcdir}.tar.xz
+Source2:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{clang_version}%{?rc_ver:-rc%{rc_ver}}/%{clang_tools_srcdir}.tar.xz.sig
 %endif
 Source4:	release-keys.asc
 %if %{with bundle_compat_lib}
@@ -67,32 +88,30 @@ Source8:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{compat
 Source9:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{compat_ver}/cmake-%{compat_ver}.src.tar.xz
 Source10:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{compat_ver}/cmake-%{compat_ver}.src.tar.xz.sig
 %endif
-%if !0%{with compat_build}
-Source11:	macros.%{name}
+%endif
+%if %{without compat_build}
+Source105:	macros.%{name}
 %endif
 
 # Patches for clang
+Patch1:     0001-PATCH-clang-Make-funwind-tables-the-default-on-all-a.patch
+Patch2:     0003-PATCH-clang-Don-t-install-static-libraries.patch
+Patch3:     0001-Driver-Add-a-gcc-equivalent-triple-to-the-list-of-tr.patch
+# Drop the following patch after debugedit adds support to DWARF-5:
+# https://sourceware.org/bugzilla/show_bug.cgi?id=28728
+Patch4:     0001-Produce-DWARF4-by-default.patch
+# Workaround a bug in ORC on ppc64le.
+# More info is available here: https://reviews.llvm.org/D159115#4641826
+Patch5:     0001-Workaround-a-bug-in-ORC-on-ppc64le.patch
+# Patches for https://issues.redhat.com/browse/RHEL-1650
+# Remove in clang 18.
+Patch6:     cfg.patch
+Patch7:     tsa.patch
 
-Patch1:     0003-PATCH-Make-funwind-tables-the-default-on-all-archs.patch
-Patch2:     0006-Don-t-install-static-libraries.patch
-Patch3:     0002-Driver-Add-a-gcc-equivalent-triple-to-the-list-of-tr.patch
-Patch4:	    0010-PATCH-clang-Produce-DWARF4-by-default.patch
-# Make clangBasic and clangDriver depend on LLVMTargetParser
-# See https://reviews.llvm.org/D141581
-Patch7:     D141581.diff
-# clang/cmake: Use installed gtest libraries for stand-alone builds
-# See https://reviews.llvm.org/D138472
-Patch8:     D138472.diff
 
-Patch10:    fix-ieee128-cross.diff
-
-Patch11:    0001-Change-LLVM_COMMON_CMAKE_UTILS-usage.patch
-
-# RHEL specific patch
-Patch12:     0009-disable-recommonmark.patch
-Patch13:     0001-Driver-Give-devtoolset-path-precedence-over-Installe.patch
-
-Patch100:  100-armv6-add-llc-gcc-triplet-translation.diff
+# RHEL specific patches
+Patch101:     0009-disable-recommonmark.patch
+Patch102:     0001-Driver-Give-devtoolset-path-precedence-over-Installe.patch
 
 %if %{without compat_build}
 # Patches for clang-tools-extra
@@ -107,17 +126,20 @@ BuildRequires: gcc-toolset-%{gts_version}-gdb
 BuildRequires:	clang
 BuildRequires:	cmake
 BuildRequires:	ninja-build
+
 %if %{with compat_build}
-BuildRequires:	llvm%{maj_ver}-devel = %{version}
-BuildRequires:	llvm%{maj_ver}-static = %{version}
+%global llvm_pkg_name llvm%{maj_ver}
 %else
-BuildRequires:	llvm-devel = %{version}
-BuildRequires:	llvm-test = %{version}
+%global llvm_pkg_name llvm
+BuildRequires:  llvm-test = %{version}
+BuildRequires:  llvm-googletest = %{version}
+%endif
+
+BuildRequires:	%{llvm_pkg_name}-devel = %{version}
 # llvm-static is required, because clang-tablegen needs libLLVMTableGen, which
 # is not included in libLLVM.so.
-BuildRequires:	llvm-static = %{version}
-BuildRequires:	llvm-googletest = %{version}
-%endif
+BuildRequires:	%{llvm_pkg_name}-static = %{version}
+BuildRequires:	%{llvm_pkg_name}-cmake-utils = %{version}
 
 BuildRequires:	libxml2-devel
 BuildRequires:	perl-generators
@@ -192,7 +214,7 @@ libomp-devel to enable -fopenmp.
 
 %package libs
 Summary: Runtime library for clang
-Requires: %{name}-resource-filesystem%{?_isa} = %{version}
+Requires: %{name}-resource-filesystem = %{version}
 Requires: gcc-toolset-%{gts_version}-gcc-c++
 Recommends: compiler-rt%{?_isa} = %{version}
 # atomic support is not part of compiler-rt
@@ -225,9 +247,10 @@ Development header files for clang.
 %package resource-filesystem
 Summary: Filesystem package that owns the clang resource directory
 Provides: %{name}-resource-filesystem(major) = %{maj_ver}
+BuildArch: noarch
 
 %description resource-filesystem
-This package owns the clang resouce directory: $libdir/clang/$version/
+This package owns the clang resouce directory: lib/clang/$version/
 
 %if %{without compat_build}
 %package analyzer
@@ -249,6 +272,15 @@ Requires:	emacs-filesystem
 
 %description tools-extra
 A set of extra tools built using Clang's tooling API.
+
+%if 0%{?fedora}
+%package tools-extra-devel
+Summary: Development header files for clang tools
+Requires: %{name}-tools-extra = %{version}-%{release}
+
+%description tools-extra-devel
+Development header files for clang tools.
+%endif
 
 # Put git-clang-format in its own package, because it Requires git
 # and we don't want to force users to install all those dependenices if they
@@ -275,7 +307,9 @@ Requires:      python3
 
 
 %prep
-%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
+%if %{without snapshot_build}
+%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE3}' --data='%{SOURCE0}'
+%endif
 
 %if %{with bundle_compat_lib}
 %{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE6}' --data='%{SOURCE5}'
@@ -291,10 +325,12 @@ Requires:      python3
 %autosetup -n %{clang_srcdir} -p2
 %else
 
-%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE3}' --data='%{SOURCE2}'
-%setup -T -q -b 2 -n %{clang_tools_srcdir}
-%autopatch -m200 -p2
+%if %{without snapshot_build}
+%{gpgverify} --keyring='%{SOURCE4}' --signature='%{SOURCE2}' --data='%{SOURCE1}'
+%endif
 
+%setup -T -q -b 1 -n %{clang_tools_srcdir}
+%autopatch -m200 -p2
 
 # failing test case
 rm test/clang-tidy/checkers/altera/struct-pack-align.cpp
@@ -304,7 +340,7 @@ rm test/clang-tidy/checkers/altera/struct-pack-align.cpp
 	clang-include-fixer/find-all-symbols/tool/run-find-all-symbols.py
 
 %setup -q -n %{clang_srcdir}
-%autopatch -M200 -p2
+%autopatch -M%{?!rhel:100}%{?rhel:200} -p2
 
 # failing test case
 rm test/CodeGen/profile-filter.c
@@ -321,6 +357,19 @@ rm test/CodeGen/profile-filter.c
 %endif
 
 %build
+
+# Use ThinLTO to limit build time.
+%define _lto_cflags -flto=thin
+# And disable LTO on AArch64 entirely.
+%ifarch aarch64
+%define _lto_cflags %{nil}
+%endif
+
+# Disable LTO to speed up builds
+%if %{with snapshot_build}
+%global _lto_cflags %nil
+%endif
+
 
 %if 0%{?__isa_bits} == 64
 sed -i 's/\@FEDORA_LLVM_LIB_SUFFIX\@/64/g' test/lit.cfg.py
@@ -364,7 +413,8 @@ mv ../cmake-%{compat_ver}.src ../cmake
 	-DLLVM_TARGETS_TO_BUILD=%{targets_to_build} \
 	-DLLVM_INCLUDE_BENCHMARKS=OFF \
 	-DCMAKE_C_FLAGS_RELEASE="-fno-lto" \
-	-DCMAKE_CXX_FLAGS_RELEASE="-fno-lto"
+	-DCMAKE_CXX_FLAGS_RELEASE="-fno-lto" \
+	-DLLVM_INCLUDE_TESTS:BOOL=OFF
 
 %ninja_build -C ../clang-compat-libs libclang.so
 %ninja_build -C ../clang-compat-libs libclang-cpp.so
@@ -372,13 +422,17 @@ mv ../cmake-%{compat_ver}.src ../cmake
 
 %endif
 
-# We set CLANG_DEFAULT_PIE_ON_LINUX=OFF to match the default used by Fedora's GCC.
+# We set CLANG_DEFAULT_PIE_ON_LINUX=OFF and PPC_LINUX_DEFAULT_IEEELONGDOUBLE=ON to match the
+# defaults used by Fedora's GCC.
 # See https://bugzilla.redhat.com/show_bug.cgi?id=2134146
 %cmake  -G Ninja \
 %ifarch %ix86
 	-DHAVE_CXX_ATOMICS64_WITHOUT_LIB=OFF \
 %endif
 	-DCLANG_DEFAULT_PIE_ON_LINUX=OFF \
+%if 0%{?fedora} || 0%{?rhel} > 9
+	-DPPC_LINUX_DEFAULT_IEEELONGDOUBLE=ON \
+%endif
 	-DLLVM_PARALLEL_LINK_JOBS=1 \
 	-DLLVM_LINK_LLVM_DYLIB:BOOL=ON \
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -393,6 +447,8 @@ mv ../cmake-%{compat_ver}.src ../cmake
 	-DLLVM_CONFIG:FILEPATH=%{pkg_bindir}/llvm-config-%{maj_ver}-%{__isa_bits} \
 	-DCMAKE_INSTALL_PREFIX=%{install_prefix} \
 	-DCLANG_INCLUDE_TESTS:BOOL=OFF \
+	-DLLVM_INCLUDE_TESTS:BOOL=OFF \
+	-DLLVM_CMAKE_DIR=%{install_libdir}/cmake/llvm \
 %else
 	-DCLANG_INCLUDE_TESTS:BOOL=ON \
 	-DLLVM_BUILD_UTILS:BOOL=ON \
@@ -407,12 +463,16 @@ mv ../cmake-%{compat_ver}.src ../cmake
 %endif
 %endif
 	\
+%if %{with snapshot_build}
+	-DLLVM_VERSION_SUFFIX="%{llvm_snapshot_version_suffix}" \
+%endif
+	\
 %if %{with compat_build}
 	-DLLVM_TABLEGEN_EXE:FILEPATH=%{_bindir}/llvm-tblgen-%{maj_ver} \
 %else
 	-DLLVM_TABLEGEN_EXE:FILEPATH=%{_bindir}/llvm-tblgen \
 %endif
-	-DLLVM_COMMON_CMAKE_UTILS=%{_libdir}/cmake/llvm \
+	-DLLVM_COMMON_CMAKE_UTILS=%{install_datadir}/llvm/cmake \
 	-DCLANG_ENABLE_ARCMT:BOOL=ON \
 	-DCLANG_ENABLE_STATIC_ANALYZER:BOOL=ON \
 	-DCLANG_INCLUDE_DOCS:BOOL=ON \
@@ -427,7 +487,8 @@ mv ../cmake-%{compat_ver}.src ../cmake
 	\
 	-DCLANG_BUILD_EXAMPLES:BOOL=OFF \
 	-DBUILD_SHARED_LIBS=OFF \
-	-DCLANG_REPOSITORY_STRING="%{?fedora:Fedora}%{?rhel:Red Hat} %{version}-%{release}" \
+	-DCLANG_REPOSITORY_STRING="%{?dist_vendor} %{version}-%{release}" \
+	-DCLANG_RESOURCE_DIR=../lib/clang/%{maj_ver} \
 %ifarch %{arm}
 	-DCLANG_DEFAULT_LINKER=lld \
 %endif
@@ -457,14 +518,14 @@ rm -Rf %{buildroot}%{install_bindir}
 rm -Rf %{buildroot}%{install_prefix}/share
 rm -Rf %{buildroot}%{install_prefix}/libexec
 # Remove scanview-py helper libs
-rm -Rf %{buildroot}%{install_prefix}/%{_lib}/{libear,libscanbuild}
+rm -Rf %{buildroot}%{install_prefix}/lib/{libear,libscanbuild}
 
 %else
 
 # File in the macros file for other packages to use.  We are not doing this
 # in the compat package, because the version macros would # conflict with
 # eachother if both clang and the clang compat package were installed together.
-install -p -m0644 -D %{SOURCE11} %{buildroot}%{_rpmmacrodir}/macros.%{name}
+install -p -m0644 -D %{SOURCE105} %{buildroot}%{_rpmmacrodir}/macros.%{name}
 sed -i -e "s|@@CLANG_MAJOR_VERSION@@|%{maj_ver}|" \
        -e "s|@@CLANG_MINOR_VERSION@@|%{min_ver}|" \
        -e "s|@@CLANG_PATCH_VERSION@@|%{patch_ver}|" \
@@ -519,7 +580,7 @@ chmod u-x %{buildroot}%{_mandir}/man1/scan-build.1*
 
 # Create sub-directories in the clang resource directory that will be
 # populated by other packages
-mkdir -p %{buildroot}%{pkg_libdir}/clang/%{maj_ver}/{include,lib,share}/
+mkdir -p %{buildroot}%{install_prefix}/lib/clang/%{maj_ver}/{bin,include,lib,share}/
 
 
 # Remove clang-tidy headers.  We don't ship the libraries for these.
@@ -581,13 +642,8 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
 %endif
 
 %files libs
-%if %{without compat_build}
-%{_libdir}/clang/%{maj_ver}/include/*
-%{_libdir}/*.so.*
-%else
-%{pkg_libdir}/*.so.*
-%{pkg_libdir}/clang/%{maj_ver}/include/*
-%endif
+%{install_prefix}/lib/clang/%{maj_ver}/include/*
+%{install_libdir}/*.so.*
 %if %{with bundle_compat_lib}
 %{_libdir}/libclang.so.%{compat_maj_ver}*
 %{_libdir}/libclang-cpp.so.%{compat_maj_ver}*
@@ -603,20 +659,23 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
 %dir %{_datadir}/clang/
 %{_rpmmacrodir}/macros.%{name}
 %else
-%{pkg_libdir}/*.so
+%{install_libdir}/*.so
 %{pkg_includedir}/clang/
 %{pkg_includedir}/clang-c/
-%{pkg_libdir}/cmake/
+%{install_libdir}/cmake/
 %endif
 
 %files resource-filesystem
-%dir %{pkg_libdir}/clang/
-%dir %{pkg_libdir}/clang/%{maj_ver}/
-%dir %{pkg_libdir}/clang/%{maj_ver}/include/
-%dir %{pkg_libdir}/clang/%{maj_ver}/lib/
-%dir %{pkg_libdir}/clang/%{maj_ver}/share/
-
+%dir %{install_prefix}/lib/clang/
+%dir %{install_prefix}/lib/clang/%{maj_ver}/
+%dir %{install_prefix}/lib/clang/%{maj_ver}/bin/
+%dir %{install_prefix}/lib/clang/%{maj_ver}/include/
+%dir %{install_prefix}/lib/clang/%{maj_ver}/lib/
+%dir %{install_prefix}/lib/clang/%{maj_ver}/share/
 %if %{without compat_build}
+%{_rpmmacrodir}/macros.%{name}
+
+
 %files analyzer
 %{_bindir}/scan-view
 %{_bindir}/scan-build
@@ -679,6 +738,11 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
 %{_datadir}/clang/run-find-all-symbols.py*
 %{_datadir}/clang/clang-rename.py*
 
+%if 0%{?fedora}
+%files tools-extra-devel
+%{_includedir}/clang-tidy/
+%endif
+
 %files -n git-clang-format
 %{_bindir}/git-clang-format
 
@@ -688,8 +752,23 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
 
 %endif
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 16.0.6-1.redsleeve
-- added triple translation for armv6
+* Tue Jan 09 2024 Timm Bäder <tbaeder@redhat.com> - 17.0.6-5
+- Remove compat libs
+
+* Thu Dec 14 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.6-4
+- Add back compat libs until all necessary packages have been rebuilt.
+
+* Fri Dec 08 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.6-3
+- Remove compat libs
+
+* Wed Dec 06 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.6-2
+- Update to 17.0.6
+
+* Wed Oct 04 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.1-2
+- Pick up macros.clang changes from Fedora
+
+* Thu Sep 28 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.1-1
+- Update to 17.0.1
 
 * Wed Jul 05 2023 Nikita Popov <npopov@redhat.com> - 16.0.6-1
 - Update to LLVM 16.0.6

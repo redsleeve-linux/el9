@@ -155,7 +155,7 @@ end \
 Summary: The GNU libc libraries
 Name: glibc
 Version: %{glibcversion}
-Release: 83%{?dist}.7.redsleeve
+Release: 100%{?dist}.2
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -196,8 +196,6 @@ Source11: parse-SUPPORTED.py
 # Include in the source RPM for reference.
 Source12: ChangeLog.old
 Source13: nscd-sysusers.conf
-
-Source1000: glibc-arm-dl-tunables.list
 
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
@@ -772,6 +770,49 @@ Patch533: glibc-RHEL-2426-13.patch
 Patch534: glibc-RHEL-3000.patch
 Patch535: glibc-RHEL-2426-14.patch
 Patch536: glibc-RHEL-2426-15.patch
+Patch537: glibc-RHEL-1191.patch
+Patch538: glibc-RHEL-3397.patch
+Patch539: glibc-RHEL-2123.patch
+Patch540: glibc-RHEL-16275.patch
+Patch541: glibc-RHEL-2491.patch
+Patch542: glibc-RHEL-14383-1.patch
+Patch543: glibc-RHEL-14383-2.patch
+Patch544: glibc-RHEL-2338-1.patch
+Patch545: glibc-RHEL-2338-2.patch
+Patch546: glibc-RHEL-2338-3.patch
+Patch547: glibc-RHEL-2338-4.patch
+Patch548: glibc-RHEL-15343-1.patch
+Patch549: glibc-RHEL-15343-2.patch
+Patch550: glibc-RHEL-15343-3.patch
+Patch551: glibc-RHEL-15343-4.patch
+Patch552: glibc-rhel-17157.patch
+Patch553: glibc-RHEL-16016-1.patch
+Patch554: glibc-RHEL-16016-2.patch
+Patch555: glibc-RHEL-16016-3.patch
+Patch556: glibc-RHEL-16016-4.patch
+Patch557: glibc-RHEL-16016-5.patch
+Patch558: glibc-RHEL-16016-6.patch
+Patch559: glibc-RHEL-16016-7.patch
+Patch560: glibc-RHEL-17319-1.patch
+Patch561: glibc-RHEL-17319-2.patch
+Patch562: glibc-RHEL-17319-3.patch
+Patch563: glibc-RHEL-17319-4.patch
+Patch564: glibc-RHEL-17465-1.patch
+Patch565: glibc-RHEL-17465-2.patch
+Patch566: glibc-RHEL-19862.patch
+Patch567: glibc-RHEL-16643-1.patch
+Patch568: glibc-RHEL-16643-2.patch
+Patch569: glibc-RHEL-16643-3.patch
+Patch570: glibc-RHEL-16643-4.patch
+Patch571: glibc-RHEL-16643-5.patch
+Patch572: glibc-RHEL-16643-6.patch
+Patch573: glibc-RHEL-19444.patch
+Patch574: glibc-RHEL-21556.patch
+Patch575: glibc-RHEL-32480.patch
+Patch576: glibc-RHEL-34318-1.patch
+Patch577: glibc-RHEL-34318-2.patch
+Patch578: glibc-RHEL-34318-3.patch
+Patch579: glibc-RHEL-34318-4.patch
 
 ##############################################################################
 # Continued list of core "glibc" package information:
@@ -1594,10 +1635,6 @@ that can be installed across architectures.
 %prep
 %autosetup -n %{glibcsrcdir} -p1
 
-%ifarch %{arm}
-cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
-%endif
-
 ##############################################################################
 # %%prep - Additional prep required...
 ##############################################################################
@@ -1943,6 +1980,7 @@ gzip -9nvf %{glibc_sysroot}%{_infodir}/libc*
 # Copy the debugger interface documentation over to the right location
 mkdir -p %{glibc_sysroot}%{_docdir}/glibc
 cp elf/rtld-debugger-interface.txt %{glibc_sysroot}%{_docdir}/glibc
+cp posix/gai.conf %{glibc_sysroot}%{_docdir}/glibc
 %else
 rm -f %{glibc_sysroot}%{_infodir}/dir
 rm -f %{glibc_sysroot}%{_infodir}/libc.info*
@@ -2933,8 +2971,66 @@ update_gconv_modules_cache ()
 %endif
 
 %changelog
-* Fri Nov 24 06 2023 Jacco Ligthart <jacco@redsleeve.org> - 2.34-83.7.redsleeve
-- add dl-tunables.list for arm
+* Mon Apr 29 2024 Florian Weimer <fweimer@redhat.com> - 2.34-100.2
+- CVE-2024-33599: nscd: buffer overflow in netgroup cache (RHEL-34318)
+- CVE-2024-33600: nscd: null pointer dereferences in netgroup cache
+- CVE-2024-33601: nscd: crash on out-of-memory condition
+- CVE-2024-33602: nscd: memory corruption with NSS netgroup modules
+
+* Tue Apr 16 2024 Florian Weimer <fweimer@redhat.com> - 2.34-100.1
+- CVE-2024-2961: Out of bounds write in iconv conversion to ISO-2022-CN-EXT (RHEL-32480)
+
+* Wed Jan 24 2024 Patsy Griffin <patsy@redhat.com> - 2.34-100
+- manual: fix order of arguments of memalign and aligned_alloc (RHEL-21556)
+
+* Tue Jan 09 2024 Arjun Shankar <arjun@redhat.com> - 2.34-99
+- getaddrinfo: Return correct error EAI_MEMORY when out-of-memory (RHEL-19444)
+
+* Mon Jan  8 2024 Arjun Shankar <arjun@redhat.com> - 2.34-98
+- getaddrinfo: Fix occasionally empty result due to nscd cache order (RHEL-16643)
+
+* Tue Jan  2 2024 Florian Weimer <fweimer@redhat.com> - 2.34-97
+- Re-enable output buffering for wide stdio streams (RHEL-19862)
+
+* Thu Dec 21 2023 Carlos O'Donell <carlos@redhat.com> - 2.34-96
+- Fix TLS corruption during dlopen()/dlclose() sequences (RHEL-17465)
+
+* Fri Dec  8 2023 Florian Weimer <fweimer@redhat.com> - 2.34-95
+- Improve compatibility between underlinking and IFUNC resolvers (RHEL-17319)
+
+* Thu Dec  7 2023 Patsy Griffin <patsy@redhat.com> - 2.34-94
+- Update syscall-names.list for Linux 6.6. (RHEL-16016)
+
+* Wed Dec  6 2023 Patsy Griffin <patsy@redhat.com> - 2.34-93
+- malloc: Use __get_nprocs on arena_get2. (RHEL-17157)
+
+* Fri Dec  1 2023 Patsy Griffin <patsy@redhat.com> - 2.34-92
+- Improve test coverage for wcsdup, strdup and strndup. (RHEL-15343)
+
+* Fri Nov 24 2023 Florian Weimer <fweimer@redhat.com> - 2.34-91
+- fstat performance enhancement (RHEL-2338)
+
+* Tue Nov 21 2023 Florian Weimer <fweimer@redhat.com> - 2.34-90
+- ldconfig should skip temporary files created by RPM (RHEL-14383)
+
+* Mon Nov 20 2023 Florian Weimer <fweimer@redhat.com> - 2.34-89
+- Fix force-first handling in dlclose (RHEL-2491)
+
+* Wed Nov 15 2023 Arjun Shankar <arjun@redhat.com> - 2.34-88
+- nscd: Refer to /run instead of /var/run in systemd socket file
+  (RHEL-16275)
+
+* Fri Nov 10 2023 Florian Weimer <fweimer@redhat.com> - 2.34-87
+- Fix slow tls access after dlopen (RHEL-2123)
+
+* Tue Oct 24 2023 Arjun Shankar <arjun@redhat.com> - 2.34-86
+- Add /usr/share/doc/glibc/gai.conf to glibc-doc (RHEL-14545)
+
+* Fri Oct 20 2023 Florian Weimer <fweimer@redhat.com> - 2.34-85
+- nscd: Skip unusable entries in first pass in prune_cache (RHEL-3397)
+
+* Mon Oct  9 2023 Florian Weimer <fweimer@redhat.com> - 2.34-84
+- x86-64: Report non-zero cache sizes under TDX hypervisors (RHEL-1191)
 
 * Mon Sep 25 2023 Florian Weimer <fweimer@redhat.com> - 2.34-83.7
 - Fix memory leak regression in getaddrinfo (RHEL-2426)

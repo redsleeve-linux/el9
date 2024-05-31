@@ -1,0 +1,3533 @@
+From bcc54c0a5743a309654823eeb72b5b5dc24c9062 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 22 Nov 2023 13:07:56 +0100
+Subject: [PATCH] Backport ukify from upstream
+
+This is based off v255-rc2.
+
+Resolves: RHEL-13199
+---
+ man/rules/meson.build                         |    1 +
+ man/uki.conf.example                          |   14 +
+ man/ukify.xml                                 |  685 +++++++
+ meson.build                                   |   25 +
+ meson_options.txt                             |    2 +
+ src/ukify/test/example.signing.crt.base64     |   23 +
+ src/ukify/test/example.signing.key.base64     |   30 +
+ .../test/example.tpm2-pcr-private.pem.base64  |   30 +
+ .../test/example.tpm2-pcr-private2.pem.base64 |   30 +
+ .../test/example.tpm2-pcr-public.pem.base64   |    8 +
+ .../test/example.tpm2-pcr-public2.pem.base64  |    8 +
+ src/ukify/test/meson.build                    |   20 +
+ src/ukify/test/test_ukify.py                  |  848 +++++++++
+ src/ukify/ukify.py                            | 1660 +++++++++++++++++
+ 14 files changed, 3384 insertions(+)
+ create mode 100644 man/uki.conf.example
+ create mode 100644 man/ukify.xml
+ create mode 100644 src/ukify/test/example.signing.crt.base64
+ create mode 100644 src/ukify/test/example.signing.key.base64
+ create mode 100644 src/ukify/test/example.tpm2-pcr-private.pem.base64
+ create mode 100644 src/ukify/test/example.tpm2-pcr-private2.pem.base64
+ create mode 100644 src/ukify/test/example.tpm2-pcr-public.pem.base64
+ create mode 100644 src/ukify/test/example.tpm2-pcr-public2.pem.base64
+ create mode 100644 src/ukify/test/meson.build
+ create mode 100755 src/ukify/test/test_ukify.py
+ create mode 100755 src/ukify/ukify.py
+
+diff --git a/man/rules/meson.build b/man/rules/meson.build
+index bb7799036d..c7045840f2 100644
+--- a/man/rules/meson.build
++++ b/man/rules/meson.build
+@@ -1189,6 +1189,7 @@ manpages = [
+   ''],
+  ['udev_new', '3', ['udev_ref', 'udev_unref'], ''],
+  ['udevadm', '8', [], ''],
++ ['ukify', '1', [], 'ENABLE_UKIFY'],
+  ['user@.service',
+   '5',
+   ['systemd-user-runtime-dir', 'user-runtime-dir@.service'],
+diff --git a/man/uki.conf.example b/man/uki.conf.example
+new file mode 100644
+index 0000000000..84a9f77b8d
+--- /dev/null
++++ b/man/uki.conf.example
+@@ -0,0 +1,14 @@
++[UKI]
++SecureBootPrivateKey=/etc/kernel/secure-boot.key.pem
++SecureBootCertificate=/etc/kernel/secure-boot.cert.pem
++
++[PCRSignature:initrd]
++Phases=enter-initrd
++PCRPrivateKey=/etc/kernel/pcr-initrd.key.pem
++PCRPublicKey=/etc/kernel/pcr-initrd.pub.pem
++
++[PCRSignature:system]
++Phases=enter-initrd:leave-initrd enter-initrd:leave-initrd:sysinit
++       enter-initrd:leave-initrd:sysinit:ready
++PCRPrivateKey=/etc/kernel/pcr-system.key.pem
++PCRPublicKey=/etc/kernel/pcr-system.pub.pem
+diff --git a/man/ukify.xml b/man/ukify.xml
+new file mode 100644
+index 0000000000..eff74ca150
+--- /dev/null
++++ b/man/ukify.xml
+@@ -0,0 +1,685 @@
++<?xml version="1.0"?>
++<!--*-nxml-*-->
++<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
++  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
++<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
++<refentry id="ukify" xmlns:xi="http://www.w3.org/2001/XInclude" conditional='ENABLE_UKIFY'>
++
++  <refentryinfo>
++    <title>ukify</title>
++    <productname>systemd</productname>
++  </refentryinfo>
++
++  <refmeta>
++    <refentrytitle>ukify</refentrytitle>
++    <manvolnum>1</manvolnum>
++  </refmeta>
++
++  <refnamediv>
++    <refname>ukify</refname>
++    <refpurpose>Combine components into a signed Unified Kernel Image for UEFI systems</refpurpose>
++  </refnamediv>
++
++  <refsynopsisdiv>
++    <cmdsynopsis>
++      <command>ukify</command>
++      <arg choice="opt" rep="repeat">OPTIONS</arg>
++      <arg choice="plain">build</arg>
++    </cmdsynopsis>
++
++    <cmdsynopsis>
++      <command>ukify</command>
++      <arg choice="opt" rep="repeat">OPTIONS</arg>
++      <arg choice="plain">genkey</arg>
++    </cmdsynopsis>
++
++    <cmdsynopsis>
++      <command>ukify</command>
++      <arg choice="opt" rep="repeat">OPTIONS</arg>
++      <arg choice="plain">inspect</arg>
++      <arg choice="plain" rep="repeat">FILE</arg>
++    </cmdsynopsis>
++  </refsynopsisdiv>
++
++  <refsect1>
++    <title>Description</title>
++
++    <para><command>ukify</command> is a tool whose primary purpose is to combine components (usually a
++    kernel, an initrd, and a UEFI boot stub) to create a
++    <ulink url="https://uapi-group.org/specifications/specs/unified_kernel_image/">Unified Kernel Image (UKI)</ulink>
++    — a PE binary that can be executed by the firmware to start the embedded linux kernel.
++    See <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>
++    for details about the stub.</para>
++  </refsect1>
++
++  <refsect1>
++    <title>Commands</title>
++
++    <para>The following commands are understood:</para>
++
++    <refsect2>
++      <title><command>build</command></title>
++
++      <para>This command creates a Unified Kernel Image. The two primary options that should be specified for
++      the <command>build</command> verb are <varname>Linux=</varname>/<option>--linux=</option>, and
++      <varname>Initrd=</varname>/<option>--initrd=</option>. <varname>Initrd=</varname> accepts multiple
++      whitespace-separated paths and <option>--initrd=</option> can be specified multiple times.</para>
++
++      <para>Additional sections will be inserted into the UKI, either automatically or only if a specific
++      option is provided. See the discussions of
++      <varname>Cmdline=</varname>/<option>--cmdline=</option>,
++      <varname>OSRelease=</varname>/<option>--os-release=</option>,
++      <varname>DeviceTree=</varname>/<option>--devicetree=</option>,
++      <varname>Splash=</varname>/<option>--splash=</option>,
++      <varname>PCRPKey=</varname>/<option>--pcrpkey=</option>,
++      <varname>Uname=</varname>/<option>--uname=</option>,
++      <varname>SBAT=</varname>/<option>--sbat=</option>,
++      and <option>--section=</option>
++      below.</para>
++
++      <para><command>ukify</command> can also be used to assemble a PE binary that is not executable but
++      contains auxiliary data, for example additional kernel command line entries.</para>
++
++      <para>If PCR signing keys are provided via the
++      <varname>PCRPrivateKey=</varname>/<option>--pcr-private-key=</option> and
++      <varname>PCRPublicKey=</varname>/<option>--pcr-public-key=</option> options, PCR values that will be seen
++      after booting with the given kernel, initrd, and other sections, will be calculated, signed, and embedded
++      in the UKI.
++      <citerefentry><refentrytitle>systemd-measure</refentrytitle><manvolnum>1</manvolnum></citerefentry> is
++      used to perform this calculation and signing.</para>
++
++      <para>The calculation of PCR values is done for specific boot phase paths. Those can be specified with
++      the <varname>Phases=</varname>/<option>--phases=</option> option. If not specified, the default provided
++      by <command>systemd-measure</command> is used. It is also possible to specify the
++      <varname>PCRPrivateKey=</varname>/<option>--pcr-private-key=</option>,
++      <varname>PCRPublicKey=</varname>/<option>--pcr-public-key=</option>, and
++      <varname>Phases=</varname>/<option>--phases=</option> arguments more than once. Signatures will then be
++      performed with each of the specified keys. On the command line, when both <option>--phases=</option> and
++      <option>--pcr-private-key=</option> are used, they must be specified the same number of times, and then
++      the n-th boot phase path set will be signed by the n-th key. This can be used to build different trust
++      policies for different phases of the boot. In the config file, <varname>PCRPrivateKey=</varname>,
++      <varname>PCRPublicKey=</varname>, and <varname>Phases=</varname> are grouped into separate sections,
++      describing separate boot phases.</para>
++
++      <para>If a SecureBoot signing key is provided via the
++      <varname>SecureBootPrivateKey=</varname>/<option>--secureboot-private-key=</option> option, the resulting
++      PE binary will be signed as a whole, allowing the resulting UKI to be trusted by SecureBoot. Also see the
++      discussion of automatic enrollment in
++      <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>.
++      </para>
++
++      <para>If the stub and/or the kernel contain <literal>.sbat</literal> sections they will be merged in
++      the UKI so that revocation updates affecting either are considered when the UKI is loaded by Shim. For
++      more information on SBAT see
++      <ulink url="https://github.com/rhboot/shim/blob/main/SBAT.md">Shim documentation</ulink>.
++      </para>
++    </refsect2>
++
++    <refsect2>
++      <title><command>genkey</command></title>
++
++      <para>This command creates the keys for PCR signing and the key and certificate used for SecureBoot
++      signing. The same configuration options that determine what keys and in which paths will be needed for
++      signing when <command>build</command> is used, here determine which keys will be created. See the
++      discussion of <varname>PCRPrivateKey=</varname>/<option>--pcr-private-key=</option>,
++      <varname>PCRPublicKey=</varname>/<option>--pcr-public-key=</option>, and
++      <varname>SecureBootPrivateKey=</varname>/<option>--secureboot-private-key=</option> below.</para>
++
++      <para>The output files must not exist.</para>
++    </refsect2>
++
++    <refsect2>
++      <title><command>inspect</command></title>
++
++      <para>Display information about the sections in a given binary or binaries.
++      If <option>--all</option> is given, all sections are shown.
++      Otherwise, if <option>--section=</option> option is specified at least once, only those sections are shown.
++      Otherwise, well-known sections that are typically included in an UKI are shown.
++      For each section, its name, size, and sha256-digest is printed.
++      For text sections, the contents are printed.</para>
++
++      <para>Also see the description of <option>-j</option>/<option>--json=</option> and
++      <option>--section=</option>.</para>
++    </refsect2>
++  </refsect1>
++
++  <refsect1>
++    <title>Configuration settings</title>
++
++    <para>Settings can appear in configuration files (the syntax with <varname
++    index='false'>SomeSetting=<replaceable>value</replaceable></varname>) and on the command line (the syntax
++    with <option index='false'>--some-setting=<replaceable>value</replaceable></option>). For some command
++    line parameters, a single-letter shortcut is also allowed. In the configuration files, the setting must
++    be in the appropriate section, so the descriptions are grouped by section below. When the same setting
++    appears in the configuration file and on the command line, generally the command line setting has higher
++    priority and overwrites the config file setting completely. If some setting behaves differently, this is
++    described below.</para>
++
++    <para>If no config file is provided via the option <option>--config=<replaceable>PATH</replaceable></option>,
++    <command>ukify</command> will try to look for a default configuration file in the following paths in this
++    order: <filename>/run/systemd/ukify.conf</filename>, <filename>/etc/systemd/ukify.conf</filename>,
++    <filename>/usr/local/lib/systemd/ukify.conf</filename>, and <filename>/usr/lib/systemd/ukify.conf</filename>,
++    and then load the first one found. <command>ukify</command> will proceed normally if no configuration file
++    is specified and no default one is found.</para>
++
++    <para>The <replaceable>LINUX</replaceable> and <replaceable>INITRD</replaceable> positional arguments, or
++    the equivalent <varname>Linux=</varname> and <varname>Initrd=</varname> settings, are optional. If more
++    than one initrd is specified, they will all be combined into a single PE section. This is useful to, for
++    example, prepend microcode before the actual initrd.</para>
++
++    <para>The following options and settings are understood:</para>
++
++    <refsect2>
++      <title>Command line-only options</title>
++
++      <variablelist>
++        <varlistentry>
++          <term><option>--config=<replaceable>PATH</replaceable></option></term>
++
++          <listitem><para>Load configuration from the given config file. In general, settings specified in
++          the config file have lower precedence than the settings specified via options. In cases where the
++          command line option does not fully override the config file setting are explicitly mentioned in the
++          descriptions of individual options.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><option>--measure</option></term>
++          <term><option>--no-measure</option></term>
++
++          <listitem><para>Enable or disable a call to
++          <citerefentry><refentrytitle>systemd-measure</refentrytitle><manvolnum>1</manvolnum></citerefentry>
++          to print pre-calculated PCR values. Defaults to false.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><option>--section=<replaceable>NAME</replaceable>:<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
++          <term><option>--section=<replaceable>NAME</replaceable>:<arg choice="plain">text|binary</arg><optional>@<replaceable>PATH</replaceable></optional></option></term>
++
++          <listitem><para>For all verbs except <command>inspect</command>, the first syntax is used.
++          Specify an arbitrary additional section <literal><replaceable>NAME</replaceable></literal>.
++          The argument may be a literal string, or <literal>@</literal> followed by a path name.
++          This option may be specified more than once. Any sections specified in this fashion will be
++          inserted (in order) before the <literal>.linux</literal> section which is always last.</para>
++
++          <para>For the <command>inspect</command> verb, the second syntax is used.
++          The section <replaceable>NAME</replaceable> will be inspected (if found).
++          If the second argument is <literal>text</literal>, the contents will be printed.
++          If the third argument is given, the contents will be saved to file <replaceable>PATH</replaceable>.
++          </para>
++
++          <para>Note that the name is used as-is, and if the section name should start with a dot, it must be
++          included in <replaceable>NAME</replaceable>.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><option>--tools=<replaceable>DIRS</replaceable></option></term>
++
++          <listitem><para>Specify one or more directories with helper tools. <command>ukify</command> will
++          look for helper tools in those directories first, and if not found, try to load them from
++          <varname>$PATH</varname> in the usual fashion.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><option>--output=<replaceable>FILENAME</replaceable></option></term>
++
++          <listitem><para>The output filename. If not specified, the name of the
++          <replaceable>LINUX</replaceable> argument, with the suffix <literal>.unsigned.efi</literal> or
++          <literal>.signed.efi</literal> will be used, depending on whether signing for SecureBoot was
++          performed.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><option>--summary</option></term>
++
++          <listitem><para>Print a summary of loaded config and exit. This is useful to check how the options
++          from the configuration file and the command line are combined.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><option>--all</option></term>
++
++          <listitem><para>Print all sections (with <command>inspect</command> verb).</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><option>--json</option></term>
++
++          <listitem><para>Generate JSON output (with <command>inspect</command> verb).</para>
++
++          </listitem>
++        </varlistentry>
++
++        <xi:include href="standard-options.xml" xpointer="help" />
++        <xi:include href="standard-options.xml" xpointer="version" />
++      </variablelist>
++    </refsect2>
++
++    <refsect2>
++      <title>[UKI] section</title>
++
++      <variablelist>
++        <varlistentry>
++          <term><varname>Linux=<replaceable>LINUX</replaceable></varname></term>
++          <term><option>--linux=<replaceable>LINUX</replaceable></option></term>
++
++          <listitem><para>A path to the kernel binary.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>Initrd=<replaceable>INITRD</replaceable>...</varname></term>
++          <term><option>--initrd=<replaceable>LINUX</replaceable></option></term>
++
++          <listitem><para>Zero or more initrd paths. In the configuration file, items are separated by
++          whitespace. The initrds are combined in the order of specification, with the initrds specified in
++          the config file first.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>Cmdline=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></varname></term>
++          <term><option>--cmdline=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
++
++          <listitem><para>The kernel command line (the <literal>.cmdline</literal> section). The argument may
++          be a literal string, or <literal>@</literal> followed by a path name. If not specified, no command
++          line will be embedded.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>OSRelease=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></varname></term>
++          <term><option>--os-release=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
++
++          <listitem><para>The os-release description (the <literal>.osrel</literal> section). The argument
++          may be a literal string, or <literal>@</literal> followed by a path name. If not specified, the
++          <citerefentry><refentrytitle>os-release</refentrytitle><manvolnum>5</manvolnum></citerefentry> file
++          will be picked up from the host system.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>DeviceTree=<replaceable>PATH</replaceable></varname></term>
++          <term><option>--devicetree=<replaceable>PATH</replaceable></option></term>
++
++          <listitem><para>The devicetree description (the <literal>.dtb</literal> section). The argument is a
++          path to a compiled binary DeviceTree file. If not specified, the section will not be present.
++          </para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>Splash=<replaceable>PATH</replaceable></varname></term>
++          <term><option>--splash=<replaceable>PATH</replaceable></option></term>
++
++          <listitem><para>A picture to display during boot (the <literal>.splash</literal> section). The
++          argument is a path to a BMP file. If not specified, the section will not be present.
++          </para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>PCRPKey=<replaceable>PATH</replaceable></varname></term>
++          <term><option>--pcrpkey=<replaceable>PATH</replaceable></option></term>
++
++          <listitem><para>A path to a public key to embed in the <literal>.pcrpkey</literal> section. If not
++          specified, and there's exactly one
++          <varname>PCRPublicKey=</varname>/<option>--pcr-public-key=</option> argument, that key will be used.
++          Otherwise, the section will not be present.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>Uname=<replaceable>VERSION</replaceable></varname></term>
++          <term><option>--uname=<replaceable>VERSION</replaceable></option></term>
++
++          <listitem><para>Specify the kernel version (as in <command>uname -r</command>, the
++          <literal>.uname</literal> section). If not specified, an attempt will be made to extract the
++          version string from the kernel image. It is recommended to pass this explicitly if known, because
++          the extraction is based on heuristics and not very reliable. If not specified and extraction fails,
++          the section will not be present.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>PCRBanks=<replaceable>PATH</replaceable></varname></term>
++          <term><option>--pcr-banks=<replaceable>PATH</replaceable></option></term>
++
++          <listitem><para>A comma or space-separated list of PCR banks to sign a policy for. If not present,
++          all known banks will be used (<literal>sha1</literal>, <literal>sha256</literal>,
++          <literal>sha384</literal>, <literal>sha512</literal>), which will fail if not supported by the
++          system.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>SecureBootSigningTool=<replaceable>SIGNER</replaceable></varname></term>
++          <term><option>--signtool=<replaceable>SIGNER</replaceable></option></term>
++
++          <listitem><para>Whether to use <literal>sbsign</literal> or <literal>pesign</literal>.
++          Depending on this choice, different parameters are required in order to sign an image.
++          Defaults to <literal>sbsign</literal>.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>SecureBootPrivateKey=<replaceable>SB_KEY</replaceable></varname></term>
++          <term><option>--secureboot-private-key=<replaceable>SB_KEY</replaceable></option></term>
++
++          <listitem><para>A path to a private key to use for signing of the resulting binary. If the
++          <varname>SigningEngine=</varname>/<option>--signing-engine=</option> option is used, this may also be
++          an engine-specific designation. This option is required by
++          <varname>SecureBootSigningTool=sbsign</varname>/<option>--signtool=sbsign</option>. </para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>SecureBootCertificate=<replaceable>SB_CERT</replaceable></varname></term>
++          <term><option>--secureboot-certificate=<replaceable>SB_CERT</replaceable></option></term>
++
++          <listitem><para>A path to a certificate to use for signing of the resulting binary. If the
++          <varname>SigningEngine=</varname>/<option>--signing-engine=</option> option is used, this may also
++          be an engine-specific designation. This option is required by
++          <varname>SecureBootSigningTool=sbsign</varname>/<option>--signtool=sbsign</option>. </para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>SecureBootCertificateDir=<replaceable>SB_PATH</replaceable></varname></term>
++          <term><option>--secureboot-certificate-dir=<replaceable>SB_PATH</replaceable></option></term>
++
++          <listitem><para>A path to a nss certificate database directory to use for signing of the resulting binary.
++          Takes effect when <varname>SecureBootSigningTool=pesign</varname>/<option>--signtool=pesign</option> is used.
++          Defaults to <filename>/etc/pki/pesign</filename>.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>SecureBootCertificateName=<replaceable>SB_CERTNAME</replaceable></varname></term>
++          <term><option>--secureboot-certificate-name=<replaceable>SB_CERTNAME</replaceable></option></term>
++
++          <listitem><para>The name of the nss certificate database entry to use for signing of the resulting binary.
++          This option is required by <varname>SecureBootSigningTool=pesign</varname>/<option>--signtool=pesign</option>.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>SecureBootCertificateValidity=<replaceable>DAYS</replaceable></varname></term>
++          <term><option>--secureboot-certificate-validity=<replaceable>DAYS</replaceable></option></term>
++
++          <listitem><para>Period of validity (in days) for a certificate created by
++          <command>genkey</command>. Defaults to 3650, i.e. 10 years.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>SigningEngine=<replaceable>ENGINE</replaceable></varname></term>
++          <term><option>--signing-engine=<replaceable>ENGINE</replaceable></option></term>
++
++          <listitem><para>An "engine" for signing of the resulting binary. This option is currently passed
++          verbatim to the <option>--engine=</option> option of
++          <citerefentry project='archlinux'><refentrytitle>sbsign</refentrytitle><manvolnum>1</manvolnum></citerefentry>.
++          </para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>SignKernel=<replaceable>BOOL</replaceable></varname></term>
++          <term><option>--sign-kernel</option></term>
++          <term><option>--no-sign-kernel</option></term>
++
++          <listitem><para>Override the detection of whether to sign the Linux binary itself before it is
++          embedded in the combined image. If not specified, it will be signed if a SecureBoot signing key is
++          provided via the
++          <varname>SecureBootPrivateKey=</varname>/<option>--secureboot-private-key=</option> option and the
++          binary has not already been signed. If
++          <varname>SignKernel=</varname>/<option>--sign-kernel</option> is true, and the binary has already
++          been signed, the signature will be appended anyway.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>SBAT=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></varname></term>
++          <term><option>--sbat=<replaceable>TEXT</replaceable>|<replaceable>@PATH</replaceable></option></term>
++
++          <listitem><para>SBAT metadata associated with the UKI or addon. SBAT policies are useful to revoke
++          whole groups of UKIs or addons with a single, static policy update that does not take space in
++          DBX/MOKX. If not specified manually, a default metadata entry consisting of
++          <literal>uki,1,UKI,uki,1,https://www.freedesktop.org/software/systemd/man/systemd-stub.html</literal>
++          will be used, to ensure it is always possible to revoke UKIs and addons. For more information on
++          SBAT see <ulink url="https://github.com/rhboot/shim/blob/main/SBAT.md">Shim documentation</ulink>.
++          </para>
++
++          </listitem>
++        </varlistentry>
++      </variablelist>
++    </refsect2>
++
++    <refsect2>
++      <title>[PCRSignature:<replaceable>NAME</replaceable>] section</title>
++
++      <para>In the config file, those options are grouped by section. On the command line, they
++      must be specified in the same order. The sections specified in both sources are combined.
++      </para>
++
++      <variablelist>
++        <varlistentry>
++          <term><varname>PCRPrivateKey=<replaceable>PATH</replaceable></varname></term>
++          <term><option>--pcr-private-key=<replaceable>PATH</replaceable></option></term>
++
++          <listitem><para>A private key to use for signing PCR policies. On the command line, this option may
++          be specified more than once, in which case multiple signatures will be made.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>PCRPublicKey=<replaceable>PATH</replaceable></varname></term>
++          <term><option>--pcr-public-key=<replaceable>PATH</replaceable></option></term>
++
++          <listitem><para>A public key to use for signing PCR policies.</para>
++
++          <para>On the command line, this option may be specified more than once, similarly to the
++          <option>--pcr-private-key=</option> option. If not present, the public keys will be extracted from
++          the private keys. On the command line, if present, this option must be specified the same number of
++          times as the <option>--pcr-private-key=</option> option.</para>
++
++          </listitem>
++        </varlistentry>
++
++        <varlistentry>
++          <term><varname>Phases=<replaceable>LIST</replaceable></varname></term>
++          <term><option>--phases=<replaceable>LIST</replaceable></option></term>
++
++          <listitem><para>A comma or space-separated list of colon-separated phase paths to sign a policy
++          for. Each set of boot phase paths will be signed with the corresponding private key. If not
++          present, the default of
++          <citerefentry><refentrytitle>systemd-measure</refentrytitle><manvolnum>1</manvolnum></citerefentry>
++          will be used.</para>
++
++          <para>On the command line, when this argument is present, it must appear the same number of times as
++          the <option>--pcr-private-key=</option> option. </para>
++
++          </listitem>
++        </varlistentry>
++      </variablelist>
++    </refsect2>
++  </refsect1>
++
++  <refsect1>
++    <title>Examples</title>
++
++    <example>
++      <title>Minimal invocation</title>
++
++      <programlisting>$ ukify build \
++      --linux=/lib/modules/6.0.9-300.fc37.x86_64/vmlinuz \
++      --initrd=/some/path/initramfs-6.0.9-300.fc37.x86_64.img \
++      --cmdline='quiet rw'
++      </programlisting>
++
++      <para>This creates an unsigned UKI <filename>./vmlinuz.unsigned.efi</filename>.</para>
++    </example>
++
++    <example>
++      <title>All the bells and whistles</title>
++
++      <programlisting>$ ukify build \
++      --linux=/lib/modules/6.0.9-300.fc37.x86_64/vmlinuz \
++      --initrd=early_cpio \
++      --initrd=/some/path/initramfs-6.0.9-300.fc37.x86_64.img \
++      --sbat='sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md
++      uki.author.myimage,1,UKI for System,uki.author.myimage,1,https://www.freedesktop.org/software/systemd/man/systemd-stub.html' \
++      --pcr-private-key=pcr-private-initrd-key.pem \
++      --pcr-public-key=pcr-public-initrd-key.pem \
++      --phases='enter-initrd' \
++      --pcr-private-key=pcr-private-system-key.pem \
++      --pcr-public-key=pcr-public-system-key.pem \
++      --phases='enter-initrd:leave-initrd enter-initrd:leave-initrd:sysinit \
++                enter-initrd:leave-initrd:sysinit:ready' \
++      --pcr-banks=sha384,sha512 \
++      --secureboot-private-key=sb.key \
++      --secureboot-certificate=sb.cert \
++      --sign-kernel \
++      --cmdline='quiet rw rhgb'
++      </programlisting>
++
++      <para>This creates a signed UKI <filename index='false'>./vmlinuz.signed.efi</filename>.
++      The initrd section contains two concatenated parts, <filename index='false'>early_cpio</filename>
++      and <filename index='false'>initramfs-6.0.9-300.fc37.x86_64.img</filename>.
++      The policy embedded in the <literal>.pcrsig</literal> section will be signed for the initrd (the
++      <constant>enter-initrd</constant> phase) with the key
++      <filename index='false'>pcr-private-initrd-key.pem</filename>, and for the main system (phases
++      <constant>leave-initrd</constant>, <constant>sysinit</constant>, <constant>ready</constant>) with the
++      key <filename index='false'>pcr-private-system-key.pem</filename>. The Linux binary and the resulting
++      combined image will be signed with the SecureBoot key <filename index='false'>sb.key</filename>.</para>
++    </example>
++
++    <example>
++      <title>All the bells and whistles, via a config file</title>
++
++      <para>This is the same as the previous example, but this time the configuration is stored in a
++      file:</para>
++
++      <programlisting>$ cat ukify.conf
++[UKI]
++Initrd=early_cpio
++Cmdline=quiet rw rhgb
++
++SecureBootPrivateKey=sb.key
++SecureBootCertificate=sb.cert
++SignKernel=yes
++PCRBanks=sha384,sha512
++
++[PCRSignature:initrd]
++PCRPrivateKey=pcr-private-initrd-key.pem
++PCRPublicKey=pcr-public-initrd-key.pem
++Phases=enter-initrd
++
++[PCRSignature:system]
++PCRPrivateKey=pcr-private-system-key.pem
++PCRPublicKey=pcr-public-system-key.pem
++Phases=enter-initrd:leave-initrd
++       enter-initrd:leave-initrd:sysinit
++       enter-initrd:leave-initrd:sysinit:ready
++
++$ ukify -c ukify.conf build \
++        --linux=/lib/modules/6.0.9-300.fc37.x86_64/vmlinuz \
++        --initrd=/some/path/initramfs-6.0.9-300.fc37.x86_64.img
++      </programlisting>
++
++      <para>One "initrd" (<filename index='false'>early_cpio</filename>) is specified in the config file, and
++      the other initrd (<filename index='false'>initramfs-6.0.9-300.fc37.x86_64.img</filename>) is specified
++      on the command line. This may be useful for example when the first initrd contains microcode for the CPU
++      and does not need to be updated when the kernel version changes, unlike the actual initrd.</para>
++    </example>
++
++    <example>
++      <title>Kernel command line auxiliary PE</title>
++
++      <programlisting>ukify build \
++      --secureboot-private-key=sb.key \
++      --secureboot-certificate=sb.cert \
++      --cmdline='debug' \
++      --sbat='sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md
++      uki.addon.author,1,UKI Addon for System,uki.addon.author,1,https://www.freedesktop.org/software/systemd/man/systemd-stub.html'
++      --output=debug.cmdline
++      </programlisting>
++
++      <para>This creates a signed PE binary that contains the additional kernel command line parameter
++      <literal>debug</literal> with SBAT metadata referring to the owner of the addon.</para>
++    </example>
++
++    <example>
++      <title>Decide signing policy and create certificate and keys</title>
++
++      <para>First, let's create an config file that specifies what signatures shall be made:</para>
++
++      <programlisting># cat >/etc/kernel/uki.conf &lt;&lt;EOF
++<xi:include href="uki.conf.example" parse="text" />EOF</programlisting>
++
++      <para>Next, we can generate the certificate and keys:</para>
++      <programlisting># ukify genkey --config=/etc/kernel/uki.conf
++Writing SecureBoot private key to /etc/kernel/secure-boot.key.pem
++Writing SecureBoot certificate to /etc/kernel/secure-boot.cert.pem
++Writing private key for PCR signing to /etc/kernel/pcr-initrd.key.pem
++Writing public key for PCR signing to /etc/kernel/pcr-initrd.pub.pem
++Writing private key for PCR signing to /etc/kernel/pcr-system.key.pem
++Writing public key for PCR signing to /etc/kernel/pcr-system.pub.pem
++</programlisting>
++
++      <para>(Both operations need to be done as root to allow write access
++      to <filename>/etc/kernel/</filename>.)</para>
++
++      <para>Subsequent invocations using the config file
++      (<command>ukify build --config=/etc/kernel/uki.conf</command>)
++      will use this certificate and key files. Note that the
++      <citerefentry><refentrytitle>kernel-install</refentrytitle><manvolnum>8</manvolnum></citerefentry>
++      plugin <filename>60-ukify.install</filename> uses <filename>/etc/kernel/uki.conf</filename>
++      by default, so after this file has been created, installations of kernels that create a UKI on the
++      local machine using <command>kernel-install</command> will perform signing using this config.</para>
++    </example>
++  </refsect1>
++
++  <refsect1>
++    <title>See Also</title>
++    <para>
++      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-measure</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-pcrphase.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
++     </para>
++  </refsect1>
++
++</refentry>
+diff --git a/meson.build b/meson.build
+index 5b2e7ca172..b874c2f9b4 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1916,6 +1916,18 @@ subdir('src/boot/efi')
+ 
+ ############################################################
+ 
++pymod = import('python')
++python = pymod.find_installation('python3', required : true, modules : ['jinja2'])
++python_39 = python.language_version().version_compare('>=3.9')
++
++want_ukify = get_option('ukify')
++if want_ukify and not python_39
++    error('ukify requires Python >= 3.9')
++endif
++conf.set10('ENABLE_UKIFY', want_ukify)
++
++############################################################
++
+ generate_gperfs = find_program('tools/generate-gperfs.py')
+ make_autosuspend_rules_py = find_program('tools/make-autosuspend-rules.py')
+ make_directive_index_py = find_program('tools/make-directive-index.py')
+@@ -2164,6 +2176,7 @@ subdir('src/test')
+ subdir('src/fuzz')
+ subdir('rules.d')
+ subdir('test')
++subdir('src/ukify/test')  # needs to be last for test_env variable
+ 
+ ############################################################
+ 
+@@ -3841,6 +3854,18 @@ exe = custom_target(
+         install_dir : bindir)
+ public_programs += exe
+ 
++ukify = custom_target(
++        'ukify',
++        input : 'src/ukify/ukify.py',
++        output : 'ukify',
++        command : [jinja2_cmdline, '@INPUT@', '@OUTPUT@'],
++        install : want_ukify,
++        install_mode : 'rwxr-xr-x',
++        install_dir : rootlibexecdir)
++if want_ukify
++        public_programs += ukify
++endif
++
+ if want_tests != 'false' and want_kernel_install
+         test('test-kernel-install',
+              test_kernel_install_sh,
+diff --git a/meson_options.txt b/meson_options.txt
+index 814f340840..903e6681a4 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -499,6 +499,8 @@ option('llvm-fuzz', type : 'boolean', value : false,
+        description : 'build against LLVM libFuzzer')
+ option('kernel-install', type: 'boolean', value: true,
+        description : 'install kernel-install and associated files')
++option('ukify', type : 'boolean', value : false,
++       description : 'install ukify')
+ option('analyze', type: 'boolean', value: true,
+        description : 'install systemd-analyze')
+ 
+diff --git a/src/ukify/test/example.signing.crt.base64 b/src/ukify/test/example.signing.crt.base64
+new file mode 100644
+index 0000000000..694d13b5a6
+--- /dev/null
++++ b/src/ukify/test/example.signing.crt.base64
+@@ -0,0 +1,23 @@
++LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURsVENDQW4yZ0F3SUJBZ0lVTzlqUWhhblhj
++b3ViOERzdXlMMWdZbksrR1lvd0RRWUpLb1pJaHZjTkFRRUwKQlFBd1dURUxNQWtHQTFVRUJoTUNX
++Rmd4RlRBVEJnTlZCQWNNREVSbFptRjFiSFFnUTJsMGVURWNNQm9HQTFVRQpDZ3dUUkdWbVlYVnNk
++Q0JEYjIxd1lXNTVJRXgwWkRFVk1CTUdBMVVFQXd3TWEyVjVJSE5wWjI1cGJtbG5NQ0FYCkRUSXlN
++VEF5T1RFM01qY3dNVm9ZRHpNd01qSXdNekF4TVRjeU56QXhXakJaTVFzd0NRWURWUVFHRXdKWVdE
++RVYKTUJNR0ExVUVCd3dNUkdWbVlYVnNkQ0JEYVhSNU1Sd3dHZ1lEVlFRS0RCTkVaV1poZFd4MElF
++TnZiWEJoYm5rZwpUSFJrTVJVd0V3WURWUVFEREF4clpYa2djMmxuYm1sdWFXY3dnZ0VpTUEwR0NT
++cUdTSWIzRFFFQkFRVUFBNElCCkR3QXdnZ0VLQW9JQkFRREtVeHR4Y0d1aGYvdUp1SXRjWEhvdW0v
++RE9RL1RJM3BzUWlaR0ZWRkJzbHBicU5wZDUKa2JDaUFMNmgrY1FYaGRjUmlOT1dBR0wyMFZ1T2Rv
++VTZrYzlkdklGQnFzKzc2NHhvWGY1UGd2SlhvQUxSUGxDZAp4YVdPQzFsOFFIRHpxZ09SdnREMWNI
++WFoveTkvZ1YxVU1GK1FlYm12aUhRN0U4eGw1T2h5MG1TQVZYRDhBTitsCjdpMUR6N0NuTzhrMVph
++alhqYXlpNWV1WEV0TnFSZXNuVktRRElTQ0t2STFueUxySWxHRU1GZmFuUmRLQWthZ3MKalJnTmVh
++T3N3aklHNjV6UzFVdjJTZXcxVFpIaFhtUmd5TzRVT0JySHZlSml2T2hObzU3UlRKd0M2K2lGY0FG
++aApSSnorVmM2QUlSSkI1ZWtJUmdCN3VDNEI5ZmwydXdZKytMODNBZ01CQUFHalV6QlJNQjBHQTFV
++ZERnUVdCQlFqCllIMnpzVFlPQU51MkcweXk1QkxlOHBvbWZUQWZCZ05WSFNNRUdEQVdnQlFqWUgy
++enNUWU9BTnUyRzB5eTVCTGUKOHBvbWZUQVBCZ05WSFJNQkFmOEVCVEFEQVFIL01BMEdDU3FHU0li
++M0RRRUJDd1VBQTRJQkFRQ2dxcmFXaE51dQptUmZPUjVxcURVcC83RkpIL1N6Zk1vaDBHL2lWRkhv
++OUpSS0tqMUZ2Q0VZc1NmeThYTmdaUDI5eS81Z0h4cmcrCjhwZWx6bWJLczdhUTRPK01TcmIzTm11
++V1IzT0M0alBoNENrM09ZbDlhQy9iYlJqSWFvMDJ6K29XQWNZZS9xYTEKK2ZsemZWVEUwMHJ5V1RM
++K0FJdDFEZEVqaG01WXNtYlgvbWtacUV1TjBtSVhhRXhSVE9walczUWRNeVRQaURTdApvanQvQWMv
++R2RUWDd0QkhPTk44Z3djaC91V293aVNORERMUm1wM2VScnlOZ3RPKzBISUd5Qm16ZWNsM0VlVEo2
++CnJzOGRWUFhqR1Z4dlZDb2tqQllrOWdxbkNGZEJCMGx4VXVNZldWdVkyRUgwSjI3aGh4SXNFc3ls
++VTNIR1EyK2MKN1JicVY4VTNSRzA4Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+diff --git a/src/ukify/test/example.signing.key.base64 b/src/ukify/test/example.signing.key.base64
+new file mode 100644
+index 0000000000..88baedbcb6
+--- /dev/null
++++ b/src/ukify/test/example.signing.key.base64
+@@ -0,0 +1,30 @@
++LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2Z0lCQURBTkJna3Foa2lHOXcwQkFRRUZB
++QVNDQktnd2dnU2tBZ0VBQW9JQkFRREtVeHR4Y0d1aGYvdUoKdUl0Y1hIb3VtL0RPUS9USTNwc1Fp
++WkdGVkZCc2xwYnFOcGQ1a2JDaUFMNmgrY1FYaGRjUmlOT1dBR0wyMFZ1Twpkb1U2a2M5ZHZJRkJx
++cys3NjR4b1hmNVBndkpYb0FMUlBsQ2R4YVdPQzFsOFFIRHpxZ09SdnREMWNIWFoveTkvCmdWMVVN
++RitRZWJtdmlIUTdFOHhsNU9oeTBtU0FWWEQ4QU4rbDdpMUR6N0NuTzhrMVphalhqYXlpNWV1WEV0
++TnEKUmVzblZLUURJU0NLdkkxbnlMcklsR0VNRmZhblJkS0FrYWdzalJnTmVhT3N3aklHNjV6UzFV
++djJTZXcxVFpIaApYbVJneU80VU9Cckh2ZUppdk9oTm81N1JUSndDNitpRmNBRmhSSnorVmM2QUlS
++SkI1ZWtJUmdCN3VDNEI5ZmwyCnV3WSsrTDgzQWdNQkFBRUNnZ0VBQkhZQ28rU3JxdHJzaStQU3hz
++MlBNQm5tSEZZcFBvaVIrTEpmMEFYRTVEQUoKMGM0MFZzemNqU1hoRGljNHFLQWQxdGdpZWlzMkEy
++VW9WS0xPV3pVOTBqNUd4MURoMWEzaTRhWTQ1ajNuNUFDMgpMekRsakNVQWVucExsYzdCN3MxdjJM
++WFJXNmdJSVM5Y043NTlkVTYvdktyQ2FsbGkzcTZZRWlNUzhQMHNsQnZFCkZtdEc1elFsOVJjV0gr
++cHBqdzlIMTJSZ3BldUVJVEQ2cE0vd2xwcXZHRlUwcmZjM0NjMHhzaWdNTnh1Z1FJNGgKbnpjWDVs
++OEs0SHdvbmhOTG9TYkh6OU5BK3p3QkpuUlZVSWFaaEVjSThtaEVPWHRaRkpYc01aRnhjS2l3SHFS
++dApqUUVHOHJRa3lPLytXMmR5Z2czV1lNYXE1OWpUWVdIOUsrQmFyeEMzRVFLQmdRRFBNSFMycjgz
++ZUpRTTlreXpkCndDdnlmWGhQVlVtbVJnOGwyWng0aC9tci9mNUdDeW5SdzRzT2JuZGVQd29tZ1Iz
++cFBleFFGWlFFSExoZ1RGY3UKVk5uYXcrTzBFL1VnL01pRGswZDNXU0hVZXZPZnM1cEM2b3hYNjNT
++VENwNkVLT2VEZlpVMW9OeHRsZ0YyRVhjcgpmVlZpSzFKRGk3N2dtaENLcFNGcjBLK3gyUUtCZ1FE
++NS9VUC9hNU52clExdUhnKzR0SzJZSFhSK1lUOFREZG00Ck8xZmh5TU5lOHRYSkd5UUJjTktVTWg2
++M2VyR1MwWlRWdGdkNHlGS3RuOGtLU2U4TmlacUl1aitVUVIyZ3pEQVAKQ2VXcXl2Y2pRNmovU1Yw
++WjVvKzlTNytiOStpWWx5RTg2bGZobHh5Z21aNnptYisxUUNteUtNVUdBNis5VmUvMgo1MHhDMXBB
++L2p3S0JnUUNEOHA4UnpVcDFZK3I1WnVaVzN0RGVJSXZqTWpTeVFNSGE0QWhuTm1tSjREcjBUcDIy
++CmFpci82TmY2WEhsUlpqOHZVSEZUMnpvbG1FalBneTZ1WWZsUCtocmtqeVU0ZWVRVTcxRy9Mek45
++UjBRcCs4Nk4KT1NSaHhhQzdHRE0xaFh0VFlVSUtJa1RmUVgzeXZGTEJqcE0yN3RINEZHSmVWWitk
++UEdiWmE5REltUUtCZ1FENQpHTU5qeExiQnhhY25QYThldG5KdnE1SUR5RFRJY0xtc1dQMkZ6cjNX
++WTVSZzhybGE4aWZ5WVVxNE92cXNPRWZjCjk2ZlVVNUFHejd2TWs4VXZNUmtaK3JRVnJ4aXR2Q2g3
++STdxRkIvOWdWVEFWU080TE8vR29oczBqeGRBd0ZBK2IKbWtyOVQ4ekh2cXNqZlNWSW51bXRTL0Nl
++d0plaHl2cjBoSjg1em9Fbnd3S0JnR1h6UXVDSjJDb3NHVVhEdnlHKwpyRzVBd3pUZGd0bHg4YTBK
++NTg1OWtZbVd0cW5WYUJmbFdrRmNUcHNEaGZ2ZWVDUkswc29VRlNPWkcranpsbWJrCkpRL09aVkZJ
++dG9MSVZCeE9qeWVXNlhUSkJXUzFRSkVHckkwY0tTbXNKcENtUXVPdUxMVnZYczV0U21CVmc5RXQK
++MjZzUkZwcjVWWmsrZlNRa3RhbkM4NGV1Ci0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+diff --git a/src/ukify/test/example.tpm2-pcr-private.pem.base64 b/src/ukify/test/example.tpm2-pcr-private.pem.base64
+new file mode 100644
+index 0000000000..586b28ef9b
+--- /dev/null
++++ b/src/ukify/test/example.tpm2-pcr-private.pem.base64
+@@ -0,0 +1,30 @@
++LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2Z0lCQURBTkJna3Foa2lHOXcwQkFRRUZB
++QVNDQktnd2dnU2tBZ0VBQW9JQkFRQzVuOHFhbzVNZ1BJUVcKc0F5Y2R3dnB1bjdNNHlRSW9FL3I3
++ekFGTG1hZlBXclo3d2JaaUIyTkY1MVdHOEo4bnlDQkI3M0RLcmZaeWs5cwphQXdXVW5RR2t0dGFv
++RXpXRzZSRTM3dXdQOUpVM09YdklTNTBhcy9KSHVHNlJPYmE2V0NOOFp2TTdkZGpvTDFKCkZlYnBS
++SXI1Vi82VStMTFhrUnRNYVczUnZ6T0xYeU1NT2QzOEcxZ0d0VlRHcm90ejVldFgrTUNVU2lOVGFE
++OVUKN1dEZXVsZXVpMlRnK1I3TGRoSXg3ZTQ5cEhRM3d6a1NxeFQ4SGpoU3ZURWpITWVSNjIwaUhF
++ZW9uYzdsMXVnagpzY1pwTktHdk13bXUvU2ptWFp6UkpOdjVOU0txcEVnQll2RnFkS3dUdlc4MWl6
++SUFvN3paMkx6NDJYb25zSWJ2CjNrbGZqTG1mQWdNQkFBRUNnZ0VBQXozYm8yeTAzb3kvLzhkdVNQ
++TTVSWWtvdXJwQ3dGWFFYMzNyV0VQUnJmazgKR3ZjMkp1bGVIcjhwVTc0alhOcklqZ2hORTVIMDZQ
++eEQrOUFyV2Q1eHdVV2lTQWhobnlHWGNrNTM4Q0dGTWs4egpRc1JSRTk1anA0Ny9BU28vMzlYUWhs
++b1FUdmxlV0JLUUM2MHl2YU1oVEM1eHR6ZEtwRUlYK0hNazVGTlMrcDJVCmxtL3AzVE1YWDl1bmc5
++Mk9pTzUzV1VreFpQN2cwTVJHbGJrNzhqc1dkdjFYY0tLRjhuVmU5WC9NR1lTYlVLNy8KM2NYazFR
++WTRUdVZaQlBFSE12RFRpWWwxbmdDd1ZuL2MyY3JQU3hJRFdFWlhEdm90SFUwQkNQZURVckxGa0F5
++cQpDaloza3MzdEh4am42STkraEVNcUJDMzY1MHFjdDNkZ0RVV2loc2MzdVFLQmdRRG1mVTNKc29K
++QWFOdmxCbXgyClhzRDRqbXlXV1F2Z244cVNVNG03a2JKdmprcUJ6VnB0T0ZsYmk2ejZHOXR6ZHNX
++a0dJSjh3T0ZRb1hlM0dKOFIKSlVpeEFXTWZOM1JURGo5VjVXbzZJdE5EbzM1N3dNbVVYOW1qeThF
++YXp0RE1BckdSNGJva0Q5RjY3clhqSGdSMQpaZVcvSDlUWHFUV1l4VHl6UDB3ZDBQeUZ4d0tCZ1FE
++T0swWHVQS0o0WG00WmFCemN0OTdETXdDcFBSVmVvUWU3CmkzQjRJQ3orWFZ4cVM2amFTY2xNeEVm
++Nk5tM2tLNERDR1dwVkpXcm9qNjlMck1KWnQzTlI2VUJ5NzNqUVBSamsKRXk5N3YrR04yVGwwNjFw
++ZUxUM0dRS2RhT2VxWldpdElOcFc1dUxHL1poMGhoRUY5c1lSVTRtUFYwUWpla2kvdgp1bnVmcWx0
++TmFRS0JnQTl6TE1pdFg0L0R0NkcxZVlYQnVqdXZDRlpYcDdVcDRPRklHajVwZU1XRGl6a0NNK0tJ
++CldXMEtndERORnp1NUpXeG5mQyt5bWlmV2V2alovS2Vna1N2VVJQbXR0TzF3VWd5RzhVVHVXcXo1
++QTV4MkFzMGcKVTYxb0ZneWUrbDRDZkRha0k5OFE5R0RDS1kwTTBRMnhnK0g0MTBLUmhCYzJlV2dt
++Z1FxcW5KSzNBb0dCQU1rZgpnOWZXQlBVQndjdzlPYkxFR0tjNkVSSUlTZG1IbytCOE5kcXFJTnAv
++djFEZXdEazZ0QXFVakZiMlZCdTdxSjh4ClpmN3NRcS9ldzdaQ01WS09XUXgyVEc0VFdUdGo3dTFJ
++SGhGTjdiNlFRN0hnaXNiR3diV3VpdFBGSGl3OXYyMXgKK253MFJnb2VscHFFeDlMVG92R2Y3SjdB
++ampONlR4TkJTNnBGNlUzSkFvR0JBT0tnbHlRWDJpVG5oMXd4RG1TVQo4RXhoQVN3S09iNS8yRmx4
++aUhtUHVjNTZpS0tHY0lkV1cxMUdtbzdJakNzSTNvRm9iRkFjKzBXZkMvQTdMNWlmCjNBYVNWcmh0
++cThRRklRaUtyYUQ0YlRtRk9Famg5QVVtUHMrWnd1OE9lSXJBSWtwZDV3YmlhTEJLd0pRbVdtSFAK
++dUNBRTA3cXlSWXJ0c3QvcnVSSG5IdFA1Ci0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+diff --git a/src/ukify/test/example.tpm2-pcr-private2.pem.base64 b/src/ukify/test/example.tpm2-pcr-private2.pem.base64
+new file mode 100644
+index 0000000000..d21a3d6043
+--- /dev/null
++++ b/src/ukify/test/example.tpm2-pcr-private2.pem.base64
+@@ -0,0 +1,30 @@
++LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2QUlCQURBTkJna3Foa2lHOXcwQkFRRUZB
++QVNDQktZd2dnU2lBZ0VBQW9JQkFRQzJ2Nk1oZHg3a3VjUHIKbmtFNFIrY3FnV2Y5T3B1c2h2M2o3
++SG50K08wdi84d2l2T1BFNTlLMHYvRWJOOG94TDZEWUNXU0JCRU4vREJ5MgpMUTYwbldSdHBZN2Ju
++bEcrcEtVeTRvSDRNZXZCR2JqZUhrak9LU3dNYVVWNGs4UmVSSjg4cVZ1U1MxSnVORW1NCmd5SERF
++NGFPNG5ndG5UUFZZdzUydVBIcG1rN0E4VFdXN2lLZE5JWWZWOCtuR1pENXIzRWllekRsUUNORG54
++UkcKdm5uSFZ6VFhZR3RwY2xaeWlJclpVekpBNFFPZnRueXB5UDVrQS94NVM1MU9QeGFxWlA3eGtP
++S0NicUUvZmZvMApFTi9rTno0N0ZoUGUxbVBHUkZZWldHZXg0aWFPdHlLdHhnU1FYYkdlNEVoeVR4
++SjJlT3U4QUVoVklTdjh6UU9nClNtbWx2UGQvQWdNQkFBRUNnZ0VBUUFpRERRRlR3bG96QTVhMmpK
++VnBNdlFYNzF0L1c2TUxTRGMrZS90cWhKU1IKUHlUSGZHR3NhMmdMLy9qNjhHUWJiRWRTUDRDeWM4
++eFhMU0E1bEdESDVVR0svbm9KYzQ3MlVZK2JjYzl3SjMrdgpUcWoyNHNIN2JMZmdQMEVybjhwVXIy
++azZMRmNYSVlWUnRobm1sUmQ4NFFrS2loVVlxZTdsRFFWOXdsZ3V1eHpRCnBmVEtDTWk1bXJlYjIx
++OExHS0QrMUxjVmVYZjExamc3Z2JnMllLZ1dOQ2R3VmIyUzJ5V0hTTjBlT3hPd21kWXIKSUVCekpG
++eEc2MFJxSlJ1RzVIam9iemc2cy9ycUo1THFta3JhUWh6bHFPQVZLblpGOHppbG9vcDhXUXBQY3RN
++cwp0cHBjczhtYkFkWHpoSTVjN0U1VVpDM2NJcEd6SE4raDZLK0F3R3ZEeVFLQmdRRDRBOTdQM29v
++dGhoMHZHQmFWCnZWOXhHTm1YbW5TeUg0b29HcmJvaG1JWkkwVlhZdms5dWViSUJjbDZRMUx4WnN3
++UFpRMVh5TUhpTjY1Z0E1emgKai9HZGcrdDlvcU5CZml0TUFrUTl1aWxvaXlKVWhYblk5REMvRitl
++ZksycEpNbHdkci9qWEttRHpkQUZBVDgyWQpWRmJ3MlpLVi9GNEJNMUtCdDBZN0RPTmlad0tCZ1FD
++OG9kZk0waytqL25VSzQ4TEV2MGtGbVNMdWdnTVlkM3hVCmZibmx0cUhFTVpJZU45OFVHK2hBWEdw
++dU1Ya0JPM2Mwcm5ZRDVXZkNBRzFxT1V2ZTZzdHd6N0VuK3hWdlkvcWEKU3ZTaDRzMzhnZlBIeXhR
++aGJvNWRwQTZUT3pwT0MyVi9rVXBVRUdJSmVVVllhQ05uWXNpUjRWUGVWL1lvR1htSwpQV29KbnAw
++REtRS0JnQlk3cXBheDJXczVVWlp1TDJBZkNOWkhwd0hySzdqb0VPZUZkWTRrdGRpUkM5OUlsUlZP
++CmUvekVZQXBnektldFVtK3kzRjVaTmVCRW81SWg0TWRyc3ZvdTRFWno5UFNqRGRpVGYzQ1ZKcThq
++Z2VGWDBkTjgKR0g2WTh2K1cwY0ZjRFZ2djhYdkFaYzZOUUt0Mk8vVUM0b1JXek1nN1JtWVBKcjlR
++SWJDYmVDclRBb0dBTjdZbApJbDFMSUVoYkVTaExzZ2c4N09aWnBzL0hVa2FYOWV4Y0p6aFZkcmlk
++UzBkOUgxZE90Uk9XYTQwNUMrQWdTUEx0CjhDQ2xFR3RINVlPZW9Pdi93Z1hWY05WN2N6YTRJVEhh
++SnFYeDZJNEpEZzB3bU44cU5RWHJPQmphRTRyU0kyY3AKNk1JZDhtWmEwTTJSQjB2cHFRdy8xUDl0
++dUZJdHoySnNHd001cEdFQ2dZQVVnQVV3WENBcEtZVkZFRmxHNlBhYwpvdTBhdzdGNm1aMi9NNUcv
++ek9tMHFDYnNXdGFNU09TdUEvNmlVOXB0NDBaWUFONFUvd2ZxbncyVkVoRnA3dzFNCnpZWmJCRDBx
++ZVlkcDRmc1NuWXFMZmJBVmxQLzB6dmEzdkwwMlJFa25WalBVSnAvaGpKVWhBK21WN252VDZ5VjQK
++cTg4SWVvOEx3Q1c1c2Jtd2lyU3Btdz09Ci0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+diff --git a/src/ukify/test/example.tpm2-pcr-public.pem.base64 b/src/ukify/test/example.tpm2-pcr-public.pem.base64
+new file mode 100644
+index 0000000000..728a0f5362
+--- /dev/null
++++ b/src/ukify/test/example.tpm2-pcr-public.pem.base64
+@@ -0,0 +1,8 @@
++LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FR
++OEFNSUlCQ2dLQ0FRRUF1Wi9LbXFPVElEeUVGckFNbkhjTAo2YnArek9Na0NLQlA2Kzh3QlM1bW56
++MXEyZThHMllnZGpSZWRWaHZDZko4Z2dRZTl3eXEzMmNwUGJHZ01GbEowCkJwTGJXcUJNMWh1a1JO
++KzdzRC9TVk56bDd5RXVkR3JQeVI3aHVrVG0ydWxnamZHYnpPM1hZNkM5U1JYbTZVU0sKK1ZmK2xQ
++aXkxNUViVEdsdDBiOHppMThqRERuZC9CdFlCclZVeHE2TGMrWHJWL2pBbEVvalUyZy9WTzFnM3Jw
++WApyb3RrNFBrZXkzWVNNZTN1UGFSME44TTVFcXNVL0I0NFVyMHhJeHpIa2V0dEloeEhxSjNPNWRi
++b0k3SEdhVFNoCnJ6TUpydjBvNWwyYzBTVGIrVFVpcXFSSUFXTHhhblNzRTcxdk5Zc3lBS084MmRp
++OCtObDZKN0NHNzk1Slg0eTUKbndJREFRQUIKLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==
+diff --git a/src/ukify/test/example.tpm2-pcr-public2.pem.base64 b/src/ukify/test/example.tpm2-pcr-public2.pem.base64
+new file mode 100644
+index 0000000000..44bb3ee9ac
+--- /dev/null
++++ b/src/ukify/test/example.tpm2-pcr-public2.pem.base64
+@@ -0,0 +1,8 @@
++LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FR
++OEFNSUlCQ2dLQ0FRRUF0citqSVhjZTVMbkQ2NTVCT0VmbgpLb0ZuL1RxYnJJYjk0K3g1N2ZqdEwv
++L01JcnpqeE9mU3RML3hHemZLTVMrZzJBbGtnUVJEZnd3Y3RpME90SjFrCmJhV08yNTVSdnFTbE11
++S0IrREhyd1JtNDNoNUl6aWtzREdsRmVKUEVYa1NmUEtsYmtrdFNialJKaklNaHd4T0cKanVKNExa
++MHoxV01PZHJqeDZacE93UEUxbHU0aW5UU0dIMWZQcHhtUSthOXhJbnN3NVVBalE1OFVScjU1eDFj
++MAoxMkJyYVhKV2NvaUsyVk15UU9FRG43WjhxY2orWkFQOGVVdWRUajhXcW1UKzhaRGlnbTZoUDMz
++Nk5CRGY1RGMrCk94WVQzdFpqeGtSV0dWaG5zZUltanJjaXJjWUVrRjJ4bnVCSWNrOFNkbmpydkFC
++SVZTRXIvTTBEb0VwcHBiejMKZndJREFRQUIKLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg==
+diff --git a/src/ukify/test/meson.build b/src/ukify/test/meson.build
+new file mode 100644
+index 0000000000..5870ccc06c
+--- /dev/null
++++ b/src/ukify/test/meson.build
+@@ -0,0 +1,20 @@
++# SPDX-License-Identifier: LGPL-2.1-or-later
++
++if want_ukify and want_tests != 'false'
++        have_pytest_flakes = pymod.find_installation(
++                'python3',
++                required : false,
++                modules : ['pytest_flakes'],
++        ).found()
++
++        args = ['-v']
++        if have_pytest_flakes
++                args += ['--flakes']
++        endif
++
++        test('test-ukify',
++             files('test_ukify.py'),
++             args: args,
++             env : test_env,
++             suite : 'ukify')
++endif
+diff --git a/src/ukify/test/test_ukify.py b/src/ukify/test/test_ukify.py
+new file mode 100755
+index 0000000000..b12c09d4bf
+--- /dev/null
++++ b/src/ukify/test/test_ukify.py
+@@ -0,0 +1,848 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: LGPL-2.1-or-later
++
++# pylint: disable=unused-import,import-outside-toplevel,useless-else-on-loop
++# pylint: disable=consider-using-with,wrong-import-position,unspecified-encoding
++# pylint: disable=protected-access,redefined-outer-name
++
++import base64
++import json
++import os
++import pathlib
++import re
++import shutil
++import subprocess
++import sys
++import tempfile
++import textwrap
++
++try:
++    import pytest
++except ImportError as e:
++    print(str(e), file=sys.stderr)
++    sys.exit(77)
++
++try:
++    # pyflakes: noqa
++    import pefile  # noqa
++except ImportError as e:
++    print(str(e), file=sys.stderr)
++    sys.exit(77)
++
++# We import ukify.py, which is a template file. But only __version__ is
++# substituted, which we don't care about here. Having the .py suffix makes it
++# easier to import the file.
++sys.path.append(os.path.dirname(__file__) + '/..')
++import ukify
++
++build_root = os.getenv('PROJECT_BUILD_ROOT')
++arg_tools = ['--tools', build_root] if build_root else []
++
++def systemd_measure():
++    opts = ukify.create_parser().parse_args(arg_tools)
++    return ukify.find_tool('systemd-measure', opts=opts)
++
++def test_guess_efi_arch():
++    arch = ukify.guess_efi_arch()
++    assert arch in ukify.EFI_ARCHES
++
++def test_shell_join():
++    assert ukify.shell_join(['a', 'b', ' ']) == "a b ' '"
++
++def test_round_up():
++    assert ukify.round_up(0) == 0
++    assert ukify.round_up(4095) == 4096
++    assert ukify.round_up(4096) == 4096
++    assert ukify.round_up(4097) == 8192
++
++def test_namespace_creation():
++    ns = ukify.create_parser().parse_args(())
++    assert ns.linux is None
++    assert ns.initrd is None
++
++def test_config_example():
++    ex = ukify.config_example()
++    assert '[UKI]' in ex
++    assert 'Splash = BMP' in ex
++
++def test_apply_config(tmp_path):
++    config = tmp_path / 'config1.conf'
++    config.write_text(textwrap.dedent(
++        f'''
++        [UKI]
++        Linux = LINUX
++        Initrd = initrd1 initrd2
++                 initrd3
++        Cmdline = 1 2 3 4 5
++                  6 7 8
++        OSRelease = @some/path1
++        DeviceTree = some/path2
++        Splash = some/path3
++        Uname = 1.2.3
++        EFIArch=arm
++        Stub = some/path4
++        PCRBanks = sha512,sha1
++        SigningEngine = engine1
++        SecureBootPrivateKey = some/path5
++        SecureBootCertificate = some/path6
++        SignKernel = no
++
++        [PCRSignature:NAME]
++        PCRPrivateKey = some/path7
++        PCRPublicKey = some/path8
++        Phases = {':'.join(ukify.KNOWN_PHASES)}
++        '''))
++
++    ns = ukify.create_parser().parse_args(['build'])
++    ns.linux = None
++    ns.initrd = []
++    ukify.apply_config(ns, config)
++
++    assert ns.linux == pathlib.Path('LINUX')
++    assert ns.initrd == [pathlib.Path('initrd1'),
++                         pathlib.Path('initrd2'),
++                         pathlib.Path('initrd3')]
++    assert ns.cmdline == '1 2 3 4 5\n6 7 8'
++    assert ns.os_release == '@some/path1'
++    assert ns.devicetree == pathlib.Path('some/path2')
++    assert ns.splash == pathlib.Path('some/path3')
++    assert ns.efi_arch == 'arm'
++    assert ns.stub == pathlib.Path('some/path4')
++    assert ns.pcr_banks == ['sha512', 'sha1']
++    assert ns.signing_engine == 'engine1'
++    assert ns.sb_key == 'some/path5'
++    assert ns.sb_cert == 'some/path6'
++    assert ns.sign_kernel is False
++
++    assert ns._groups == ['NAME']
++    assert ns.pcr_private_keys == [pathlib.Path('some/path7')]
++    assert ns.pcr_public_keys == [pathlib.Path('some/path8')]
++    assert ns.phase_path_groups == [['enter-initrd:leave-initrd:sysinit:ready:shutdown:final']]
++
++    ukify.finalize_options(ns)
++
++    assert ns.linux == pathlib.Path('LINUX')
++    assert ns.initrd == [pathlib.Path('initrd1'),
++                         pathlib.Path('initrd2'),
++                         pathlib.Path('initrd3')]
++    assert ns.cmdline == '1 2 3 4 5 6 7 8'
++    assert ns.os_release == pathlib.Path('some/path1')
++    assert ns.devicetree == pathlib.Path('some/path2')
++    assert ns.splash == pathlib.Path('some/path3')
++    assert ns.efi_arch == 'arm'
++    assert ns.stub == pathlib.Path('some/path4')
++    assert ns.pcr_banks == ['sha512', 'sha1']
++    assert ns.signing_engine == 'engine1'
++    assert ns.sb_key == 'some/path5'
++    assert ns.sb_cert == 'some/path6'
++    assert ns.sign_kernel is False
++
++    assert ns._groups == ['NAME']
++    assert ns.pcr_private_keys == [pathlib.Path('some/path7')]
++    assert ns.pcr_public_keys == [pathlib.Path('some/path8')]
++    assert ns.phase_path_groups == [['enter-initrd:leave-initrd:sysinit:ready:shutdown:final']]
++
++def test_parse_args_minimal():
++    with pytest.raises(ValueError):
++        ukify.parse_args([])
++
++    opts = ukify.parse_args('arg1 arg2'.split())
++    assert opts.linux == pathlib.Path('arg1')
++    assert opts.initrd == [pathlib.Path('arg2')]
++    assert opts.os_release in (pathlib.Path('/etc/os-release'),
++                               pathlib.Path('/usr/lib/os-release'))
++
++def test_parse_args_many_deprecated():
++    opts = ukify.parse_args(
++        ['/ARG1', '///ARG2', '/ARG3 WITH SPACE',
++         '--cmdline=a b c',
++         '--os-release=K1=V1\nK2=V2',
++         '--devicetree=DDDDTTTT',
++         '--splash=splash',
++         '--pcrpkey=PATH',
++         '--uname=1.2.3',
++         '--stub=STUBPATH',
++         '--pcr-private-key=PKEY1',
++         '--pcr-public-key=PKEY2',
++         '--pcr-banks=SHA1,SHA256',
++         '--signing-engine=ENGINE',
++         '--secureboot-private-key=SBKEY',
++         '--secureboot-certificate=SBCERT',
++         '--sign-kernel',
++         '--no-sign-kernel',
++         '--tools=TOOLZ///',
++         '--output=OUTPUT',
++         '--measure',
++         '--no-measure',
++         ])
++    assert opts.linux == pathlib.Path('/ARG1')
++    assert opts.initrd == [pathlib.Path('/ARG2'), pathlib.Path('/ARG3 WITH SPACE')]
++    assert opts.cmdline == 'a b c'
++    assert opts.os_release == 'K1=V1\nK2=V2'
++    assert opts.devicetree == pathlib.Path('DDDDTTTT')
++    assert opts.splash == pathlib.Path('splash')
++    assert opts.pcrpkey == pathlib.Path('PATH')
++    assert opts.uname == '1.2.3'
++    assert opts.stub == pathlib.Path('STUBPATH')
++    assert opts.pcr_private_keys == [pathlib.Path('PKEY1')]
++    assert opts.pcr_public_keys == [pathlib.Path('PKEY2')]
++    assert opts.pcr_banks == ['SHA1', 'SHA256']
++    assert opts.signing_engine == 'ENGINE'
++    assert opts.sb_key == 'SBKEY'
++    assert opts.sb_cert == 'SBCERT'
++    assert opts.sign_kernel is False
++    assert opts.tools == [pathlib.Path('TOOLZ/')]
++    assert opts.output == pathlib.Path('OUTPUT')
++    assert opts.measure is False
++
++def test_parse_args_many():
++    opts = ukify.parse_args(
++        ['build',
++         '--linux=/ARG1',
++         '--initrd=///ARG2',
++         '--initrd=/ARG3 WITH SPACE',
++         '--cmdline=a b c',
++         '--os-release=K1=V1\nK2=V2',
++         '--devicetree=DDDDTTTT',
++         '--splash=splash',
++         '--pcrpkey=PATH',
++         '--uname=1.2.3',
++         '--stub=STUBPATH',
++         '--pcr-private-key=PKEY1',
++         '--pcr-public-key=PKEY2',
++         '--pcr-banks=SHA1,SHA256',
++         '--signing-engine=ENGINE',
++         '--secureboot-private-key=SBKEY',
++         '--secureboot-certificate=SBCERT',
++         '--sign-kernel',
++         '--no-sign-kernel',
++         '--tools=TOOLZ///',
++         '--output=OUTPUT',
++         '--measure',
++         '--no-measure',
++         ])
++    assert opts.linux == pathlib.Path('/ARG1')
++    assert opts.initrd == [pathlib.Path('/ARG2'), pathlib.Path('/ARG3 WITH SPACE')]
++    assert opts.cmdline == 'a b c'
++    assert opts.os_release == 'K1=V1\nK2=V2'
++    assert opts.devicetree == pathlib.Path('DDDDTTTT')
++    assert opts.splash == pathlib.Path('splash')
++    assert opts.pcrpkey == pathlib.Path('PATH')
++    assert opts.uname == '1.2.3'
++    assert opts.stub == pathlib.Path('STUBPATH')
++    assert opts.pcr_private_keys == [pathlib.Path('PKEY1')]
++    assert opts.pcr_public_keys == [pathlib.Path('PKEY2')]
++    assert opts.pcr_banks == ['SHA1', 'SHA256']
++    assert opts.signing_engine == 'ENGINE'
++    assert opts.sb_key == 'SBKEY'
++    assert opts.sb_cert == 'SBCERT'
++    assert opts.sign_kernel is False
++    assert opts.tools == [pathlib.Path('TOOLZ/')]
++    assert opts.output == pathlib.Path('OUTPUT')
++    assert opts.measure is False
++
++def test_parse_sections():
++    opts = ukify.parse_args(
++        ['build',
++         '--linux=/ARG1',
++         '--initrd=/ARG2',
++         '--section=test:TESTTESTTEST',
++         '--section=test2:@FILE',
++         ])
++
++    assert opts.linux == pathlib.Path('/ARG1')
++    assert opts.initrd == [pathlib.Path('/ARG2')]
++    assert len(opts.sections) == 2
++
++    assert opts.sections[0].name == 'test'
++    assert isinstance(opts.sections[0].content, pathlib.Path)
++    assert opts.sections[0].tmpfile
++    assert opts.sections[0].measure is False
++
++    assert opts.sections[1].name == 'test2'
++    assert opts.sections[1].content == pathlib.Path('FILE')
++    assert opts.sections[1].tmpfile is None
++    assert opts.sections[1].measure is False
++
++def test_config_priority(tmp_path):
++    config = tmp_path / 'config1.conf'
++    # config: use pesign and give certdir + certname
++    config.write_text(textwrap.dedent(
++        f'''
++        [UKI]
++        Linux = LINUX
++        Initrd = initrd1 initrd2
++                 initrd3
++        Cmdline = 1 2 3 4 5
++                  6 7 8
++        OSRelease = @some/path1
++        DeviceTree = some/path2
++        Splash = some/path3
++        Uname = 1.2.3
++        EFIArch = arm
++        Stub = some/path4
++        PCRBanks = sha512,sha1
++        SigningEngine = engine1
++        SecureBootSigningTool = pesign
++        SecureBootCertificateDir = some/path5
++        SecureBootCertificateName = some/name1
++        SignKernel = no
++
++        [PCRSignature:NAME]
++        PCRPrivateKey = some/path7
++        PCRPublicKey = some/path8
++        Phases = {':'.join(ukify.KNOWN_PHASES)}
++        '''))
++
++    # args: use sbsign and give key + cert, should override pesign
++    opts = ukify.parse_args(
++        ['build',
++         '--linux=/ARG1',
++         '--initrd=///ARG2',
++         '--initrd=/ARG3 WITH SPACE',
++         '--cmdline= a  b  c ',
++         '--os-release=K1=V1\nK2=V2',
++         '--devicetree=DDDDTTTT',
++         '--splash=splash',
++         '--pcrpkey=PATH',
++         '--uname=1.2.3',
++         '--stub=STUBPATH',
++         '--pcr-private-key=PKEY1',
++         '--pcr-public-key=PKEY2',
++         '--pcr-banks=SHA1,SHA256',
++         '--signing-engine=ENGINE',
++         '--signtool=sbsign',
++         '--secureboot-private-key=SBKEY',
++         '--secureboot-certificate=SBCERT',
++         '--sign-kernel',
++         '--no-sign-kernel',
++         '--tools=TOOLZ///',
++         '--output=OUTPUT',
++         '--measure',
++         ])
++
++    ukify.apply_config(opts, config)
++    ukify.finalize_options(opts)
++
++    assert opts.linux == pathlib.Path('/ARG1')
++    assert opts.initrd == [pathlib.Path('initrd1'),
++                           pathlib.Path('initrd2'),
++                           pathlib.Path('initrd3'),
++                           pathlib.Path('/ARG2'),
++                           pathlib.Path('/ARG3 WITH SPACE')]
++    assert opts.cmdline == 'a b c'
++    assert opts.os_release == 'K1=V1\nK2=V2'
++    assert opts.devicetree == pathlib.Path('DDDDTTTT')
++    assert opts.splash == pathlib.Path('splash')
++    assert opts.pcrpkey == pathlib.Path('PATH')
++    assert opts.uname == '1.2.3'
++    assert opts.stub == pathlib.Path('STUBPATH')
++    assert opts.pcr_private_keys == [pathlib.Path('PKEY1'),
++                                     pathlib.Path('some/path7')]
++    assert opts.pcr_public_keys == [pathlib.Path('PKEY2'),
++                                    pathlib.Path('some/path8')]
++    assert opts.pcr_banks == ['SHA1', 'SHA256']
++    assert opts.signing_engine == 'ENGINE'
++    assert opts.signtool == 'sbsign' # from args
++    assert opts.sb_key == 'SBKEY' # from args
++    assert opts.sb_cert == 'SBCERT' # from args
++    assert opts.sb_certdir == 'some/path5' # from config
++    assert opts.sb_cert_name == 'some/name1' # from config
++    assert opts.sign_kernel is False
++    assert opts.tools == [pathlib.Path('TOOLZ/')]
++    assert opts.output == pathlib.Path('OUTPUT')
++    assert opts.measure is True
++
++def test_help(capsys):
++    with pytest.raises(SystemExit):
++        ukify.parse_args(['--help'])
++    out = capsys.readouterr()
++    assert '--section' in out.out
++    assert not out.err
++
++def test_help_display(capsys):
++    with pytest.raises(SystemExit):
++        ukify.parse_args(['inspect', '--help'])
++    out = capsys.readouterr()
++    assert '--section' in out.out
++    assert not out.err
++
++def test_help_error_deprecated(capsys):
++    with pytest.raises(SystemExit):
++        ukify.parse_args(['a', 'b', '--no-such-option'])
++    out = capsys.readouterr()
++    assert not out.out
++    assert '--no-such-option' in out.err
++    assert len(out.err.splitlines()) == 1
++
++def test_help_error(capsys):
++    with pytest.raises(SystemExit):
++        ukify.parse_args(['build', '--no-such-option'])
++    out = capsys.readouterr()
++    assert not out.out
++    assert '--no-such-option' in out.err
++    assert len(out.err.splitlines()) == 1
++
++@pytest.fixture(scope='session')
++def kernel_initrd():
++    opts = ukify.create_parser().parse_args(arg_tools)
++    bootctl = ukify.find_tool('bootctl', opts=opts)
++    if bootctl is None:
++        return None
++
++    try:
++        text = subprocess.check_output([bootctl, 'list', '--json=short'],
++                                       text=True)
++    except subprocess.CalledProcessError:
++        return None
++
++    items = json.loads(text)
++
++    for item in items:
++        try:
++            linux = f"{item['root']}{item['linux']}"
++            initrd = f"{item['root']}{item['initrd'][0].split(' ')[0]}"
++        except (KeyError, IndexError):
++            continue
++        return ['--linux', linux, '--initrd', initrd]
++    else:
++        return None
++
++def test_check_splash():
++    try:
++        # pyflakes: noqa
++        import PIL  # noqa
++    except ImportError:
++        pytest.skip('PIL not available')
++
++    with pytest.raises(OSError):
++        ukify.check_splash(os.devnull)
++
++def test_basic_operation(kernel_initrd, tmpdir):
++    if kernel_initrd is None:
++        pytest.skip('linux+initrd not found')
++
++    output = f'{tmpdir}/basic.efi'
++    opts = ukify.parse_args([
++        'build',
++        *kernel_initrd,
++        f'--output={output}',
++    ])
++    try:
++        ukify.check_inputs(opts)
++    except OSError as e:
++        pytest.skip(str(e))
++
++    ukify.make_uki(opts)
++
++    # let's check that objdump likes the resulting file
++    subprocess.check_output(['objdump', '-h', output])
++
++def test_sections(kernel_initrd, tmpdir):
++    if kernel_initrd is None:
++        pytest.skip('linux+initrd not found')
++
++    output = f'{tmpdir}/basic.efi'
++    opts = ukify.parse_args([
++        'build',
++        *kernel_initrd,
++        f'--output={output}',
++        '--uname=1.2.3',
++        '--cmdline=ARG1 ARG2 ARG3',
++        '--os-release=K1=V1\nK2=V2\n',
++        '--section=.test:CONTENTZ',
++    ])
++
++    try:
++        ukify.check_inputs(opts)
++    except OSError as e:
++        pytest.skip(str(e))
++
++    ukify.make_uki(opts)
++
++    # let's check that objdump likes the resulting file
++    dump = subprocess.check_output(['objdump', '-h', output], text=True)
++
++    for sect in 'text osrel cmdline linux initrd uname test'.split():
++        assert re.search(fr'^\s*\d+\s+.{sect}\s+0', dump, re.MULTILINE)
++
++def test_addon(tmpdir):
++    output = f'{tmpdir}/addon.efi'
++    args = [
++        'build',
++        f'--output={output}',
++        '--cmdline=ARG1 ARG2 ARG3',
++        """--sbat=sbat,1,foo
++foo,1
++bar,2
++""",
++        '--section=.test:CONTENTZ',
++        """--sbat=sbat,1,foo
++baz,3
++"""
++    ]
++    if stub := os.getenv('EFI_ADDON'):
++        args += [f'--stub={stub}']
++        expected_exceptions = ()
++    else:
++        expected_exceptions = (FileNotFoundError,)
++
++    opts = ukify.parse_args(args)
++    try:
++        ukify.check_inputs(opts)
++    except expected_exceptions as e:
++        pytest.skip(str(e))
++
++    ukify.make_uki(opts)
++
++    # let's check that objdump likes the resulting file
++    dump = subprocess.check_output(['objdump', '-h', output], text=True)
++
++    for sect in 'text cmdline test sbat'.split():
++        assert re.search(fr'^\s*\d+\s+.{sect}\s+0', dump, re.MULTILINE)
++
++    pe = pefile.PE(output, fast_load=True)
++    found = False
++
++    for section in pe.sections:
++        if section.Name.rstrip(b"\x00").decode() == ".sbat":
++            assert found is False
++            split = section.get_data().rstrip(b"\x00").decode().splitlines()
++            assert split == ["sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md", "foo,1", "bar,2", "baz,3"]
++            found = True
++
++    assert found is True
++
++
++def unbase64(filename):
++    tmp = tempfile.NamedTemporaryFile()
++    base64.decode(filename.open('rb'), tmp)
++    tmp.flush()
++    return tmp
++
++
++def test_uname_scraping(kernel_initrd):
++    if kernel_initrd is None:
++        pytest.skip('linux+initrd not found')
++
++    assert kernel_initrd[0] == '--linux'
++    uname = ukify.Uname.scrape(kernel_initrd[1])
++    assert re.match(r'\d+\.\d+\.\d+', uname)
++
++def test_efi_signing_sbsign(kernel_initrd, tmpdir):
++    if kernel_initrd is None:
++        pytest.skip('linux+initrd not found')
++    if not shutil.which('sbsign'):
++        pytest.skip('sbsign not found')
++
++    ourdir = pathlib.Path(__file__).parent
++    cert = unbase64(ourdir / 'example.signing.crt.base64')
++    key = unbase64(ourdir / 'example.signing.key.base64')
++
++    output = f'{tmpdir}/signed.efi'
++    opts = ukify.parse_args([
++        'build',
++        *kernel_initrd,
++        f'--output={output}',
++        '--uname=1.2.3',
++        '--cmdline=ARG1 ARG2 ARG3',
++        f'--secureboot-certificate={cert.name}',
++        f'--secureboot-private-key={key.name}',
++    ])
++
++    try:
++        ukify.check_inputs(opts)
++    except OSError as e:
++        pytest.skip(str(e))
++
++    ukify.make_uki(opts)
++
++    if shutil.which('sbverify'):
++        # let's check that sbverify likes the resulting file
++        dump = subprocess.check_output([
++            'sbverify',
++            '--cert', cert.name,
++            output,
++        ], text=True)
++
++        assert 'Signature verification OK' in dump
++
++def test_efi_signing_pesign(kernel_initrd, tmpdir):
++    if kernel_initrd is None:
++        pytest.skip('linux+initrd not found')
++    if not shutil.which('pesign'):
++        pytest.skip('pesign not found')
++
++    nss_db = f'{tmpdir}/nss_db'
++    name = 'Test_Secureboot'
++    author = 'systemd'
++
++    subprocess.check_call(['mkdir', '-p', nss_db])
++    cmd = f'certutil -N --empty-password -d {nss_db}'.split(' ')
++    subprocess.check_call(cmd)
++    cmd = f'efikeygen -d {nss_db} -S -k -c CN={author} -n {name}'.split(' ')
++    subprocess.check_call(cmd)
++
++    output = f'{tmpdir}/signed.efi'
++    opts = ukify.parse_args([
++        'build',
++        *kernel_initrd,
++        f'--output={output}',
++        '--uname=1.2.3',
++        '--signtool=pesign',
++        '--cmdline=ARG1 ARG2 ARG3',
++        f'--secureboot-certificate-name={name}',
++        f'--secureboot-certificate-dir={nss_db}',
++    ])
++
++    try:
++        ukify.check_inputs(opts)
++    except OSError as e:
++        pytest.skip(str(e))
++
++    ukify.make_uki(opts)
++
++    # let's check that sbverify likes the resulting file
++    dump = subprocess.check_output([
++        'pesign', '-S',
++        '-i', output,
++    ], text=True)
++
++    assert f"The signer's common name is {author}" in dump
++
++def test_inspect(kernel_initrd, tmpdir, capsys):
++    if kernel_initrd is None:
++        pytest.skip('linux+initrd not found')
++    if not shutil.which('sbsign'):
++        pytest.skip('sbsign not found')
++
++    ourdir = pathlib.Path(__file__).parent
++    cert = unbase64(ourdir / 'example.signing.crt.base64')
++    key = unbase64(ourdir / 'example.signing.key.base64')
++
++    output = f'{tmpdir}/signed2.efi'
++    uname_arg='1.2.3'
++    osrel_arg='Linux'
++    cmdline_arg='ARG1 ARG2 ARG3'
++    opts = ukify.parse_args([
++        'build',
++        *kernel_initrd,
++        f'--cmdline={cmdline_arg}',
++        f'--os-release={osrel_arg}',
++        f'--uname={uname_arg}',
++        f'--output={output}',
++        f'--secureboot-certificate={cert.name}',
++        f'--secureboot-private-key={key.name}',
++    ])
++
++    ukify.check_inputs(opts)
++    ukify.make_uki(opts)
++
++    opts = ukify.parse_args(['inspect', output])
++    ukify.inspect_sections(opts)
++
++    text = capsys.readouterr().out
++
++    expected_osrel = f'.osrel:\n  size: {len(osrel_arg)}'
++    assert expected_osrel in text
++    expected_cmdline = f'.cmdline:\n  size: {len(cmdline_arg)}'
++    assert expected_cmdline in text
++    expected_uname = f'.uname:\n  size: {len(uname_arg)}'
++    assert expected_uname in text
++
++    expected_initrd = '.initrd:\n  size:'
++    assert expected_initrd in text
++    expected_linux = '.linux:\n  size:'
++    assert expected_linux in text
++
++
++def test_pcr_signing(kernel_initrd, tmpdir):
++    if kernel_initrd is None:
++        pytest.skip('linux+initrd not found')
++    if systemd_measure() is None:
++        pytest.skip('systemd-measure not found')
++
++    ourdir = pathlib.Path(__file__).parent
++    pub = unbase64(ourdir / 'example.tpm2-pcr-public.pem.base64')
++    priv = unbase64(ourdir / 'example.tpm2-pcr-private.pem.base64')
++
++    output = f'{tmpdir}/signed.efi'
++    args = [
++        'build',
++        *kernel_initrd,
++        f'--output={output}',
++        '--uname=1.2.3',
++        '--cmdline=ARG1 ARG2 ARG3',
++        '--os-release=ID=foobar\n',
++        '--pcr-banks=sha1',   # use sha1 because it doesn't really matter
++        f'--pcr-private-key={priv.name}',
++    ] + arg_tools
++
++    # If the public key is not explicitly specified, it is derived automatically. Let's make sure everything
++    # works as expected both when the public keys is specified explicitly and when it is derived from the
++    # private key.
++    for extra in ([f'--pcrpkey={pub.name}', f'--pcr-public-key={pub.name}'], []):
++        opts = ukify.parse_args(args + extra)
++        try:
++            ukify.check_inputs(opts)
++        except OSError as e:
++            pytest.skip(str(e))
++
++        ukify.make_uki(opts)
++
++        # let's check that objdump likes the resulting file
++        dump = subprocess.check_output(['objdump', '-h', output], text=True)
++
++        for sect in 'text osrel cmdline linux initrd uname pcrsig'.split():
++            assert re.search(fr'^\s*\d+\s+.{sect}\s+0', dump, re.MULTILINE)
++
++        # objcopy fails when called without an output argument (EPERM).
++        # It also fails when called with /dev/null (file truncated).
++        # It also fails when called with /dev/zero (because it reads the
++        # output file, infinitely in this case.)
++        # So let's just call it with a dummy output argument.
++        subprocess.check_call([
++            'objcopy',
++            *(f'--dump-section=.{n}={tmpdir}/out.{n}' for n in (
++                'pcrpkey', 'pcrsig', 'osrel', 'uname', 'cmdline')),
++            output,
++            tmpdir / 'dummy',
++        ],
++            text=True)
++
++        assert open(tmpdir / 'out.pcrpkey').read() == open(pub.name).read()
++        assert open(tmpdir / 'out.osrel').read() == 'ID=foobar\n'
++        assert open(tmpdir / 'out.uname').read() == '1.2.3'
++        assert open(tmpdir / 'out.cmdline').read() == 'ARG1 ARG2 ARG3'
++        sig = open(tmpdir / 'out.pcrsig').read()
++        sig = json.loads(sig)
++        assert list(sig.keys()) == ['sha1']
++        assert len(sig['sha1']) == 4   # four items for four phases
++
++def test_pcr_signing2(kernel_initrd, tmpdir):
++    if kernel_initrd is None:
++        pytest.skip('linux+initrd not found')
++    if systemd_measure() is None:
++        pytest.skip('systemd-measure not found')
++
++    ourdir = pathlib.Path(__file__).parent
++    pub = unbase64(ourdir / 'example.tpm2-pcr-public.pem.base64')
++    priv = unbase64(ourdir / 'example.tpm2-pcr-private.pem.base64')
++    pub2 = unbase64(ourdir / 'example.tpm2-pcr-public2.pem.base64')
++    priv2 = unbase64(ourdir / 'example.tpm2-pcr-private2.pem.base64')
++
++    # simulate a microcode file
++    with open(f'{tmpdir}/microcode', 'wb') as microcode:
++        microcode.write(b'1234567890')
++
++    output = f'{tmpdir}/signed.efi'
++    assert kernel_initrd[0] == '--linux'
++    opts = ukify.parse_args([
++        'build',
++        *kernel_initrd[:2],
++        f'--initrd={microcode.name}',
++        *kernel_initrd[2:],
++        f'--output={output}',
++        '--uname=1.2.3',
++        '--cmdline=ARG1 ARG2 ARG3',
++        '--os-release=ID=foobar\n',
++        '--pcr-banks=sha1',
++        f'--pcrpkey={pub2.name}',
++        f'--pcr-public-key={pub.name}',
++        f'--pcr-private-key={priv.name}',
++        '--phases=enter-initrd enter-initrd:leave-initrd',
++        f'--pcr-public-key={pub2.name}',
++        f'--pcr-private-key={priv2.name}',
++        '--phases=sysinit ready shutdown final',  # yes, those phase paths are not reachable
++    ] + arg_tools)
++
++    try:
++        ukify.check_inputs(opts)
++    except OSError as e:
++        pytest.skip(str(e))
++
++    ukify.make_uki(opts)
++
++    # let's check that objdump likes the resulting file
++    dump = subprocess.check_output(['objdump', '-h', output], text=True)
++
++    for sect in 'text osrel cmdline linux initrd uname pcrsig'.split():
++        assert re.search(fr'^\s*\d+\s+.{sect}\s+0', dump, re.MULTILINE)
++
++    subprocess.check_call([
++        'objcopy',
++        *(f'--dump-section=.{n}={tmpdir}/out.{n}' for n in (
++            'pcrpkey', 'pcrsig', 'osrel', 'uname', 'cmdline', 'initrd')),
++        output,
++        tmpdir / 'dummy',
++    ],
++        text=True)
++
++    assert open(tmpdir / 'out.pcrpkey').read() == open(pub2.name).read()
++    assert open(tmpdir / 'out.osrel').read() == 'ID=foobar\n'
++    assert open(tmpdir / 'out.uname').read() == '1.2.3'
++    assert open(tmpdir / 'out.cmdline').read() == 'ARG1 ARG2 ARG3'
++    assert open(tmpdir / 'out.initrd', 'rb').read(10) == b'1234567890'
++
++    sig = open(tmpdir / 'out.pcrsig').read()
++    sig = json.loads(sig)
++    assert list(sig.keys()) == ['sha1']
++    assert len(sig['sha1']) == 6   # six items for six phases paths
++
++def test_key_cert_generation(tmpdir):
++    opts = ukify.parse_args([
++        'genkey',
++        f"--pcr-public-key={tmpdir / 'pcr1.pub.pem'}",
++        f"--pcr-private-key={tmpdir / 'pcr1.priv.pem'}",
++        '--phases=enter-initrd enter-initrd:leave-initrd',
++        f"--pcr-public-key={tmpdir / 'pcr2.pub.pem'}",
++        f"--pcr-private-key={tmpdir / 'pcr2.priv.pem'}",
++        '--phases=sysinit ready',
++        f"--secureboot-private-key={tmpdir / 'sb.priv.pem'}",
++        f"--secureboot-certificate={tmpdir / 'sb.cert.pem'}",
++    ])
++    assert opts.verb == 'genkey'
++    ukify.check_cert_and_keys_nonexistent(opts)
++
++    pytest.importorskip('cryptography')
++
++    ukify.generate_keys(opts)
++
++    if not shutil.which('openssl'):
++        return
++
++    for key in (tmpdir / 'pcr1.priv.pem',
++                tmpdir / 'pcr2.priv.pem',
++                tmpdir / 'sb.priv.pem'):
++        out = subprocess.check_output([
++            'openssl', 'rsa',
++            '-in', key,
++            '-text',
++            '-noout',
++        ], text = True)
++        assert 'Private-Key' in out
++        assert '2048 bit' in out
++
++    for pub in (tmpdir / 'pcr1.pub.pem',
++                tmpdir / 'pcr2.pub.pem'):
++        out = subprocess.check_output([
++            'openssl', 'rsa',
++            '-pubin',
++            '-in', pub,
++            '-text',
++            '-noout',
++        ], text = True)
++        assert 'Public-Key' in out
++        assert '2048 bit' in out
++
++    out = subprocess.check_output([
++        'openssl', 'x509',
++        '-in', tmpdir / 'sb.cert.pem',
++        '-text',
++        '-noout',
++    ], text = True)
++    assert 'Certificate' in out
++    assert 'Issuer: CN = SecureBoot signing key on host' in out
++
++if __name__ == '__main__':
++    sys.exit(pytest.main(sys.argv))
+diff --git a/src/ukify/ukify.py b/src/ukify/ukify.py
+new file mode 100755
+index 0000000000..08f505a271
+--- /dev/null
++++ b/src/ukify/ukify.py
+@@ -0,0 +1,1660 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: LGPL-2.1-or-later
++#
++# This file is part of systemd.
++#
++# systemd is free software; you can redistribute it and/or modify it
++# under the terms of the GNU Lesser General Public License as published by
++# the Free Software Foundation; either version 2.1 of the License, or
++# (at your option) any later version.
++#
++# systemd is distributed in the hope that it will be useful, but
++# WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++# General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public License
++# along with systemd; If not, see <https://www.gnu.org/licenses/>.
++
++# pylint: disable=import-outside-toplevel,consider-using-with,unused-argument
++# pylint: disable=unnecessary-lambda-assignment
++
++import argparse
++import configparser
++import contextlib
++import collections
++import dataclasses
++import datetime
++import fnmatch
++import itertools
++import json
++import os
++import pathlib
++import pprint
++import pydoc
++import re
++import shlex
++import shutil
++import socket
++import subprocess
++import sys
++import tempfile
++import textwrap
++from hashlib import sha256
++from typing import (Any,
++                    Callable,
++                    IO,
++                    Optional,
++                    Sequence,
++                    Union)
++
++import pefile  # type: ignore
++
++__version__ = '{{PROJECT_VERSION}} ({{GIT_VERSION}})'
++
++EFI_ARCH_MAP = {
++    # host_arch glob : [efi_arch, 32_bit_efi_arch if mixed mode is supported]
++    'x86_64'       : ['x64', 'ia32'],
++    'i[3456]86'    : ['ia32'],
++    'aarch64'      : ['aa64'],
++    'armv[45678]*l': ['arm'],
++    'loongarch32'  : ['loongarch32'],
++    'loongarch64'  : ['loongarch64'],
++    'riscv32'      : ['riscv32'],
++    'riscv64'      : ['riscv64'],
++}
++EFI_ARCHES: list[str] = sum(EFI_ARCH_MAP.values(), [])
++
++# Default configuration directories and file name.
++# When the user does not specify one, the directories are searched in this order and the first file found is used.
++DEFAULT_CONFIG_DIRS = ['/run/systemd', '/etc/systemd', '/usr/local/lib/systemd', '/usr/lib/systemd']
++DEFAULT_CONFIG_FILE = 'ukify.conf'
++
++class Style:
++    bold = "\033[0;1;39m" if sys.stderr.isatty() else ""
++    gray = "\033[0;38;5;245m" if sys.stderr.isatty() else ""
++    red = "\033[31;1m" if sys.stderr.isatty() else ""
++    yellow = "\033[33;1m" if sys.stderr.isatty() else ""
++    reset = "\033[0m" if sys.stderr.isatty() else ""
++
++
++def guess_efi_arch():
++    arch = os.uname().machine
++
++    for glob, mapping in EFI_ARCH_MAP.items():
++        if fnmatch.fnmatch(arch, glob):
++            efi_arch, *fallback = mapping
++            break
++    else:
++        raise ValueError(f'Unsupported architecture {arch}')
++
++    # This makes sense only on some architectures, but it also probably doesn't
++    # hurt on others, so let's just apply the check everywhere.
++    if fallback:
++        fw_platform_size = pathlib.Path('/sys/firmware/efi/fw_platform_size')
++        try:
++            size = fw_platform_size.read_text().strip()
++        except FileNotFoundError:
++            pass
++        else:
++            if int(size) == 32:
++                efi_arch = fallback[0]
++
++    # print(f'Host arch {arch!r}, EFI arch {efi_arch!r}')
++    return efi_arch
++
++
++def page(text: str, enabled: Optional[bool]) -> None:
++    if enabled:
++        # Initialize less options from $SYSTEMD_LESS or provide a suitable fallback.
++        os.environ['LESS'] = os.getenv('SYSTEMD_LESS', 'FRSXMK')
++        pydoc.pager(text)
++    else:
++        print(text)
++
++
++def shell_join(cmd):
++    # TODO: drop in favour of shlex.join once shlex.join supports pathlib.Path.
++    return ' '.join(shlex.quote(str(x)) for x in cmd)
++
++
++def round_up(x, blocksize=4096):
++    return (x + blocksize - 1) // blocksize * blocksize
++
++
++def try_import(modname, name=None):
++    try:
++        return __import__(modname)
++    except ImportError as e:
++        raise ValueError(f'Kernel is compressed with {name or modname}, but module unavailable') from e
++
++
++def maybe_decompress(filename):
++    """Decompress file if compressed. Return contents."""
++    f = open(filename, 'rb')
++    start = f.read(4)
++    f.seek(0)
++
++    if start.startswith(b'\x7fELF'):
++        # not compressed
++        return f.read()
++
++    if start.startswith(b'MZ'):
++        # not compressed aarch64 and riscv64
++        return f.read()
++
++    if start.startswith(b'\x1f\x8b'):
++        gzip = try_import('gzip')
++        return gzip.open(f).read()
++
++    if start.startswith(b'\x28\xb5\x2f\xfd'):
++        zstd = try_import('zstd')
++        return zstd.uncompress(f.read())
++
++    if start.startswith(b'\x02\x21\x4c\x18'):
++        lz4 = try_import('lz4.frame', 'lz4')
++        return lz4.frame.decompress(f.read())
++
++    if start.startswith(b'\x04\x22\x4d\x18'):
++        print('Newer lz4 stream format detected! This may not boot!')
++        lz4 = try_import('lz4.frame', 'lz4')
++        return lz4.frame.decompress(f.read())
++
++    if start.startswith(b'\x89LZO'):
++        # python3-lzo is not packaged for Fedora
++        raise NotImplementedError('lzo decompression not implemented')
++
++    if start.startswith(b'BZh'):
++        bz2 = try_import('bz2', 'bzip2')
++        return bz2.open(f).read()
++
++    if start.startswith(b'\x5d\x00\x00'):
++        lzma = try_import('lzma')
++        return lzma.open(f).read()
++
++    raise NotImplementedError(f'unknown file format (starts with {start})')
++
++
++class Uname:
++    # This class is here purely as a namespace for the functions
++
++    VERSION_PATTERN = r'(?P<version>[a-z0-9._-]+) \([^ )]+\) (?:#.*)'
++
++    NOTES_PATTERN = r'^\s+Linux\s+0x[0-9a-f]+\s+OPEN\n\s+description data: (?P<version>[0-9a-f ]+)\s*$'
++
++    # Linux version 6.0.8-300.fc37.ppc64le (mockbuild@buildvm-ppc64le-03.iad2.fedoraproject.org)
++    # (gcc (GCC) 12.2.1 20220819 (Red Hat 12.2.1-2), GNU ld version 2.38-24.fc37)
++    # #1 SMP Fri Nov 11 14:39:11 UTC 2022
++    TEXT_PATTERN = rb'Linux version (?P<version>\d\.\S+) \('
++
++    @classmethod
++    def scrape_x86(cls, filename, opts=None):
++        # Based on https://gitlab.archlinux.org/archlinux/mkinitcpio/mkinitcpio/-/blob/master/functions#L136
++        # and https://www.kernel.org/doc/html/latest/x86/boot.html#the-real-mode-kernel-header
++        with open(filename, 'rb') as f:
++            f.seek(0x202)
++            magic = f.read(4)
++            if magic != b'HdrS':
++                raise ValueError('Real-Mode Kernel Header magic not found')
++            f.seek(0x20E)
++            offset = f.read(1)[0] + f.read(1)[0]*256  # Pointer to kernel version string
++            f.seek(0x200 + offset)
++            text = f.read(128)
++        text = text.split(b'\0', maxsplit=1)[0]
++        text = text.decode()
++
++        if not (m := re.match(cls.VERSION_PATTERN, text)):
++            raise ValueError(f'Cannot parse version-host-release uname string: {text!r}')
++        return m.group('version')
++
++    @classmethod
++    def scrape_elf(cls, filename, opts=None):
++        readelf = find_tool('readelf', opts=opts)
++
++        cmd = [
++            readelf,
++            '--notes',
++            filename,
++        ]
++
++        print('+', shell_join(cmd))
++        try:
++            notes = subprocess.check_output(cmd, stderr=subprocess.PIPE, text=True)
++        except subprocess.CalledProcessError as e:
++            raise ValueError(e.stderr.strip()) from e
++
++        if not (m := re.search(cls.NOTES_PATTERN, notes, re.MULTILINE)):
++            raise ValueError('Cannot find Linux version note')
++
++        text = ''.join(chr(int(c, 16)) for c in m.group('version').split())
++        return text.rstrip('\0')
++
++    @classmethod
++    def scrape_generic(cls, filename, opts=None):
++        # import libarchive
++        # libarchive-c fails with
++        # ArchiveError: Unrecognized archive format (errno=84, retcode=-30, archive_p=94705420454656)
++
++        # Based on https://gitlab.archlinux.org/archlinux/mkinitcpio/mkinitcpio/-/blob/master/functions#L209
++
++        text = maybe_decompress(filename)
++        if not (m := re.search(cls.TEXT_PATTERN, text)):
++            raise ValueError(f'Cannot find {cls.TEXT_PATTERN!r} in {filename}')
++
++        return m.group('version').decode()
++
++    @classmethod
++    def scrape(cls, filename, opts=None):
++        for func in (cls.scrape_x86, cls.scrape_elf, cls.scrape_generic):
++            try:
++                version = func(filename, opts=opts)
++                print(f'Found uname version: {version}')
++                return version
++            except ValueError as e:
++                print(str(e))
++        return None
++
++DEFAULT_SECTIONS_TO_SHOW = {
++        '.linux'    : 'binary',
++        '.initrd'   : 'binary',
++        '.splash'   : 'binary',
++        '.dtb'      : 'binary',
++        '.cmdline'  : 'text',
++        '.osrel'    : 'text',
++        '.uname'    : 'text',
++        '.pcrpkey'  : 'text',
++        '.pcrsig'   : 'text',
++        '.sbat'     : 'text',
++        '.sbom'     : 'binary',
++}
++
++@dataclasses.dataclass
++class Section:
++    name: str
++    content: Optional[pathlib.Path]
++    tmpfile: Optional[IO] = None
++    measure: bool = False
++    output_mode: Optional[str] = None
++
++    @classmethod
++    def create(cls, name, contents, **kwargs):
++        if isinstance(contents, (str, bytes)):
++            mode = 'wt' if isinstance(contents, str) else 'wb'
++            tmp = tempfile.NamedTemporaryFile(mode=mode, prefix=f'tmp{name}')
++            tmp.write(contents)
++            tmp.flush()
++            contents = pathlib.Path(tmp.name)
++        else:
++            tmp = None
++
++        return cls(name, contents, tmpfile=tmp, **kwargs)
++
++    @classmethod
++    def parse_input(cls, s):
++        try:
++            name, contents, *rest = s.split(':')
++        except ValueError as e:
++            raise ValueError(f'Cannot parse section spec (name or contents missing): {s!r}') from e
++        if rest:
++            raise ValueError(f'Cannot parse section spec (extraneous parameters): {s!r}')
++
++        if contents.startswith('@'):
++            contents = pathlib.Path(contents[1:])
++
++        sec = cls.create(name, contents)
++        sec.check_name()
++        return sec
++
++    @classmethod
++    def parse_output(cls, s):
++        if not (m := re.match(r'([a-zA-Z0-9_.]+):(text|binary)(?:@(.+))?', s)):
++            raise ValueError(f'Cannot parse section spec: {s!r}')
++
++        name, ttype, out = m.groups()
++        out = pathlib.Path(out) if out else None
++
++        return cls.create(name, out, output_mode=ttype)
++
++    def size(self):
++        return self.content.stat().st_size
++
++    def check_name(self):
++        # PE section names with more than 8 characters are legal, but our stub does
++        # not support them.
++        if not self.name.isascii() or not self.name.isprintable():
++            raise ValueError(f'Bad section name: {self.name!r}')
++        if len(self.name) > 8:
++            raise ValueError(f'Section name too long: {self.name!r}')
++
++
++@dataclasses.dataclass
++class UKI:
++    executable: list[Union[pathlib.Path, str]]
++    sections: list[Section] = dataclasses.field(default_factory=list, init=False)
++
++    def add_section(self, section):
++        if section.name in [s.name for s in self.sections]:
++            raise ValueError(f'Duplicate section {section.name}')
++
++        self.sections += [section]
++
++
++def parse_banks(s):
++    banks = re.split(r',|\s+', s)
++    # TODO: do some sanity checking here
++    return banks
++
++
++KNOWN_PHASES = (
++    'enter-initrd',
++    'leave-initrd',
++    'sysinit',
++    'ready',
++    'shutdown',
++    'final',
++)
++
++def parse_phase_paths(s):
++    # Split on commas or whitespace here. Commas might be hard to parse visually.
++    paths = re.split(r',|\s+', s)
++
++    for path in paths:
++        for phase in path.split(':'):
++            if phase not in KNOWN_PHASES:
++                raise argparse.ArgumentTypeError(f'Unknown boot phase {phase!r} ({path=})')
++
++    return paths
++
++
++def check_splash(filename):
++    if filename is None:
++        return
++
++    # import is delayed, to avoid import when the splash image is not used
++    try:
++        from PIL import Image
++    except ImportError:
++        return
++
++    img = Image.open(filename, formats=['BMP'])
++    print(f'Splash image {filename} is {img.width}×{img.height} pixels')
++
++
++def check_inputs(opts):
++    for name, value in vars(opts).items():
++        if name in {'output', 'tools'}:
++            continue
++
++        if isinstance(value, pathlib.Path):
++            # Open file to check that we can read it, or generate an exception
++            value.open().close()
++        elif isinstance(value, list):
++            for item in value:
++                if isinstance(item, pathlib.Path):
++                    item.open().close()
++
++    check_splash(opts.splash)
++
++
++def check_cert_and_keys_nonexistent(opts):
++    # Raise if any of the keys and certs are found on disk
++    paths = itertools.chain(
++        (opts.sb_key, opts.sb_cert),
++        *((priv_key, pub_key)
++          for priv_key, pub_key, _ in key_path_groups(opts)))
++    for path in paths:
++        if path and path.exists():
++            raise ValueError(f'{path} is present')
++
++
++def find_tool(name, fallback=None, opts=None):
++    if opts and opts.tools:
++        for d in opts.tools:
++            tool = d / name
++            if tool.exists():
++                return tool
++
++    if shutil.which(name) is not None:
++        return name
++
++    if fallback is None:
++        print(f"Tool {name} not installed!")
++
++    return fallback
++
++def combine_signatures(pcrsigs):
++    combined = collections.defaultdict(list)
++    for pcrsig in pcrsigs:
++        for bank, sigs in pcrsig.items():
++            for sig in sigs:
++                if sig not in combined[bank]:
++                    combined[bank] += [sig]
++    return json.dumps(combined)
++
++
++def key_path_groups(opts):
++    if not opts.pcr_private_keys:
++        return
++
++    n_priv = len(opts.pcr_private_keys)
++    pub_keys = opts.pcr_public_keys or [None] * n_priv
++    pp_groups = opts.phase_path_groups or [None] * n_priv
++
++    yield from zip(opts.pcr_private_keys,
++                   pub_keys,
++                   pp_groups)
++
++
++def call_systemd_measure(uki, linux, opts):
++    measure_tool = find_tool('systemd-measure',
++                             '/usr/lib/systemd/systemd-measure',
++                             opts=opts)
++
++    banks = opts.pcr_banks or ()
++
++    # PCR measurement
++
++    if opts.measure:
++        pp_groups = opts.phase_path_groups or []
++
++        cmd = [
++            measure_tool,
++            'calculate',
++            f'--linux={linux}',
++            *(f"--{s.name.removeprefix('.')}={s.content}"
++              for s in uki.sections
++              if s.measure),
++            *(f'--bank={bank}'
++              for bank in banks),
++            # For measurement, the keys are not relevant, so we can lump all the phase paths
++            # into one call to systemd-measure calculate.
++            *(f'--phase={phase_path}'
++              for phase_path in itertools.chain.from_iterable(pp_groups)),
++        ]
++
++        print('+', shell_join(cmd))
++        subprocess.check_call(cmd)
++
++    # PCR signing
++
++    if opts.pcr_private_keys:
++        pcrsigs = []
++
++        cmd = [
++            measure_tool,
++            'sign',
++            f'--linux={linux}',
++            *(f"--{s.name.removeprefix('.')}={s.content}"
++              for s in uki.sections
++              if s.measure),
++            *(f'--bank={bank}'
++              for bank in banks),
++        ]
++
++        for priv_key, pub_key, group in key_path_groups(opts):
++            extra = [f'--private-key={priv_key}']
++            if pub_key:
++                extra += [f'--public-key={pub_key}']
++            extra += [f'--phase={phase_path}' for phase_path in group or ()]
++
++            print('+', shell_join(cmd + extra))
++            pcrsig = subprocess.check_output(cmd + extra, text=True)
++            pcrsig = json.loads(pcrsig)
++            pcrsigs += [pcrsig]
++
++        combined = combine_signatures(pcrsigs)
++        uki.add_section(Section.create('.pcrsig', combined))
++
++
++def join_initrds(initrds):
++    if not initrds:
++        return None
++    if len(initrds) == 1:
++        return initrds[0]
++
++    seq = []
++    for file in initrds:
++        initrd = file.read_bytes()
++        n = len(initrd)
++        padding = b'\0' * (round_up(n, 4) - n)  # pad to 32 bit alignment
++        seq += [initrd, padding]
++
++    return b''.join(seq)
++
++
++def pairwise(iterable):
++    a, b = itertools.tee(iterable)
++    next(b, None)
++    return zip(a, b)
++
++
++class PEError(Exception):
++    pass
++
++
++def pe_add_sections(uki: UKI, output: str):
++    pe = pefile.PE(uki.executable, fast_load=True)
++
++    # Old stubs do not have the symbol/string table stripped, even though image files should not have one.
++    if symbol_table := pe.FILE_HEADER.PointerToSymbolTable:
++        symbol_table_size = 18 * pe.FILE_HEADER.NumberOfSymbols
++        if string_table_size := pe.get_dword_from_offset(symbol_table + symbol_table_size):
++            symbol_table_size += string_table_size
++
++        # Let's be safe and only strip it if it's at the end of the file.
++        if symbol_table + symbol_table_size == len(pe.__data__):
++            pe.__data__ = pe.__data__[:symbol_table]
++            pe.FILE_HEADER.PointerToSymbolTable = 0
++            pe.FILE_HEADER.NumberOfSymbols = 0
++            pe.FILE_HEADER.IMAGE_FILE_LOCAL_SYMS_STRIPPED = True
++
++    # Old stubs might have been stripped, leading to unaligned raw data values, so let's fix them up here.
++    # pylint thinks that Structure doesn't have various members that it has…
++    # pylint: disable=no-member
++
++    for i, section in enumerate(pe.sections):
++        oldp = section.PointerToRawData
++        oldsz = section.SizeOfRawData
++        section.PointerToRawData = round_up(oldp, pe.OPTIONAL_HEADER.FileAlignment)
++        section.SizeOfRawData = round_up(oldsz, pe.OPTIONAL_HEADER.FileAlignment)
++        padp = section.PointerToRawData - oldp
++        padsz = section.SizeOfRawData - oldsz
++
++        for later_section in pe.sections[i+1:]:
++            later_section.PointerToRawData += padp + padsz
++
++        pe.__data__ = pe.__data__[:oldp] + bytes(padp) + pe.__data__[oldp:oldp+oldsz] + bytes(padsz) + pe.__data__[oldp+oldsz:]
++
++    # We might not have any space to add new sections. Let's try our best to make some space by padding the
++    # SizeOfHeaders to a multiple of the file alignment. This is safe because the first section's data starts
++    # at a multiple of the file alignment, so all space before that is unused.
++    pe.OPTIONAL_HEADER.SizeOfHeaders = round_up(pe.OPTIONAL_HEADER.SizeOfHeaders, pe.OPTIONAL_HEADER.FileAlignment)
++    pe = pefile.PE(data=pe.write(), fast_load=True)
++
++    warnings = pe.get_warnings()
++    if warnings:
++        raise PEError(f'pefile warnings treated as errors: {warnings}')
++
++    security = pe.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']]
++    if security.VirtualAddress != 0:
++        # We could strip the signatures, but why would anyone sign the stub?
++        raise PEError('Stub image is signed, refusing.')
++
++    for section in uki.sections:
++        new_section = pefile.SectionStructure(pe.__IMAGE_SECTION_HEADER_format__, pe=pe)
++        new_section.__unpack__(b'\0' * new_section.sizeof())
++
++        offset = pe.sections[-1].get_file_offset() + new_section.sizeof()
++        if offset + new_section.sizeof() > pe.OPTIONAL_HEADER.SizeOfHeaders:
++            raise PEError(f'Not enough header space to add section {section.name}.')
++
++        assert section.content
++        data = section.content.read_bytes()
++
++        new_section.set_file_offset(offset)
++        new_section.Name = section.name.encode()
++        new_section.Misc_VirtualSize = len(data)
++        # Non-stripped stubs might still have an unaligned symbol table at the end, making their size
++        # unaligned, so we make sure to explicitly pad the pointer to new sections to an aligned offset.
++        new_section.PointerToRawData = round_up(len(pe.__data__), pe.OPTIONAL_HEADER.FileAlignment)
++        new_section.SizeOfRawData = round_up(len(data), pe.OPTIONAL_HEADER.FileAlignment)
++        new_section.VirtualAddress = round_up(
++            pe.sections[-1].VirtualAddress + pe.sections[-1].Misc_VirtualSize,
++            pe.OPTIONAL_HEADER.SectionAlignment,
++        )
++
++        new_section.IMAGE_SCN_MEM_READ = True
++        if section.name == '.linux':
++            # Old kernels that use EFI handover protocol will be executed inline.
++            new_section.IMAGE_SCN_CNT_CODE = True
++        else:
++            new_section.IMAGE_SCN_CNT_INITIALIZED_DATA = True
++
++        # Special case, mostly for .sbat: the stub will already have a .sbat section, but we want to append
++        # the one from the kernel to it. It should be small enough to fit in the existing section, so just
++        # swap the data.
++        for i, s in enumerate(pe.sections):
++            if s.Name.rstrip(b"\x00").decode() == section.name:
++                if new_section.Misc_VirtualSize > s.SizeOfRawData:
++                    raise PEError(f'Not enough space in existing section {section.name} to append new data.')
++
++                padding = bytes(new_section.SizeOfRawData - new_section.Misc_VirtualSize)
++                pe.__data__ = pe.__data__[:s.PointerToRawData] + data + padding + pe.__data__[pe.sections[i+1].PointerToRawData:]
++                s.SizeOfRawData = new_section.SizeOfRawData
++                s.Misc_VirtualSize = new_section.Misc_VirtualSize
++                break
++        else:
++            pe.__data__ = pe.__data__[:] + bytes(new_section.PointerToRawData - len(pe.__data__)) + data + bytes(new_section.SizeOfRawData - len(data))
++
++            pe.FILE_HEADER.NumberOfSections += 1
++            pe.OPTIONAL_HEADER.SizeOfInitializedData += new_section.Misc_VirtualSize
++            pe.__structures__.append(new_section)
++            pe.sections.append(new_section)
++
++    pe.OPTIONAL_HEADER.CheckSum = 0
++    pe.OPTIONAL_HEADER.SizeOfImage = round_up(
++        pe.sections[-1].VirtualAddress + pe.sections[-1].Misc_VirtualSize,
++        pe.OPTIONAL_HEADER.SectionAlignment,
++    )
++
++    pe.write(output)
++
++def merge_sbat(input_pe: [pathlib.Path], input_text: [str]) -> str:
++    sbat = []
++
++    for f in input_pe:
++        try:
++            pe = pefile.PE(f, fast_load=True)
++        except pefile.PEFormatError:
++            print(f"{f} is not a valid PE file, not extracting SBAT section.")
++            continue
++
++        for section in pe.sections:
++            if section.Name.rstrip(b"\x00").decode() == ".sbat":
++                split = section.get_data().rstrip(b"\x00").decode().splitlines()
++                if not split[0].startswith('sbat,'):
++                    print(f"{f} does not contain a valid SBAT section, skipping.")
++                    continue
++                # Filter out the sbat line, we'll add it back later, there needs to be only one and it
++                # needs to be first.
++                sbat += split[1:]
++
++    for t in input_text:
++        if t.startswith('@'):
++            t = pathlib.Path(t[1:]).read_text()
++        split = t.splitlines()
++        if not split[0].startswith('sbat,'):
++            print(f"{t} does not contain a valid SBAT section, skipping.")
++            continue
++        sbat += split[1:]
++
++    return 'sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md\n' + '\n'.join(sbat) + "\n\x00"
++
++def signer_sign(cmd):
++    print('+', shell_join(cmd))
++    subprocess.check_call(cmd)
++
++def find_sbsign(opts=None):
++    return find_tool('sbsign', opts=opts)
++
++def sbsign_sign(sbsign_tool, input_f, output_f, opts=None):
++    sign_invocation = [
++        sbsign_tool,
++        '--key', opts.sb_key,
++        '--cert', opts.sb_cert,
++        input_f,
++        '--output', output_f,
++    ]
++    if opts.signing_engine is not None:
++        sign_invocation += ['--engine', opts.signing_engine]
++    signer_sign(sign_invocation)
++
++def find_pesign(opts=None):
++    return find_tool('pesign', opts=opts)
++
++def pesign_sign(pesign_tool, input_f, output_f, opts=None):
++    sign_invocation = [
++        pesign_tool, '-s', '--force',
++        '-n', opts.sb_certdir,
++        '-c', opts.sb_cert_name,
++        '-i', input_f,
++        '-o', output_f,
++    ]
++    signer_sign(sign_invocation)
++
++SBVERIFY = {
++    'name': 'sbverify',
++    'option': '--list',
++    'output': 'No signature table present',
++}
++
++PESIGCHECK = {
++    'name': 'pesign',
++    'option': '-i',
++    'output': 'No signatures found.',
++    'flags': '-S'
++}
++
++def verify(tool, opts):
++    verify_tool = find_tool(tool['name'], opts=opts)
++    cmd = [
++        verify_tool,
++        tool['option'],
++        opts.linux,
++    ]
++    if 'flags' in tool:
++        cmd.append(tool['flags'])
++
++    print('+', shell_join(cmd))
++    info = subprocess.check_output(cmd, text=True)
++
++    return tool['output'] in info
++
++def make_uki(opts):
++    # kernel payload signing
++
++    sign_tool = None
++    sign_args_present = opts.sb_key or opts.sb_cert_name
++    sign_kernel = opts.sign_kernel
++    sign = None
++    linux = opts.linux
++
++    if sign_args_present:
++        if opts.signtool == 'sbsign':
++            sign_tool = find_sbsign(opts=opts)
++            sign = sbsign_sign
++            verify_tool = SBVERIFY
++        else:
++            sign_tool = find_pesign(opts=opts)
++            sign = pesign_sign
++            verify_tool = PESIGCHECK
++
++        if sign_tool is None:
++            raise ValueError(f'{opts.signtool}, required for signing, is not installed')
++
++        if sign_kernel is None and opts.linux is not None:
++            # figure out if we should sign the kernel
++            sign_kernel = verify(verify_tool, opts)
++
++        if sign_kernel:
++            linux_signed = tempfile.NamedTemporaryFile(prefix='linux-signed')
++            linux = pathlib.Path(linux_signed.name)
++            sign(sign_tool, opts.linux, linux, opts=opts)
++
++    if opts.uname is None and opts.linux is not None:
++        print('Kernel version not specified, starting autodetection 😖.')
++        opts.uname = Uname.scrape(opts.linux, opts=opts)
++
++    uki = UKI(opts.stub)
++    initrd = join_initrds(opts.initrd)
++
++    pcrpkey = opts.pcrpkey
++    if pcrpkey is None:
++        if opts.pcr_public_keys and len(opts.pcr_public_keys) == 1:
++            pcrpkey = opts.pcr_public_keys[0]
++        elif opts.pcr_private_keys and len(opts.pcr_private_keys) == 1:
++            import cryptography.hazmat.primitives.serialization as serialization
++            privkey = serialization.load_pem_private_key(opts.pcr_private_keys[0].read_bytes(), password=None)
++            pcrpkey = privkey.public_key().public_bytes(
++                encoding=serialization.Encoding.PEM,
++                format=serialization.PublicFormat.SubjectPublicKeyInfo,
++            )
++
++    sections = [
++        # name,      content,         measure?
++        ('.osrel',   opts.os_release, True ),
++        ('.cmdline', opts.cmdline,    True ),
++        ('.dtb',     opts.devicetree, True ),
++        ('.uname',   opts.uname,      True ),
++        ('.splash',  opts.splash,     True ),
++        ('.pcrpkey', pcrpkey,         True ),
++        ('.initrd',  initrd,          True ),
++
++        # linux shall be last to leave breathing room for decompression.
++        # We'll add it later.
++    ]
++
++    for name, content, measure in sections:
++        if content:
++            uki.add_section(Section.create(name, content, measure=measure))
++
++    # systemd-measure doesn't know about those extra sections
++    for section in opts.sections:
++        uki.add_section(section)
++
++    if linux is not None:
++        # Merge the .sbat sections from stub, kernel and parameter, so that revocation can be done on either.
++        uki.add_section(Section.create('.sbat', merge_sbat([opts.stub, linux], opts.sbat), measure=True))
++    else:
++        # Addons don't use the stub so we add SBAT manually
++        if not opts.sbat:
++            opts.sbat = ["""sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md
++uki,1,UKI,uki,1,https://www.freedesktop.org/software/systemd/man/systemd-stub.html
++"""]
++        uki.add_section(Section.create('.sbat', merge_sbat([], opts.sbat), measure=False))
++
++    # PCR measurement and signing
++
++    # We pass in the contents for .linux separately because we need them to do the measurement but can't add
++    # the section yet because we want .linux to be the last section. Make sure any other sections are added
++    # before this function is called.
++    call_systemd_measure(uki, linux, opts=opts)
++
++    # UKI creation
++
++    if linux is not None:
++        uki.add_section(Section.create('.linux', linux, measure=True))
++
++    if sign_args_present:
++        unsigned = tempfile.NamedTemporaryFile(prefix='uki')
++        unsigned_output = unsigned.name
++    else:
++        unsigned_output = opts.output
++
++    pe_add_sections(uki, unsigned_output)
++
++    # UKI signing
++
++    if sign_args_present:
++        assert sign
++        sign(sign_tool, unsigned_output, opts.output, opts=opts)
++
++        # We end up with no executable bits, let's reapply them
++        os.umask(umask := os.umask(0))
++        os.chmod(opts.output, 0o777 & ~umask)
++
++    print(f"Wrote {'signed' if sign_args_present else 'unsigned'} {opts.output}")
++
++
++ONE_DAY = datetime.timedelta(1, 0, 0)
++
++
++@contextlib.contextmanager
++def temporary_umask(mask: int):
++    # Drop <mask> bits from umask
++    old = os.umask(0)
++    os.umask(old | mask)
++    try:
++        yield
++    finally:
++        os.umask(old)
++
++
++def generate_key_cert_pair(
++        common_name: str,
++        valid_days: int,
++        keylength: int = 2048,
++) -> tuple[bytes]:
++
++    from cryptography import x509
++    from cryptography.hazmat.primitives import serialization, hashes
++    from cryptography.hazmat.primitives.asymmetric import rsa
++
++    # We use a keylength of 2048 bits. That is what Microsoft documents as
++    # supported/expected:
++    # https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/windows-secure-boot-key-creation-and-management-guidance?view=windows-11#12-public-key-cryptography
++
++    now = datetime.datetime.utcnow()
++
++    key = rsa.generate_private_key(
++        public_exponent=65537,
++        key_size=keylength,
++    )
++    cert = x509.CertificateBuilder(
++    ).subject_name(
++        x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, common_name)])
++    ).issuer_name(
++        x509.Name([x509.NameAttribute(x509.oid.NameOID.COMMON_NAME, common_name)])
++    ).not_valid_before(
++        now,
++    ).not_valid_after(
++        now + ONE_DAY * valid_days
++    ).serial_number(
++        x509.random_serial_number()
++    ).public_key(
++        key.public_key()
++    ).add_extension(
++        x509.BasicConstraints(ca=False, path_length=None),
++        critical=True,
++    ).sign(
++        private_key=key,
++        algorithm=hashes.SHA256(),
++    )
++
++    cert_pem = cert.public_bytes(
++        encoding=serialization.Encoding.PEM,
++    )
++    key_pem = key.private_bytes(
++        encoding=serialization.Encoding.PEM,
++        format=serialization.PrivateFormat.TraditionalOpenSSL,
++        encryption_algorithm=serialization.NoEncryption(),
++    )
++
++    return key_pem, cert_pem
++
++
++def generate_priv_pub_key_pair(keylength : int = 2048) -> tuple[bytes]:
++    from cryptography.hazmat.primitives import serialization
++    from cryptography.hazmat.primitives.asymmetric import rsa
++
++    key = rsa.generate_private_key(
++        public_exponent=65537,
++        key_size=keylength,
++    )
++    priv_key_pem = key.private_bytes(
++        encoding=serialization.Encoding.PEM,
++        format=serialization.PrivateFormat.TraditionalOpenSSL,
++        encryption_algorithm=serialization.NoEncryption(),
++    )
++    pub_key_pem = key.public_key().public_bytes(
++        encoding=serialization.Encoding.PEM,
++        format=serialization.PublicFormat.SubjectPublicKeyInfo,
++    )
++
++    return priv_key_pem, pub_key_pem
++
++
++def generate_keys(opts):
++    # This will generate keys and certificates and write them to the paths that
++    # are specified as input paths.
++    if opts.sb_key or opts.sb_cert:
++        fqdn = socket.getfqdn()
++        cn = f'SecureBoot signing key on host {fqdn}'
++        key_pem, cert_pem = generate_key_cert_pair(
++            common_name=cn,
++            valid_days=opts.sb_cert_validity,
++        )
++        print(f'Writing SecureBoot private key to {opts.sb_key}')
++        with temporary_umask(0o077):
++            opts.sb_key.write_bytes(key_pem)
++        print(f'Writing SecureBoot certificate to {opts.sb_cert}')
++        opts.sb_cert.write_bytes(cert_pem)
++
++    for priv_key, pub_key, _ in key_path_groups(opts):
++        priv_key_pem, pub_key_pem = generate_priv_pub_key_pair()
++
++        print(f'Writing private key for PCR signing to {priv_key}')
++        with temporary_umask(0o077):
++            priv_key.write_bytes(priv_key_pem)
++        if pub_key:
++            print(f'Writing public key for PCR signing to {pub_key}')
++            pub_key.write_bytes(pub_key_pem)
++
++
++def inspect_section(opts, section):
++    name = section.Name.rstrip(b"\x00").decode()
++
++    # find the config for this section in opts and whether to show it
++    config = opts.sections_by_name.get(name, None)
++    show = (config or
++            opts.all or
++            (name in DEFAULT_SECTIONS_TO_SHOW and not opts.sections))
++    if not show:
++        return name, None
++
++    ttype = config.output_mode if config else DEFAULT_SECTIONS_TO_SHOW.get(name, 'binary')
++
++    size = section.Misc_VirtualSize
++    # TODO: Use ignore_padding once we can depend on a newer version of pefile
++    data = section.get_data(length=size)
++    digest = sha256(data).hexdigest()
++
++    struct = {
++        'size' : size,
++        'sha256' : digest,
++    }
++
++    if ttype == 'text':
++        try:
++            struct['text'] = data.decode()
++        except UnicodeDecodeError as e:
++            print(f"Section {name!r} is not valid text: {e}")
++            struct['text'] = '(not valid UTF-8)'
++
++    if config and config.content:
++        assert isinstance(config.content, pathlib.Path)
++        config.content.write_bytes(data)
++
++    if opts.json == 'off':
++        print(f"{name}:\n  size: {size} bytes\n  sha256: {digest}")
++        if ttype == 'text':
++            text = textwrap.indent(struct['text'].rstrip(), ' ' * 4)
++            print(f"  text:\n{text}")
++
++    return name, struct
++
++
++def inspect_sections(opts):
++    indent = 4 if opts.json == 'pretty' else None
++
++    for file in opts.files:
++        pe = pefile.PE(file, fast_load=True)
++        gen = (inspect_section(opts, section) for section in pe.sections)
++        descs = {key:val for (key, val) in gen if val}
++        if opts.json != 'off':
++            json.dump(descs, sys.stdout, indent=indent)
++
++
++@dataclasses.dataclass(frozen=True)
++class ConfigItem:
++    @staticmethod
++    def config_list_prepend(
++            namespace: argparse.Namespace,
++            group: Optional[str],
++            dest: str,
++            value: Any,
++    ) -> None:
++        "Prepend value to namespace.<dest>"
++
++        assert not group
++
++        old = getattr(namespace, dest, [])
++        if old is None:
++            old = []
++        setattr(namespace, dest, value + old)
++
++    @staticmethod
++    def config_set_if_unset(
++            namespace: argparse.Namespace,
++            group: Optional[str],
++            dest: str,
++            value: Any,
++    ) -> None:
++        "Set namespace.<dest> to value only if it was None"
++
++        assert not group
++
++        if getattr(namespace, dest) is None:
++            setattr(namespace, dest, value)
++
++    @staticmethod
++    def config_set(
++            namespace: argparse.Namespace,
++            group: Optional[str],
++            dest: str,
++            value: Any,
++    ) -> None:
++        "Set namespace.<dest> to value only if it was None"
++
++        assert not group
++
++        setattr(namespace, dest, value)
++
++    @staticmethod
++    def config_set_group(
++            namespace: argparse.Namespace,
++            group: Optional[str],
++            dest: str,
++            value: Any,
++    ) -> None:
++        "Set namespace.<dest>[idx] to value, with idx derived from group"
++
++        # pylint: disable=protected-access
++        if group not in namespace._groups:
++            namespace._groups += [group]
++        idx = namespace._groups.index(group)
++
++        old = getattr(namespace, dest, None)
++        if old is None:
++            old = []
++        setattr(namespace, dest,
++                old + ([None] * (idx - len(old))) + [value])
++
++    @staticmethod
++    def parse_boolean(s: str) -> bool:
++        "Parse 1/true/yes/y/t/on as true and 0/false/no/n/f/off/None as false"
++        s_l = s.lower()
++        if s_l in {'1', 'true', 'yes', 'y', 't', 'on'}:
++            return True
++        if s_l in {'0', 'false', 'no', 'n', 'f', 'off'}:
++            return False
++        raise ValueError('f"Invalid boolean literal: {s!r}')
++
++    # arguments for argparse.ArgumentParser.add_argument()
++    name: Union[str, tuple[str, str]]
++    dest: Optional[str] = None
++    metavar: Optional[str] = None
++    type: Optional[Callable] = None
++    nargs: Optional[str] = None
++    action: Optional[Union[str, Callable]] = None
++    default: Any = None
++    version: Optional[str] = None
++    choices: Optional[tuple[str, ...]] = None
++    const: Optional[Any] = None
++    help: Optional[str] = None
++
++    # metadata for config file parsing
++    config_key: Optional[str] = None
++    config_push: Callable[[argparse.Namespace, Optional[str], str, Any], None] = \
++                    config_set_if_unset
++
++    def _names(self) -> tuple[str, ...]:
++        return self.name if isinstance(self.name, tuple) else (self.name,)
++
++    def argparse_dest(self) -> str:
++        # It'd be nice if argparse exported this, but I don't see that in the API
++        if self.dest:
++            return self.dest
++        return self._names()[0].lstrip('-').replace('-', '_')
++
++    def add_to(self, parser: argparse.ArgumentParser):
++        kwargs = { key:val
++                   for key in dataclasses.asdict(self)
++                   if (key not in ('name', 'config_key', 'config_push') and
++                       (val := getattr(self, key)) is not None) }
++        args = self._names()
++        parser.add_argument(*args, **kwargs)
++
++    def apply_config(self, namespace, section, group, key, value) -> None:
++        assert f'{section}/{key}' == self.config_key
++        dest = self.argparse_dest()
++
++        conv: Callable[[str], Any]
++        if self.action == argparse.BooleanOptionalAction:
++            # We need to handle this case separately: the options are called
++            # --foo and --no-foo, and no argument is parsed. But in the config
++            # file, we have Foo=yes or Foo=no.
++            conv = self.parse_boolean
++        elif self.type:
++            conv = self.type
++        else:
++            conv = lambda s:s
++
++        # This is a bit ugly, but --initrd is the only option which is specified
++        # with multiple args on the command line and a space-separated list in the
++        # config file.
++        if self.name == '--initrd':
++            value = [conv(v) for v in value.split()]
++        else:
++            value = conv(value)
++
++        self.config_push(namespace, group, dest, value)
++
++    def config_example(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
++        if not self.config_key:
++            return None, None, None
++        section_name, key = self.config_key.split('/', 1)
++        if section_name.endswith(':'):
++            section_name += 'NAME'
++        if self.choices:
++            value = '|'.join(self.choices)
++        else:
++            value = self.metavar or self.argparse_dest().upper()
++        return (section_name, key, value)
++
++
++VERBS = ('build', 'genkey', 'inspect')
++
++CONFIG_ITEMS = [
++    ConfigItem(
++        'positional',
++        metavar = 'VERB',
++        nargs = '*',
++        help = argparse.SUPPRESS,
++    ),
++
++    ConfigItem(
++        '--version',
++        action = 'version',
++        version = f'ukify {__version__}',
++    ),
++
++    ConfigItem(
++        '--summary',
++        help = 'print parsed config and exit',
++        action = 'store_true',
++    ),
++
++    ConfigItem(
++        '--linux',
++        type = pathlib.Path,
++        help = 'vmlinuz file [.linux section]',
++        config_key = 'UKI/Linux',
++    ),
++
++    ConfigItem(
++        '--initrd',
++        metavar = 'INITRD',
++        type = pathlib.Path,
++        action = 'append',
++        help = 'initrd file [part of .initrd section]',
++        config_key = 'UKI/Initrd',
++        config_push = ConfigItem.config_list_prepend,
++    ),
++
++    ConfigItem(
++        ('--config', '-c'),
++        metavar = 'PATH',
++        type = pathlib.Path,
++        help = 'configuration file',
++    ),
++
++    ConfigItem(
++        '--cmdline',
++        metavar = 'TEXT|@PATH',
++        help = 'kernel command line [.cmdline section]',
++        config_key = 'UKI/Cmdline',
++    ),
++
++    ConfigItem(
++        '--os-release',
++        metavar = 'TEXT|@PATH',
++        help = 'path to os-release file [.osrel section]',
++        config_key = 'UKI/OSRelease',
++    ),
++
++    ConfigItem(
++        '--devicetree',
++        metavar = 'PATH',
++        type = pathlib.Path,
++        help = 'Device Tree file [.dtb section]',
++        config_key = 'UKI/DeviceTree',
++    ),
++    ConfigItem(
++        '--splash',
++        metavar = 'BMP',
++        type = pathlib.Path,
++        help = 'splash image bitmap file [.splash section]',
++        config_key = 'UKI/Splash',
++    ),
++    ConfigItem(
++        '--pcrpkey',
++        metavar = 'KEY',
++        type = pathlib.Path,
++        help = 'embedded public key to seal secrets to [.pcrpkey section]',
++        config_key = 'UKI/PCRPKey',
++    ),
++    ConfigItem(
++        '--uname',
++        metavar='VERSION',
++        help='"uname -r" information [.uname section]',
++        config_key = 'UKI/Uname',
++    ),
++
++    ConfigItem(
++        '--efi-arch',
++        metavar = 'ARCH',
++        choices = ('ia32', 'x64', 'arm', 'aa64', 'riscv64'),
++        help = 'target EFI architecture',
++        config_key = 'UKI/EFIArch',
++    ),
++
++    ConfigItem(
++        '--stub',
++        type = pathlib.Path,
++        help = 'path to the sd-stub file [.text,.data,… sections]',
++        config_key = 'UKI/Stub',
++    ),
++
++    ConfigItem(
++        '--sbat',
++        metavar = 'TEXT|@PATH',
++        help = 'SBAT policy [.sbat section]',
++        default = [],
++        action = 'append',
++        config_key = 'UKI/SBAT',
++    ),
++
++    ConfigItem(
++        '--section',
++        dest = 'sections',
++        metavar = 'NAME:TEXT|@PATH',
++        action = 'append',
++        default = [],
++        help = 'section as name and contents [NAME section] or section to print',
++    ),
++
++    ConfigItem(
++        '--pcr-banks',
++        metavar = 'BANK…',
++        type = parse_banks,
++        config_key = 'UKI/PCRBanks',
++    ),
++
++    ConfigItem(
++        '--signing-engine',
++        metavar = 'ENGINE',
++        help = 'OpenSSL engine to use for signing',
++        config_key = 'UKI/SigningEngine',
++    ),
++    ConfigItem(
++        '--signtool',
++        choices = ('sbsign', 'pesign'),
++        dest = 'signtool',
++        help = 'whether to use sbsign or pesign. It will also be inferred by the other \
++        parameters given: when using --secureboot-{private-key/certificate}, sbsign \
++        will be used, otherwise pesign will be used',
++        config_key = 'UKI/SecureBootSigningTool',
++    ),
++    ConfigItem(
++        '--secureboot-private-key',
++        dest = 'sb_key',
++        help = 'required by --signtool=sbsign. Path to key file or engine-specific designation for SB signing',
++        config_key = 'UKI/SecureBootPrivateKey',
++    ),
++    ConfigItem(
++        '--secureboot-certificate',
++        dest = 'sb_cert',
++        help = 'required by --signtool=sbsign. sbsign needs a path to certificate file or engine-specific designation for SB signing',
++        config_key = 'UKI/SecureBootCertificate',
++    ),
++    ConfigItem(
++        '--secureboot-certificate-dir',
++        dest = 'sb_certdir',
++        default = '/etc/pki/pesign',
++        help = 'required by --signtool=pesign. Path to nss certificate database directory for PE signing. Default is /etc/pki/pesign',
++        config_key = 'UKI/SecureBootCertificateDir',
++        config_push = ConfigItem.config_set
++    ),
++    ConfigItem(
++        '--secureboot-certificate-name',
++        dest = 'sb_cert_name',
++        help = 'required by --signtool=pesign. pesign needs a certificate nickname of nss certificate database entry to use for PE signing',
++        config_key = 'UKI/SecureBootCertificateName',
++    ),
++    ConfigItem(
++        '--secureboot-certificate-validity',
++        metavar = 'DAYS',
++        dest = 'sb_cert_validity',
++        default = 365 * 10,
++        help = "period of validity (in days) for a certificate created by 'genkey'",
++        config_key = 'UKI/SecureBootCertificateValidity',
++        config_push = ConfigItem.config_set
++    ),
++
++    ConfigItem(
++        '--sign-kernel',
++        action = argparse.BooleanOptionalAction,
++        help = 'Sign the embedded kernel',
++        config_key = 'UKI/SignKernel',
++    ),
++
++    ConfigItem(
++        '--pcr-private-key',
++        dest = 'pcr_private_keys',
++        metavar = 'PATH',
++        type = pathlib.Path,
++        action = 'append',
++        help = 'private part of the keypair for signing PCR signatures',
++        config_key = 'PCRSignature:/PCRPrivateKey',
++        config_push = ConfigItem.config_set_group,
++    ),
++    ConfigItem(
++        '--pcr-public-key',
++        dest = 'pcr_public_keys',
++        metavar = 'PATH',
++        type = pathlib.Path,
++        action = 'append',
++        help = 'public part of the keypair for signing PCR signatures',
++        config_key = 'PCRSignature:/PCRPublicKey',
++        config_push = ConfigItem.config_set_group,
++    ),
++    ConfigItem(
++        '--phases',
++        dest = 'phase_path_groups',
++        metavar = 'PHASE-PATH…',
++        type = parse_phase_paths,
++        action = 'append',
++        help = 'phase-paths to create signatures for',
++        config_key = 'PCRSignature:/Phases',
++        config_push = ConfigItem.config_set_group,
++    ),
++
++    ConfigItem(
++        '--tools',
++        type = pathlib.Path,
++        action = 'append',
++        help = 'Directories to search for tools (systemd-measure, …)',
++    ),
++
++    ConfigItem(
++        ('--output', '-o'),
++        type = pathlib.Path,
++        help = 'output file path',
++    ),
++
++    ConfigItem(
++        '--measure',
++        action = argparse.BooleanOptionalAction,
++        help = 'print systemd-measure output for the UKI',
++    ),
++
++    ConfigItem(
++        '--json',
++        choices = ('pretty', 'short', 'off'),
++        default = 'off',
++        help = 'generate JSON output',
++    ),
++    ConfigItem(
++        '-j',
++        dest='json',
++        action='store_const',
++        const='pretty',
++        help='equivalent to --json=pretty',
++    ),
++
++    ConfigItem(
++        '--all',
++        help = 'print all sections',
++        action = 'store_true',
++    ),
++]
++
++CONFIGFILE_ITEMS = { item.config_key:item
++                     for item in CONFIG_ITEMS
++                     if item.config_key }
++
++
++def apply_config(namespace, filename=None):
++    if filename is None:
++        if namespace.config:
++            # Config set by the user, use that.
++            filename = namespace.config
++            print(f'Using config file: {filename}')
++        else:
++            # Try to look for a config file then use the first one found.
++            for config_dir in DEFAULT_CONFIG_DIRS:
++                filename = pathlib.Path(config_dir) / DEFAULT_CONFIG_FILE
++                if filename.is_file():
++                    # Found a config file, use it.
++                    print(f'Using found config file: {filename}')
++                    break
++            else:
++                # No config file specified or found, nothing to do.
++                return
++
++    # Fill in ._groups based on --pcr-public-key=, --pcr-private-key=, and --phases=.
++    assert '_groups' not in namespace
++    n_pcr_priv = len(namespace.pcr_private_keys or ())
++    namespace._groups = list(range(n_pcr_priv))  # pylint: disable=protected-access
++
++    cp = configparser.ConfigParser(
++        comment_prefixes='#',
++        inline_comment_prefixes='#',
++        delimiters='=',
++        empty_lines_in_values=False,
++        interpolation=None,
++        strict=False)
++    # Do not make keys lowercase
++    cp.optionxform = lambda option: option
++
++    # The API is not great.
++    read = cp.read(filename)
++    if not read:
++        raise IOError(f'Failed to read {filename}')
++
++    for section_name, section in cp.items():
++        idx = section_name.find(':')
++        if idx >= 0:
++            section_name, group = section_name[:idx+1], section_name[idx+1:]
++            if not section_name or not group:
++                raise ValueError('Section name components cannot be empty')
++            if ':' in group:
++                raise ValueError('Section name cannot contain more than one ":"')
++        else:
++            group = None
++        for key, value in section.items():
++            if item := CONFIGFILE_ITEMS.get(f'{section_name}/{key}'):
++                item.apply_config(namespace, section_name, group, key, value)
++            else:
++                print(f'Unknown config setting [{section_name}] {key}=')
++
++
++def config_example():
++    prev_section = None
++    for item in CONFIG_ITEMS:
++        section, key, value = item.config_example()
++        if section:
++            if prev_section != section:
++                if prev_section:
++                    yield ''
++                yield f'[{section}]'
++                prev_section = section
++            yield f'{key} = {value}'
++
++
++class PagerHelpAction(argparse._HelpAction):  # pylint: disable=protected-access
++    def __call__(
++        self,
++        parser: argparse.ArgumentParser,
++        namespace: argparse.Namespace,
++        values: Union[str, Sequence[Any], None] = None,
++        option_string: Optional[str] = None
++    ) -> None:
++        page(parser.format_help(), True)
++        parser.exit()
++
++
++def create_parser():
++    p = argparse.ArgumentParser(
++        description='Build and sign Unified Kernel Images',
++        usage='\n  ' + textwrap.dedent('''\
++          ukify {b}build{e} [--linux=LINUX] [--initrd=INITRD] [options…]
++            ukify {b}genkey{e} [options…]
++            ukify {b}inspect{e} FILE… [options…]
++        ''').format(b=Style.bold, e=Style.reset),
++        allow_abbrev=False,
++        add_help=False,
++        epilog='\n  '.join(('config file:', *config_example())),
++        formatter_class=argparse.RawDescriptionHelpFormatter,
++    )
++
++    for item in CONFIG_ITEMS:
++        item.add_to(p)
++
++    # Suppress printing of usage synopsis on errors
++    p.error = lambda message: p.exit(2, f'{p.prog}: error: {message}\n')
++
++    # Make --help paged
++    p.add_argument(
++        '-h', '--help',
++        action=PagerHelpAction,
++        help='show this help message and exit',
++    )
++
++    return p
++
++
++def finalize_options(opts):
++    # Figure out which syntax is being used, one of:
++    # ukify verb --arg --arg --arg
++    # ukify linux initrd…
++    if len(opts.positional) >= 1 and opts.positional[0] == 'inspect':
++        opts.verb = opts.positional[0]
++        opts.files = opts.positional[1:]
++        if not opts.files:
++            raise ValueError('file(s) to inspect must be specified')
++        if len(opts.files) > 1 and opts.json != 'off':
++            # We could allow this in the future, but we need to figure out the right structure
++            raise ValueError('JSON output is not allowed with multiple files')
++    elif len(opts.positional) == 1 and opts.positional[0] in VERBS:
++        opts.verb = opts.positional[0]
++    elif opts.linux or opts.initrd:
++        raise ValueError('--linux/--initrd options cannot be used with positional arguments')
++    else:
++        print("Assuming obsolete command line syntax with no verb. Please use 'build'.")
++        if opts.positional:
++            opts.linux = pathlib.Path(opts.positional[0])
++        # If we have initrds from parsing config files, append our positional args at the end
++        opts.initrd = (opts.initrd or []) + [pathlib.Path(arg) for arg in opts.positional[1:]]
++        opts.verb = 'build'
++
++    # Check that --pcr-public-key=, --pcr-private-key=, and --phases=
++    # have either the same number of arguments are are not specified at all.
++    n_pcr_pub = None if opts.pcr_public_keys is None else len(opts.pcr_public_keys)
++    n_pcr_priv = None if opts.pcr_private_keys is None else len(opts.pcr_private_keys)
++    n_phase_path_groups = None if opts.phase_path_groups is None else len(opts.phase_path_groups)
++    if n_pcr_pub is not None and n_pcr_pub != n_pcr_priv:
++        raise ValueError('--pcr-public-key= specifications must match --pcr-private-key=')
++    if n_phase_path_groups is not None and n_phase_path_groups != n_pcr_priv:
++        raise ValueError('--phases= specifications must match --pcr-private-key=')
++
++    if opts.cmdline and opts.cmdline.startswith('@'):
++        opts.cmdline = pathlib.Path(opts.cmdline[1:])
++    elif opts.cmdline:
++        # Drop whitespace from the command line. If we're reading from a file,
++        # we copy the contents verbatim. But configuration specified on the command line
++        # or in the config file may contain additional whitespace that has no meaning.
++        opts.cmdline = ' '.join(opts.cmdline.split())
++
++    if opts.os_release and opts.os_release.startswith('@'):
++        opts.os_release = pathlib.Path(opts.os_release[1:])
++    elif not opts.os_release and opts.linux:
++        p = pathlib.Path('/etc/os-release')
++        if not p.exists():
++            p = pathlib.Path('/usr/lib/os-release')
++        opts.os_release = p
++
++    if opts.efi_arch is None:
++        opts.efi_arch = guess_efi_arch()
++
++    if opts.stub is None:
++        if opts.linux is not None:
++            opts.stub = pathlib.Path(f'/usr/lib/systemd/boot/efi/linux{opts.efi_arch}.efi.stub')
++        else:
++            opts.stub = pathlib.Path(f'/usr/lib/systemd/boot/efi/addon{opts.efi_arch}.efi.stub')
++
++    if opts.signing_engine is None:
++        if opts.sb_key:
++            opts.sb_key = pathlib.Path(opts.sb_key)
++        if opts.sb_cert:
++            opts.sb_cert = pathlib.Path(opts.sb_cert)
++
++    if bool(opts.sb_key) ^ bool(opts.sb_cert):
++        # one param only given, sbsign needs both
++        raise ValueError('--secureboot-private-key= and --secureboot-certificate= must be specified together')
++    elif bool(opts.sb_key) and bool(opts.sb_cert):
++        # both param given, infer sbsign and in case it was given, ensure signtool=sbsign
++        if opts.signtool and opts.signtool != 'sbsign':
++            raise ValueError(f'Cannot provide --signtool={opts.signtool} with --secureboot-private-key= and --secureboot-certificate=')
++        opts.signtool = 'sbsign'
++    elif bool(opts.sb_cert_name):
++        # sb_cert_name given, infer pesign and in case it was given, ensure signtool=pesign
++        if opts.signtool and opts.signtool != 'pesign':
++            raise ValueError(f'Cannot provide --signtool={opts.signtool} with --secureboot-certificate-name=')
++        opts.signtool = 'pesign'
++
++    if opts.sign_kernel and not opts.sb_key and not opts.sb_cert_name:
++        raise ValueError('--sign-kernel requires either --secureboot-private-key= and --secureboot-certificate= (for sbsign) or --secureboot-certificate-name= (for pesign) to be specified')
++
++    if opts.verb == 'build' and opts.output is None:
++        if opts.linux is None:
++            raise ValueError('--output= must be specified when building a PE addon')
++        suffix = '.efi' if opts.sb_key or opts.sb_cert_name else '.unsigned.efi'
++        opts.output = opts.linux.name + suffix
++
++    # Now that we know if we're inputting or outputting, really parse section config
++    f = Section.parse_output if opts.verb == 'inspect' else Section.parse_input
++    opts.sections = [f(s) for s in opts.sections]
++    # A convenience dictionary to make it easy to look up sections
++    opts.sections_by_name = {s.name:s for s in opts.sections}
++
++    if opts.summary:
++        # TODO: replace pprint() with some fancy formatting.
++        pprint.pprint(vars(opts))
++        sys.exit()
++
++
++def parse_args(args=None):
++    opts = create_parser().parse_args(args)
++    apply_config(opts)
++    finalize_options(opts)
++    return opts
++
++
++def main():
++    opts = parse_args()
++    if opts.verb == 'build':
++        check_inputs(opts)
++        make_uki(opts)
++    elif opts.verb == 'genkey':
++        check_cert_and_keys_nonexistent(opts)
++        generate_keys(opts)
++    elif opts.verb == 'inspect':
++        inspect_sections(opts)
++    else:
++        assert False
++
++
++if __name__ == '__main__':
++    main()

@@ -1,0 +1,171 @@
+From a83545ba5d0cc1b29f2bb4e2b794ce14b138e3fe Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 23 Jan 2023 12:28:38 +0100
+Subject: [PATCH] tree-wide: unify how we pick OS pretty name to display
+
+(cherry picked from commit 02b7005e38db756711cd6463bda34e93cf304c3c)
+
+Related: RHEL-16354
+---
+ src/analyze/analyze-plot.c            | 3 ++-
+ src/basic/os-util.c                   | 9 +++++++++
+ src/basic/os-util.h                   | 2 ++
+ src/core/main.c                       | 2 +-
+ src/firstboot/firstboot.c             | 5 +++--
+ src/hostname/hostnamed.c              | 7 ++++++-
+ src/journal-remote/journal-gatewayd.c | 9 ++++++---
+ 7 files changed, 29 insertions(+), 8 deletions(-)
+
+diff --git a/src/analyze/analyze-plot.c b/src/analyze/analyze-plot.c
+index 24f4add099..8aca691b3d 100644
+--- a/src/analyze/analyze-plot.c
++++ b/src/analyze/analyze-plot.c
+@@ -6,6 +6,7 @@
+ #include "bus-error.h"
+ #include "bus-map-properties.h"
+ #include "format-table.h"
++#include "os-util.h"
+ #include "sort-util.h"
+ #include "version.h"
+ 
+@@ -283,7 +284,7 @@ static int produce_plot_as_svg(
+         svg("<text x=\"20\" y=\"50\">%s</text>", pretty_times);
+         if (host)
+                 svg("<text x=\"20\" y=\"30\">%s %s (%s %s %s) %s %s</text>",
+-                    isempty(host->os_pretty_name) ? "Linux" : host->os_pretty_name,
++                    os_release_pretty_name(host->os_pretty_name, NULL),
+                     strempty(host->hostname),
+                     strempty(host->kernel_name),
+                     strempty(host->kernel_release),
+diff --git a/src/basic/os-util.c b/src/basic/os-util.c
+index 8f8bb0881e..66cbfc76a5 100644
+--- a/src/basic/os-util.c
++++ b/src/basic/os-util.c
+@@ -370,3 +370,12 @@ int os_release_support_ended(const char *support_end, bool quiet) {
+         usec_t ts = now(CLOCK_REALTIME);
+         return DIV_ROUND_UP(ts, USEC_PER_SEC) > (usec_t) eol;
+ }
++
++const char *os_release_pretty_name(const char *pretty_name, const char *name) {
++        /* Distills a "pretty" name to show from os-release data. First argument is supposed to be the
++         * PRETTY_NAME= field, the second one the NAME= field. This function is trivial, of course, and
++         * exists mostly to ensure we use the same logic wherever possible. */
++
++        return empty_to_null(pretty_name) ?:
++                empty_to_null(name) ?: "Linux";
++}
+diff --git a/src/basic/os-util.h b/src/basic/os-util.h
+index d22f5ab8e7..1239f6f6b7 100644
+--- a/src/basic/os-util.h
++++ b/src/basic/os-util.h
+@@ -33,3 +33,5 @@ int load_os_release_pairs(const char *root, char ***ret);
+ int load_os_release_pairs_with_prefix(const char *root, const char *prefix, char ***ret);
+ 
+ int os_release_support_ended(const char *support_end, bool quiet);
++
++const char *os_release_pretty_name(const char *pretty_name, const char *name);
+diff --git a/src/core/main.c b/src/core/main.c
+index d3ec526e7e..0e2e5448bb 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -1339,7 +1339,7 @@ static int os_release_status(void) {
+                 return log_full_errno(r == -ENOENT ? LOG_DEBUG : LOG_WARNING, r,
+                                       "Failed to read os-release file, ignoring: %m");
+ 
+-        const char *label = empty_to_null(pretty_name) ?: empty_to_null(name) ?: "Linux";
++        const char *label = os_release_pretty_name(pretty_name, name);
+ 
+         if (show_status_on(arg_show_status)) {
+                 if (log_get_show_color())
+diff --git a/src/firstboot/firstboot.c b/src/firstboot/firstboot.c
+index 63db78b52d..10eda1d302 100644
+--- a/src/firstboot/firstboot.c
++++ b/src/firstboot/firstboot.c
+@@ -96,7 +96,7 @@ static bool press_any_key(void) {
+ }
+ 
+ static void print_welcome(void) {
+-        _cleanup_free_ char *pretty_name = NULL, *ansi_color = NULL;
++        _cleanup_free_ char *pretty_name = NULL, *os_name = NULL, *ansi_color = NULL;
+         static bool done = false;
+         const char *pn, *ac;
+         int r;
+@@ -110,12 +110,13 @@ static void print_welcome(void) {
+         r = parse_os_release(
+                         arg_root,
+                         "PRETTY_NAME", &pretty_name,
++                        "NAME", &os_name,
+                         "ANSI_COLOR", &ansi_color);
+         if (r < 0)
+                 log_full_errno(r == -ENOENT ? LOG_DEBUG : LOG_WARNING, r,
+                                "Failed to read os-release file, ignoring: %m");
+ 
+-        pn = isempty(pretty_name) ? "Linux" : pretty_name;
++        pn = os_release_pretty_name(pretty_name, os_name);
+         ac = isempty(ansi_color) ? "0" : ansi_color;
+ 
+         if (colors_enabled())
+diff --git a/src/hostname/hostnamed.c b/src/hostname/hostnamed.c
+index 486b093062..2a675caada 100644
+--- a/src/hostname/hostnamed.c
++++ b/src/hostname/hostnamed.c
+@@ -147,6 +147,7 @@ static void context_read_machine_info(Context *c) {
+ }
+ 
+ static void context_read_os_release(Context *c) {
++        _cleanup_free_ char *os_name = NULL, *os_pretty_name = NULL;
+         struct stat current_stat = {};
+         int r;
+ 
+@@ -163,12 +164,16 @@ static void context_read_os_release(Context *c) {
+                       (UINT64_C(1) << PROP_OS_HOME_URL));
+ 
+         r = parse_os_release(NULL,
+-                             "PRETTY_NAME", &c->data[PROP_OS_PRETTY_NAME],
++                             "PRETTY_NAME", &os_pretty_name,
++                             "NAME", &os_name,
+                              "CPE_NAME", &c->data[PROP_OS_CPE_NAME],
+                              "HOME_URL", &c->data[PROP_OS_HOME_URL]);
+         if (r < 0 && r != -ENOENT)
+                 log_warning_errno(r, "Failed to read os-release file, ignoring: %m");
+ 
++        if (free_and_strdup(&c->data[PROP_OS_PRETTY_NAME], os_release_pretty_name(os_pretty_name, os_name)) < 0)
++                log_oom();
++
+         c->etc_os_release_stat = current_stat;
+ }
+ 
+diff --git a/src/journal-remote/journal-gatewayd.c b/src/journal-remote/journal-gatewayd.c
+index 34def4670e..e848ae5026 100644
+--- a/src/journal-remote/journal-gatewayd.c
++++ b/src/journal-remote/journal-gatewayd.c
+@@ -732,7 +732,7 @@ static int request_handler_machine(
+         _cleanup_(MHD_destroy_responsep) struct MHD_Response *response = NULL;
+         RequestMeta *m = ASSERT_PTR(connection_cls);
+         int r;
+-        _cleanup_free_ char* hostname = NULL, *os_name = NULL;
++        _cleanup_free_ char* hostname = NULL, *pretty_name = NULL, *os_name = NULL;
+         uint64_t cutoff_from = 0, cutoff_to = 0, usage = 0;
+         sd_id128_t mid, bid;
+         _cleanup_free_ char *v = NULL, *json = NULL;
+@@ -763,7 +763,10 @@ static int request_handler_machine(
+         if (r < 0)
+                 return mhd_respondf(connection, r, MHD_HTTP_INTERNAL_SERVER_ERROR, "Failed to determine disk usage: %m");
+ 
+-        (void) parse_os_release(NULL, "PRETTY_NAME", &os_name);
++        (void) parse_os_release(
++                        NULL,
++                        "PRETTY_NAME", &pretty_name,
++                        "NAME=", &os_name);
+         (void) get_virtualization(&v);
+ 
+         r = asprintf(&json,
+@@ -778,7 +781,7 @@ static int request_handler_machine(
+                      SD_ID128_FORMAT_VAL(mid),
+                      SD_ID128_FORMAT_VAL(bid),
+                      hostname_cleanup(hostname),
+-                     os_name ? os_name : "Linux",
++                     os_release_pretty_name(pretty_name, os_name),
+                      v ? v : "bare",
+                      usage,
+                      cutoff_from,

@@ -1,0 +1,29 @@
+From dd4c492721ed4be1b4c26cd937566dac2e97ba19 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 16 May 2023 13:05:09 +0900
+Subject: [PATCH] udev/net: generate new network interface name only on add
+ uevent
+
+On other uevents, the name will be anyway ignored in rename_netif() in
+udev-event.c.
+
+(cherry picked from commit cd941e6596adba6bb139c387ae596f26b35701f7)
+
+Related: RHEL-5988
+---
+ src/udev/net/link-config.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/udev/net/link-config.c b/src/udev/net/link-config.c
+index 4fcf373f8e..c9789bcb7c 100644
+--- a/src/udev/net/link-config.c
++++ b/src/udev/net/link-config.c
+@@ -722,7 +722,7 @@ static int link_generate_new_name(Link *link) {
+         config = link->config;
+         device = link->device;
+ 
+-        if (link->action == SD_DEVICE_MOVE) {
++        if (link->action != SD_DEVICE_ADD) {
+                 log_link_debug(link, "Skipping to apply Name= and NamePolicy= on '%s' uevent.",
+                                device_action_to_string(link->action));
+                 goto no_rename;

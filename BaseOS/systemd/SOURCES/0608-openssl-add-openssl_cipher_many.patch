@@ -1,0 +1,288 @@
+From d6134077134468d8b72dd0124d6d3470e5b143ac Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Tue, 27 Jun 2023 15:04:59 -0400
+Subject: [PATCH] openssl: add openssl_cipher_many()
+
+Add function to perform openssl cipher operations.
+
+(cherry picked from commit 58f215a0ac195dc0a7e0232d53789ccde736a08b)
+
+Related: RHEL-16182
+---
+ src/shared/openssl-util.c | 101 ++++++++++++++++++++++++++++++++++
+ src/shared/openssl-util.h |   7 +++
+ src/shared/tests.h        |   2 +-
+ src/test/test-openssl.c   | 112 ++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 221 insertions(+), 1 deletion(-)
+
+diff --git a/src/shared/openssl-util.c b/src/shared/openssl-util.c
+index 9107f198cb..19ec385bf0 100644
+--- a/src/shared/openssl-util.c
++++ b/src/shared/openssl-util.c
+@@ -237,6 +237,107 @@ int openssl_hmac_many(
+         return 0;
+ }
+ 
++/* Symmetric Cipher encryption using the alg-bits-mode cipher, e.g. AES-128-CFB. The key is required and must
++ * be at least the minimum required key length for the cipher. The IV is optional but, if provided, it must
++ * be at least the minimum iv length for the cipher. If no IV is provided and the cipher requires one, a
++ * buffer of zeroes is used. Returns 0 on success, -EOPNOTSUPP if the cipher algorithm is not supported, or <
++ * 0 on any other error. */
++int openssl_cipher_many(
++                const char *alg,
++                size_t bits,
++                const char *mode,
++                const void *key,
++                size_t key_size,
++                const void *iv,
++                size_t iv_size,
++                const struct iovec data[],
++                size_t n_data,
++                void **ret,
++                size_t *ret_size) {
++
++        assert(alg);
++        assert(bits > 0);
++        assert(mode);
++        assert(key);
++        assert(iv || iv_size == 0);
++        assert(data || n_data == 0);
++        assert(ret);
++        assert(ret_size);
++
++        _cleanup_free_ char *cipher_alg = NULL;
++        if (asprintf(&cipher_alg, "%s-%zu-%s", alg, bits, mode) < 0)
++                return log_oom_debug();
++
++#if OPENSSL_VERSION_MAJOR >= 3
++        _cleanup_(EVP_CIPHER_freep) EVP_CIPHER *cipher = EVP_CIPHER_fetch(NULL, cipher_alg, NULL);
++#else
++        const EVP_CIPHER *cipher = EVP_get_cipherbyname(cipher_alg);
++#endif
++        if (!cipher)
++                return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
++                                       "Cipher algorithm '%s' not supported.", cipher_alg);
++
++        _cleanup_(EVP_CIPHER_CTX_freep) EVP_CIPHER_CTX *ctx = EVP_CIPHER_CTX_new();
++        if (!ctx)
++                return log_openssl_errors("Failed to create new EVP_CIPHER_CTX");
++
++        /* Verify enough key data was provided. */
++        int cipher_key_length = EVP_CIPHER_key_length(cipher);
++        assert(cipher_key_length >= 0);
++        if ((size_t) cipher_key_length > key_size)
++                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
++                                       "Not enough key bytes provided, require %d", cipher_key_length);
++
++        /* Verify enough IV data was provided or, if no IV was provided, use a zeroed buffer for IV data. */
++        int cipher_iv_length = EVP_CIPHER_iv_length(cipher);
++        assert(cipher_iv_length >= 0);
++        _cleanup_free_ void *zero_iv = NULL;
++        if (iv_size == 0) {
++                zero_iv = malloc0(cipher_iv_length);
++                if (!zero_iv)
++                        return log_oom_debug();
++
++                iv = zero_iv;
++                iv_size = (size_t) cipher_iv_length;
++        }
++        if ((size_t) cipher_iv_length > iv_size)
++                return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
++                                       "Not enough IV bytes provided, require %d", cipher_iv_length);
++
++        if (!EVP_EncryptInit(ctx, cipher, key, iv))
++                return log_openssl_errors("Failed to initialize EVP_CIPHER_CTX.");
++
++        int cipher_block_size = EVP_CIPHER_CTX_block_size(ctx);
++        assert(cipher_block_size > 0);
++
++        _cleanup_free_ uint8_t *buf = NULL;
++        size_t size = 0;
++
++        for (size_t i = 0; i < n_data; i++) {
++                /* Cipher may produce (up to) input length + cipher block size of output. */
++                if (!GREEDY_REALLOC(buf, size + data[i].iov_len + cipher_block_size))
++                        return log_oom_debug();
++
++                int update_size;
++                if (!EVP_EncryptUpdate(ctx, &buf[size], &update_size, data[i].iov_base, data[i].iov_len))
++                        return log_openssl_errors("Failed to update Cipher.");
++
++                size += update_size;
++        }
++
++        if (!GREEDY_REALLOC(buf, size + cipher_block_size))
++                return log_oom_debug();
++
++        int final_size;
++        if (!EVP_EncryptFinal_ex(ctx, &buf[size], &final_size))
++                return log_openssl_errors("Failed to finalize Cipher.");
++
++        *ret = TAKE_PTR(buf);
++        *ret_size = size + final_size;
++
++        return 0;
++}
++
+ /* Perform Key-Based HMAC KDF. The mode must be "COUNTER" or "FEEDBACK". The parameter naming is from the
+  * Openssl api, and maps to SP800-108 naming as "...key, salt, info, and seed correspond to KI, Label,
+  * Context, and IV (respectively)...". The derive_size parameter specifies how many bytes are derived.
+diff --git a/src/shared/openssl-util.h b/src/shared/openssl-util.h
+index a927819932..2e894fba80 100644
+--- a/src/shared/openssl-util.h
++++ b/src/shared/openssl-util.h
+@@ -41,6 +41,7 @@ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(SSL*, SSL_free, NULL);
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(BIO*, BIO_free, NULL);
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_MD_CTX*, EVP_MD_CTX_free, NULL);
+ #if OPENSSL_VERSION_MAJOR >= 3
++DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_CIPHER*, EVP_CIPHER_free, NULL);
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_KDF*, EVP_KDF_free, NULL);
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_KDF_CTX*, EVP_KDF_CTX_free, NULL);
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_MAC*, EVP_MAC_free, NULL);
+@@ -77,6 +78,12 @@ static inline int openssl_hmac(const char *digest_alg, const void *key, size_t k
+         return openssl_hmac_many(digest_alg, key, key_size, &IOVEC_MAKE((void*) buf, len), 1, ret_digest, ret_digest_size);
+ }
+ 
++int openssl_cipher_many(const char *alg, size_t bits, const char *mode, const void *key, size_t key_size, const void *iv, size_t iv_size, const struct iovec data[], size_t n_data, void **ret, size_t *ret_size);
++
++static inline int openssl_cipher(const char *alg, size_t bits, const char *mode, const void *key, size_t key_size, const void *iv, size_t iv_size, const void *buf, size_t len, void **ret, size_t *ret_size) {
++        return openssl_cipher_many(alg, bits, mode, key, key_size, iv, iv_size, &IOVEC_MAKE((void*) buf, len), 1, ret, ret_size);
++}
++
+ int kdf_kb_hmac_derive(const char *mode, const char *digest, const void *key, size_t key_size, const void *salt, size_t salt_size, const void *info, size_t info_size, const void *seed, size_t seed_size, size_t derive_size, void **ret);
+ 
+ int rsa_encrypt_bytes(EVP_PKEY *pkey, const void *decrypted_key, size_t decrypted_key_size, void **ret_encrypt_key, size_t *ret_encrypt_key_size);
+diff --git a/src/shared/tests.h b/src/shared/tests.h
+index 6c2a2f1df2..3cf34d9bcc 100644
+--- a/src/shared/tests.h
++++ b/src/shared/tests.h
+@@ -42,7 +42,7 @@ bool can_memlock(void);
+ #define DEFINE_HEX_PTR(name, hex)                                       \
+         _cleanup_free_ void *name = NULL;                               \
+         size_t name##_len = 0;                                          \
+-        assert_se(unhexmem(hex, strlen(hex), &name, &name##_len) >= 0);
++        assert_se(unhexmem(hex, strlen_ptr(hex), &name, &name##_len) >= 0);
+ 
+ #define TEST_REQ_RUNNING_SYSTEMD(x)                                 \
+         if (sd_booted() > 0) {                                      \
+diff --git a/src/test/test-openssl.c b/src/test/test-openssl.c
+index a354b524f0..9d2a1ad0c2 100644
+--- a/src/test/test-openssl.c
++++ b/src/test/test-openssl.c
+@@ -313,4 +313,116 @@ TEST(kdf_kb_hmac_derive) {
+ #endif
+ }
+ 
++static void check_cipher(
++                const char *alg,
++                size_t bits,
++                const char *mode,
++                const char *hex_key,
++                const char *hex_iv,
++                const struct iovec data[],
++                size_t n_data,
++                const char *hex_expected) {
++
++        _cleanup_free_ void *enc_buf = NULL;
++        size_t enc_buf_len;
++
++        DEFINE_HEX_PTR(key, hex_key);
++        DEFINE_HEX_PTR(iv, hex_iv);
++        DEFINE_HEX_PTR(expected, hex_expected);
++
++        if (n_data == 0) {
++                assert_se(openssl_cipher(alg, bits, mode, key, key_len, iv, iv_len, NULL, 0, &enc_buf, &enc_buf_len) >= 0);
++                assert_se(memcmp_nn(enc_buf, enc_buf_len, expected, expected_len) == 0);
++                enc_buf = mfree(enc_buf);
++        } else if (n_data == 1) {
++                assert_se(openssl_cipher(alg, bits, mode, key, key_len, iv, iv_len, data[0].iov_base, data[0].iov_len, &enc_buf, &enc_buf_len) >= 0);
++                assert_se(memcmp_nn(enc_buf, enc_buf_len, expected, expected_len) == 0);
++                enc_buf = mfree(enc_buf);
++        }
++
++        assert_se(openssl_cipher_many(alg, bits, mode, key, key_len, iv, iv_len, data, n_data, &enc_buf, &enc_buf_len) >= 0);
++        assert_se(memcmp_nn(enc_buf, enc_buf_len, expected, expected_len) == 0);
++}
++
++TEST(openssl_cipher) {
++        struct iovec data[] = {
++                IOVEC_MAKE_STRING("my"),
++                IOVEC_MAKE_STRING(" "),
++                IOVEC_MAKE_STRING("secret"),
++                IOVEC_MAKE_STRING(" "),
++                IOVEC_MAKE_STRING("text"),
++                IOVEC_MAKE_STRING("!"),
++        };
++
++        check_cipher(
++                "aes", 256, "cfb",
++                "32c62bbaeb0decc5c874b8e0148f86475b5bb10a36f7078a75a6f11704c2f06a",
++                /* hex_iv= */ NULL,
++                data, ELEMENTSOF(data),
++                "bd4a46f8762bf4bef4430514aaec5e");
++
++        check_cipher(
++                "aes", 256, "cfb",
++                "32c62bbaeb0decc5c874b8e0148f86475b5bb10a36f7078a75a6f11704c2f06a",
++                "00000000000000000000000000000000",
++                data, ELEMENTSOF(data),
++                "bd4a46f8762bf4bef4430514aaec5e");
++
++        check_cipher(
++                "aes", 256, "cfb",
++                "32c62bbaeb0decc5c874b8e0148f86475b5bb10a36f7078a75a6f11704c2f06a",
++                "9088fd5c4ad9b9419eced86283021a59",
++                data, ELEMENTSOF(data),
++                "6dfbf8dc972f9a462ad7427a1fa41a");
++
++        check_cipher(
++                "aes", 256, "cfb",
++                "32c62bbaeb0decc5c874b8e0148f86475b5bb10a36f7078a75a6f11704c2f06a",
++                /* hex_iv= */ NULL,
++                &data[2], 1,
++                "a35605f9763c");
++
++        check_cipher(
++                "aes", 256, "cfb",
++                "32c62bbaeb0decc5c874b8e0148f86475b5bb10a36f7078a75a6f11704c2f06a",
++                /* hex_iv= */ NULL,
++                /* data= */ NULL, /* n_data= */ 0,
++                /* expected= */ NULL);
++
++        check_cipher(
++                "aes", 128, "cfb",
++                "b8fe4b89f6f25dd58cadceb68c99d508",
++                /* hex_iv= */ NULL,
++                data, ELEMENTSOF(data),
++                "9c0fe3abb904ab419d950ae00c93a1");
++
++        check_cipher(
++                "aes", 128, "cfb",
++                "b8fe4b89f6f25dd58cadceb68c99d508",
++                "00000000000000000000000000000000",
++                data, ELEMENTSOF(data),
++                "9c0fe3abb904ab419d950ae00c93a1");
++
++        check_cipher(
++                "aes", 128, "cfb",
++                "b8fe4b89f6f25dd58cadceb68c99d508",
++                "9088fd5c4ad9b9419eced86283021a59",
++                data, ELEMENTSOF(data),
++                "e765617aceb1326f5309008c14f4e1");
++
++        check_cipher(
++                "aes", 128, "cfb",
++                "b8fe4b89f6f25dd58cadceb68c99d508",
++                /* hex_iv= */ NULL,
++                /* data= */ NULL, /* n_data= */ 0,
++                /* expected= */ NULL);
++
++        check_cipher(
++                "aes", 128, "cfb",
++                "b8fe4b89f6f25dd58cadceb68c99d508",
++                "00000000000000000000000000000000",
++                /* data= */ NULL, /* n_data= */ 0,
++                /* expected= */ NULL);
++}
++
+ DEFINE_TEST_MAIN(LOG_DEBUG);

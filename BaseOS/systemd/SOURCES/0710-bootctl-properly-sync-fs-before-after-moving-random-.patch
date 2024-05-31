@@ -1,0 +1,51 @@
+From 30aa0b51b3edba2cda99abf32e7965afb4ea311c Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 20 Dec 2022 11:15:51 +0100
+Subject: [PATCH] bootctl: properly sync fs before/after moving random seed
+ file into place
+
+Let's do a careful, focussed sync at the right places instead of a
+blanket sync at the end. After all we want to run this on every boot
+soon.
+
+(cherry picked from commit 60315d59534fe59aacae26e2c497359a409af0b6)
+
+Related: RHEL-16952
+---
+ src/boot/bootctl.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/boot/bootctl.c b/src/boot/bootctl.c
+index 9bb99eeec1..5edcf0fc32 100644
+--- a/src/boot/bootctl.c
++++ b/src/boot/bootctl.c
+@@ -2017,6 +2017,11 @@ static int install_random_seed(const char *esp) {
+                 goto fail;
+         }
+ 
++        if (fsync(fd) < 0 || fsync(loader_dir_fd) < 0) {
++                r = log_error_errno(errno, "Failed to sync random seed file: %m");
++                goto fail;
++        }
++
+         if (renameat(loader_dir_fd, tmp, loader_dir_fd, "random-seed") < 0) {
+                 r = log_error_errno(errno, "Failed to move random seed file into place: %m");
+                 goto fail;
+@@ -2024,6 +2029,9 @@ static int install_random_seed(const char *esp) {
+ 
+         tmp = mfree(tmp);
+ 
++        if (syncfs(fd) < 0)
++                return log_error_errno(errno, "Failed to sync ESP file system: %m");
++
+         log_info("Random seed file %s/loader/random-seed successfully written (%zu bytes).", esp, sizeof(buffer));
+ 
+         if (!arg_touch_variables)
+@@ -2468,7 +2476,6 @@ static int verb_random_seed(int argc, char *argv[], void *userdata) {
+         if (r < 0)
+                 return r;
+ 
+-        (void) sync_everything();
+         return 0;
+ }
+ 

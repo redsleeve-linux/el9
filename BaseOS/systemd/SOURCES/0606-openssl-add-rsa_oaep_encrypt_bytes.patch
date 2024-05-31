@@ -1,0 +1,107 @@
+From 4abb94f091fb2bf934b5157d8f6a9ae25a4145a2 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Thu, 15 Jun 2023 08:19:51 -0400
+Subject: [PATCH] openssl: add rsa_oaep_encrypt_bytes()
+
+Add function to encrypt bytes, similar to rsa_encrypt_bytes() but using OAEP
+(Optimal Asymmetric Encryption Padding).
+
+(cherry picked from commit 816b1dc4eb27eef8c4a6f5e4380e68589b58c9bf)
+
+Related: RHEL-16182
+---
+ src/shared/openssl-util.c | 67 +++++++++++++++++++++++++++++++++++++++
+ src/shared/openssl-util.h |  2 ++
+ 2 files changed, 69 insertions(+)
+
+diff --git a/src/shared/openssl-util.c b/src/shared/openssl-util.c
+index 10664e362c..20c1885efb 100644
+--- a/src/shared/openssl-util.c
++++ b/src/shared/openssl-util.c
+@@ -273,6 +273,73 @@ int rsa_encrypt_bytes(
+         return 0;
+ }
+ 
++/* Encrypt the key data using RSA-OAEP with the provided label and specified digest algorithm. Returns 0 on
++ * success, -EOPNOTSUPP if the digest algorithm is not supported, or < 0 for any other error. */
++int rsa_oaep_encrypt_bytes(
++                const EVP_PKEY *pkey,
++                const char *digest_alg,
++                const char *label,
++                const void *decrypted_key,
++                size_t decrypted_key_size,
++                void **ret_encrypt_key,
++                size_t *ret_encrypt_key_size) {
++
++        assert(pkey);
++        assert(digest_alg);
++        assert(label);
++        assert(decrypted_key);
++        assert(decrypted_key_size > 0);
++        assert(ret_encrypt_key);
++        assert(ret_encrypt_key_size);
++
++#if OPENSSL_VERSION_MAJOR >= 3
++        _cleanup_(EVP_MD_freep) EVP_MD *md = EVP_MD_fetch(NULL, digest_alg, NULL);
++#else
++        const EVP_MD *md = EVP_get_digestbyname(digest_alg);
++#endif
++        if (!md)
++                return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
++                                       "Digest algorithm '%s' not supported.", digest_alg);
++
++        _cleanup_(EVP_PKEY_CTX_freep) EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new((EVP_PKEY*) pkey, NULL);
++        if (!ctx)
++                return log_openssl_errors("Failed to create new EVP_PKEY_CTX");
++
++        if (EVP_PKEY_encrypt_init(ctx) <= 0)
++                return log_openssl_errors("Failed to initialize EVP_PKEY_CTX");
++
++        if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_OAEP_PADDING) <= 0)
++                return log_openssl_errors("Failed to configure RSA-OAEP padding");
++
++        if (EVP_PKEY_CTX_set_rsa_oaep_md(ctx, md) <= 0)
++                return log_openssl_errors("Failed to configure RSA-OAEP MD");
++
++        _cleanup_free_ char *duplabel = strdup(label);
++        if (!duplabel)
++                return log_oom_debug();
++
++        if (EVP_PKEY_CTX_set0_rsa_oaep_label(ctx, duplabel, strlen(duplabel) + 1) <= 0)
++                return log_openssl_errors("Failed to configure RSA-OAEP label");
++        /* ctx owns this now, don't free */
++        TAKE_PTR(duplabel);
++
++        size_t size = 0;
++        if (EVP_PKEY_encrypt(ctx, NULL, &size, decrypted_key, decrypted_key_size) <= 0)
++                return log_openssl_errors("Failed to determine RSA-OAEP encrypted key size");
++
++        _cleanup_free_ void *buf = malloc(size);
++        if (!buf)
++                return log_oom_debug();
++
++        if (EVP_PKEY_encrypt(ctx, buf, &size, decrypted_key, decrypted_key_size) <= 0)
++                return log_openssl_errors("Failed to RSA-OAEP encrypt");
++
++        *ret_encrypt_key = TAKE_PTR(buf);
++        *ret_encrypt_key_size = size;
++
++        return 0;
++}
++
+ int rsa_pkey_to_suitable_key_size(
+                 EVP_PKEY *pkey,
+                 size_t *ret_suitable_key_size) {
+diff --git a/src/shared/openssl-util.h b/src/shared/openssl-util.h
+index 8079946ab5..5fe7ca341f 100644
+--- a/src/shared/openssl-util.h
++++ b/src/shared/openssl-util.h
+@@ -76,6 +76,8 @@ static inline int openssl_hmac(const char *digest_alg, const void *key, size_t k
+ 
+ int rsa_encrypt_bytes(EVP_PKEY *pkey, const void *decrypted_key, size_t decrypted_key_size, void **ret_encrypt_key, size_t *ret_encrypt_key_size);
+ 
++int rsa_oaep_encrypt_bytes(const EVP_PKEY *pkey, const char *digest_alg, const char *label, const void *decrypted_key, size_t decrypted_key_size, void **ret_encrypt_key, size_t *ret_encrypt_key_size);
++
+ int rsa_pkey_to_suitable_key_size(EVP_PKEY *pkey, size_t *ret_suitable_key_size);
+ 
+ int rsa_pkey_new(size_t bits, EVP_PKEY **ret);

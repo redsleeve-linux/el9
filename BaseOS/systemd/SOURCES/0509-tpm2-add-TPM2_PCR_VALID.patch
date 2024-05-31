@@ -1,0 +1,90 @@
+From 926160f00356c562eea2d87bb88c1cd3febe0655 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Mon, 27 Feb 2023 06:44:13 -0500
+Subject: [PATCH] tpm2: add TPM2_PCR_VALID()
+
+(cherry picked from commit aa07a4fa353d758562c4bec8c7d3b1d44b55e573)
+
+Related: RHEL-16182
+---
+ .../cryptsetup-token-systemd-tpm2.c            |  2 +-
+ src/cryptsetup/cryptsetup.c                    |  2 +-
+ src/shared/tpm2-util.c                         |  2 +-
+ src/shared/tpm2-util.h                         | 18 ++++++++++++------
+ 4 files changed, 15 insertions(+), 9 deletions(-)
+
+diff --git a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+index 319b0ca64d..e8bc091191 100644
+--- a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+@@ -271,7 +271,7 @@ _public_ int cryptsetup_token_validate(
+                 }
+ 
+                 u = json_variant_unsigned(e);
+-                if (u >= TPM2_PCRS_MAX) {
++                if (!TPM2_PCR_VALID(u)) {
+                         crypt_log_debug(cd, "TPM2 PCR number out of range.");
+                         return 1;
+                 }
+diff --git a/src/cryptsetup/cryptsetup.c b/src/cryptsetup/cryptsetup.c
+index d5ce252e57..d46a88c9fb 100644
+--- a/src/cryptsetup/cryptsetup.c
++++ b/src/cryptsetup/cryptsetup.c
+@@ -438,7 +438,7 @@ static int parse_one_option(const char *option) {
+                         }
+ 
+                         pcr = r ? TPM_PCR_INDEX_VOLUME_KEY : UINT_MAX;
+-                } else if (pcr >= TPM2_PCRS_MAX) {
++                } else if (!TPM2_PCR_VALID(pcr)) {
+                         log_error("Selected TPM index for measurement %u outside of allowed range 0…%u, ignoring.", pcr, TPM2_PCRS_MAX-1);
+                         return 0;
+                 }
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index b5eabb8159..0cbb32f819 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -462,7 +462,7 @@ void tpm2_pcr_mask_to_selection(uint32_t mask, uint16_t bank, TPML_PCR_SELECTION
+         assert(ret);
+ 
+         /* We only do 24bit here, as that's what PC TPMs are supposed to support */
+-        assert(mask <= 0xFFFFFFU);
++        assert(TPM2_PCR_MASK_VALID(mask));
+ 
+         *ret = (TPML_PCR_SELECTION) {
+                 .count = 1,
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index d26a945a90..07a8a89800 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -11,6 +11,18 @@ typedef enum TPM2Flags {
+         TPM2_FLAGS_USE_PIN = 1 << 0,
+ } TPM2Flags;
+ 
++
++/* As per https://trustedcomputinggroup.org/wp-content/uploads/TCG_PCClient_PFP_r1p05_v23_pub.pdf a
++ * TPM2 on a Client PC must have at least 24 PCRs. This hardcodes our expectation of 24. */
++#define TPM2_PCRS_MAX 24U
++#define TPM2_PCRS_MASK ((UINT32_C(1) << TPM2_PCRS_MAX) - 1)
++static inline bool TPM2_PCR_VALID(unsigned pcr) {
++        return pcr < TPM2_PCRS_MAX;
++}
++static inline bool TPM2_PCR_MASK_VALID(uint32_t pcr_mask) {
++        return pcr_mask <= TPM2_PCRS_MASK;
++}
++
+ #if HAVE_TPM2
+ 
+ #include <tss2/tss2_esys.h>
+@@ -108,12 +120,6 @@ int tpm2_parse_pcr_json_array(JsonVariant *v, uint32_t *ret);
+ int tpm2_make_luks2_json(int keyslot, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, const void *salt, size_t salt_size, TPM2Flags flags, JsonVariant **ret);
+ int tpm2_parse_luks2_json(JsonVariant *v, int *ret_keyslot, uint32_t *ret_hash_pcr_mask, uint16_t *ret_pcr_bank, void **ret_pubkey, size_t *ret_pubkey_size, uint32_t *ret_pubkey_pcr_mask, uint16_t *ret_primary_alg, void **ret_blob, size_t *ret_blob_size, void **ret_policy_hash, size_t *ret_policy_hash_size, void **ret_salt, size_t *ret_salt_size, TPM2Flags *ret_flags);
+ 
+-#define TPM2_PCRS_MAX 24U
+-
+-static inline bool TPM2_PCR_MASK_VALID(uint64_t pcr_mask) {
+-        return pcr_mask < (UINT64_C(1) << TPM2_PCRS_MAX); /* Support 24 PCR banks */
+-}
+-
+ /* Default to PCR 7 only */
+ #define TPM2_PCR_MASK_DEFAULT (UINT32_C(1) << 7)
+ 

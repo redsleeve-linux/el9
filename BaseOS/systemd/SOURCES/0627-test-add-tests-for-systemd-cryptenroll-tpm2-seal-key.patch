@@ -1,0 +1,416 @@
+From 324ecadd672aecc1331035ede0e1b72dd6af3abd Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Fri, 6 Oct 2023 11:14:25 -0400
+Subject: [PATCH] test: add tests for systemd-cryptenroll
+ --tpm2-seal-key-handle
+
+In TEST-70-TPM2, test systemd-cryptenroll --tpm2-seal-key-handle using the
+default (0) as well as the SRK handle (0x81000001), and test using a non-SRK
+handle index after creating and persisting a primary key.
+
+In test/test-tpm2, test tpm2_seal() and tpm2_unseal() using default (0), the SRK
+handle, and a transient handle.
+
+(cherry picked from commit adcd3266ecddd8527374b2ba905ed0e98b19385c)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c     |  10 +--
+ src/shared/tpm2-util.h     |   9 ++
+ src/test/test-tpm2.c       | 173 +++++++++++++++++++++++++++++--------
+ test/TEST-70-TPM2/test.sh  |   8 ++
+ test/units/testsuite-70.sh |  63 ++++++++++++++
+ 5 files changed, 216 insertions(+), 47 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index b7f55ad7d3..c287809450 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -1076,7 +1076,7 @@ static int tpm2_get_legacy_template(TPMI_ALG_PUBLIC alg, TPMT_PUBLIC *ret_templa
+  *
+  * These templates are only needed to create a new persistent SRK (or a new transient key that is
+  * SRK-compatible). Preferably, the TPM should contain a shared SRK located at the reserved shared SRK handle
+- * (see TPM2_SRK_HANDLE and tpm2_get_srk() below).
++ * (see TPM2_SRK_HANDLE in tpm2-util.h, and tpm2_get_srk() below).
+  *
+  * The alg must be TPM2_ALG_RSA or TPM2_ALG_ECC. Returns error if the requested template is not supported on
+  * this TPM. Also see tpm2_get_best_srk_template() below. */
+@@ -1175,14 +1175,6 @@ static int tpm2_get_best_srk_template(Tpm2Context *c, TPMT_PUBLIC *ret_template)
+                                "TPM does not support either SRK template L-1 (RSA) or L-2 (ECC).");
+ }
+ 
+-/* The SRK handle is defined in the Provisioning Guidance document (see above) in the table "Reserved Handles
+- * for TPM Provisioning Fundamental Elements". The SRK is useful because it is "shared", meaning it has no
+- * authValue nor authPolicy set, and thus may be used by anyone on the system to generate derived keys or
+- * seal secrets. This is useful if the TPM has an auth (password) set for the 'owner hierarchy', which would
+- * prevent users from generating primary transient keys, unless they knew the owner hierarchy auth. See
+- * the Provisioning Guidance document for more details. */
+-#define TPM2_SRK_HANDLE UINT32_C(0x81000001)
+-
+ /* Get the SRK. Returns 1 if SRK is found, 0 if there is no SRK, or < 0 on error. Also see
+  * tpm2_get_or_create_srk() below. */
+ static int tpm2_get_srk(
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 8d60d43c51..959a428f08 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -18,6 +18,15 @@ typedef enum TPM2Flags {
+  * TPM2 on a Client PC must have at least 24 PCRs. This hardcodes our expectation of 24. */
+ #define TPM2_PCRS_MAX 24U
+ #define TPM2_PCRS_MASK ((UINT32_C(1) << TPM2_PCRS_MAX) - 1)
++
++/* The SRK handle is defined in the Provisioning Guidance document (see above) in the table "Reserved Handles
++ * for TPM Provisioning Fundamental Elements". The SRK is useful because it is "shared", meaning it has no
++ * authValue nor authPolicy set, and thus may be used by anyone on the system to generate derived keys or
++ * seal secrets. This is useful if the TPM has an auth (password) set for the 'owner hierarchy', which would
++ * prevent users from generating primary transient keys, unless they knew the owner hierarchy auth. See
++ * the Provisioning Guidance document for more details. */
++#define TPM2_SRK_HANDLE UINT32_C(0x81000001)
++
+ static inline bool TPM2_PCR_INDEX_VALID(unsigned pcr) {
+         return pcr < TPM2_PCRS_MAX;
+ }
+diff --git a/src/test/test-tpm2.c b/src/test/test-tpm2.c
+index b8bddcc4f0..a4beb1ff8d 100644
+--- a/src/test/test-tpm2.c
++++ b/src/test/test-tpm2.c
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
+ #include "hexdecoct.h"
++#include "macro.h"
+ #include "tpm2-util.h"
+ #include "tests.h"
+ 
+@@ -701,21 +702,44 @@ TEST(parse_pcr_argument) {
+         check_parse_pcr_argument_to_mask("debug+24", -EINVAL);
+ }
+ 
+-static void tpm2b_public_rsa_init(TPM2B_PUBLIC *public, const char *rsa_n) {
+-        TPMT_PUBLIC tpmt = {
+-                .type = TPM2_ALG_RSA,
+-                .nameAlg = TPM2_ALG_SHA256,
+-                .objectAttributes = TPMA_OBJECT_RESTRICTED|TPMA_OBJECT_DECRYPT|TPMA_OBJECT_FIXEDTPM|TPMA_OBJECT_FIXEDPARENT|TPMA_OBJECT_SENSITIVEDATAORIGIN|TPMA_OBJECT_USERWITHAUTH,
+-                .parameters.rsaDetail = {
+-                        .symmetric = {
+-                                .algorithm = TPM2_ALG_AES,
+-                                .keyBits.aes = 128,
+-                                .mode.aes = TPM2_ALG_CFB,
+-                        },
+-                        .scheme.scheme = TPM2_ALG_NULL,
+-                        .keyBits = 2048,
++static const TPMT_PUBLIC test_rsa_template = {
++        .type = TPM2_ALG_RSA,
++        .nameAlg = TPM2_ALG_SHA256,
++        .objectAttributes = TPMA_OBJECT_RESTRICTED|TPMA_OBJECT_DECRYPT|TPMA_OBJECT_FIXEDTPM|TPMA_OBJECT_FIXEDPARENT|TPMA_OBJECT_SENSITIVEDATAORIGIN|TPMA_OBJECT_USERWITHAUTH,
++        .parameters.rsaDetail = {
++                .symmetric = {
++                        .algorithm = TPM2_ALG_AES,
++                        .keyBits.aes = 128,
++                        .mode.aes = TPM2_ALG_CFB,
+                 },
+-        };
++                .scheme.scheme = TPM2_ALG_NULL,
++                .keyBits = 2048,
++        },
++};
++
++static const TPMT_PUBLIC test_ecc_template = {
++        .type = TPM2_ALG_ECC,
++        .nameAlg = TPM2_ALG_SHA256,
++        .objectAttributes = TPMA_OBJECT_RESTRICTED|TPMA_OBJECT_DECRYPT|TPMA_OBJECT_FIXEDTPM|TPMA_OBJECT_FIXEDPARENT|TPMA_OBJECT_SENSITIVEDATAORIGIN|TPMA_OBJECT_USERWITHAUTH,
++        .parameters.eccDetail = {
++                .symmetric = {
++                        .algorithm = TPM2_ALG_AES,
++                        .keyBits.aes = 128,
++                        .mode.aes = TPM2_ALG_CFB,
++                },
++                .scheme.scheme = TPM2_ALG_NULL,
++                .curveID = TPM2_ECC_NIST_P256,
++                .kdf.scheme = TPM2_ALG_NULL,
++        },
++};
++
++static const TPMT_PUBLIC *test_templates[] = {
++        &test_rsa_template,
++        &test_ecc_template,
++};
++
++static void tpm2b_public_rsa_init(TPM2B_PUBLIC *public, const char *rsa_n) {
++        TPMT_PUBLIC tpmt = test_rsa_template;
+ 
+         DEFINE_HEX_PTR(key, rsa_n);
+         tpmt.unique.rsa = TPM2B_PUBLIC_KEY_RSA_MAKE(key, key_len);
+@@ -725,21 +749,8 @@ static void tpm2b_public_rsa_init(TPM2B_PUBLIC *public, const char *rsa_n) {
+ }
+ 
+ static void tpm2b_public_ecc_init(TPM2B_PUBLIC *public, TPMI_ECC_CURVE curve, const char *x, const char *y) {
+-        TPMT_PUBLIC tpmt = {
+-                .type = TPM2_ALG_ECC,
+-                .nameAlg = TPM2_ALG_SHA256,
+-                .objectAttributes = TPMA_OBJECT_RESTRICTED|TPMA_OBJECT_DECRYPT|TPMA_OBJECT_FIXEDTPM|TPMA_OBJECT_FIXEDPARENT|TPMA_OBJECT_SENSITIVEDATAORIGIN|TPMA_OBJECT_USERWITHAUTH,
+-                .parameters.eccDetail = {
+-                        .symmetric = {
+-                                .algorithm = TPM2_ALG_AES,
+-                                .keyBits.aes = 128,
+-                                .mode.aes = TPM2_ALG_CFB,
+-                        },
+-                        .scheme.scheme = TPM2_ALG_NULL,
+-                        .curveID = curve,
+-                        .kdf.scheme = TPM2_ALG_NULL,
+-                },
+-        };
++        TPMT_PUBLIC tpmt = test_ecc_template;
++        tpmt.parameters.eccDetail.curveID = curve;
+ 
+         DEFINE_HEX_PTR(buf_x, x);
+         tpmt.unique.ecc.x = TPM2B_ECC_PARAMETER_MAKE(buf_x, buf_x_len);
+@@ -949,15 +960,8 @@ TEST(calculate_policy_pcr) {
+         assert_se(digest_check(&d, "7481fd1b116078eb3ac2456e4ad542c9b46b9b8eb891335771ca8e7c8f8e4415"));
+ }
+ 
+-TEST(tpm_required_tests) {
+-        int r;
+-
+-        _cleanup_(tpm2_context_unrefp) Tpm2Context *c = NULL;
+-        r = tpm2_context_new(NULL, &c);
+-        if (r < 0) {
+-                log_tests_skipped("Could not find TPM");
+-                return;
+-        }
++static void check_test_parms(Tpm2Context *c) {
++        assert(c);
+ 
+         TPMU_PUBLIC_PARMS parms = {
+                 .symDetail.sym = {
+@@ -976,6 +980,10 @@ TEST(tpm_required_tests) {
+ 
+         /* Test with valid parms */
+         assert_se(tpm2_test_parms(c, TPM2_ALG_SYMCIPHER, &parms));
++}
++
++static void check_supports_alg(Tpm2Context *c) {
++        assert(c);
+ 
+         /* Test invalid algs */
+         assert_se(!tpm2_supports_alg(c, TPM2_ALG_ERROR));
+@@ -985,6 +993,10 @@ TEST(tpm_required_tests) {
+         assert_se(tpm2_supports_alg(c, TPM2_ALG_RSA));
+         assert_se(tpm2_supports_alg(c, TPM2_ALG_AES));
+         assert_se(tpm2_supports_alg(c, TPM2_ALG_CFB));
++}
++
++static void check_supports_command(Tpm2Context *c) {
++        assert(c);
+ 
+         /* Test invalid commands. TPM specification Part 2 ("Structures") section "TPM_CC (Command Codes)"
+          * states bits 31:30 and 28:16 are reserved and must be 0. */
+@@ -1003,6 +1015,91 @@ TEST(tpm_required_tests) {
+         assert_se(tpm2_supports_command(c, TPM2_CC_Unseal));
+ }
+ 
++static void check_seal_unseal_for_handle(Tpm2Context *c, TPM2_HANDLE handle) {
++        TPM2B_DIGEST policy = TPM2B_DIGEST_MAKE(NULL, TPM2_SHA256_DIGEST_SIZE);
++
++        assert(c);
++
++        log_debug("Check seal/unseal for handle 0x%" PRIx32, handle);
++
++        _cleanup_free_ void *secret = NULL, *blob = NULL, *srk = NULL, *unsealed_secret = NULL;
++        size_t secret_size, blob_size, srk_size, unsealed_secret_size;
++        assert_se(tpm2_seal(
++                        c,
++                        handle,
++                        &policy,
++                        /* pin= */ NULL,
++                        &secret, &secret_size,
++                        &blob, &blob_size,
++                        /* ret_primary_alg= */ NULL,
++                        &srk, &srk_size) >= 0);
++
++        assert_se(tpm2_unseal(
++                        c,
++                        /* hash_pcr_mask= */ 0,
++                        /* pcr_bank= */ 0,
++                        /* pubkey= */ NULL, /* pubkey_size= */ 0,
++                        /* pubkey_pcr_mask= */ 0,
++                        /* signature= */ NULL,
++                        /* pin= */ NULL,
++                        /* primary_alg= */ 0,
++                        blob, blob_size,
++                        /* policy_hash= */ NULL, /* policy_hash_size= */ 0,
++                        srk, srk_size,
++                        &unsealed_secret, &unsealed_secret_size) >= 0);
++
++        assert_se(memcmp_nn(secret, secret_size, unsealed_secret, unsealed_secret_size) == 0);
++}
++
++static void check_seal_unseal(Tpm2Context *c) {
++        int r;
++
++        assert(c);
++
++        check_seal_unseal_for_handle(c, 0);
++        check_seal_unseal_for_handle(c, TPM2_SRK_HANDLE);
++
++        FOREACH_ARRAY(template, test_templates, ELEMENTSOF(test_templates)) {
++                TPM2B_PUBLIC public = {
++                        .publicArea = **template,
++                        .size = sizeof(**template),
++                };
++                _cleanup_(tpm2_handle_freep) Tpm2Handle *transient_handle = NULL;
++                assert_se(tpm2_create_primary(
++                                c,
++                                /* session= */ NULL,
++                                &public,
++                                /* sensitive= */ NULL,
++                                /* ret_public= */ NULL,
++                                &transient_handle) >= 0);
++
++                TPMI_DH_PERSISTENT transient_handle_index;
++                r = tpm2_index_from_handle(c, transient_handle, &transient_handle_index);
++                if (r == -EOPNOTSUPP) {
++                        /* libesys too old */
++                        log_tests_skipped("libesys too old for tpm2_index_from_handle");
++                        return;
++                }
++                assert_se(r >= 0);
++
++                check_seal_unseal_for_handle(c, transient_handle_index);
++        }
++}
++
++TEST_RET(tests_which_require_tpm) {
++        _cleanup_(tpm2_context_unrefp) Tpm2Context *c = NULL;
++
++        if (tpm2_context_new(NULL, &c) < 0)
++                return log_tests_skipped("Could not find TPM");
++
++        check_test_parms(c);
++        check_supports_alg(c);
++        check_supports_command(c);
++        check_seal_unseal(c);
++
++        return 0;
++}
++
+ #endif /* HAVE_TPM2 */
+ 
+ DEFINE_TEST_MAIN(LOG_DEBUG);
+diff --git a/test/TEST-70-TPM2/test.sh b/test/TEST-70-TPM2/test.sh
+index f448a4a5f1..72784ec418 100755
+--- a/test/TEST-70-TPM2/test.sh
++++ b/test/TEST-70-TPM2/test.sh
+@@ -12,6 +12,11 @@ TEST_REQUIRE_INSTALL_TESTS=0
+ 
+ command -v swtpm >/dev/null 2>&1 || exit 0
+ command -v tpm2_pcrextend >/dev/null 2>&1 || exit 0
++command -v openssl >/dev/null 2>&1 || exit 0
++command -v tpm2_createprimary >/dev/null 2>&1 || exit 0
++command -v tpm2_evictcontrol >/dev/null 2>&1 || exit 0
++command -v tpm2_flushcontext >/dev/null 2>&1 || exit 0
++
+ 
+ test_append_files() {
+         local workspace="${1:?}"
+@@ -22,6 +27,9 @@ test_append_files() {
+         inst_binary tpm2_pcrextend
+         inst_binary tpm2_pcrread
+         inst_binary openssl
++        inst_binary tpm2_createprimary
++        inst_binary tpm2_evictcontrol
++        inst_binary tpm2_flushcontext
+ }
+ 
+ TEST_70_TPM_DEVICE="tpm-tis"
+diff --git a/test/units/testsuite-70.sh b/test/units/testsuite-70.sh
+index 91f31cd169..12b47f329c 100755
+--- a/test/units/testsuite-70.sh
++++ b/test/units/testsuite-70.sh
+@@ -5,9 +5,19 @@ set -o pipefail
+ 
+ export SYSTEMD_LOG_LEVEL=debug
+ 
++trap cleanup ERR
++cleanup() {
++    # Evict the TPM primary key that we persisted
++    if [[ -n $persistent ]]; then
++        tpm2_evictcontrol -c "$persistent"
++    fi
++}
++persistent=""
++
+ # Prepare fresh disk image
+ img="/var/tmp/test.img"
+ truncate -s 20M $img
++
+ echo -n passphrase >/tmp/passphrase
+ cryptsetup luksFormat -q --pbkdf pbkdf2 --pbkdf-force-iterations 1000 --use-urandom $img /tmp/passphrase
+ 
+@@ -94,6 +104,57 @@ if tpm_has_pcr sha256 12; then
+     rm -f /tmp/pcr.dat
+ fi
+ 
++# Use default (0) seal key handle
++systemd-cryptenroll --wipe-slot=tpm2 "$img"
++PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle=0 "$img"
++/usr/lib/systemd/systemd-cryptsetup attach test-volume "$img" - tpm2-device=auto,headless=1
++/usr/lib/systemd/systemd-cryptsetup detach test-volume
++
++systemd-cryptenroll --wipe-slot=tpm2 "$img"
++PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle=0x0 "$img"
++/usr/lib/systemd/systemd-cryptsetup attach test-volume "$img" - tpm2-device=auto,headless=1
++/usr/lib/systemd/systemd-cryptsetup detach test-volume
++
++# Use SRK seal key handle
++systemd-cryptenroll --wipe-slot=tpm2 "$img"
++PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle=81000001 "$img"
++/usr/lib/systemd/systemd-cryptsetup attach test-volume "$img" - tpm2-device=auto,headless=1
++/usr/lib/systemd/systemd-cryptsetup detach test-volume
++
++systemd-cryptenroll --wipe-slot=tpm2 "$img"
++PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle=0x81000001 "$img"
++/usr/lib/systemd/systemd-cryptsetup attach test-volume "$img" - tpm2-device=auto,headless=1
++/usr/lib/systemd/systemd-cryptsetup detach test-volume
++
++# Test invalid ranges: pcr, nv, session, permanent
++systemd-cryptenroll --wipe-slot=tpm2 "$img"
++(! PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle=7 "$img")          # PCR
++(! PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle=0x01000001 "$img") # NV index
++(! PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle=0x02000001 "$img") # HMAC/loaded session
++(! PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle=0x03000001 "$img") # Policy/saved session
++(! PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle=0x40000001 "$img") # Permanent
++
++# Use non-SRK persistent seal key handle (by creating/persisting new key)
++primary=/tmp/primary.ctx
++tpm2_createprimary -c "$primary"
++persistent_line=$(tpm2_evictcontrol -c "$primary" | grep persistent-handle)
++persistent="0x${persistent_line##*0x}"
++tpm2_flushcontext -t
++
++systemd-cryptenroll --wipe-slot=tpm2 "$img"
++PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle="${persistent#0x}" "$img"
++/usr/lib/systemd/systemd-cryptsetup attach test-volume "$img" - tpm2-device=auto,headless=1
++/usr/lib/systemd/systemd-cryptsetup detach test-volume
++
++systemd-cryptenroll --wipe-slot=tpm2 "$img"
++PASSWORD=passphrase systemd-cryptenroll --tpm2-device=auto --tpm2-seal-key-handle="$persistent" "$img"
++/usr/lib/systemd/systemd-cryptsetup attach test-volume "$img" - tpm2-device=auto,headless=1
++/usr/lib/systemd/systemd-cryptsetup detach test-volume
++
++tpm2_evictcontrol -c "$persistent"
++persistent=""
++rm -f "$primary"
++
+ rm $img
+ 
+ if [[ -e /usr/lib/systemd/systemd-measure ]]; then
+@@ -294,6 +355,8 @@ systemd-cryptenroll --wipe-slot=10240000 $img_2 && { echo 'unexpected success';
+ #fido2_multiple_auto
+ systemd-cryptenroll --fido2-device=auto --unlock-fido2-device=auto $img_2 && { echo 'unexpected success'; exit 1; }
+ 
++cleanup
++
+ echo OK >/testok
+ 
+ exit 0

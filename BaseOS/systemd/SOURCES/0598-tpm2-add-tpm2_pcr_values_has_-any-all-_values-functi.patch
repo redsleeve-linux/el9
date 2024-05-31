@@ -1,0 +1,78 @@
+From 889bffecee285203761d0d9f052122f2ef46dfce Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Mon, 21 Aug 2023 19:18:40 -0400
+Subject: [PATCH] tpm2: add tpm2_pcr_values_has_(any|all)_values() functions
+
+(cherry picked from commit 26d8d71fa5fc9d620899e3940ad246485991e632)
+
+Related: RHEL-16182
+---
+ src/cryptenroll/cryptenroll-tpm2.c |  7 +------
+ src/shared/tpm2-util.c             | 22 ++++++++++++++++++++++
+ src/shared/tpm2-util.h             |  2 ++
+ 3 files changed, 25 insertions(+), 6 deletions(-)
+
+diff --git a/src/cryptenroll/cryptenroll-tpm2.c b/src/cryptenroll/cryptenroll-tpm2.c
+index 7c1946c3b1..e16039590a 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.c
++++ b/src/cryptenroll/cryptenroll-tpm2.c
+@@ -214,12 +214,7 @@ int enroll_tpm2(struct crypt_device *cd,
+         if (r < 0)
+                 return r;
+ 
+-        bool pcr_value_specified = false;
+-        for (size_t i = 0; i < n_hash_pcr_values; i++)
+-                if (hash_pcr_values[i].value.size > 0) {
+-                        pcr_value_specified = true;
+-                        break;
+-                }
++        bool pcr_value_specified = tpm2_pcr_values_has_any_values(hash_pcr_values, n_hash_pcr_values);
+ 
+         r = tpm2_pcr_read_missing_values(tpm2_context, hash_pcr_values, n_hash_pcr_values);
+         if (r < 0)
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 9ef69fb7d8..05189d9dfe 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -1585,6 +1585,28 @@ bool tpm2_pcr_values_valid(const Tpm2PCRValue *pcr_values, size_t n_pcr_values)
+         return true;
+ }
+ 
++/* Returns true if any of the provided PCR values has an actual hash value included, false otherwise. */
++bool tpm2_pcr_values_has_any_values(const Tpm2PCRValue *pcr_values, size_t n_pcr_values) {
++        assert(pcr_values || n_pcr_values == 0);
++
++        FOREACH_ARRAY(v, pcr_values, n_pcr_values)
++                if (v->value.size > 0)
++                        return true;
++
++        return false;
++}
++
++/* Returns true if all of the provided PCR values has an actual hash value included, false otherwise. */
++bool tpm2_pcr_values_has_all_values(const Tpm2PCRValue *pcr_values, size_t n_pcr_values) {
++        assert(pcr_values || n_pcr_values == 0);
++
++        FOREACH_ARRAY(v, pcr_values, n_pcr_values)
++                if (v->value.size == 0)
++                        return false;
++
++        return true;
++}
++
+ static int cmp_pcr_values(const Tpm2PCRValue *a, const Tpm2PCRValue *b) {
+         assert(a);
+         assert(b);
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 4f6f795fbb..f74efbd223 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -83,6 +83,8 @@ typedef struct {
+         }
+ 
+ bool tpm2_pcr_value_valid(const Tpm2PCRValue *pcr_value);
++bool tpm2_pcr_values_has_any_values(const Tpm2PCRValue *pcr_values, size_t n_pcr_values);
++bool tpm2_pcr_values_has_all_values(const Tpm2PCRValue *pcr_values, size_t n_pcr_values);
+ int tpm2_pcr_value_from_string(const char *arg, Tpm2PCRValue *ret_pcr_value);
+ char *tpm2_pcr_value_to_string(const Tpm2PCRValue *pcr_value);
+ 

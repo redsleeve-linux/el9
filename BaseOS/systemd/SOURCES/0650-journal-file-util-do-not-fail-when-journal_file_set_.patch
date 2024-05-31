@@ -1,0 +1,39 @@
+From 79d1c46296052bef600b52851356618d583c9c6a Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 5 Oct 2023 18:20:40 +0900
+Subject: [PATCH] journal-file-util: do not fail when
+ journal_file_set_offline() called more than once
+
+Previously, if journal_file_set_offline() is called twice with 'wait = false',
+the second call triggered segfaults, as the offline_state is OFFLINE_DONE,
+and journal_file_set_offline_thread_join() tries to call pthread_join()
+with NULL.
+
+(cherry picked from commit 46e98dfcc7563dd16a2db3b05bb3e803c27f40ea)
+
+Related: RHEL-11591
+---
+ src/journal/managed-journal-file.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/src/journal/managed-journal-file.c b/src/journal/managed-journal-file.c
+index 810167772a..382a7ff45b 100644
+--- a/src/journal/managed-journal-file.c
++++ b/src/journal/managed-journal-file.c
+@@ -345,9 +345,14 @@ int managed_journal_file_set_offline(ManagedJournalFile *f, bool wait) {
+         /* Initiate a new offline. */
+         f->file->offline_state = OFFLINE_SYNCING;
+ 
+-        if (wait) /* Without using a thread if waiting. */
++        if (wait) {
++                /* Without using a thread if waiting. */
+                 managed_journal_file_set_offline_internal(f);
+-        else {
++
++                assert(f->file->offline_state == OFFLINE_DONE);
++                f->file->offline_state = OFFLINE_JOINED;
++
++        } else {
+                 sigset_t ss, saved_ss;
+                 int k;
+ 

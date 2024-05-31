@@ -1,0 +1,34 @@
+From f7b027e1a0dcdd2c92a5f3b1bcd488912389dca4 Mon Sep 17 00:00:00 2001
+From: Jacek Migacz <jmigacz@redhat.com>
+Date: Mon, 26 Feb 2024 14:07:37 +0100
+Subject: [PATCH] resolved: reduce the maximum nsec3 iterations to 100
+
+According to RFC9267, the 2500 value is not helpful, and in fact it can
+be harmful to permit a large number of iterations. Combined with limits
+on the number of signature validations, I expect this will mitigate the
+impact of maliciously crafted domains designed to cause excessive
+cryptographic work.
+
+(cherry picked from commit eba291124bc11f03732d1fc468db3bfac069f9cb)
+
+Related: RHEL-26643
+---
+ src/resolve/resolved-dns-dnssec.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/resolve/resolved-dns-dnssec.c b/src/resolve/resolved-dns-dnssec.c
+index de2660e317..df25b7f619 100644
+--- a/src/resolve/resolved-dns-dnssec.c
++++ b/src/resolve/resolved-dns-dnssec.c
+@@ -27,8 +27,9 @@ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EC_KEY*, EC_KEY_free, NULL);
+ /* Permit a maximum clock skew of 1h 10min. This should be enough to deal with DST confusion */
+ #define SKEW_MAX (1*USEC_PER_HOUR + 10*USEC_PER_MINUTE)
+ 
+-/* Maximum number of NSEC3 iterations we'll do. RFC5155 says 2500 shall be the maximum useful value */
+-#define NSEC3_ITERATIONS_MAX 2500
++/* Maximum number of NSEC3 iterations we'll do. RFC5155 says 2500 shall be the maximum useful value, but
++ * RFC9276 § 3.2 says that we should reduce the acceptable iteration count */
++#define NSEC3_ITERATIONS_MAX 100
+ 
+ /*
+  * The DNSSEC Chain of trust:

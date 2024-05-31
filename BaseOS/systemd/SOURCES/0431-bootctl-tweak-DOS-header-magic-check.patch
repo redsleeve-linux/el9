@@ -1,0 +1,41 @@
+From 618e38b8b775f45c0a18975ae33753b92c954092 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Tue, 24 Jan 2023 10:28:25 +0100
+Subject: [PATCH] bootctl: tweak DOS header magic check
+
+Read the magic first, try reading the full DOS exe header only in case
+the magic check succeeds.
+
+This avoids throwing an header read error on small dummy files as used
+by test-kernel-install.
+
+(cherry picked from commit 78088b8f43717a43661cd2c1627a9860904c4794)
+
+Related: RHEL-16354
+---
+ src/boot/bootctl-uki.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/src/boot/bootctl-uki.c b/src/boot/bootctl-uki.c
+index fd249c43fb..d90a850b1c 100644
+--- a/src/boot/bootctl-uki.c
++++ b/src/boot/bootctl-uki.c
+@@ -30,11 +30,16 @@ static int pe_sections(FILE *uki, struct PeSectionHeader **ret, size_t *ret_n) {
+         assert(ret_n);
+ 
+         items = fread(&dos, 1, sizeof(dos), uki);
+-        if (items != sizeof(dos))
+-                return log_error_errno(SYNTHETIC_ERRNO(EIO), "DOS header read error");
++        if (items < sizeof(dos.Magic))
++                return log_error_errno(SYNTHETIC_ERRNO(EIO), "File is smaller than DOS magic (got %"PRIu64" of %zu bytes)",
++                                       items, sizeof(dos.Magic));
+         if (memcmp(dos.Magic, dos_file_magic, sizeof(dos_file_magic)) != 0)
+                 goto no_sections;
+ 
++        if (items != sizeof(dos))
++                return log_error_errno(SYNTHETIC_ERRNO(EIO), "File is smaller than DOS header (got %"PRIu64" of %zu bytes)",
++                                       items, sizeof(dos));
++
+         if (fseek(uki, le32toh(dos.ExeHeader), SEEK_SET) < 0)
+                 return log_error_errno(errno, "seek to PE header");
+ 

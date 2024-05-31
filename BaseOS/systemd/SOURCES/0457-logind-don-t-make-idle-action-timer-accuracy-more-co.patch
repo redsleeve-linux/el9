@@ -1,0 +1,33 @@
+From 51dba4b4c93298e32442c88cd0bce7715eea289d Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 29 Nov 2023 11:07:08 +0100
+Subject: [PATCH] logind: don't make idle action timer accuracy more coarse
+ than timeout
+
+If we allow the timer accuracy to grow larger then the timeout itself
+things are very confusing, because people might set a 1s time-out and we
+turn that into 30s.
+
+Hence, let's just cut off the 30s accuracy to the time-out itself, so
+that we stay close to what users configured.
+
+(cherry picked from commit e20bfa5005ab5458837bb62cb35bc1687f25124f)
+
+Related: RHEL-20757
+---
+ src/login/logind.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/login/logind.c b/src/login/logind.c
+index 0348b19c05..70f72387c5 100644
+--- a/src/login/logind.c
++++ b/src/login/logind.c
+@@ -989,7 +989,7 @@ static int manager_dispatch_idle_action(sd_event_source *s, uint64_t t, void *us
+                                 m->event,
+                                 &m->idle_action_event_source,
+                                 CLOCK_MONOTONIC,
+-                                elapse, USEC_PER_SEC*30,
++                                elapse, MIN(USEC_PER_SEC*30, m->idle_action_usec), /* accuracy of 30s, but don't have an accuracy lower than the idle action timeout */
+                                 manager_dispatch_idle_action, m);
+                 if (r < 0)
+                         return log_error_errno(r, "Failed to add idle event source: %m");

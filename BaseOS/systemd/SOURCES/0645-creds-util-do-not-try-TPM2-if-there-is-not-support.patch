@@ -1,0 +1,49 @@
+From 5d5a32888ec46d1cce61d46c92f6ad1df986213e Mon Sep 17 00:00:00 2001
+From: Alberto Planas <aplanas@suse.com>
+Date: Mon, 16 Jan 2023 11:16:53 +0100
+Subject: [PATCH] creds-util: do not try TPM2 if there is not support
+
+During the credentials encryption, if systemd it is compiled with TPM2
+support, it will try to use it depending on the key flags passed.
+
+The current code only checks if the system has a functional TPM2 if the
+case of the INITRD flag.
+
+This patch do a similar check in the case that it is outside initrd (but
+still automatic).
+
+Signed-off-by: Alberto Planas <aplanas@suse.com>
+(cherry picked from commit e653a194e490fae7d166f40762c334006d592051)
+
+Related: RHEL-16182
+---
+ src/shared/creds-util.c | 15 ++++++---------
+ 1 file changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/src/shared/creds-util.c b/src/shared/creds-util.c
+index 20b3b83369..075fd2327a 100644
+--- a/src/shared/creds-util.c
++++ b/src/shared/creds-util.c
+@@ -609,16 +609,13 @@ int encrypt_credential_and_warn(
+ #if HAVE_TPM2
+         bool try_tpm2;
+         if (sd_id128_equal(with_key, _CRED_AUTO)) {
+-                /* If automatic mode is selected and we are running in a container, let's not try TPM2. OTOH
+-                 * if user picks TPM2 explicitly, let's always honour the request and try. */
++                /* If automatic mode is selected lets see if a TPM2 it is present. If we are running in a
++                 * container tpm2_support will detect this, and will return a different flag combination of
++                 * TPM2_SUPPORT_FULL, effectively skipping the use of TPM2 when inside one. */
+ 
+-                r = detect_container();
+-                if (r < 0)
+-                        log_debug_errno(r, "Failed to determine whether we are running in a container, ignoring: %m");
+-                else if (r > 0)
+-                        log_debug("Running in container, not attempting to use TPM2.");
+-
+-                try_tpm2 = r <= 0;
++                try_tpm2 = tpm2_support() == TPM2_SUPPORT_FULL;
++                if (!try_tpm2)
++                        log_debug("System lacks TPM2 support or running in a container, not attempting to use TPM2.");
+         } else if (sd_id128_equal(with_key, _CRED_AUTO_INITRD)) {
+                 /* If automatic mode for initrds is selected, we'll use the TPM2 key if the firmware does it,
+                  * otherwise we'll use a fixed key */

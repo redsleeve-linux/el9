@@ -1,0 +1,206 @@
+From 32cb9ab9f1701b1a1a826b48f2083cb75adf1e87 Mon Sep 17 00:00:00 2001
+From: Eric Blake <eblake@redhat.com>
+Date: Thu, 9 Nov 2023 20:11:08 -0600
+Subject: [libnbd PATCH] tests: Check behavior of
+ nbd_set_strict_mode(STRICT_AUTO_FLAG)
+Content-type: text/plain
+
+While developing extended header support for qemu 8.2, I needed a way
+to make libnbd quickly behave as a non-compliant client to test corner
+cases in qemu's server code; so I wrote commit 5c1dae9236 ("api: Add
+LIBNBD_STRICT_AUTO_FLAG to nbd_set_strict", v1.18.0) to meet my needs.
+However, I failed to codify my manual tests of that bit into a unit
+test for libnbd, until now.  Most sane clients will never call
+nbd_set_strict_mode() in the first place (after all, it is explicitly
+documented as an integration tool, which is how I used it with my qemu
+code development), but it never hurts to make sure we don't break it
+even for the relatively small set of users that would ever use it.
+
+The test added here runs in two parts; if you get a SKIP despite
+having qemu-nbd, then the first part ran successfully before the
+second half gave up due to lack of extended headers in qemu
+(presumably qemu 8.1 or older); if you get a PASS, then both parts
+were run.  However, both parts are inherently fragile, depending on
+behavior known to be in qemu 8.2 - while it is unlikely to change in
+future qemu releases (at least as long as I continue to maintain NBD
+code there), the fact that we are intentionally violating the NBD
+protocol means a different server is within its rights to behave
+differently than qemu 8.2 did.  Hence this test lives in interop/
+rather than tests/ because of its strong ties to a particular qemu.
+
+Signed-off-by: Eric Blake <eblake@redhat.com>
+(cherry picked from commit 54d4426394c372413f55f648d4ad1d21b3395e07)
+Signed-off-by: Eric Blake <eblake@redhat.com>
+---
+ interop/Makefile.am              |   2 +
+ interop/strict-mode-auto-flag.sh | 138 +++++++++++++++++++++++++++++++
+ 2 files changed, 140 insertions(+)
+ create mode 100755 interop/strict-mode-auto-flag.sh
+
+diff --git a/interop/Makefile.am b/interop/Makefile.am
+index d6485adf..ac12d84a 100644
+--- a/interop/Makefile.am
++++ b/interop/Makefile.am
+@@ -28,6 +28,7 @@ EXTRA_DIST = \
+ 	structured-read.sh \
+ 	opt-extended-headers.sh \
+ 	block-status-payload.sh \
++	strict-mode-auto-flag.sh \
+ 	$(NULL)
+
+ TESTS_ENVIRONMENT = \
+@@ -153,6 +154,7 @@ TESTS += \
+ 	interop-qemu-block-size.sh \
+ 	opt-extended-headers.sh \
+ 	block-status-payload.sh \
++	strict-mode-auto-flag.sh \
+ 	$(NULL)
+
+ interop_qemu_nbd_SOURCES = \
+diff --git a/interop/strict-mode-auto-flag.sh b/interop/strict-mode-auto-flag.sh
+new file mode 100755
+index 00000000..8f73ea73
+--- /dev/null
++++ b/interop/strict-mode-auto-flag.sh
+@@ -0,0 +1,138 @@
++#!/usr/bin/env bash
++# nbd client library in userspace
++# Copyright Red Hat
++#
++# This library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2 of the License, or (at your option) any later version.
++#
++# This library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with this library; if not, write to the Free Software
++# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++
++# Test effect of AUTO_FLAG bit in set_strict_mode()
++
++source ../tests/functions.sh
++set -e
++set -x
++
++requires truncate --version
++requires qemu-nbd --version
++requires nbdsh --version
++
++file="strict-mode-auto-flag.file"
++rm -f $file
++cleanup_fn rm -f $file
++
++truncate -s 1M $file
++
++# Unconditional part of test: behavior when extended headers are not in use
++$VG nbdsh -c '
++import errno
++
++h.set_request_extended_headers(False)
++args = ["qemu-nbd", "-f", "raw", "'"$file"'"]
++h.connect_systemd_socket_activation(args)
++assert h.get_extended_headers_negotiated() is False
++
++# STRICT_AUTO_FLAG and STRICT_COMMANDS are on by default
++flags = h.get_strict_mode()
++assert flags & nbd.STRICT_AUTO_FLAG
++assert flags & nbd.STRICT_COMMANDS
++
++# Under STRICT_AUTO_FLAG, using or omitting flag does not matter; client
++# side auto-corrects the flag before passing to server
++h.pwrite(b"1"*512, 0, 0)
++h.pwrite(b"2"*512, 0, nbd.CMD_FLAG_PAYLOAD_LEN)
++
++# Without STRICT_AUTO_FLAG but still STRICT_COMMANDS, client side now sees
++# attempts to use the flag as invalid
++flags = flags & ~nbd.STRICT_AUTO_FLAG
++h.set_strict_mode(flags)
++h.pwrite(b"3"*512, 0, 0)
++stats = h.stats_bytes_sent()
++try:
++  h.pwrite(b"4"*512, 0, nbd.CMD_FLAG_PAYLOAD_LEN)
++  assert False
++except nbd.Error as e:
++  assert e.errnum == errno.EINVAL
++assert stats == h.stats_bytes_sent()
++
++# Warning: fragile test ahead.  Without STRICT_COMMANDS, we send unexpected
++# flag to qemu, and expect failure. For qemu <= 8.1, this is safe (those
++# versions did not know the flag, and correctly reject unknown flags with
++# NBD_EINVAL). For qemu 8.2, this also works (qemu knows the flag, but warns
++# that we were not supposed to send it without extended headers). But if
++# future qemu versions change to start silently ignoring the flag (after all,
++# a write command obviously has a payload even without extended headers, so
++# the flag is redundant for NBD_CMD_WRITE), then we may need to tweak this.
++flags = flags & ~nbd.STRICT_COMMANDS
++h.set_strict_mode(flags)
++h.pwrite(b"5"*512, 0, 0)
++stats = h.stats_bytes_sent()
++try:
++  h.pwrite(b"6"*512, 0, nbd.CMD_FLAG_PAYLOAD_LEN)
++  print("Did newer qemu change behavior?")
++  assert False
++except nbd.Error as e:
++  assert e.errnum == errno.EINVAL
++assert stats < h.stats_bytes_sent()
++
++h.shutdown()
++'
++
++# Conditional part of test: only run if qemu supports extended headers
++requires nbdinfo --has extended-headers -- [ qemu-nbd -r -f raw "$file" ]
++$VG nbdsh -c '
++import errno
++
++args = ["qemu-nbd", "-f", "raw", "'"$file"'"]
++h.connect_systemd_socket_activation(args)
++assert h.get_extended_headers_negotiated() is True
++
++# STRICT_AUTO_FLAG and STRICT_COMMANDS are on by default
++flags = h.get_strict_mode()
++assert flags & nbd.STRICT_AUTO_FLAG
++assert flags & nbd.STRICT_COMMANDS
++
++# Under STRICT_AUTO_FLAG, using or omitting flag does not matter; client
++# side auto-corrects the flag before passing to server
++h.pwrite(b"1"*512, 0, 0)
++h.pwrite(b"2"*512, 0, nbd.CMD_FLAG_PAYLOAD_LEN)
++
++# Without STRICT_AUTO_FLAG but still STRICT_COMMANDS, client side now sees
++# attempts to omit the flag as invalid
++flags = flags & ~nbd.STRICT_AUTO_FLAG
++h.set_strict_mode(flags)
++h.pwrite(b"3"*512, 0, nbd.CMD_FLAG_PAYLOAD_LEN)
++stats = h.stats_bytes_sent()
++try:
++  h.pwrite(b"4"*512, 0, 0)
++  assert False
++except nbd.Error as e:
++  assert e.errnum == errno.EINVAL
++assert stats == h.stats_bytes_sent()
++
++# Warning: fragile test ahead.  Without STRICT_COMMANDS, omitting the flag
++# is a protocol violation. qemu 8.2 silently ignores the violation; but a
++# future qemu might start failing the command, at which point we would need
++# to tweak this part of the test.
++flags = flags & ~nbd.STRICT_COMMANDS
++h.set_strict_mode(flags)
++h.pwrite(b"5"*512, 0, nbd.CMD_FLAG_PAYLOAD_LEN)
++stats = h.stats_bytes_sent()
++try:
++  h.pwrite(b"6"*512, 0, 0)
++except nbd.Error:
++  print("Did newer qemu change behavior?")
++  assert False
++assert stats < h.stats_bytes_sent()
++
++h.shutdown()
++'
+-- 
+2.41.0
+

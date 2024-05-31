@@ -1,0 +1,160 @@
+From b7c36073f9a645967feba035e21468976b567adb Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 17 Oct 2022 15:20:53 +0200
+Subject: [PATCH] man: document new machine-id/fs measurement options
+
+(cherry picked from commit 2bd33c909c0cf02a2a794ac83d66e8b32879c25d)
+
+Related: RHEL-16182
+---
+ man/rules/meson.build            |  5 ++-
+ man/systemd-pcrphase.service.xml | 57 +++++++++++++++++++++++++++-----
+ man/systemd.mount.xml            | 14 ++++++++
+ 3 files changed, 67 insertions(+), 9 deletions(-)
+
+diff --git a/man/rules/meson.build b/man/rules/meson.build
+index c7045840f2..65a16b1e2a 100644
+--- a/man/rules/meson.build
++++ b/man/rules/meson.build
+@@ -971,7 +971,10 @@ manpages = [
+  ['systemd-path', '1', [], ''],
+  ['systemd-pcrphase.service',
+   '8',
+-  ['systemd-pcrphase',
++  ['systemd-pcrfs-root.service',
++   'systemd-pcrfs@.service',
++   'systemd-pcrmachine.service',
++   'systemd-pcrphase',
+    'systemd-pcrphase-initrd.service',
+    'systemd-pcrphase-sysinit.service'],
+   'HAVE_GNU_EFI'],
+diff --git a/man/systemd-pcrphase.service.xml b/man/systemd-pcrphase.service.xml
+index 9b7cc80b3a..95b0e05269 100644
+--- a/man/systemd-pcrphase.service.xml
++++ b/man/systemd-pcrphase.service.xml
+@@ -20,15 +20,21 @@
+     <refname>systemd-pcrphase.service</refname>
+     <refname>systemd-pcrphase-sysinit.service</refname>
+     <refname>systemd-pcrphase-initrd.service</refname>
++    <refname>systemd-pcrmachine.service</refname>
++    <refname>systemd-pcrfs-root.service</refname>
++    <refname>systemd-pcrfs@.service</refname>
+     <refname>systemd-pcrphase</refname>
+-    <refpurpose>Measure boot phase into TPM2 PCR 11</refpurpose>
++    <refpurpose>Measure boot phase into TPM2 PCR 11, machine ID and file system identity into PCR 15</refpurpose>
+   </refnamediv>
+ 
+   <refsynopsisdiv>
+     <para><filename>systemd-pcrphase.service</filename></para>
+     <para><filename>systemd-pcrphase-sysinit.service</filename></para>
+     <para><filename>systemd-pcrphase-initrd.service</filename></para>
+-    <para><filename>/usr/lib/systemd/system-pcrphase</filename> <replaceable>STRING</replaceable></para>
++    <para><filename>systemd-pcrmachine.service</filename></para>
++    <para><filename>systemd-pcrfs-root.service</filename></para>
++    <para><filename>systemd-pcrfs@.service</filename></para>
++    <para><filename>/usr/lib/systemd/system-pcrphase</filename> <optional><replaceable>STRING</replaceable></optional></para>
+   </refsynopsisdiv>
+ 
+   <refsect1>
+@@ -39,13 +45,23 @@
+     <filename>systemd-pcrphase-initrd.service</filename> are system services that measure specific strings
+     into TPM2 PCR 11 during boot at various milestones of the boot process.</para>
+ 
++    <para><filename>systemd-pcrmachine.service</filename> is a system service that measures the machine ID
++    (see <citerefentry><refentrytitle>machine-id</refentrytitle><manvolnum>5</manvolnum></citerefentry>) into
++    PCR 15.</para>
++
++    <para><filename>systemd-pcrfs-root.service</filename> and <filename>systemd-pcrfs@.service</filename> are
++    services that measure file system identity information (i.e. mount point, file system type, label and
++    UUID, partition label and UUID) into PCR 15. <filename>systemd-pcrfs-root.service</filename> does so for
++    the root file system, <filename>systemd-pcrfs@.service</filename> is a template unit that measures the
++    file system indicated by its instance identifier instead.</para>
++
+     <para>These services require
+     <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry> to be
+-    used in a unified kernel image (UKI) setup. They execute no operation when invoked when the stub has not
+-    been used to invoke the kernel. The stub will measure the invoked kernel and associated vendor resources
+-    into PCR 11 before handing control to it; once userspace is invoked these services then will extend
+-    certain literal strings indicating various phases of the boot process into TPM2 PCR 11. During a regular
+-    boot process the following strings are extended into PCR 11.</para>
++    used in a unified kernel image (UKI). They execute no operation when the stub has not been used to invoke
++    the kernel. The stub will measure the invoked kernel and associated vendor resources into PCR 11 before
++    handing control to it; once userspace is invoked these services then will extend TPM2 PCR 11 with certain
++    literal strings indicating phases of the boot process. During a regular boot process PCR 11 is extended
++    with the following strings:</para>
+ 
+     <orderedlist>
+       <listitem><para><literal>enter-initrd</literal> is extended into PCR 11 early when the initrd
+@@ -104,6 +120,14 @@
+     <para>Use
+     <citerefentry><refentrytitle>systemd-measure</refentrytitle><manvolnum>1</manvolnum></citerefentry> to
+     pre-calculate expected PCR 11 values for specific boot phases (via the <option>--phase=</option> switch).</para>
++
++    <para><filename>systemd-pcrfs-root.service</filename> and <filename>systemd-pcrfs@.service</filename> are
++    automatically pulled into the initial transaction by
++    <citerefentry><refentrytitle>systemd-gpt-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
++    for the root and <filename>/var/</filename> file
++    systems. <citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
++    will do this for all mounts with the <option>x-systemd.pcrfs</option> mount option in
++    <filename>/etc/fstab</filename>.</para>
+   </refsect1>
+ 
+   <refsect1>
+@@ -139,6 +163,21 @@
+         TPM2 device will cause the invocation to fail.</para></listitem>
+       </varlistentry>
+ 
++      <varlistentry>
++        <term><option>--machine-id</option></term>
++
++        <listitem><para>Instead of measuring a word specified on the command line into PCR 11, measure the
++        host's machine ID into PCR 15.</para></listitem>
++      </varlistentry>
++
++      <varlistentry>
++        <term><option>--file-system=</option></term>
++
++        <listitem><para>Instead of measuring a word specified on the command line into PCR 11, measure
++        identity information of the specified file system into PCR 15. The parameter must be the path to the
++        established mount point of the file system to measure.</para></listitem>
++      </varlistentry>
++
+       <xi:include href="standard-options.xml" xpointer="help" />
+       <xi:include href="standard-options.xml" xpointer="version" />
+ 
+@@ -150,7 +189,9 @@
+     <para>
+       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>systemd-measure</refentrytitle><manvolnum>1</manvolnum></citerefentry>
++      <citerefentry><refentrytitle>systemd-measure</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-gpt-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-fstab-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+     </para>
+   </refsect1>
+ 
+diff --git a/man/systemd.mount.xml b/man/systemd.mount.xml
+index 773ca04cd6..3dbc623f44 100644
+--- a/man/systemd.mount.xml
++++ b/man/systemd.mount.xml
+@@ -366,6 +366,20 @@
+         <varname>Options=</varname> setting in a unit file.</para></listitem>
+       </varlistentry>
+ 
++      <varlistentry>
++        <term><option>x-systemd.pcrfs</option></term>
++
++        <listitem><para>Measures file system identity information (mount point, type, label, UUID, partition
++        label, partition UUID) into PCR 15 after the file system has been mounted. This ensures the
++        <citerefentry><refentrytitle>systemd-pcrfs@.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
++        or <filename>systemd-pcrfs-root.service</filename> services are pulled in by the mount unit.</para>
++
++        <para>Note that this option can only be used in <filename>/etc/fstab</filename>, and will be ignored
++        when part of the <varname>Options=</varname> setting in a unit file. It is also implied for the root
++        and <filename>/usr/</filename> partitions dicovered by
++        <citerefentry><refentrytitle>systemd-gpt-auto-generator</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para></listitem>
++      </varlistentry>
++
+       <varlistentry>
+         <term><option>x-systemd.rw-only</option></term>
+ 

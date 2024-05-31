@@ -48,5 +48,7 @@ check_convert_bitcode () {
 
 echo "Checking for LLVM bitcode artifacts"
 export -f check_convert_bitcode
-find "$RPM_BUILD_ROOT" -type f -name "*.[ao]" -print0 | \
-  xargs -0 -r -n1 -P$NCPUS sh -c "check_convert_bitcode \$@ $CLANG_FLAGS" ARG0
+# Deduplicate by device:inode to avoid processing hardlinks in parallel.
+find "$RPM_BUILD_ROOT" -type f -name "*.[ao]" -printf "%D:%i %p\n" | \
+  awk '!seen[$1]++' | cut -d" " -f2- | \
+  xargs -d"\n" -r -n1 -P$NCPUS sh -c "check_convert_bitcode \$@ $CLANG_FLAGS" ARG0

@@ -1,0 +1,150 @@
+From 3012047a48f67f6cceba50ce326497aa647074ea Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Tue, 17 Jan 2023 22:06:06 +0100
+Subject: [PATCH] bootctl: add kernel-inspect command
+
+Takes a kernel image as argument. Prints details about the kernel.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+(cherry picked from commit a05255981ba5b04f1cf54ea656fbce1dfd9c3a68)
+
+Resolves: RHEL-16354
+---
+ man/bootctl.xml        |  6 ++++
+ src/boot/bootctl-uki.c | 79 ++++++++++++++++++++++++++++++++++++++++++
+ src/boot/bootctl-uki.h |  1 +
+ src/boot/bootctl.c     |  1 +
+ 4 files changed, 87 insertions(+)
+
+diff --git a/man/bootctl.xml b/man/bootctl.xml
+index 0f992ec383..c12fe93214 100644
+--- a/man/bootctl.xml
++++ b/man/bootctl.xml
+@@ -227,6 +227,12 @@
+         <listitem><para>Takes a kernel image as argument. Checks what kind of kernel the image is.  Returns
+         one of uki, pe or unknown.</para></listitem>
+       </varlistentry>
++
++      <varlistentry>
++        <term><option>kernel-inspect</option> <replaceable>kernel</replaceable></term>
++
++        <listitem><para>Takes a kernel image as argument. Prints details about the kernel.</para></listitem>
++      </varlistentry>
+     </variablelist>
+   </refsect1>
+ 
+diff --git a/src/boot/bootctl-uki.c b/src/boot/bootctl-uki.c
+index 7e8e8a570b..3085f703a8 100644
+--- a/src/boot/bootctl-uki.c
++++ b/src/boot/bootctl-uki.c
+@@ -13,6 +13,8 @@ static const uint8_t pe_file_magic[4] = "PE\0\0";
+ static const uint8_t name_osrel[8] = ".osrel";
+ static const uint8_t name_linux[8] = ".linux";
+ static const uint8_t name_initrd[8] = ".initrd";
++static const uint8_t name_cmdline[8] = ".cmdline";
++static const uint8_t name_uname[8] = ".uname";
+ 
+ static int pe_sections(FILE *uki, struct PeSectionHeader **ret, size_t *ret_n) {
+         _cleanup_free_ struct PeSectionHeader *sections = NULL;
+@@ -107,3 +109,80 @@ int verb_kernel_identify(int argc, char *argv[], void *userdata) {
+         puts("unknown");
+         return EXIT_SUCCESS;
+ }
++
++static int read_pe_section(FILE *uki, const struct PeSectionHeader *section,
++                           void **ret, size_t *ret_n) {
++        _cleanup_free_ void *data = NULL;
++        uint32_t size, bytes;
++        uint64_t soff;
++        int rc;
++
++        soff = le32toh(section->PointerToRawData);
++        size = le32toh(section->VirtualSize);
++
++        if (size > 16 * 1024)
++                return log_error_errno(SYNTHETIC_ERRNO(E2BIG), "PE section too big");
++
++        rc = fseek(uki, soff, SEEK_SET);
++        if (rc < 0)
++                return log_error_errno(errno, "seek to PE section");
++
++        data = malloc(size+1);
++        if (!data)
++                return log_oom();
++        ((uint8_t*) data)[size] = 0; /* safety NUL byte */
++
++        bytes = fread(data, 1, size, uki);
++        if (bytes != size)
++                return log_error_errno(SYNTHETIC_ERRNO(EIO), "PE section read error");
++
++        *ret = TAKE_PTR(data);
++        if (ret_n)
++                *ret_n = size;
++        return 0;
++}
++
++static void inspect_uki(FILE *uki, struct PeSectionHeader *sections, size_t scount) {
++        _cleanup_free_ char *cmdline = NULL;
++        _cleanup_free_ char *uname = NULL;
++        size_t idx;
++
++        if (find_pe_section(sections, scount, name_cmdline, sizeof(name_cmdline), &idx))
++                read_pe_section(uki, sections + idx, (void**)&cmdline, NULL);
++
++        if (find_pe_section(sections, scount, name_uname, sizeof(name_uname), &idx))
++                read_pe_section(uki, sections + idx, (void**)&uname, NULL);
++
++        if (cmdline)
++                printf("    Cmdline: %s\n", cmdline);
++        if (uname)
++                printf("    Version: %s\n", uname);
++}
++
++int verb_kernel_inspect(int argc, char *argv[], void *userdata) {
++        _cleanup_fclose_ FILE *uki = NULL;
++        _cleanup_free_ struct PeSectionHeader *sections = NULL;
++        size_t scount;
++        int rc;
++
++        uki = fopen(argv[1], "re");
++        if (!uki)
++                return log_error_errno(errno, "Failed to open UKI file '%s': %m", argv[1]);
++
++        rc = pe_sections(uki, &sections, &scount);
++        if (rc < 0)
++                return EXIT_FAILURE;
++
++        if (sections) {
++                if (is_uki(sections, scount)) {
++                        puts("Kernel Type: uki");
++                        inspect_uki(uki, sections, scount);
++                        return EXIT_SUCCESS;
++                }
++                puts("Kernel Type: pe");
++                return EXIT_SUCCESS;
++        }
++
++        puts("Kernel Type: unknown");
++        return EXIT_SUCCESS;
++}
+diff --git a/src/boot/bootctl-uki.h b/src/boot/bootctl-uki.h
+index 3c1fb5bc6a..effb984d80 100644
+--- a/src/boot/bootctl-uki.h
++++ b/src/boot/bootctl-uki.h
+@@ -1,3 +1,4 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
+ int verb_kernel_identify(int argc, char *argv[], void *userdata);
++int verb_kernel_inspect(int argc, char *argv[], void *userdata);
+diff --git a/src/boot/bootctl.c b/src/boot/bootctl.c
+index 58e4af85f8..b98673cd11 100644
+--- a/src/boot/bootctl.c
++++ b/src/boot/bootctl.c
+@@ -2571,6 +2571,7 @@ static int bootctl_main(int argc, char *argv[]) {
+                 { "remove",              VERB_ANY, 1,        0,            verb_remove              },
+                 { "is-installed",        VERB_ANY, 1,        0,            verb_is_installed        },
+                 { "kernel-identify",     2,        2,        0,            verb_kernel_identify     },
++                { "kernel-inspect",      2,        2,        0,            verb_kernel_inspect      },
+                 { "list",                VERB_ANY, 1,        0,            verb_list                },
+                 { "set-default",         2,        2,        0,            verb_set_efivar          },
+                 { "set-oneshot",         2,        2,        0,            verb_set_efivar          },

@@ -1,9 +1,9 @@
 
 Name:    annobin
 Summary: Annotate and examine compiled binary files
-Version: 12.12
-Release: 1%{?dist}.redsleeve
-License: GPLv3+
+Version: 12.31
+Release: 2%{?dist}
+License: GPL-3.0-or-later AND LGPL-2.0-or-later AND (GPL-2.0-or-later WITH GCC-exception-2.0) AND (LGPL-2.0-or-later WITH GCC-exception-2.0) AND GFDL-1.3-or-later 
 # Maintainer: nickc@redhat.com
 # Web Page: https://sourceware.org/annobin/
 # Watermark Protocol: https://fedoraproject.org/wiki/Toolchain/Watermark
@@ -62,7 +62,7 @@ Source: https://nickc.fedorapeople.org/%{annobin_sources}
 %global annobin_source_dir %{_usrsrc}/annobin
 
 # Insert patches here, if needed.  Eg:
-# Patch01: annobin-foo.patch
+Patch01: annobin-strings-no-attach.patch
 
 #---------------------------------------------------------------------------------
 
@@ -248,11 +248,6 @@ CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" CXXFLAGS="$CFLAGS" %configure ${CONFIG_ARGS}
 export CLANG_TARGET_OPTIONS="-fcf-protection"
 %endif
 
-%ifarch armv6hl
-# FIXME: There should be a better way to do this.
-export CLANG_TARGET_OPTIONS="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
-%endif
-
 %make_build
 
 %if %{with plugin_rebuild}
@@ -371,8 +366,36 @@ exit $res
 #---------------------------------------------------------------------------------
 
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 12.12-1.redsleeve
-- added compiler flags for armv6
+* Wed Jan 17 2024 Nick Clifron  <nickc@redhat.com> - 12.31-2
+- GCC Plugin: Do not use section groups with string notes.  (RHEL-21772)
+
+* Wed Nov 15 2023 Nick Clifron  <nickc@redhat.com> - 12.31-1
+- Update glibc detection heuristics for PPC64.  (RHEL-16453)
+- Fix another atexit test failure.  (#2247481)
+- Fix atexit test failure.
+- Notes: Add support for string format notes.
+
+* Mon Oct 09 2023 Nick Clifton  <nickc@redhat.com> - 12.28-1
+- Tests: Fix obsoleted syntax in plans/ci.fmf  (RHEL-12194)
+- Spec File: Use SPDX licensing.
+- GCC Plugin: Record settings of -Wstrict-flex-arrays and -fstrict-flex-arrays
+- Annobin: Add future test of these options.
+- GCC Plugin: Record settings of -Wimplicit-int and -Wimplicit-function-declaration.
+- Annobin: Add test for these warnings.
+- LLVM Plugin: Fix building with LLVM version 17.
+- GCC Plugin: Enable string note format by default.
+- Annocheck: Change GO FIPS test to look for CGO_ENABLED markers.
+- Annocheck: Add test for FIPS compliant GO binaries.
+- Annocheck: Fix double free.  (#2226749)
+- Annocheck: Ignore AArch64 $x and $d symbols.  (#2221192)
+- GCC Plugin: Suppress active checks for fortran sources.  Improve scanning of COLLECT_GCC_OPTIONS.
+- Annocheck: Remove dependency upon binutils-devel.
+- Annocheck: Add detection of known parts of libstdc++-nonshared.a that contain gaps.  (#2217864)
+- Annocheck: Ignore weak/undef function symbols when checking to see if a binary contains code.  (#2217840)
+- Annocheck: Add --suppress-version-warnings option.
+- Annocheck: Do not ignore separate debuginfo files that do not contain any DWARF.  (#2144553)
+- Annocheck: Ignore /dev/null filename in string notes.
+- Annocheck: More tweaks to glibc detection heuristics.  (#2215968)
 
 * Wed Jun 14 2023 Nick Clifton  <nickc@redhat.com> - 12.12-1
 - Rebuild against LLVM-16.  (#2212739)

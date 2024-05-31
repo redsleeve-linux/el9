@@ -1,0 +1,80 @@
+From 4f3593718196c007838eebf5d9b42f09318bd4e6 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Fri, 20 Jan 2023 09:05:18 +0100
+Subject: [PATCH] kernel-install: handle uki installs automatically
+
+Detect image type using "bootctl kernel-identify $kernel",
+store result in KERNEL_INSTALL_IMAGE_TYPE.
+
+Extend layout autodetection to check the kernel image type
+and pick layout=uki for UKIs.
+
+Resolves: https://github.com/systemd/systemd/issues/25822
+(cherry picked from commit 3d5f0bfe4e72fdc4d8f8d65f96dc5501dfed8a64)
+
+Related: RHEL-16354
+---
+ man/kernel-install.xml               | 17 +++++++++++++----
+ src/kernel-install/kernel-install.in | 12 ++++++++++--
+ 2 files changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/man/kernel-install.xml b/man/kernel-install.xml
+index 1bc6e7aa05..4d91b7b20b 100644
+--- a/man/kernel-install.xml
++++ b/man/kernel-install.xml
+@@ -224,10 +224,8 @@
+       (EFI System Partition) are mounted, and also conceptually referred to as <varname>$BOOT</varname>. Can
+       be overridden by setting <varname>$BOOT_ROOT</varname> (see below).</para>
+ 
+-      <para><varname>$KERNEL_INSTALL_LAYOUT=bls|uki|other|...</varname> is set for the plugins to specify the
+-      installation layout. Defaults to <option>bls</option> if
+-      <filename>$BOOT/<replaceable>ENTRY-TOKEN</replaceable></filename> exists, or <option>other</option>
+-      otherwise. Additional layout names may be defined by convention. If a plugin uses a special layout,
++      <para><varname>$KERNEL_INSTALL_LAYOUT=auto|bls|uki|other|...</varname> is set for the plugins to specify the
++      installation layout. Additional layout names may be defined by convention. If a plugin uses a special layout,
+       it's encouraged to declare its own layout name and configure <varname>layout=</varname> in
+       <filename>install.conf</filename> upon initial installation. The following values are currently
+       understood:</para>
+@@ -264,6 +262,17 @@
+             <para>Some other layout not understood natively by <command>kernel-install</command>.</para>
+           </listitem>
+         </varlistentry>
++        <varlistentry>
++          <term>auto</term>
++          <listitem>
++            <para>Pick the layout automatically. If the kernel is a UKI set layout to
++            <option>uki</option>. If not default to <option>bls</option> if
++            <filename>$BOOT/loader/entries.srel</filename> with content <literal>type1</literal> or
++            <filename>$BOOT/<replaceable>ENTRY-TOKEN</replaceable></filename> exists, or
++            <option>other</option> otherwise.</para>
++            <para>Leaving layout blank has the same effect. This is the default.</para>
++          </listitem>
++        </varlistentry>
+       </variablelist>
+ 
+       <para><varname>$KERNEL_INSTALL_INITRD_GENERATOR</varname> is set for plugins to select the initrd
+diff --git a/src/kernel-install/kernel-install.in b/src/kernel-install/kernel-install.in
+index fa2c0d5276..25884fc0e2 100755
+--- a/src/kernel-install/kernel-install.in
++++ b/src/kernel-install/kernel-install.in
+@@ -250,10 +250,18 @@ if [ -z "$ENTRY_TOKEN" ]; then
+         echo "No entry-token candidate matched, using \"$ENTRY_TOKEN\" from machine-id"
+ fi
+ 
+-if [ -z "$layout" ]; then
++export KERNEL_INSTALL_IMAGE_TYPE=""
++if [ -f "$1" ]; then
++    KERNEL_INSTALL_IMAGE_TYPE="$(bootctl kernel-identify "$1" 2>/dev/null || echo "unknown")"
++fi
++
++if [ "$layout" = "auto" ] || [ -z "$layout" ]; then
+     # No layout configured by the administrator. Let's try to figure it out
+     # automatically from metadata already contained in $BOOT_ROOT.
+-    if [ -e "$BOOT_ROOT/loader/entries.srel" ]; then
++    if [ "$KERNEL_INSTALL_IMAGE_TYPE" = "uki" ]; then
++        layout="uki"
++        log_verbose "Kernel image is UKI, using layout=$layout"
++    elif [ -e "$BOOT_ROOT/loader/entries.srel" ]; then
+         read -r ENTRIES_SREL <"$BOOT_ROOT/loader/entries.srel"
+         if [ "$ENTRIES_SREL" = "type1" ]; then
+             # The loader/entries.srel file clearly indicates that the installed

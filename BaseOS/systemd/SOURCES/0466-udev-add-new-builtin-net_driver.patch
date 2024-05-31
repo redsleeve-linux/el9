@@ -1,0 +1,184 @@
+From f2bf171137c348f6f976276504c8e8a54e33ff78 Mon Sep 17 00:00:00 2001
+From: Lukas Nykryn <lnykryn@redhat.com>
+Date: Thu, 19 Oct 2023 10:38:06 +0200
+Subject: [PATCH] udev: add new builtin net_driver
+
+Currently the ID_NET_DRIVER is set in net_setup_link builtin.
+But this is called pretty late in the udev processing chain.
+
+Right now in some custom rules it was workarounded by calling ethtool
+binary directly, which is ugly.
+
+So let's split this code to a separate builtin.
+
+(cherry picked from commit 2b5b25f123ceb89b3ff45b2380db1c8a88b046d9)
+
+Resolves: RHEL-22443
+---
+ rules.d/50-udev-default.rules.in       |  2 ++
+ src/udev/meson.build                   |  1 +
+ src/udev/net/link-config.c             |  5 ++-
+ src/udev/net/link-config.h             |  2 +-
+ src/udev/udev-builtin-net_driver.c     | 43 ++++++++++++++++++++++++++
+ src/udev/udev-builtin-net_setup_link.c |  3 --
+ src/udev/udev-builtin.c                |  1 +
+ src/udev/udev-builtin.h                |  2 ++
+ 8 files changed, 52 insertions(+), 7 deletions(-)
+ create mode 100644 src/udev/udev-builtin-net_driver.c
+
+diff --git a/rules.d/50-udev-default.rules.in b/rules.d/50-udev-default.rules.in
+index 843bdaf9ce..f670b51987 100644
+--- a/rules.d/50-udev-default.rules.in
++++ b/rules.d/50-udev-default.rules.in
+@@ -17,6 +17,8 @@ SUBSYSTEM=="rtc", KERNEL=="rtc0", SYMLINK+="rtc", OPTIONS+="link_priority=-100"
+ SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", IMPORT{builtin}="usb_id", IMPORT{builtin}="hwdb --subsystem=usb"
+ ENV{MODALIAS}!="", IMPORT{builtin}="hwdb --subsystem=$env{SUBSYSTEM}"
+ 
++SUBSYSTEM=="net", IMPORT{builtin}="net_driver"
++
+ ACTION!="add", GOTO="default_end"
+ 
+ SUBSYSTEM=="tty", KERNEL=="ptmx", GROUP="tty", MODE="0666"
+diff --git a/src/udev/meson.build b/src/udev/meson.build
+index 08a1d97e81..564aa6de1b 100644
+--- a/src/udev/meson.build
++++ b/src/udev/meson.build
+@@ -35,6 +35,7 @@ libudevd_core_sources = files(
+         'udev-builtin-hwdb.c',
+         'udev-builtin-input_id.c',
+         'udev-builtin-keyboard.c',
++        'udev-builtin-net_driver.c',
+         'udev-builtin-net_id.c',
+         'udev-builtin-net_setup_link.c',
+         'udev-builtin-path_id.c',
+diff --git a/src/udev/net/link-config.c b/src/udev/net/link-config.c
+index 2d8c902fd3..80c64519ab 100644
+--- a/src/udev/net/link-config.c
++++ b/src/udev/net/link-config.c
+@@ -362,7 +362,6 @@ Link *link_free(Link *link) {
+ 
+         sd_device_unref(link->device);
+         free(link->kind);
+-        free(link->driver);
+         strv_free(link->altnames);
+         return mfree(link);
+ }
+@@ -415,8 +414,8 @@ int link_new(LinkConfigContext *ctx, sd_netlink **rtnl, sd_device *device, Link
+                         log_link_debug_errno(link, r, "Failed to get permanent hardware address, ignoring: %m");
+         }
+ 
+-        r = ethtool_get_driver(&ctx->ethtool_fd, link->ifname, &link->driver);
+-        if (r < 0)
++        r = sd_device_get_property_value(link->device, "ID_NET_DRIVER", &link->driver);
++        if (r < 0 && r != -ENOENT)
+                 log_link_debug_errno(link, r, "Failed to get driver, ignoring: %m");
+ 
+         *ret = TAKE_PTR(link);
+diff --git a/src/udev/net/link-config.h b/src/udev/net/link-config.h
+index 874a391543..8343783caf 100644
+--- a/src/udev/net/link-config.h
++++ b/src/udev/net/link-config.h
+@@ -34,7 +34,7 @@ typedef struct Link {
+         sd_device_action_t action;
+ 
+         char *kind;
+-        char *driver;
++        const char *driver;
+         uint16_t iftype;
+         uint32_t flags;
+         struct hw_addr_data hw_addr;
+diff --git a/src/udev/udev-builtin-net_driver.c b/src/udev/udev-builtin-net_driver.c
+new file mode 100644
+index 0000000000..f1642a491d
+--- /dev/null
++++ b/src/udev/udev-builtin-net_driver.c
+@@ -0,0 +1,43 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++
++#include "alloc-util.h"
++#include "device-util.h"
++#include "errno-util.h"
++#include "ethtool-util.h"
++#include "fd-util.h"
++#include "log.h"
++#include "string-util.h"
++#include "udev-builtin.h"
++
++static int builtin_net_driver_set_driver(UdevEvent *event, int argc, char **argv, bool test) {
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
++        _cleanup_close_ int ethtool_fd = -EBADF;
++        _cleanup_free_ char *driver = NULL;
++        const char *sysname;
++        int r;
++
++        r = sd_device_get_sysname(dev, &sysname);
++        if (r < 0)
++                return log_device_warning_errno(dev, r, "Failed to get sysname: %m");
++
++        r = ethtool_get_driver(&ethtool_fd, sysname, &driver);
++        if (ERRNO_IS_NEG_NOT_SUPPORTED(r)) {
++                log_device_debug_errno(dev, r, "Querying driver name via ethtool API is not supported by device '%s', ignoring: %m", sysname);
++                return 0;
++        }
++        if (r == -ENODEV) {
++                log_device_debug_errno(dev, r, "Device already vanished, ignoring.");
++                return 0;
++        }
++        if (r < 0)
++                return log_device_warning_errno(dev, r, "Failed to get driver for '%s': %m", sysname);
++
++        return udev_builtin_add_property(event->dev, test, "ID_NET_DRIVER", driver);
++}
++
++const UdevBuiltin udev_builtin_net_driver = {
++        .name = "net_driver",
++        .cmd = builtin_net_driver_set_driver,
++        .help = "Set driver for network device",
++        .run_once = true,
++};
+diff --git a/src/udev/udev-builtin-net_setup_link.c b/src/udev/udev-builtin-net_setup_link.c
+index e964bf7bf4..b0279a1814 100644
+--- a/src/udev/udev-builtin-net_setup_link.c
++++ b/src/udev/udev-builtin-net_setup_link.c
+@@ -26,9 +26,6 @@ static int builtin_net_setup_link(UdevEvent *event, int argc, char **argv, bool
+         if (r < 0)
+                 return log_device_warning_errno(dev, r, "Failed to get link information: %m");
+ 
+-        if (link->driver)
+-                udev_builtin_add_property(dev, test, "ID_NET_DRIVER", link->driver);
+-
+         r = link_get_config(ctx, link);
+         if (r < 0) {
+                 if (r == -ENOENT) {
+diff --git a/src/udev/udev-builtin.c b/src/udev/udev-builtin.c
+index c84db8855c..d55dc3337d 100644
+--- a/src/udev/udev-builtin.c
++++ b/src/udev/udev-builtin.c
+@@ -22,6 +22,7 @@ static const UdevBuiltin *const builtins[_UDEV_BUILTIN_MAX] = {
+ #if HAVE_KMOD
+         [UDEV_BUILTIN_KMOD] = &udev_builtin_kmod,
+ #endif
++        [UDEV_BUILTIN_NET_DRIVER] = &udev_builtin_net_driver,
+         [UDEV_BUILTIN_NET_ID] = &udev_builtin_net_id,
+         [UDEV_BUILTIN_NET_LINK] = &udev_builtin_net_setup_link,
+         [UDEV_BUILTIN_PATH_ID] = &udev_builtin_path_id,
+diff --git a/src/udev/udev-builtin.h b/src/udev/udev-builtin.h
+index 919d51e798..c23f2d1613 100644
+--- a/src/udev/udev-builtin.h
++++ b/src/udev/udev-builtin.h
+@@ -19,6 +19,7 @@ typedef enum UdevBuiltinCommand {
+ #if HAVE_KMOD
+         UDEV_BUILTIN_KMOD,
+ #endif
++        UDEV_BUILTIN_NET_DRIVER,
+         UDEV_BUILTIN_NET_ID,
+         UDEV_BUILTIN_NET_LINK,
+         UDEV_BUILTIN_PATH_ID,
+@@ -63,6 +64,7 @@ extern const UdevBuiltin udev_builtin_keyboard;
+ #if HAVE_KMOD
+ extern const UdevBuiltin udev_builtin_kmod;
+ #endif
++extern const UdevBuiltin udev_builtin_net_driver;
+ extern const UdevBuiltin udev_builtin_net_id;
+ extern const UdevBuiltin udev_builtin_net_setup_link;
+ extern const UdevBuiltin udev_builtin_path_id;

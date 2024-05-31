@@ -1,0 +1,36 @@
+--- annobin.orig/gcc-plugin/annobin.cc	2024-01-17 14:00:26.889983192 +0000
++++ annobin-12.31/gcc-plugin/annobin.cc	2024-01-17 14:01:27.517055850 +0000
+@@ -3261,18 +3261,24 @@ plugin_init (struct plugin_name_args *
+   target_start_sym_bias = annobin_target_start_symbol_bias ();
+   if (annobin_attach_type == not_set)
+     {
+-      /* Choose a default attachment type.  Link ordering is preferable
+-	 as it is more resistant to changes in compiler section building.
+-	 But it can only be used if the target assembler supports link_order sections
+-	 and the target linker is sufficiently new that it implements them correctly.
+-	 For now we use a test of the GCC version as an approximation to the binutils
+-	 versions that are needed.  (Note - 2.35.2, as used by RHEL-9, is insufficient).
+-	 See BZ 2016458 for an example of where this solution is needed.  */
++      if (annobin_note_format == string)
++	/* String format notes do not need section groups.  */
++	annobin_attach_type = none;
++      else
++	{
++	  /* Choose a default attachment type.  Link ordering is preferable
++	     as it is more resistant to changes in compiler section building.
++	     But it can only be used if the target assembler supports link_order sections
++	     and the target linker is sufficiently new that it implements them correctly.
++	     For now we use a test of the GCC version as an approximation to the binutils
++	     versions that are needed.  (Note - 2.35.2, as used by RHEL-9, is insufficient).
++	     See BZ 2016458 for an example of where this solution is needed.  */
+ #if GCCPLUGIN_VERSION_MAJOR >= 12
+-      annobin_attach_type = link_order;
++	  annobin_attach_type = link_order;
+ #else
+-      annobin_attach_type = group;
++	  annobin_attach_type = group;
+ #endif
++	}
+     }
+   annobin_inform (INFORM_VERBOSE, "Attach mode: %s", attach_mode_name (annobin_attach_type));
+ 

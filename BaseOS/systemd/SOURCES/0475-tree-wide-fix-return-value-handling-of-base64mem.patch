@@ -1,0 +1,440 @@
+From 841222c6f5b94ee4dfa53ce257cf021dc1ffeac3 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 11 Jan 2023 10:42:05 +0100
+Subject: [PATCH] tree-wide: fix return value handling of base64mem()
+
+This returns an ssize_t, not an int. On populare archs that's the
+difference between 64bit and 32bit. hence, let's be more careful here,
+and not silently drop half the bits on the ground by assigning the
+return value to "int".
+
+As noticed by @malikabhi05:
+
+https://github.com/systemd/systemd/pull/24754#discussion_r1062903159
+(cherry picked from commit 5e476b851251dd5addd39f06ebdf05bb3efb0be7)
+
+Related: RHEL-16182
+---
+ src/cryptenroll/cryptenroll-fido2.c           |  9 ++++----
+ src/cryptenroll/cryptenroll-pkcs11.c          |  9 ++++----
+ src/cryptenroll/cryptenroll-tpm2.c            |  9 ++++----
+ .../cryptsetup-token-systemd-tpm2.c           |  9 ++++----
+ .../cryptsetup-tokens/luks2-fido2.c           |  9 ++++----
+ .../cryptsetup-tokens/luks2-pkcs11.c          |  9 ++++----
+ src/cryptsetup/cryptsetup.c                   | 21 +++++++++++--------
+ src/home/homectl-fido2.c                      | 14 +++++++------
+ src/home/homectl-pkcs11.c                     |  7 ++++---
+ src/home/homework-fido2.c                     |  7 ++++---
+ src/home/homework-fscrypt.c                   |  9 ++++----
+ src/partition/repart.c                        |  9 ++++----
+ 12 files changed, 68 insertions(+), 53 deletions(-)
+
+diff --git a/src/cryptenroll/cryptenroll-fido2.c b/src/cryptenroll/cryptenroll-fido2.c
+index 80adaefa17..87432e0d5e 100644
+--- a/src/cryptenroll/cryptenroll-fido2.c
++++ b/src/cryptenroll/cryptenroll-fido2.c
+@@ -21,6 +21,7 @@ int enroll_fido2(
+         _cleanup_free_ char *keyslot_as_string = NULL;
+         size_t cid_size, salt_size, secret_size;
+         _cleanup_free_ void *cid = NULL;
++        ssize_t base64_encoded_size;
+         const char *node, *un;
+         int r, keyslot;
+ 
+@@ -53,9 +54,9 @@ int enroll_fido2(
+                 return r;
+ 
+         /* Before we use the secret, we base64 encode it, for compat with homed, and to make it easier to type in manually */
+-        r = base64mem(secret, secret_size, &base64_encoded);
+-        if (r < 0)
+-                return log_error_errno(r, "Failed to base64 encode secret key: %m");
++        base64_encoded_size = base64mem(secret, secret_size, &base64_encoded);
++        if (base64_encoded_size < 0)
++                return log_error_errno(base64_encoded_size, "Failed to base64 encode secret key: %m");
+ 
+         r = cryptsetup_set_minimal_pbkdf(cd);
+         if (r < 0)
+@@ -67,7 +68,7 @@ int enroll_fido2(
+                         volume_key,
+                         volume_key_size,
+                         base64_encoded,
+-                        strlen(base64_encoded));
++                        base64_encoded_size);
+         if (keyslot < 0)
+                 return log_error_errno(keyslot, "Failed to add new FIDO2 key to %s: %m", node);
+ 
+diff --git a/src/cryptenroll/cryptenroll-pkcs11.c b/src/cryptenroll/cryptenroll-pkcs11.c
+index 9f07a2e01d..54b6b86242 100644
+--- a/src/cryptenroll/cryptenroll-pkcs11.c
++++ b/src/cryptenroll/cryptenroll-pkcs11.c
+@@ -21,6 +21,7 @@ int enroll_pkcs11(
+         size_t decrypted_key_size, encrypted_key_size;
+         _cleanup_free_ void *encrypted_key = NULL;
+         _cleanup_(X509_freep) X509 *cert = NULL;
++        ssize_t base64_encoded_size;
+         const char *node;
+         EVP_PKEY *pkey;
+         int keyslot, r;
+@@ -60,9 +61,9 @@ int enroll_pkcs11(
+ 
+         /* Let's base64 encode the key to use, for compat with homed (and it's easier to type it in by
+          * keyboard, if that might ever end up being necessary.) */
+-        r = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
+-        if (r < 0)
+-                return log_error_errno(r, "Failed to base64 encode secret key: %m");
++        base64_encoded_size = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
++        if (base64_encoded_size < 0)
++                return log_error_errno(base64_encoded_size, "Failed to base64 encode secret key: %m");
+ 
+         r = cryptsetup_set_minimal_pbkdf(cd);
+         if (r < 0)
+@@ -74,7 +75,7 @@ int enroll_pkcs11(
+                         volume_key,
+                         volume_key_size,
+                         base64_encoded,
+-                        strlen(base64_encoded));
++                        base64_encoded_size);
+         if (keyslot < 0)
+                 return log_error_errno(keyslot, "Failed to add new PKCS#11 key to %s: %m", node);
+ 
+diff --git a/src/cryptenroll/cryptenroll-tpm2.c b/src/cryptenroll/cryptenroll-tpm2.c
+index 5c902908c4..96d5fc0695 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.c
++++ b/src/cryptenroll/cryptenroll-tpm2.c
+@@ -145,6 +145,7 @@ int enroll_tpm2(struct crypt_device *cd,
+         uint16_t pcr_bank, primary_alg;
+         const char *node;
+         _cleanup_(erase_and_freep) char *pin_str = NULL;
++        ssize_t base64_encoded_size;
+         int r, keyslot;
+         TPM2Flags flags = 0;
+ 
+@@ -230,9 +231,9 @@ int enroll_tpm2(struct crypt_device *cd,
+         }
+ 
+         /* let's base64 encode the key to use, for compat with homed (and it's easier to every type it in by keyboard, if that might end up being necessary. */
+-        r = base64mem(secret, secret_size, &base64_encoded);
+-        if (r < 0)
+-                return log_error_errno(r, "Failed to base64 encode secret key: %m");
++        base64_encoded_size = base64mem(secret, secret_size, &base64_encoded);
++        if (base64_encoded_size < 0)
++                return log_error_errno(base64_encoded_size, "Failed to base64 encode secret key: %m");
+ 
+         r = cryptsetup_set_minimal_pbkdf(cd);
+         if (r < 0)
+@@ -244,7 +245,7 @@ int enroll_tpm2(struct crypt_device *cd,
+                         volume_key,
+                         volume_key_size,
+                         base64_encoded,
+-                        strlen(base64_encoded));
++                        base64_encoded_size);
+         if (keyslot < 0)
+                 return log_error_errno(keyslot, "Failed to add new TPM2 key to %s: %m", node);
+ 
+diff --git a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+index abe80720af..1eb924529c 100644
+--- a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+@@ -51,6 +51,7 @@ _public_ int cryptsetup_token_open_pin(
+                 .search_pcr_mask = UINT32_MAX
+         };
+         uint16_t pcr_bank, primary_alg;
++        ssize_t base64_encoded_size;
+         TPM2Flags flags = 0;
+         const char *json;
+         int r;
+@@ -116,13 +117,13 @@ _public_ int cryptsetup_token_open_pin(
+                 return log_debug_open_error(cd, r);
+ 
+         /* Before using this key as passphrase we base64 encode it, for compat with homed */
+-        r = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
+-        if (r < 0)
+-                return log_debug_open_error(cd, r);
++        base64_encoded_size = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
++        if (base64_encoded_size < 0)
++                return log_debug_open_error(cd, base64_encoded_size);
+ 
+         /* free'd automatically by libcryptsetup */
+-        *ret_password_len = strlen(base64_encoded);
+         *ret_password = TAKE_PTR(base64_encoded);
++        *ret_password_len = base64_encoded_size;
+ 
+         return 0;
+ }
+diff --git a/src/cryptsetup/cryptsetup-tokens/luks2-fido2.c b/src/cryptsetup/cryptsetup-tokens/luks2-fido2.c
+index a0e1ccbeeb..a1c85e600c 100644
+--- a/src/cryptsetup/cryptsetup-tokens/luks2-fido2.c
++++ b/src/cryptsetup/cryptsetup-tokens/luks2-fido2.c
+@@ -25,6 +25,7 @@ int acquire_luks2_key(
+         _cleanup_(erase_and_freep) void *decrypted_key = NULL;
+         _cleanup_(erase_and_freep) char *base64_encoded = NULL;
+         _cleanup_strv_free_erase_ char **pins = NULL;
++        ssize_t base64_encoded_size;
+ 
+         assert(ret_keyslot_passphrase);
+         assert(ret_keyslot_passphrase_size);
+@@ -58,12 +59,12 @@ int acquire_luks2_key(
+                 return r;
+ 
+         /* Before using this key as passphrase we base64 encode it, for compat with homed */
+-        r = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
+-        if (r < 0)
+-                return crypt_log_error_errno(cd, r, "Failed to base64 encode key: %m");
++        base64_encoded_size = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
++        if (base64_encoded_size < 0)
++                return crypt_log_error_errno(cd, (int) base64_encoded_size, "Failed to base64 encode key: %m");
+ 
+         *ret_keyslot_passphrase = TAKE_PTR(base64_encoded);
+-        *ret_keyslot_passphrase_size = strlen(*ret_keyslot_passphrase);
++        *ret_keyslot_passphrase_size = base64_encoded_size;
+ 
+         return 0;
+ }
+diff --git a/src/cryptsetup/cryptsetup-tokens/luks2-pkcs11.c b/src/cryptsetup/cryptsetup-tokens/luks2-pkcs11.c
+index 2e0450aa5b..1ed9e2bb86 100644
+--- a/src/cryptsetup/cryptsetup-tokens/luks2-pkcs11.c
++++ b/src/cryptsetup/cryptsetup-tokens/luks2-pkcs11.c
+@@ -187,6 +187,7 @@ int acquire_luks2_key(
+         _cleanup_free_ char *pkcs11_uri = NULL;
+         _cleanup_free_ void *encrypted_key = NULL;
+         systemd_pkcs11_plugin_params *pkcs11_params = userdata;
++        ssize_t base64_encoded_size;
+ 
+         assert(json);
+         assert(ret_password);
+@@ -213,12 +214,12 @@ int acquire_luks2_key(
+         if (r < 0)
+                 return r;
+ 
+-        r = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
+-        if (r < 0)
+-                return crypt_log_error_errno(cd, r, "Can not base64 encode key: %m");
++        base64_encoded_size = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
++        if (base64_encoded_size < 0)
++                return crypt_log_error_errno(cd, (int) base64_encoded_size, "Can not base64 encode key: %m");
+ 
+         *ret_password = TAKE_PTR(base64_encoded);
+-        *ret_password_size = strlen(*ret_password);
++        *ret_password_size = base64_encoded_size;
+ 
+         return 0;
+ }
+diff --git a/src/cryptsetup/cryptsetup.c b/src/cryptsetup/cryptsetup.c
+index 7aa36b4b03..a25fb28948 100644
+--- a/src/cryptsetup/cryptsetup.c
++++ b/src/cryptsetup/cryptsetup.c
+@@ -1176,14 +1176,15 @@ static int attach_luks_or_plain_or_bitlk_by_fido2(
+                 r = crypt_activate_by_volume_key(cd, name, decrypted_key, decrypted_key_size, flags);
+         else {
+                 _cleanup_(erase_and_freep) char *base64_encoded = NULL;
++                ssize_t base64_encoded_size;
+ 
+                 /* Before using this key as passphrase we base64 encode it, for compat with homed */
+ 
+-                r = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
+-                if (r < 0)
++                base64_encoded_size = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
++                if (base64_encoded_size < 0)
+                         return log_oom();
+ 
+-                r = crypt_activate_by_passphrase(cd, name, keyslot, base64_encoded, strlen(base64_encoded), flags);
++                r = crypt_activate_by_passphrase(cd, name, keyslot, base64_encoded, base64_encoded_size, flags);
+         }
+         if (r == -EPERM) {
+                 log_error_errno(r, "Failed to activate with FIDO2 decrypted key. (Key incorrect?)");
+@@ -1323,6 +1324,7 @@ static int attach_luks_or_plain_or_bitlk_by_pkcs11(
+                 r = crypt_activate_by_volume_key(cd, name, decrypted_key, decrypted_key_size, flags);
+         else {
+                 _cleanup_(erase_and_freep) char *base64_encoded = NULL;
++                ssize_t base64_encoded_size;
+ 
+                 /* Before using this key as passphrase we base64 encode it. Why? For compatibility
+                  * with homed's PKCS#11 hookup: there we want to use the key we acquired through
+@@ -1332,11 +1334,11 @@ static int attach_luks_or_plain_or_bitlk_by_pkcs11(
+                  * without embedded NUL here too, and that's easiest to generate from a binary blob
+                  * via base64 encoding. */
+ 
+-                r = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
+-                if (r < 0)
++                base64_encoded_size = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
++                if (base64_encoded_size < 0)
+                         return log_oom();
+ 
+-                r = crypt_activate_by_passphrase(cd, name, keyslot, base64_encoded, strlen(base64_encoded), flags);
++                r = crypt_activate_by_passphrase(cd, name, keyslot, base64_encoded, base64_encoded_size, flags);
+         }
+         if (r == -EPERM) {
+                 log_error_errno(r, "Failed to activate with PKCS#11 decrypted key. (Key incorrect?)");
+@@ -1611,14 +1613,15 @@ static int attach_luks_or_plain_or_bitlk_by_tpm2(
+                 r = crypt_activate_by_volume_key(cd, name, decrypted_key, decrypted_key_size, flags);
+         else {
+                 _cleanup_(erase_and_freep) char *base64_encoded = NULL;
++                ssize_t base64_encoded_size;
+ 
+                 /* Before using this key as passphrase we base64 encode it, for compat with homed */
+ 
+-                r = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
+-                if (r < 0)
++                base64_encoded_size = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
++                if (base64_encoded_size < 0)
+                         return log_oom();
+ 
+-                r = crypt_activate_by_passphrase(cd, name, keyslot, base64_encoded, strlen(base64_encoded), flags);
++                r = crypt_activate_by_passphrase(cd, name, keyslot, base64_encoded, base64_encoded_size, flags);
+         }
+         if (r == -EPERM) {
+                 log_error_errno(r, "Failed to activate with TPM2 decrypted key. (Key incorrect?)");
+diff --git a/src/home/homectl-fido2.c b/src/home/homectl-fido2.c
+index 61f0d081a3..3cbdf912aa 100644
+--- a/src/home/homectl-fido2.c
++++ b/src/home/homectl-fido2.c
+@@ -26,14 +26,15 @@ static int add_fido2_credential_id(
+         _cleanup_(json_variant_unrefp) JsonVariant *w = NULL;
+         _cleanup_strv_free_ char **l = NULL;
+         _cleanup_free_ char *escaped = NULL;
++        ssize_t escaped_size;
+         int r;
+ 
+         assert(v);
+         assert(cid);
+ 
+-        r = base64mem(cid, cid_size, &escaped);
+-        if (r < 0)
+-                return log_error_errno(r, "Failed to base64 encode FIDO2 credential ID: %m");
++        escaped_size = base64mem(cid, cid_size, &escaped);
++        if (escaped_size < 0)
++                return log_error_errno(escaped_size, "Failed to base64 encode FIDO2 credential ID: %m");
+ 
+         w = json_variant_ref(json_variant_by_key(*v, "fido2HmacCredential"));
+         if (w) {
+@@ -73,13 +74,14 @@ static int add_fido2_salt(
+ 
+         _cleanup_(json_variant_unrefp) JsonVariant *l = NULL, *w = NULL, *e = NULL;
+         _cleanup_(erase_and_freep) char *base64_encoded = NULL, *hashed = NULL;
++        ssize_t base64_encoded_size;
+         int r;
+ 
+         /* Before using UNIX hashing on the supplied key we base64 encode it, since crypt_r() and friends
+          * expect a NUL terminated string, and we use a binary key */
+-        r = base64mem(secret, secret_size, &base64_encoded);
+-        if (r < 0)
+-                return log_error_errno(r, "Failed to base64 encode secret key: %m");
++        base64_encoded_size = base64mem(secret, secret_size, &base64_encoded);
++        if (base64_encoded_size < 0)
++                return log_error_errno(base64_encoded_size, "Failed to base64 encode secret key: %m");
+ 
+         r = hash_password(base64_encoded, &hashed);
+         if (r < 0)
+diff --git a/src/home/homectl-pkcs11.c b/src/home/homectl-pkcs11.c
+index 69c9d97aca..dc6ecf1665 100644
+--- a/src/home/homectl-pkcs11.c
++++ b/src/home/homectl-pkcs11.c
+@@ -19,6 +19,7 @@ static int add_pkcs11_encrypted_key(
+ 
+         _cleanup_(json_variant_unrefp) JsonVariant *l = NULL, *w = NULL, *e = NULL;
+         _cleanup_(erase_and_freep) char *base64_encoded = NULL, *hashed = NULL;
++        ssize_t base64_encoded_size;
+         int r;
+ 
+         assert(v);
+@@ -30,9 +31,9 @@ static int add_pkcs11_encrypted_key(
+ 
+         /* Before using UNIX hashing on the supplied key we base64 encode it, since crypt_r() and friends
+          * expect a NUL terminated string, and we use a binary key */
+-        r = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
+-        if (r < 0)
+-                return log_error_errno(r, "Failed to base64 encode secret key: %m");
++        base64_encoded_size = base64mem(decrypted_key, decrypted_key_size, &base64_encoded);
++        if (base64_encoded_size < 0)
++                return log_error_errno(base64_encoded_size, "Failed to base64 encode secret key: %m");
+ 
+         r = hash_password(base64_encoded, &hashed);
+         if (r < 0)
+diff --git a/src/home/homework-fido2.c b/src/home/homework-fido2.c
+index 23fda4a355..5c7cd52e1b 100644
+--- a/src/home/homework-fido2.c
++++ b/src/home/homework-fido2.c
+@@ -17,6 +17,7 @@ int fido2_use_token(
+         _cleanup_(erase_and_freep) void *hmac = NULL;
+         size_t hmac_size;
+         Fido2EnrollFlags flags = 0;
++        ssize_t ss;
+         int r;
+ 
+         assert(h);
+@@ -65,9 +66,9 @@ int fido2_use_token(
+         if (r < 0)
+                 return r;
+ 
+-        r = base64mem(hmac, hmac_size, ret);
+-        if (r < 0)
+-                return log_error_errno(r, "Failed to base64 encode HMAC secret: %m");
++        ss = base64mem(hmac, hmac_size, ret);
++        if (ss < 0)
++                return log_error_errno(ss, "Failed to base64 encode HMAC secret: %m");
+ 
+         return 0;
+ }
+diff --git a/src/home/homework-fscrypt.c b/src/home/homework-fscrypt.c
+index 5106961f38..bd32393d93 100644
+--- a/src/home/homework-fscrypt.c
++++ b/src/home/homework-fscrypt.c
+@@ -408,6 +408,7 @@ static int fscrypt_slot_set(
+         _cleanup_free_ void *encrypted = NULL;
+         const EVP_CIPHER *cc;
+         size_t encrypted_size;
++        ssize_t ss;
+ 
+         r = crypto_random_bytes(salt, sizeof(salt));
+         if (r < 0)
+@@ -458,12 +459,12 @@ static int fscrypt_slot_set(
+         assert((size_t) encrypted_size_out1 + (size_t) encrypted_size_out2 < encrypted_size);
+         encrypted_size = (size_t) encrypted_size_out1 + (size_t) encrypted_size_out2;
+ 
+-        r = base64mem(salt, sizeof(salt), &salt_base64);
+-        if (r < 0)
++        ss = base64mem(salt, sizeof(salt), &salt_base64);
++        if (ss < 0)
+                 return log_oom();
+ 
+-        r = base64mem(encrypted, encrypted_size, &encrypted_base64);
+-        if (r < 0)
++        ss = base64mem(encrypted, encrypted_size, &encrypted_base64);
++        if (ss < 0)
+                 return log_oom();
+ 
+         joined = strjoin(salt_base64, ":", encrypted_base64);
+diff --git a/src/partition/repart.c b/src/partition/repart.c
+index c4ca9840c8..8875e09389 100644
+--- a/src/partition/repart.c
++++ b/src/partition/repart.c
+@@ -3022,6 +3022,7 @@ static int partition_encrypt(
+                 _cleanup_free_ void *pubkey = NULL;
+                 _cleanup_free_ void *blob = NULL, *hash = NULL;
+                 size_t secret_size, blob_size, hash_size, pubkey_size = 0;
++                ssize_t base64_encoded_size;
+                 uint16_t pcr_bank, primary_alg;
+                 int keyslot;
+ 
+@@ -3049,9 +3050,9 @@ static int partition_encrypt(
+                 if (r < 0)
+                         return log_error_errno(r, "Failed to seal to TPM2: %m");
+ 
+-                r = base64mem(secret, secret_size, &base64_encoded);
+-                if (r < 0)
+-                        return log_error_errno(r, "Failed to base64 encode secret key: %m");
++                base64_encoded_size = base64mem(secret, secret_size, &base64_encoded);
++                if (base64_encoded_size < 0)
++                        return log_error_errno(base64_encoded_size, "Failed to base64 encode secret key: %m");
+ 
+                 r = cryptsetup_set_minimal_pbkdf(cd);
+                 if (r < 0)
+@@ -3063,7 +3064,7 @@ static int partition_encrypt(
+                                 volume_key,
+                                 volume_key_size,
+                                 base64_encoded,
+-                                strlen(base64_encoded));
++                                base64_encoded_size);
+                 if (keyslot < 0)
+                         return log_error_errno(keyslot, "Failed to add new TPM2 key to %s: %m", node);
+ 

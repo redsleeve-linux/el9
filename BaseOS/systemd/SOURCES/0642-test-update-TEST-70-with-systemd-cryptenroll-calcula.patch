@@ -1,0 +1,57 @@
+From 53569e7b564d6de1cb1fbfbcbc5126b2f4f9f23c Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Mon, 24 Jul 2023 20:04:28 -0400
+Subject: [PATCH] test: update TEST-70 with systemd-cryptenroll calculated TPM2
+ enrollment
+
+Update test to check systemd-cryptenroll --tpm2-device-key= enrollment.
+
+(cherry picked from commit 803e95932f8c749c7ec6fa00440c1a268af1d1f5)
+
+Related: RHEL-16182
+---
+ test/TEST-70-TPM2/test.sh  |  2 ++
+ test/units/testsuite-70.sh | 10 +++++++++-
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/test/TEST-70-TPM2/test.sh b/test/TEST-70-TPM2/test.sh
+index 72784ec418..a228901b3d 100755
+--- a/test/TEST-70-TPM2/test.sh
++++ b/test/TEST-70-TPM2/test.sh
+@@ -16,6 +16,7 @@ command -v openssl >/dev/null 2>&1 || exit 0
+ command -v tpm2_createprimary >/dev/null 2>&1 || exit 0
+ command -v tpm2_evictcontrol >/dev/null 2>&1 || exit 0
+ command -v tpm2_flushcontext >/dev/null 2>&1 || exit 0
++command -v tpm2_readpublic >/dev/null 2>&1 || exit 0
+ 
+ 
+ test_append_files() {
+@@ -30,6 +31,7 @@ test_append_files() {
+         inst_binary tpm2_createprimary
+         inst_binary tpm2_evictcontrol
+         inst_binary tpm2_flushcontext
++        inst_binary tpm2_readpublic
+ }
+ 
+ TEST_70_TPM_DEVICE="tpm-tis"
+diff --git a/test/units/testsuite-70.sh b/test/units/testsuite-70.sh
+index 9e42dd5b28..222fa33d69 100755
+--- a/test/units/testsuite-70.sh
++++ b/test/units/testsuite-70.sh
+@@ -101,7 +101,15 @@ if tpm_has_pcr sha256 12; then
+     /usr/lib/systemd/systemd-cryptsetup attach test-volume "$img" - tpm2-device=auto,headless=1
+     /usr/lib/systemd/systemd-cryptsetup detach test-volume
+ 
+-    rm -f /tmp/pcr.dat
++    # enroll TPM using device key instead of direct access, then verify unlock using TPM
++    tpm2_pcrread -Q -o /tmp/pcr.dat sha256:12
++    CURRENT_PCR_VALUE=$(cat /sys/class/tpm/tpm0/pcr-sha256/12)
++    tpm2_readpublic -c 0x81000001 -o /tmp/srk.pub
++    PASSWORD=passphrase systemd-cryptenroll --tpm2-device-key=/tmp/srk.pub --tpm2-pcrs="12:sha256=$CURRENT_PCR_VALUE" "$IMAGE"
++    /usr/lib/systemd/systemd-cryptsetup attach test-volume "$IMAGE" - tpm2-device=auto,headless=1
++    /usr/lib/systemd/systemd-cryptsetup detach test-volume
++
++    rm -f /tmp/pcr.dat /tmp/srk.pub
+ fi
+ 
+ # Use default (0) seal key handle

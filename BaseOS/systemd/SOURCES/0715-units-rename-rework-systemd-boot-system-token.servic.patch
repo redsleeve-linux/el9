@@ -1,0 +1,392 @@
+From b7f74506b4a479edf2d7c5b9c08fb105e3fd7b29 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 20 Dec 2022 17:16:47 +0100
+Subject: [PATCH] =?UTF-8?q?units:=20rename/rework=20systemd-boot-system-to?=
+ =?UTF-8?q?ken.service=20=E2=86=92=20systemd-boot-random-seed.service?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This renames systemd-boot-system-token.service to
+systemd-boot-random-seed.service and conditions it less strictly.
+
+Previously, the job of the service was to write a "system token" EFI
+variable if it was missing. It called "bootctl --graceful random-seed"
+for that. With this change we condition it more liberally: instead of
+calling it only when the "system token" EFI variable isn't set, we call
+it whenever a boot loader interface compatible boot loader is used. This
+means, previously it was invoked on the first boot only: now it is
+invoked at every boot.
+
+This doesn#t change the command that is invoked. That's because
+previously already the "bootctl --graceful random-seed" did two things:
+set the system token if not set yet *and* refresh the random seed in the
+ESP. Previousy we put the focus on the former, now we shift the focus to
+the latter.
+
+With this simple change we can replace the logic
+f913c784ad4c93894fd6cb2590738113dff5a694 added, but from a service that
+can run much later and doesn't keep the ESP pinned.
+
+(cherry picked from commit 921fc451cb7ce29467c5d87346db2b8bb72fdf18)
+
+Related: RHEL-16952
+---
+ man/bootctl.xml                           |  4 +-
+ man/rules/meson.build                     |  2 +-
+ man/systemd-boot-random-seed.service.xml  | 99 +++++++++++++++++++++++
+ man/systemd-boot-system-token.service.xml | 76 -----------------
+ man/systemd-boot.xml                      |  2 +-
+ man/systemd-random-seed.service.xml       |  6 +-
+ units/meson.build                         |  2 +-
+ units/systemd-boot-random-seed.service    | 15 ++--
+ units/systemd-boot-update.service         |  3 +-
+ units/systemd-random-seed.service.in      |  4 +-
+ 10 files changed, 120 insertions(+), 93 deletions(-)
+ create mode 100644 man/systemd-boot-random-seed.service.xml
+ delete mode 100644 man/systemd-boot-system-token.service.xml
+
+diff --git a/man/bootctl.xml b/man/bootctl.xml
+index d82f12d5bb..27b45c06d3 100644
+--- a/man/bootctl.xml
++++ b/man/bootctl.xml
+@@ -208,7 +208,7 @@
+         OS and a new seed to store in the ESP from the combination of both. The random seed passed to the OS
+         is credited to the kernel's entropy pool by the system manager during early boot, and permits
+         userspace to boot up with an entropy pool fully initialized very early on. Also see
+-        <citerefentry><refentrytitle>systemd-boot-system-token.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
++        <citerefentry><refentrytitle>systemd-boot-random-seed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>.</para>
+ 
+         <para>See <ulink url="https://systemd.io/RANDOM_SEEDS">Random Seeds</ulink> for further
+         information.</para></listitem>
+@@ -550,7 +550,7 @@ Boot Loader Entries:
+       <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
+       <ulink url="https://systemd.io/BOOT_LOADER_SPECIFICATION">Boot Loader Specification</ulink>,
+       <ulink url="https://systemd.io/BOOT_LOADER_INTERFACE">Boot Loader Interface</ulink>,
+-      <citerefentry><refentrytitle>systemd-boot-system-token.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
++      <citerefentry><refentrytitle>systemd-boot-random-seed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+     </para>
+   </refsect1>
+ </refentry>
+diff --git a/man/rules/meson.build b/man/rules/meson.build
+index 9c0d773e51..beecc893fd 100644
+--- a/man/rules/meson.build
++++ b/man/rules/meson.build
+@@ -863,7 +863,7 @@ manpages = [
+   '8',
+   ['systemd-boot-check-no-failures'],
+   ''],
+- ['systemd-boot-system-token.service', '8', [], 'HAVE_GNU_EFI'],
++ ['systemd-boot-random-seed.service', '8', [], 'HAVE_GNU_EFI'],
+  ['systemd-boot', '7', ['sd-boot'], 'HAVE_GNU_EFI'],
+  ['systemd-cat', '1', [], ''],
+  ['systemd-cgls', '1', [], ''],
+diff --git a/man/systemd-boot-random-seed.service.xml b/man/systemd-boot-random-seed.service.xml
+new file mode 100644
+index 0000000000..86ce639828
+--- /dev/null
++++ b/man/systemd-boot-random-seed.service.xml
+@@ -0,0 +1,99 @@
++<?xml version='1.0'?> <!--*-nxml-*-->
++<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
++  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
++<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
++
++<refentry id="systemd-boot-random-seed.service" conditional='HAVE_GNU_EFI'
++          xmlns:xi="http://www.w3.org/2001/XInclude">
++
++  <refentryinfo>
++    <title>systemd-boot-random-seed.service</title>
++    <productname>systemd</productname>
++  </refentryinfo>
++
++  <refmeta>
++    <refentrytitle>systemd-boot-random-seed.service</refentrytitle>
++    <manvolnum>8</manvolnum>
++  </refmeta>
++
++  <refnamediv>
++    <refname>systemd-boot-random-seed.service</refname>
++    <refpurpose>Refresh boot loader random seed at boot</refpurpose>
++  </refnamediv>
++
++  <refsynopsisdiv>
++    <para><filename>systemd-boot-random-seed.service</filename></para>
++  </refsynopsisdiv>
++
++  <refsect1>
++    <title>Description</title>
++
++    <para><filename>systemd-boot-random-seed.service</filename> is a system service that automatically
++    refreshes the boot loader random seed stored in the EFI System Partition (ESP), from the Linux kernel
++    entropy pool. The boot loader random seed is primarily consumed and updated by
++    <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry> from the
++    UEFI environemnt (or
++    <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry> if the
++    former is not used, but the latter is), and passed as initial RNG seed to the OS. It is an effective way
++    to ensure the OS comes up with a random pool that is fully initialized.</para>
++
++    <para>The service also automatically generates a 'system token' to store in an EFI variable in the
++    system's NVRAM. The boot loader may then combine the on-disk random seed and the system token by
++    cryptographic hashing, and pass it to the OS it boots as initialization seed for its entropy pool. Note:
++    the random seed stored in the ESP is refreshed on <emphasis>every</emphasis> reboot ensuring that
++    multiple subsequent boots will boot with different seeds. On the other hand, the system token is
++    generated randomly <emphasis>once</emphasis>, and then persistently stored in the system's EFI variable
++    storage, ensuring the same disk image won't result in the same series of boot loader seed values if used
++    on multiple systems in parallel.</para>
++
++    <para>The <filename>systemd-boot-random-seed.service</filename> unit invokes the <command>bootctl
++    random-seed</command> command, which updates the random seed in the ESP, and initializes the system
++    token if it's not initialized yet. The service is conditionalized so that it is run only when a boot
++    loader is used that implements the <ulink url="https://systemd.io/BOOT_LOADER_INTERFACE">Boot Loader
++    Interface</ulink>.</para> <para>For further details see
++    <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>, regarding
++    the command this service invokes.</para>
++
++    <para>Note the relationship between <filename>systemd-boot-random-seed.service</filename> and
++    <citerefentry><refentrytitle>systemd-random-seed</refentrytitle><manvolnum>8</manvolnum></citerefentry>. The
++    former maintains the random seed consumed and updated by the boot environment (i.e. by
++    <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry> or
++    <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>), the
++    latter maintains a random seed consumed and updated by the OS itself. The former ensures that the OS has
++    a filled entropy pool already during earliest boot when regular disk access is not available yet
++    (i.e. when the OS random seed cannot be loaded yet). The latter is processed much later, once writable
++    disk access is available. Thus it cannot be used to seed the initial boot phase, but typically has much
++    higher quality of entropy. Both files are consumed and updated at boot, but at different
++    times. Specifically:</para>
++
++    <orderedlist>
++      <listitem><para>In UEFI mode, the <filename>systemd-boot</filename> or
++      <filename>systemd-stub</filename> components load the boot loader random seed off the ESP, hash it with
++      available entropy and the system token, and then update it on disk. A derived seed is passed to the
++      kernel which writes it to its entropy pool.</para></listitem>
++
++      <listitem><para>In userspace the <filename>systemd-random-seed.service</filename> service loads the OS
++      random seed, writes it to the kernel entropy pool, and then updates it on disk with a new value derived
++      from the kernel entropy pool.</para></listitem>
++
++      <listitem><para>In userspace the <filename>systemd-boot-random-seed.service</filename> service updates
++      the boot loader random seed with a new value derived from the kernel kernel entropy pool.</para></listitem>
++    </orderedlist>
++
++    <para>This logic should ensure that the kernel's entropy pool is seeded during earliest bool already, if
++    possible, but the highest quality entropy is propagated back to both on-disk seeds.</para>
++  </refsect1>
++
++  <refsect1>
++    <title>See Also</title>
++    <para>
++      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>random</refentrytitle><manvolnum>4</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-random-seed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
++    </para>
++  </refsect1>
++
++</refentry>
+diff --git a/man/systemd-boot-system-token.service.xml b/man/systemd-boot-system-token.service.xml
+deleted file mode 100644
+index f2e30a9b13..0000000000
+--- a/man/systemd-boot-system-token.service.xml
++++ /dev/null
+@@ -1,76 +0,0 @@
+-<?xml version='1.0'?> <!--*-nxml-*-->
+-<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
+-  "http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd">
+-<!-- SPDX-License-Identifier: LGPL-2.1-or-later -->
+-
+-<refentry id="systemd-boot-system-token.service" conditional='HAVE_GNU_EFI'
+-          xmlns:xi="http://www.w3.org/2001/XInclude">
+-
+-  <refentryinfo>
+-    <title>systemd-boot-system-token.service</title>
+-    <productname>systemd</productname>
+-  </refentryinfo>
+-
+-  <refmeta>
+-    <refentrytitle>systemd-boot-system-token.service</refentrytitle>
+-    <manvolnum>8</manvolnum>
+-  </refmeta>
+-
+-  <refnamediv>
+-    <refname>systemd-boot-system-token.service</refname>
+-    <refpurpose>Generate an initial boot loader system token and random seed</refpurpose>
+-  </refnamediv>
+-
+-  <refsynopsisdiv>
+-    <para><filename>systemd-boot-system-token.service</filename></para>
+-  </refsynopsisdiv>
+-
+-  <refsect1>
+-    <title>Description</title>
+-
+-    <para><filename>systemd-boot-system-token.service</filename> is a system service that automatically
+-    generates a 'system token' to store in an EFI variable in the system's NVRAM and a random seed to store
+-    on the EFI System Partition ESP on disk. The boot loader may then combine these two randomized data
+-    fields by cryptographic hashing, and pass it to the OS it boots as initialization seed for its entropy
+-    pool. The random seed stored in the ESP is refreshed on each reboot ensuring that multiple subsequent
+-    boots will boot with different seeds. The 'system token' is generated randomly once, and then
+-    persistently stored in the system's EFI variable storage.</para>
+-
+-    <para>The <filename>systemd-boot-system-token.service</filename> unit invokes the <command>bootctl
+-    random-seed</command> command, which updates the random seed in the ESP, and initializes the 'system
+-    token' if it's not initialized yet. The service is conditionalized so that it is run only when all of the
+-    below apply:</para>
+-
+-    <itemizedlist>
+-      <listitem><para>A boot loader is used that implements the <ulink
+-      url="https://systemd.io/BOOT_LOADER_INTERFACE">Boot Loader Interface</ulink> (which defines the 'system
+-      token' concept).</para></listitem>
+-
+-      <listitem><para>Either a 'system token' was not set yet, or the boot loader has not passed the OS a
+-      random seed yet (and thus most likely has been missing the random seed file in the
+-      ESP).</para></listitem>
+-
+-      <listitem><para>The system is not running in a VM environment. This case is explicitly excluded since
+-      on VM environments the ESP backing storage and EFI variable storage is typically not physically
+-      separated and hence booting the same OS image in multiple instances would replicate both, thus reusing
+-      the same random seed and 'system token' among all instances, which defeats its purpose. Note that it's
+-      still possible to use boot loader random seed provisioning in this mode, but the automatic logic
+-      implemented by this service has no effect then, and the user instead has to manually invoke the
+-      <command>bootctl random-seed</command> acknowledging these restrictions.</para></listitem>
+-    </itemizedlist>
+-
+-    <para>For further details see
+-    <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>, regarding
+-    the command this service invokes.</para>
+-  </refsect1>
+-
+-  <refsect1>
+-    <title>See Also</title>
+-    <para>
+-      <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>
+-    </para>
+-  </refsect1>
+-
+-</refentry>
+diff --git a/man/systemd-boot.xml b/man/systemd-boot.xml
+index f96c4c6512..773d6988e3 100644
+--- a/man/systemd-boot.xml
++++ b/man/systemd-boot.xml
+@@ -526,7 +526,7 @@
+       <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>loader.conf</refentrytitle><manvolnum>5</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>systemd-bless-boot.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>systemd-boot-system-token.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-boot-random-seed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>kernel-install</refentrytitle><manvolnum>8</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
+       <ulink url="https://systemd.io/BOOT_LOADER_SPECIFICATION">Boot Loader Specification</ulink>,
+diff --git a/man/systemd-random-seed.service.xml b/man/systemd-random-seed.service.xml
+index a1e31cd460..bc8cf50a39 100644
+--- a/man/systemd-random-seed.service.xml
++++ b/man/systemd-random-seed.service.xml
+@@ -18,7 +18,7 @@
+   <refnamediv>
+     <refname>systemd-random-seed.service</refname>
+     <refname>systemd-random-seed</refname>
+-    <refpurpose>Load and save the system random seed at boot and shutdown</refpurpose>
++    <refpurpose>Load and save the OS system random seed at boot and shutdown</refpurpose>
+   </refnamediv>
+ 
+   <refsynopsisdiv>
+@@ -86,7 +86,9 @@
+       <citerefentry><refentrytitle>systemd</refentrytitle><manvolnum>1</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>random</refentrytitle><manvolnum>4</manvolnum></citerefentry>,
+       <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
+-      <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>4</manvolnum></citerefentry>
++      <citerefentry><refentrytitle>systemd-stub</refentrytitle><manvolnum>7</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>bootctl</refentrytitle><manvolnum>4</manvolnum></citerefentry>,
++      <citerefentry><refentrytitle>systemd-boot-random-seed.service</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+     </para>
+   </refsect1>
+ 
+diff --git a/units/meson.build b/units/meson.build
+index 3a1f5229a0..cfc96a9111 100644
+--- a/units/meson.build
++++ b/units/meson.build
+@@ -105,7 +105,7 @@ units = [
+         ['systemd-ask-password-wall.path',      '',
+          'multi-user.target.wants/'],
+         ['systemd-ask-password-wall.service',   ''],
+-        ['systemd-boot-system-token.service',   'HAVE_GNU_EFI',
++        ['systemd-boot-random-seed.service',    'HAVE_GNU_EFI',
+          'sysinit.target.wants/'],
+         ['systemd-boot-update.service',         'HAVE_GNU_EFI'],
+         ['systemd-coredump.socket',             'ENABLE_COREDUMP',
+diff --git a/units/systemd-boot-random-seed.service b/units/systemd-boot-random-seed.service
+index ef5577549e..4fa286071d 100644
+--- a/units/systemd-boot-random-seed.service
++++ b/units/systemd-boot-random-seed.service
+@@ -8,22 +8,21 @@
+ #  (at your option) any later version.
+ 
+ [Unit]
+-Description=Store a System Token in an EFI Variable
+-Documentation=man:systemd-boot-system-token.service(8)
++Description=Update Boot Loader Random Seed
++Documentation=man:systemd-boot-random-seed.service(8) man:random(4)
+ 
+ DefaultDependencies=no
+ After=local-fs.target systemd-random-seed.service
+-Conflicts=shutdown.target initrd-switch-root.target
+-Before=shutdown.target initrd-switch-root.target
++Conflicts=shutdown.target
++Before=sysinit.target shutdown.target
+ 
++ConditionVirtualization=!container
++ConditionPathExists=!/etc/initrd-release
+ # Only run this if the boot loader can support random seed initialization.
+ ConditionPathExists=|/sys/firmware/efi/efivars/LoaderFeatures-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+ ConditionPathExists=|/sys/firmware/efi/efivars/StubFeatures-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+ 
+-# Only run this if there is no system token defined yet
+-ConditionPathExists=!/sys/firmware/efi/efivars/LoaderSystemToken-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+-
+ [Service]
+ Type=oneshot
+ RemainAfterExit=yes
+-ExecStart=bootctl random-seed --graceful
++ExecStart=bootctl --graceful random-seed
+diff --git a/units/systemd-boot-update.service b/units/systemd-boot-update.service
+index 61ff12762a..fe63fde35a 100644
+--- a/units/systemd-boot-update.service
++++ b/units/systemd-boot-update.service
+@@ -10,9 +10,10 @@
+ [Unit]
+ Description=Automatic Boot Loader Update
+ Documentation=man:bootctl(1)
++
+ DefaultDependencies=no
+-Conflicts=shutdown.target
+ After=local-fs.target
++Conflicts=shutdown.target
+ Before=sysinit.target shutdown.target systemd-update-done.service
+ 
+ [Service]
+diff --git a/units/systemd-random-seed.service.in b/units/systemd-random-seed.service.in
+index 1aa9af9710..d57b2d1269 100644
+--- a/units/systemd-random-seed.service.in
++++ b/units/systemd-random-seed.service.in
+@@ -8,14 +8,16 @@
+ #  (at your option) any later version.
+ 
+ [Unit]
+-Description=Load/Save Random Seed
++Description=Load/Save OS Random Seed
+ Documentation=man:systemd-random-seed.service(8) man:random(4)
++
+ DefaultDependencies=no
+ RequiresMountsFor={{RANDOM_SEED}}
+ Conflicts=shutdown.target
+ After=systemd-remount-fs.service
+ Before=first-boot-complete.target shutdown.target
+ Wants=first-boot-complete.target
++
+ ConditionVirtualization=!container
+ ConditionPathExists=!/etc/initrd-release
+ 

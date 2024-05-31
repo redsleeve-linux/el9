@@ -1,0 +1,221 @@
+From 90f26ba66f256fd65c6e7c38ed6f2138fed6b3ed Mon Sep 17 00:00:00 2001
+From: Joerg Behrmann <behrmann@physik.fu-berlin.de>
+Date: Wed, 23 Nov 2022 16:43:19 +0100
+Subject: [PATCH] kernel-install: Add uki layout
+
+Currently the kernel-install man page only documents the bls layout for use
+with the boot loader spec type #1. 90-loaderentry.install uses this layout to
+generate loader entries and copy the kernel image and initrd to $BOOT.
+
+This commit documents a second layout "uki" and adds 90-uki-copy.install,
+which copies a UKI "uki.efi" from the staging area or any file with the .efi
+extension given on the command line to
+$BOOT/EFI/Linux/$ENTRY_TOKEN-$KERNEl_VERSION(+$TRIES).efi
+
+This allows for both locally generated and distro-provided UKIs to be handled
+by kernel-install.
+
+(cherry picked from commit 0ccfd3564b2532a4da6526a9e030362c4a142b77)
+
+Resolves: RHEL-16354
+---
+ man/kernel-install.xml                 | 38 ++++++++--
+ src/kernel-install/90-uki-copy.install | 97 ++++++++++++++++++++++++++
+ src/kernel-install/meson.build         |  2 +
+ 3 files changed, 131 insertions(+), 6 deletions(-)
+ create mode 100755 src/kernel-install/90-uki-copy.install
+
+diff --git a/man/kernel-install.xml b/man/kernel-install.xml
+index b8ea2b16b2..b1822a8847 100644
+--- a/man/kernel-install.xml
++++ b/man/kernel-install.xml
+@@ -108,6 +108,14 @@
+             is missing), or "Linux <replaceable>KERNEL-VERSION</replaceable>", if unset.</para>
+ 
+             <para>If <varname>$KERNEL_INSTALL_LAYOUT</varname> is not "bls", this plugin does nothing.</para></listitem>
++
++            <listitem><para><filename>90-uki-copy.install</filename> copies a file
++            <filename>uki.efi</filename> from <varname>$KERNEL_INSTALL_STAGING_AREA</varname> or if it does
++            not exist the <replaceable>KERNEL-IMAGE</replaceable> argument, iff it has a
++            <literal>.efi</literal> extension, to
++            <filename>$BOOT/EFI/Linux/<replaceable>ENTRY-TOKEN</replaceable>-<replaceable>KERNEL-VERSION</replaceable>.efi</filename>.</para>
++
++            <para>If <varname>$KERNEL_INSTALL_LAYOUT</varname> is not "uki", this plugin does nothing.</para></listitem>
+           </itemizedlist>
+         </listitem>
+       </varlistentry>
+@@ -132,6 +140,9 @@
+ 
+             <listitem><para><filename>90-loaderentry.install</filename> removes the file
+             <filename>$BOOT/loader/entries/<replaceable>ENTRY-TOKEN</replaceable>-<replaceable>KERNEL-VERSION</replaceable>.conf</filename>.</para></listitem>
++
++            <listitem><para><filename>90-uki-copy.install</filename> removes the file
++            <filename>$BOOT/EFI/Linux/<replaceable>ENTRY-TOKEN</replaceable>-<replaceable>KERNEL-VERSION</replaceable>.efi</filename>.</para></listitem>
+           </itemizedlist>
+         </listitem>
+       </varlistentry>
+@@ -213,7 +224,7 @@
+       (EFI System Partition) are mounted, and also conceptually referred to as <varname>$BOOT</varname>. Can
+       be overridden by setting <varname>$BOOT_ROOT</varname> (see below).</para>
+ 
+-      <para><varname>$KERNEL_INSTALL_LAYOUT=bls|other|...</varname> is set for the plugins to specify the
++      <para><varname>$KERNEL_INSTALL_LAYOUT=bls|uki|other|...</varname> is set for the plugins to specify the
+       installation layout. Defaults to <option>bls</option> if
+       <filename>$BOOT/<replaceable>ENTRY-TOKEN</replaceable></filename> exists, or <option>other</option>
+       otherwise. Additional layout names may be defined by convention. If a plugin uses a special layout,
+@@ -235,6 +246,18 @@
+             <para>Implemented by <filename>90-loaderentry.install</filename>.</para>
+           </listitem>
+         </varlistentry>
++        <varlistentry>
++          <term>uki</term>
++          <listitem>
++            <para>Standard <ulink
++            url="https://uapi-group.org/specifications/specs/boot_loader_specification">Boot Loader
++            Specification</ulink> Type #2 layout, compatible with
++            <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>:
++            unified kernel images under <filename>$BOOT/EFI/Linux</filename> as
++            <filename>$BOOT/EFI/Linux/<replaceable>ENTRY-TOKEN</replaceable>-<replaceable>KERNEL-VERSION</replaceable>[+<replaceable>TRIES</replaceable>].efi</filename>.</para>
++            <para>Implemented by <filename>90-uki-copy.install</filename>.</para>
++          </listitem>
++        </varlistentry>
+         <varlistentry>
+           <term>other</term>
+           <listitem>
+@@ -312,12 +335,15 @@
+           <filename>/etc/kernel/tries</filename>
+         </term>
+           <listitem>
+-            <para>Read by <filename>90-loaderentry.install</filename>. If this file exists a numeric value is read from
+-            it and the naming of the generated entry file is slightly altered to include it as
+-            <filename>$BOOT/loader/entries/<replaceable>MACHINE-ID</replaceable>-<replaceable>KERNEL-VERSION</replaceable>+<replaceable>TRIES</replaceable>.conf</filename>. This
++            <para>Read by <filename>90-loaderentry.install</filename> and
++            <filename>90-uki-copy.install</filename>. If this file exists a numeric value is read from it
++            and the naming of the generated entry file or UKI is slightly altered to include it as
++            <filename>$BOOT/loader/entries/<replaceable>ENTRY-TOKEN</replaceable>-<replaceable>KERNEL-VERSION</replaceable>+<replaceable>TRIES</replaceable>.conf</filename>
++            or
++            <filename>$BOOT/EFI/Linux/<replaceable>ENTRY-TOKEN</replaceable>-<replaceable>KERNEL-VERSION</replaceable>+<replaceable>TRIES</replaceable>.conf</filename>, respectively. This
+             is useful for boot loaders such as
+-            <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry> which
+-            implement boot attempt counting with a counter embedded in the entry file name.
++            <citerefentry><refentrytitle>systemd-boot</refentrytitle><manvolnum>7</manvolnum></citerefentry>
++            which implement boot attempt counting with a counter embedded in the entry file name.
+             <varname>$KERNEL_INSTALL_CONF_ROOT</varname> may be used to override the path.</para>
+           </listitem>
+       </varlistentry>
+diff --git a/src/kernel-install/90-uki-copy.install b/src/kernel-install/90-uki-copy.install
+new file mode 100755
+index 0000000000..d6e3deb723
+--- /dev/null
++++ b/src/kernel-install/90-uki-copy.install
+@@ -0,0 +1,97 @@
++#!/bin/sh
++# -*- mode: shell-script; indent-tabs-mode: nil; sh-basic-offset: 4; -*-
++# ex: ts=8 sw=4 sts=4 et filetype=sh
++# SPDX-License-Identifier: LGPL-2.1-or-later
++#
++# This file is part of systemd.
++#
++# systemd is free software; you can redistribute it and/or modify it
++# under the terms of the GNU Lesser General Public License as published by
++# the Free Software Foundation; either version 2.1 of the License, or
++# (at your option) any later version.
++#
++# systemd is distributed in the hope that it will be useful, but
++# WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++# General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public License
++# along with systemd; If not, see <https://www.gnu.org/licenses/>.
++
++set -e
++
++COMMAND="${1:?}"
++KERNEL_VERSION="${2:?}"
++# shellcheck disable=SC2034
++ENTRY_DIR_ABS="$3"
++KERNEL_IMAGE="$4"
++
++[ "$KERNEL_INSTALL_LAYOUT" = "uki" ] || exit 0
++
++ENTRY_TOKEN="$KERNEL_INSTALL_ENTRY_TOKEN"
++BOOT_ROOT="$KERNEL_INSTALL_BOOT_ROOT"
++
++UKI_DIR="$BOOT_ROOT/EFI/Linux"
++
++case "$COMMAND" in
++    remove)
++        [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && \
++            echo "Removing $UKI_DIR/$ENTRY_TOKEN-$KERNEL_VERSION*.efi"
++        exec rm -f \
++            "$UKI_DIR/$ENTRY_TOKEN-$KERNEL_VERSION.efi" \
++            "$UKI_DIR/$ENTRY_TOKEN-$KERNEL_VERSION+"*".efi"
++        ;;
++    add)
++        ;;
++    *)
++        exit 0
++        ;;
++esac
++
++if ! [ -d "$UKI_DIR" ]; then
++    echo "Error: entry directory '$UKI_DIR' does not exist" >&2
++    exit 1
++fi
++
++TRIES_FILE="${KERNEL_INSTALL_CONF_ROOT:-/etc/kernel}/tries"
++
++if [ -f "$TRIES_FILE" ]; then
++    read -r TRIES <"$TRIES_FILE"
++    if ! echo "$TRIES" | grep -q '^[0-9][0-9]*$'; then
++        echo "$TRIES_FILE does not contain an integer." >&2
++        exit 1
++    fi
++    UKI_FILE="$UKI_DIR/$ENTRY_TOKEN-$KERNEL_VERSION+$TRIES.efi"
++else
++    UKI_FILE="$UKI_DIR/$ENTRY_TOKEN-$KERNEL_VERSION.efi"
++fi
++
++# If there is a UKI named uki.efi on the staging area use that, if not use what
++# was passed in as $KERNEL_IMAGE but insist it has a .efi extension
++if [ -f "$KERNEL_INSTALL_STAGING_AREA/uki.efi" ]; then
++    [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && echo "Installing $KERNEL_INSTALL_STAGING_AREA/uki.efi"
++    install -m 0644 "$KERNEL_INSTALL_STAGING_AREA/uki.efi" "$UKI_FILE" || {
++        echo "Error: could not copy '$KERNEL_INSTALL_STAGING_AREA/uki.efi' to '$UKI_FILE'." >&2
++        exit 1
++    }
++elif [ -n "$KERNEL_IMAGE" ]; then
++    [ -f "$KERNEL_IMAGE" ] || {
++        echo "Error: UKI '$KERNEL_IMAGE' not a file." >&2
++        exit 1
++    }
++    [ "$KERNEL_IMAGE" != "${KERNEL_IMAGE%*.efi}.efi" ] && {
++        echo "Error: $KERNEL_IMAGE is missing .efi suffix." >&2
++        exit 1
++    }
++    [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && echo "Installing $KERNEL_IMAGE"
++    install -m 0644 "$KERNEL_IMAGE" "$UKI_FILE" || {
++        echo "Error: could not copy '$KERNEL_IMAGE' to '$UKI_FILE'." >&2
++        exit 1
++    }
++else
++    [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && echo "No UKI available. Nothing to do."
++    exit 0
++fi
++chown root:root "$UKI_FILE" || :
++
++exit 0
+diff --git a/src/kernel-install/meson.build b/src/kernel-install/meson.build
+index 90a0e3ae49..68a4d43862 100644
+--- a/src/kernel-install/meson.build
++++ b/src/kernel-install/meson.build
+@@ -3,6 +3,8 @@
+ kernel_install_in = files('kernel-install.in')
+ loaderentry_install = files('90-loaderentry.install')
+ 
++uki_copy_install = files('90-uki-copy.install')
++
+ if want_kernel_install
+         install_data('50-depmod.install',
+                      loaderentry_install,

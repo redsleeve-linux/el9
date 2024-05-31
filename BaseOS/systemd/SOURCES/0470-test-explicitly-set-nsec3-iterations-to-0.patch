@@ -1,0 +1,40 @@
+From 101069af4b1ccee4f8c9723edef17e6213926fec Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 30 Jan 2024 16:27:58 +0100
+Subject: [PATCH] test: explicitly set nsec3-iterations to 0
+
+knot v3.2 and later does this by default. knot v3.1 still has the default set to
+10, but it also introduced a warning that the default will be changed to 0 in
+later versions, so it effectively complains about its own default, which then
+fails the config check. Let's just set the value explicitly to zero to avoid
+that.
+
+~# knotc --version
+knotc (Knot DNS), version 3.1.6
+~# grep nsec3-iterations test/knot-data/knot.conf || echo nope
+nope
+~# knotc -c /build/test/knot-data/knot.conf conf-check
+warning: config, policy[auto_rollover_nsec3].nsec3-iterations defaults to 10, since version 3.2 the default becomes 0
+Configuration is valid
+
+Follow-up to 0652cf8e7b.
+
+(cherry picked from commit cb3244c0dcea80ad35e5bcaf7a07bd449ac65325)
+
+Related: RHEL-1086
+---
+ test/knot-data/knot.conf | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/test/knot-data/knot.conf b/test/knot-data/knot.conf
+index cfe478fe1c..b925812312 100644
+--- a/test/knot-data/knot.conf
++++ b/test/knot-data/knot.conf
+@@ -51,6 +51,7 @@ policy:
+       ds-push: parent_zone_server
+       ksk-lifetime: 365d
+       ksk-submission: parent_zone_sbm
++      nsec3-iterations: 0
+       nsec3: on
+       propagation-delay: 1s
+       signing-threads: 4

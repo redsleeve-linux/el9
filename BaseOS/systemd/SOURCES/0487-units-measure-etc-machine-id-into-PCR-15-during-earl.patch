@@ -1,0 +1,61 @@
+From 46f2825866379e5019516269c9de88b8e2ba7c78 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Sun, 16 Oct 2022 18:21:12 +0200
+Subject: [PATCH] units: measure /etc/machine-id into PCR 15 during early boot
+
+We want PCR 15 to be useful for binding per-system policy to. Let's
+measure the machine ID into it, to ensure that every OS we can
+distinguish will get a different PCR (even if the root disk encryption
+key is already measured into it).
+
+(cherry picked from commit 072c8f650519f47a575b1e39509599ace21e2c8f)
+
+Related: RHEL-16182
+---
+ units/meson.build                   |  2 ++
+ units/systemd-pcrmachine.service.in | 23 +++++++++++++++++++++++
+ 2 files changed, 25 insertions(+)
+ create mode 100644 units/systemd-pcrmachine.service.in
+
+diff --git a/units/meson.build b/units/meson.build
+index a99f27adc5..9046e5d066 100644
+--- a/units/meson.build
++++ b/units/meson.build
+@@ -266,6 +266,8 @@ in_units = [
+          'sysinit.target.wants/'],
+         ['systemd-growfs-root.service',          ''],
+         ['systemd-growfs@.service',              ''],
++        ['systemd-pcrmachine.service',           'HAVE_GNU_EFI HAVE_OPENSSL HAVE_TPM2',
++         'sysinit.target.wants/'],
+ ]
+ 
+ add_wants = []
+diff --git a/units/systemd-pcrmachine.service.in b/units/systemd-pcrmachine.service.in
+new file mode 100644
+index 0000000000..e154a7eec1
+--- /dev/null
++++ b/units/systemd-pcrmachine.service.in
+@@ -0,0 +1,23 @@
++#  SPDX-License-Identifier: LGPL-2.1-or-later
++#
++#  This file is part of systemd.
++#
++#  systemd is free software; you can redistribute it and/or modify it
++#  under the terms of the GNU Lesser General Public License as published by
++#  the Free Software Foundation; either version 2.1 of the License, or
++#  (at your option) any later version.
++
++[Unit]
++Description=TPM2 PCR Machine ID Measurement
++Documentation=man:systemd-pcrmachine.service(8)
++DefaultDependencies=no
++Conflicts=shutdown.target
++Before=sysinit.target shutdown.target
++AssertPathExists=!/etc/initrd-release
++ConditionSecurity=tpm2
++ConditionPathExists=/sys/firmware/efi/efivars/StubPcrKernelImage-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
++
++[Service]
++Type=oneshot
++RemainAfterExit=yes
++ExecStart={{ROOTLIBEXECDIR}}/systemd-pcrphase --machine-id

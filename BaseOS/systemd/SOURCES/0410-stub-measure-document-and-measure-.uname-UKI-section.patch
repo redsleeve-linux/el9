@@ -1,0 +1,81 @@
+From fe66c5955044cf2b93fa788ae7bdfe3a07f11449 Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Sun, 21 May 2023 14:32:09 +0100
+Subject: [PATCH] stub/measure: document and measure .uname UKI section
+
+(cherry picked from commit b6f2e6860220aa89550f690b12246c4e8eb6e908)
+
+Resolves: RHEL-13199
+---
+ man/systemd-stub.xml      | 3 +++
+ src/boot/measure.c        | 3 +++
+ src/fundamental/tpm-pcr.c | 1 +
+ src/fundamental/tpm-pcr.h | 1 +
+ 4 files changed, 8 insertions(+)
+
+diff --git a/man/systemd-stub.xml b/man/systemd-stub.xml
+index 415d663f53..85d30129d6 100644
+--- a/man/systemd-stub.xml
++++ b/man/systemd-stub.xml
+@@ -57,6 +57,9 @@
+       <citerefentry><refentrytitle>os-release</refentrytitle><manvolnum>5</manvolnum></citerefentry> file of
+       the OS the kernel belongs to, in the <literal>.osrel</literal> PE section.</para></listitem>
+ 
++      <listitem><para>Kernel version information, i.e. the output of <command>uname -r</command> for the
++      kernel included in the UKI, in the <literal>.uname</literal> PE section.</para></listitem>
++
+       <listitem><para>The initrd will be loaded from the <literal>.initrd</literal> PE section.
+       </para></listitem>
+ 
+diff --git a/src/boot/measure.c b/src/boot/measure.c
+index 0bbd386449..67ab84753e 100644
+--- a/src/boot/measure.c
++++ b/src/boot/measure.c
+@@ -79,6 +79,7 @@ static int help(int argc, char *argv[], void *userdata) {
+                "     --initrd=PATH       Path to initrd image file              %7$s .initrd\n"
+                "     --splash=PATH       Path to splash bitmap file             %7$s .splash\n"
+                "     --dtb=PATH          Path to Devicetree file                %7$s .dtb\n"
++               "     --uname=PATH        Path to 'uname -r' file                %7$s .uname\n"
+                "     --pcrpkey=PATH      Path to public key for PCR signatures  %7$s .pcrpkey\n"
+                "\nSee the %2$s for details.\n",
+                program_invocation_short_name,
+@@ -118,6 +119,7 @@ static int parse_argv(int argc, char *argv[]) {
+                 ARG_INITRD,
+                 ARG_SPLASH,
+                 ARG_DTB,
++                ARG_UNAME,
+                 _ARG_PCRSIG, /* the .pcrsig section is not input for signing, hence not actually an argument here */
+                 _ARG_SECTION_LAST,
+                 ARG_PCRPKEY = _ARG_SECTION_LAST,
+@@ -139,6 +141,7 @@ static int parse_argv(int argc, char *argv[]) {
+                 { "initrd",      required_argument, NULL, ARG_INITRD      },
+                 { "splash",      required_argument, NULL, ARG_SPLASH      },
+                 { "dtb",         required_argument, NULL, ARG_DTB         },
++                { "uname",       required_argument, NULL, ARG_UNAME       },
+                 { "pcrpkey",     required_argument, NULL, ARG_PCRPKEY     },
+                 { "current",     no_argument,       NULL, 'c'             },
+                 { "bank",        required_argument, NULL, ARG_BANK        },
+diff --git a/src/fundamental/tpm-pcr.c b/src/fundamental/tpm-pcr.c
+index 7609d83c2e..0685d37b05 100644
+--- a/src/fundamental/tpm-pcr.c
++++ b/src/fundamental/tpm-pcr.c
+@@ -11,6 +11,7 @@ const char* const unified_sections[_UNIFIED_SECTION_MAX + 1] = {
+         [UNIFIED_SECTION_INITRD]  = ".initrd",
+         [UNIFIED_SECTION_SPLASH]  = ".splash",
+         [UNIFIED_SECTION_DTB]     = ".dtb",
++        [UNIFIED_SECTION_UNAME]   = ".uname",
+         [UNIFIED_SECTION_PCRSIG]  = ".pcrsig",
+         [UNIFIED_SECTION_PCRPKEY] = ".pcrpkey",
+         NULL,
+diff --git a/src/fundamental/tpm-pcr.h b/src/fundamental/tpm-pcr.h
+index 235d4841b0..24240b82ed 100644
+--- a/src/fundamental/tpm-pcr.h
++++ b/src/fundamental/tpm-pcr.h
+@@ -34,6 +34,7 @@ typedef enum UnifiedSection {
+         UNIFIED_SECTION_INITRD,
+         UNIFIED_SECTION_SPLASH,
+         UNIFIED_SECTION_DTB,
++        UNIFIED_SECTION_UNAME,
+         UNIFIED_SECTION_PCRSIG,
+         UNIFIED_SECTION_PCRPKEY,
+         _UNIFIED_SECTION_MAX,

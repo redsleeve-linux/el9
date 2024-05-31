@@ -144,13 +144,13 @@
 %else
 %global build_annobin_plugin 0
 %endif
-Summary: GCC version 12
-Name: %{?scl_prefix}gcc
-Version: %{gcc_version}
-Release: %{gcc_release}.4%{?dist}.redsleeve
+Summary:              GCC version 12
+Name:                 %{?scl_prefix}gcc
+Version:              %{gcc_version}
+Release:              %{gcc_release}.6%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
-License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
+License:              GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
 # The source for this package was pulled from upstream's vcs.
 # %%{gitrev} is some commit from the
 # https://gcc.gnu.org/git/?p=gcc.git;h=refs/vendors/redhat/heads/gcc-%%{gcc_major}-branch
@@ -159,27 +159,27 @@ License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2
 # git --git-dir=gcc-dir.tmp/.git fetch --depth 1 origin %%{gitrev}
 # git --git-dir=gcc-dir.tmp/.git archive --prefix=%%{name}-%%{version}-%%{DATE}/ %%{gitrev} | xz -9e > %%{name}-%%{version}-%%{DATE}.tar.xz
 # rm -rf gcc-dir.tmp
-Source0: gcc-%{version}-%{DATE}.tar.xz
-Source1: https://gcc.gnu.org/pub/gcc/infrastructure/isl-%{isl_version}.tar.bz2
-Source2: http://www.multiprecision.org/mpc/download/mpc-%{mpc_version}.tar.gz
-Source3: ftp://ftp.stack.nl/pub/users/dimitri/doxygen-%{doxygen_version}.src.tar.gz
+Source0:              gcc-%{version}-%{DATE}.tar.xz
+Source1:              https://gcc.gnu.org/pub/gcc/infrastructure/isl-%{isl_version}.tar.bz2
+Source2:              http://www.multiprecision.org/mpc/download/mpc-%{mpc_version}.tar.gz
+Source3:              ftp://ftp.stack.nl/pub/users/dimitri/doxygen-%{doxygen_version}.src.tar.gz
 # The source for nvptx-tools package was pulled from upstream's vcs.  Use the
 # following commands to generate the tarball:
 # git clone --depth 1 git://github.com/MentorEmbedded/nvptx-tools.git nvptx-tools-dir.tmp
 # git --git-dir=nvptx-tools-dir.tmp/.git fetch --depth 1 origin %%{nvptx_tools_gitrev}
 # git --git-dir=nvptx-tools-dir.tmp/.git archive --prefix=nvptx-tools-%%{nvptx_tools_gitrev}/ %%{nvptx_tools_gitrev} | xz -9e > nvptx-tools-%%{nvptx_tools_gitrev}.tar.xz
 # rm -rf nvptx-tools-dir.tmp
-Source4: nvptx-tools-%{nvptx_tools_gitrev}.tar.xz
+Source4:              nvptx-tools-%{nvptx_tools_gitrev}.tar.xz
 # The source for nvptx-newlib package was pulled from upstream's vcs.  Use the
 # following commands to generate the tarball:
 # git clone git://sourceware.org/git/newlib-cygwin.git newlib-cygwin-dir.tmp
 # git --git-dir=newlib-cygwin-dir.tmp/.git archive --prefix=newlib-cygwin-%%{newlib_cygwin_gitrev}/ %%{newlib_cygwin_gitrev} ":(exclude)newlib/libc/sys/linux/include/rpc/*.[hx]" | xz -9e > newlib-cygwin-%%{newlib_cygwin_gitrev}.tar.xz
 # rm -rf newlib-cygwin-dir.tmp
-Source5: newlib-cygwin-%{newlib_cygwin_gitrev}.tar.xz
-Source6: libgomp_nonshared.c
-Source7: http://gcc.gnu.org/pub/gcc/infrastructure/mpfr-%{mpfr_version}.tar.bz2
-Source8: http://gcc.gnu.org/pub/gcc/infrastructure/gmp-%{gmp_version}.tar.bz2
-URL: http://gcc.gnu.org
+Source5:              newlib-cygwin-%{newlib_cygwin_gitrev}.tar.xz
+Source6:              libgomp_nonshared.c
+Source7:              http://gcc.gnu.org/pub/gcc/infrastructure/mpfr-%{mpfr_version}.tar.bz2
+Source8:              http://gcc.gnu.org/pub/gcc/infrastructure/gmp-%{gmp_version}.tar.bz2
+URL:                  http://gcc.gnu.org
 # Need binutils with -pie support >= 2.14.90.0.4-4
 # Need binutils which can omit dot symbols and overlap .opd on ppc64 >= 2.15.91.0.2-4
 # Need binutils which handle -msecure-plt on ppc >= 2.16.91.0.2-2
@@ -193,43 +193,41 @@ URL: http://gcc.gnu.org
 # Need binutils which support -plugin
 # Need binutils which support .loc view >= 2.30
 # Need binutils which support --generate-missing-build-notes=yes >= 2.31
-%if 0%{?scl:1}
-BuildRequires: %{?scl_prefix}binutils >= 2.31
-BuildRequires: %{?scl_prefix}gdb >= 7.4.50
-%endif
+BuildRequires:        %{?scl_prefix}binutils >= 2.31
+BuildRequires:        %{?scl_prefix}gdb >= 7.4.50
 # While gcc doesn't include statically linked binaries, during testing
 # -static is used several times.
-BuildRequires: glibc-static
-BuildRequires: zlib-devel, gettext, dejagnu, bison, flex, sharutils
-BuildRequires: texinfo, texinfo-tex, /usr/bin/pod2man
+BuildRequires:        glibc-static
+BuildRequires:        zlib-devel, gettext, dejagnu, bison, flex, sharutils
+BuildRequires:        texinfo, texinfo-tex, /usr/bin/pod2man
 #BuildRequires: systemtap-sdt-devel >= 1.3
 #BuildRequires: gmp-devel >= 4.1.2-8, mpfr-devel >= 3.1.0, libmpc-devel >= 0.8.1
 #BuildRequires: python3-devel, /usr/bin/python
-BuildRequires: gcc, gcc-c++, make
+BuildRequires:        gcc, gcc-c++, make
 %if 0%{?rhel} == 7
-BuildRequires: python3
+BuildRequires:        python3
 %endif
 # For VTA guality testing
-BuildRequires: gdb
+BuildRequires:        gdb
 # Make sure pthread.h doesn't contain __thread tokens
 # Make sure glibc supports stack protector
 # Make sure glibc supports DT_GNU_HASH
-BuildRequires: glibc-devel >= 2.4.90-13
-BuildRequires: elfutils-devel >= 0.147
-BuildRequires: elfutils-libelf-devel >= 0.147
+BuildRequires:        glibc-devel >= 2.4.90-13
+BuildRequires:        elfutils-devel >= 0.147
+BuildRequires:        elfutils-libelf-devel >= 0.147
 %if 0%{?rhel} >= 8
-BuildRequires: libzstd-devel
+BuildRequires:        libzstd-devel
 %endif
 %ifarch ppc ppc64 ppc64le ppc64p7 s390 s390x sparc sparcv9 alpha
 # Make sure glibc supports TFmode long double
-BuildRequires: glibc >= 2.3.90-35
+BuildRequires:        glibc >= 2.3.90-35
 %endif
 %ifarch %{multilib_64_archs} sparcv9 ppc
 # Ensure glibc{,-devel} is installed for both multilib arches
-BuildRequires: /lib/libc.so.6 /usr/lib/libc.so /lib64/libc.so.6 /usr/lib64/libc.so
+BuildRequires:        /lib/libc.so.6 /usr/lib/libc.so /lib64/libc.so.6 /usr/lib64/libc.so
 %endif
 %ifarch ia64
-BuildRequires: libunwind >= 0.98
+BuildRequires:        libunwind >= 0.98
 %endif
 # Need .eh_frame ld optimizations
 # Need proper visibility support
@@ -247,55 +245,55 @@ BuildRequires: libunwind >= 0.98
 # Need binutils that support -plugin
 # Need binutils that support .loc view >= 2.30
 # Need binutils which support --generate-missing-build-notes=yes >= 2.31
-Requires: %{?scl_prefix}binutils >= 2.22.52.0.1
+Requires:             %{?scl_prefix}binutils >= 2.22.52.0.1
 # Make sure gdb will understand DW_FORM_strp
-Conflicts: gdb < 5.1-2
-Requires: glibc-devel >= 2.2.90-12
+Conflicts:            gdb < 5.1-2
+Requires:             glibc-devel >= 2.2.90-12
 %ifarch ppc ppc64 ppc64le ppc64p7 s390 s390x sparc sparcv9 alpha
 # Make sure glibc supports TFmode long double
-Requires: glibc >= 2.3.90-35
+Requires:             glibc >= 2.3.90-35
 %endif
 %if 0%{?rhel} >= 7
-BuildRequires: gmp-devel >= 4.3.2
-BuildRequires: mpfr-devel >= 3.1.0
-BuildRequires: libmpc-devel >= 0.8.1
+BuildRequires:        gmp-devel >= 4.3.2
+BuildRequires:        mpfr-devel >= 3.1.0
+BuildRequires:        libmpc-devel >= 0.8.1
 %endif
 %if %{build_libstdcxx_docs}
-BuildRequires: libxml2
-BuildRequires: graphviz
+BuildRequires:        libxml2
+BuildRequires:        graphviz
 %if 0%{?rhel} < 7
 # doxygen BRs
-BuildRequires: perl
-BuildRequires: texlive-dvips, texlive-utils, texlive-latex
-BuildRequires: ghostscript
+BuildRequires:        perl
+BuildRequires:        texlive-dvips, texlive-utils, texlive-latex
+BuildRequires:        ghostscript
 %endif
 %if 0%{?rhel} >= 7
-BuildRequires: doxygen >= 1.7.1
-BuildRequires: dblatex, texlive-collection-latex, docbook-style-xsl
+BuildRequires:        doxygen >= 1.7.1
+BuildRequires:        dblatex, texlive-collection-latex, docbook-style-xsl
 %endif
 %endif
 
 # See the build section for why this is needed.
 %if 0%{?rhel} == 6
-BuildRequires: devtoolset-11-runtime devtoolset-11-binutils
-BuildRequires: devtoolset-11-gcc devtoolset-11-gcc-c++
+BuildRequires:        devtoolset-11-runtime devtoolset-11-binutils
+BuildRequires:        devtoolset-11-gcc devtoolset-11-gcc-c++
 %endif
 
-Requires: libgcc >= 4.1.2-43
-Requires: libgomp >= 4.4.4-13
+Requires:             libgcc >= 4.1.2-43
+Requires:             libgomp >= 4.4.4-13
 # lto-wrapper invokes make
-Requires: make
+Requires:             make
 %{?scl:Requires:%scl_runtime}
-AutoReq: true
+AutoReq:              true
 # Various libraries are imported.  #1859893 asks us to list them all.
-Provides: bundled(libiberty)
-Provides: bundled(libbacktrace)
-Provides: bundled(libffi)
-Provides: gcc(major) = %{gcc_major}
+Provides:             bundled(libiberty)
+Provides:             bundled(libbacktrace)
+Provides:             bundled(libffi)
+Provides:             gcc(major) = %{gcc_major}
 %ifarch sparc64 ppc64 ppc64le s390x x86_64 ia64 aarch64
-Provides: liblto_plugin.so.0()(64bit)
+Provides:             liblto_plugin.so.0()(64bit)
 %else
-Provides: liblto_plugin.so.0
+Provides:             liblto_plugin.so.0
 %endif
 %global oformat %{nil}
 %global oformat2 %{nil}
@@ -331,64 +329,63 @@ Provides: liblto_plugin.so.0
 %global oformat OUTPUT_FORMAT(elf64-littleaarch64)
 %endif
 %if 0%{?rhel} == 6
-ExclusiveArch: x86_64 %{ix86}
+ExclusiveArch:        x86_64 %{ix86}
 %endif
 %if 0%{?rhel} == 7
-ExcludeArch: aarch64
+ExcludeArch:          aarch64
 %endif
 
-Patch0: gcc12-hack.patch
-Patch2: gcc12-sparc-config-detection.patch
-Patch3: gcc12-libgomp-omp_h-multilib.patch
-Patch4: gcc12-libtool-no-rpath.patch
-Patch5: gcc12-isl-dl.patch
-Patch6: gcc12-isl-dl2.patch
-Patch7: gcc12-libstdc++-docs.patch
-Patch8: gcc12-no-add-needed.patch
-Patch9: gcc12-Wno-format-security.patch
-Patch10: gcc12-rh1574936.patch
-Patch11: gcc12-d-shared-libphobos.patch
-Patch12: gcc12-pr107468.patch
-Patch15: gcc12-static-libquadmath.patch
-Patch16: gcc12-FMA-chains.patch
+Patch0:               gcc12-hack.patch
+Patch2:               gcc12-sparc-config-detection.patch
+Patch3:               gcc12-libgomp-omp_h-multilib.patch
+Patch4:               gcc12-libtool-no-rpath.patch
+Patch5:               gcc12-isl-dl.patch
+Patch6:               gcc12-isl-dl2.patch
+Patch7:               gcc12-libstdc++-docs.patch
+Patch8:               gcc12-no-add-needed.patch
+Patch9:               gcc12-Wno-format-security.patch
+Patch10:              gcc12-rh1574936.patch
+Patch11:              gcc12-d-shared-libphobos.patch
+Patch12:              gcc12-pr107468.patch
+Patch15:              gcc12-static-libquadmath.patch
+Patch16:              gcc12-FMA-chains.patch
+Patch17:              gcc12-pr113960.patch
 
-Patch100: gcc12-fortran-fdec-duplicates.patch
-Patch101: gcc12-fortran-flogical-as-integer.patch
-Patch102: gcc12-fortran-fdec-override-kind.patch
-Patch103: gcc12-fortran-fdec-non-logical-if.patch
+Patch100:             gcc12-fortran-fdec-duplicates.patch
+Patch101:             gcc12-fortran-flogical-as-integer.patch
+Patch102:             gcc12-fortran-fdec-override-kind.patch
+Patch103:             gcc12-fortran-fdec-non-logical-if.patch
 
-Patch1000: gcc12-libstdc++-compat.patch
-Patch1001: gcc12-alt-compat-test.patch
-Patch1002: gcc12-libgfortran-compat.patch
+Patch1000:            gcc12-libstdc++-compat.patch
+Patch1001:            gcc12-alt-compat-test.patch
+Patch1002:            gcc12-libgfortran-compat.patch
 
-Patch2001: doxygen-1.7.1-config.patch
-Patch2002: doxygen-1.7.5-timestamp.patch
-Patch2003: doxygen-1.8.0-rh856725.patch
-Patch2004: isl-rh2155127.patch
+Patch2001:            doxygen-1.7.1-config.patch
+Patch2002:            doxygen-1.7.5-timestamp.patch
+Patch2003:            doxygen-1.8.0-rh856725.patch
+Patch2004:            isl-rh2155127.patch
 
-Patch3000: 0001-basic_string-reserve-n-semantics-are-not-available-i.patch
-Patch3001: 0004-operator-istream-char-N-eofbit-fixes-are-not-availab.patch
-Patch3002: 0005-Disable-tests-for-PR-libstdc-79820-and-PR-libstdc-81.patch
-Patch3003: 0006-Don-t-assume-has_facet-codecvt_c16-when-run-against-.patch
-Patch3004: 0008-testsuite-build-plugins-with-std-c-11.patch
-Patch3005: 0009-Fix-22_locale-locale-cons-unicode.cc-when-run-under-.patch
-Patch3006: 0010-Don-t-verify-exception-handling-in-basic_filebuf-clo.patch
-Patch3007: 0011-Add-dts.exp-and-use-it-to-fix-22_locale-messages-136.patch
-Patch3008: 0012-dts.exp-use-usr-bin-gcc.patch
-Patch3009: 0013-Rename-__CXXSTDLIB_SO_VERSION__-to-__LIBSTDCXX_SO_VE.patch
-Patch3010: 0014-Conditionalize-tests-for-PR-libstdc-98466-on-__LIBST.patch
-Patch3011: 0015-Conditionalize-test-for-PR-libstdc-87135-on-__LIBSTD.patch
-Patch3012: 0016-Conditionalize-test-for-hashtable-bucket-sizes-on-__.patch
-Patch3013: 0017-Conditionalize-test-for-PR-libstdc-71181-on-__LIBSTD.patch
-Patch3014: gcc12-dg-ice-fixes.patch
-Patch3015: 0018-Use-CXX11-ABI.patch
-Patch3016: 0019-xfails.patch
-Patch3017: 0020-more-fixes.patch
-Patch3018: 0021-libstdc++-disable-tests.patch
-Patch3019: 0022-libstdc++-revert-behavior.patch
-Patch3020: gcc12-testsuite-typo.patch
-
-Patch10000: gcc6-decimal-rtti-arm.patch
+Patch3000:            0001-basic_string-reserve-n-semantics-are-not-available-i.patch
+Patch3001:            0004-operator-istream-char-N-eofbit-fixes-are-not-availab.patch
+Patch3002:            0005-Disable-tests-for-PR-libstdc-79820-and-PR-libstdc-81.patch
+Patch3003:            0006-Don-t-assume-has_facet-codecvt_c16-when-run-against-.patch
+Patch3004:            0008-testsuite-build-plugins-with-std-c-11.patch
+Patch3005:            0009-Fix-22_locale-locale-cons-unicode.cc-when-run-under-.patch
+Patch3006:            0010-Don-t-verify-exception-handling-in-basic_filebuf-clo.patch
+Patch3007:            0011-Add-dts.exp-and-use-it-to-fix-22_locale-messages-136.patch
+Patch3008:            0012-dts.exp-use-usr-bin-gcc.patch
+Patch3009:            0013-Rename-__CXXSTDLIB_SO_VERSION__-to-__LIBSTDCXX_SO_VE.patch
+Patch3010:            0014-Conditionalize-tests-for-PR-libstdc-98466-on-__LIBST.patch
+Patch3011:            0015-Conditionalize-test-for-PR-libstdc-87135-on-__LIBSTD.patch
+Patch3012:            0016-Conditionalize-test-for-hashtable-bucket-sizes-on-__.patch
+Patch3013:            0017-Conditionalize-test-for-PR-libstdc-71181-on-__LIBSTD.patch
+Patch3014:            gcc12-dg-ice-fixes.patch
+Patch3015:            0018-Use-CXX11-ABI.patch
+Patch3016:            0019-xfails.patch
+Patch3017:            0020-more-fixes.patch
+Patch3018:            0021-libstdc++-disable-tests.patch
+Patch3019:            0022-libstdc++-revert-behavior.patch
+Patch3020:            gcc12-testsuite-typo.patch
 
 %if 0%{?rhel} == 9
 %global nonsharedver 110
@@ -408,9 +405,6 @@ Patch10000: gcc6-decimal-rtti-arm.patch
 %else
 %global _gnu -gnueabi
 %endif
-%ifarch %{arm}
-%global _gnu -gnueabi
-%endif
 %ifarch sparcv9
 %global gcc_target_platform sparc64-%{_vendor}-%{_target_os}
 %endif
@@ -425,23 +419,23 @@ Patch10000: gcc6-decimal-rtti-arm.patch
 The %{?scl_prefix}gcc%{!?scl:12} package contains the GNU Compiler Collection version 10.
 
 %package -n libgcc
-Summary: GCC version 12 shared support library
-Autoreq: false
+Summary:              GCC version 12 shared support library
+Autoreq:              false
 
 %description -n libgcc
 This package contains GCC shared support library which is needed
 e.g. for exception handling support.
 
 %package c++
-Summary: C++ support for GCC version 12
-Requires: %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
+Summary:              C++ support for GCC version 12
+Requires:             %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
 %if 0%{?rhel} >= 7
-Requires: libstdc++
+Requires:             libstdc++
 %else
-Requires: libstdc++ >= 4.4.4-13
+Requires:             libstdc++ >= 4.4.4-13
 %endif
-Requires: %{?scl_prefix}libstdc++%{!?scl:12}-devel = %{version}-%{release}
-Autoreq: true
+Requires:             %{?scl_prefix}libstdc++%{!?scl:12}-devel = %{version}-%{release}
+Autoreq:              true
 
 %description c++
 This package adds C++ support to the GNU Compiler Collection
@@ -449,23 +443,23 @@ version 12.  It includes support for most of the current C++ specification
 and a lot of support for the upcoming C++ specification.
 
 %package -n libstdc++
-Summary: GNU Standard C++ Library
-Autoreq: true
-Requires: glibc >= 2.10.90-7
+Summary:              GNU Standard C++ Library
+Autoreq:              true
+Requires:             glibc >= 2.10.90-7
 
 %description -n libstdc++
 The libstdc++ package contains a rewritten standard compliant GCC Standard
 C++ Library.
 
 %package -n %{?scl_prefix}libstdc++%{!?scl:12}-devel
-Summary: Header files and libraries for C++ development
+Summary:              Header files and libraries for C++ development
 %if 0%{?rhel} >= 7
-Requires: libstdc++
+Requires:             libstdc++
 %else
-Requires: libstdc++ >= 4.4.4-13
+Requires:             libstdc++ >= 4.4.4-13
 %endif
-Requires: libstdc++%{?_isa}
-Autoreq: true
+Requires:             libstdc++%{?_isa}
+Autoreq:              true
 
 %description -n %{?scl_prefix}libstdc++%{!?scl:12}-devel
 This is the GNU implementation of the standard C++ libraries.  This
@@ -473,30 +467,30 @@ package includes the header files and libraries needed for C++
 development. This includes rewritten implementation of STL.
 
 %package -n %{?scl_prefix}libstdc++%{!?scl:12}-docs
-Summary: Documentation for the GNU standard C++ library
-Autoreq: true
+Summary:              Documentation for the GNU standard C++ library
+Autoreq:              true
 
 %description -n %{?scl_prefix}libstdc++%{!?scl:12}-docs
 Manual, doxygen generated API information and Frequently Asked Questions
 for the GNU standard C++ library.
 
 %package gfortran
-Summary: Fortran support for GCC 12
-Requires: %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
+Summary:              Fortran support for GCC 12
+Requires:             %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
 %if 0%{?rhel} > 7
-Requires: libgfortran >= 8.1.1
+Requires:             libgfortran >= 8.1.1
 %else
-Requires: libgfortran5 >= 8.1.1
+Requires:             libgfortran5 >= 8.1.1
 %endif
-Autoreq: true
+Autoreq:              true
 
 %if %{build_libquadmath}
 %if 0%{!?scl:1}
-Requires: libquadmath
+Requires:             libquadmath
 %endif
-Requires: %{?scl_prefix}libquadmath-devel = %{version}-%{release}
+Requires:             %{?scl_prefix}libquadmath-devel = %{version}-%{release}
 %endif
-Autoreq: true
+Autoreq:              true
 
 %description gfortran
 The %{?scl_prefix}gcc%{!?scl:10}-gfortran package provides support for compiling Fortran
@@ -504,35 +498,35 @@ programs with the GNU Compiler Collection.
 
 
 %package gdb-plugin
-Summary: GCC 12 plugin for GDB
-Requires: %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
+Summary:              GCC 12 plugin for GDB
+Requires:             %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
 
 %description gdb-plugin
 This package contains GCC 12 plugin for GDB C expression evaluation.
 
 %package -n %{?scl_prefix}libgccjit
-Summary: Library for embedding GCC inside programs and libraries
-Requires: %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
+Summary:              Library for embedding GCC inside programs and libraries
+Requires:             %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
 
 %description -n %{?scl_prefix}libgccjit
 This package contains shared library with GCC 12 JIT front-end.
 
 %package -n %{?scl_prefix}libgccjit-devel
-Summary: Support for embedding GCC inside programs and libraries
-Group: Development/Libraries
-Requires: %{?scl_prefix}libgccjit = %{version}-%{release}
-Requires: %{?scl_prefix}libgccjit-docs = %{version}-%{release}
+Summary:              Support for embedding GCC inside programs and libraries
+Group:                Development/Libraries
+Requires:             %{?scl_prefix}libgccjit = %{version}-%{release}
+Requires:             %{?scl_prefix}libgccjit-docs = %{version}-%{release}
 
 %description -n %{?scl_prefix}libgccjit-devel
 This package contains header files for GCC 12 JIT front end.
 
 %package -n %{?scl_prefix}libgccjit-docs
-Summary: Documentation for embedding GCC inside programs and libraries
-Group: Development/Libraries
+Summary:              Documentation for embedding GCC inside programs and libraries
+Group:                Development/Libraries
 %if 0%{?rhel} > 7
-BuildRequires: python3-sphinx
+BuildRequires:        python3-sphinx
 %else
-BuildRequires: python-sphinx
+BuildRequires:        python-sphinx
 %endif
 Requires(post): /sbin/install-info
 Requires(preun): /sbin/install-info
@@ -541,7 +535,7 @@ Requires(preun): /sbin/install-info
 This package contains documentation for GCC 12 JIT front-end.
 
 %package -n libquadmath
-Summary: GCC 12 __float128 shared support library
+Summary:              GCC 12 __float128 shared support library
 Requires(post): /sbin/install-info
 Requires(preun): /sbin/install-info
 
@@ -550,24 +544,24 @@ This package contains GCC shared support library which is needed
 for __float128 math support and for Fortran REAL*16 support.
 
 %package -n %{?scl_prefix}libquadmath-devel
-Summary: GCC 12 __float128 support
-Group: Development/Libraries
+Summary:              GCC 12 __float128 support
+Group:                Development/Libraries
 %if 0%{!?scl:1}
-Requires: %{?scl_prefix}libquadmath%{_isa} = %{version}-%{release}
+Requires:             %{?scl_prefix}libquadmath%{_isa} = %{version}-%{release}
 %else
 %if 0%{?rhel} >= 7
-Requires: libquadmath%{_isa}
+Requires:             libquadmath%{_isa}
 %endif
 %endif
-Requires: %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
+Requires:             %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
 
 %description -n %{?scl_prefix}libquadmath-devel
 This package contains headers for building Fortran programs using
 REAL*16 and programs using __float128 math.
 
 %package -n libitm
-Summary: The GNU Transactional Memory library
-Group: System Environment/Libraries
+Summary:              The GNU Transactional Memory library
+Group:                System Environment/Libraries
 Requires(post): /sbin/install-info
 Requires(preun): /sbin/install-info
 
@@ -576,21 +570,21 @@ This package contains the GNU Transactional Memory library
 which is a GCC transactional memory support runtime library.
 
 %package -n %{?scl_prefix}libitm-devel
-Summary: The GNU Transactional Memory support
-Requires: libitm%{_isa} >= 4.7.0-1
-Requires: %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
+Summary:              The GNU Transactional Memory support
+Requires:             libitm%{_isa} >= 4.7.0-1
+Requires:             %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
 
 %description -n %{?scl_prefix}libitm-devel
 This package contains headers and support files for the
 GNU Transactional Memory library.
 
 %package plugin-devel
-Summary: Support for compiling GCC plugins
-Requires: %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
+Summary:              Support for compiling GCC plugins
+Requires:             %{?scl_prefix}gcc%{!?scl:12} = %{version}-%{release}
 %if 0%{?rhel} >= 7
-Requires: gmp-devel >= 4.3.2
-Requires: mpfr-devel >= 3.1.0
-Requires: libmpc-devel >= 0.8.1
+Requires:             gmp-devel >= 4.3.2
+Requires:             mpfr-devel >= 3.1.0
+Requires:             libmpc-devel >= 0.8.1
 %endif
 
 %description plugin-devel
@@ -599,8 +593,8 @@ for compiling GCC 12 plugins.  The GCC plugin ABI is currently
 not stable, so plugins must be rebuilt any time GCC is updated.
 
 %package -n libatomic
-Summary: The GNU Atomic library
-Group: System Environment/Libraries
+Summary:              The GNU Atomic library
+Group:                System Environment/Libraries
 Requires(post): /sbin/install-info
 Requires(preun): /sbin/install-info
 
@@ -610,15 +604,15 @@ which is a GCC support runtime library for atomic operations not supported
 by hardware.
 
 %package -n %{?scl_prefix}libatomic-devel
-Summary: The GNU Atomic static library
-Requires: libatomic%{_isa} >= 4.8.0
+Summary:              The GNU Atomic static library
+Requires:             libatomic%{_isa} >= 4.8.0
 
 %description -n %{?scl_prefix}libatomic-devel
 This package contains GNU Atomic static libraries.
 
 %package -n libasan8
-Summary: The Address Sanitizer runtime library from GCC 12
-Group: System Environment/Libraries
+Summary:              The Address Sanitizer runtime library from GCC 12
+Group:                System Environment/Libraries
 Requires(post): /sbin/install-info
 Requires(preun): /sbin/install-info
 
@@ -627,15 +621,15 @@ This package contains the Address Sanitizer library from GCC 12
 which is used for -fsanitize=address instrumented programs.
 
 %package -n %{?scl_prefix}libasan-devel
-Summary: The Address Sanitizer static library
-Requires: libasan8%{_isa} >= 12.1.1
-Obsoletes: libasan5 <= 8.3.1
+Summary:              The Address Sanitizer static library
+Requires:             libasan8%{_isa} >= 12.1.1
+Obsoletes:            libasan5 <= 8.3.1
 
 %description -n %{?scl_prefix}libasan-devel
 This package contains Address Sanitizer static runtime library.
 
 %package -n libtsan2
-Summary: The Thread Sanitizer runtime library
+Summary:              The Thread Sanitizer runtime library
 Requires(post): /sbin/install-info
 Requires(preun): /sbin/install-info
 
@@ -644,14 +638,14 @@ This package contains the Thread Sanitizer library
 which is used for -fsanitize=thread instrumented programs.
 
 %package -n %{?scl_prefix}libtsan-devel
-Summary: The Thread Sanitizer static library
-Requires: libtsan2%{_isa} >= 12.1.1
+Summary:              The Thread Sanitizer static library
+Requires:             libtsan2%{_isa} >= 12.1.1
 
 %description -n %{?scl_prefix}libtsan-devel
 This package contains Thread Sanitizer static runtime library.
 
 %package -n libubsan1
-Summary: The Undefined Behavior Sanitizer runtime library
+Summary:              The Undefined Behavior Sanitizer runtime library
 Requires(post): /sbin/install-info
 Requires(preun): /sbin/install-info
 
@@ -660,19 +654,19 @@ This package contains the Undefined Behavior Sanitizer library
 which is used for -fsanitize=undefined instrumented programs.
 
 %package -n %{?scl_prefix}libubsan-devel
-Summary: The Undefined Behavior Sanitizer static library
+Summary:              The Undefined Behavior Sanitizer static library
 %if 0%{?rhel} > 7
-Requires: libubsan%{_isa} >= 8.3.1
-Obsoletes: libubsan1 <= 8.3.1
+Requires:             libubsan%{_isa} >= 8.3.1
+Obsoletes:            libubsan1 <= 8.3.1
 %else
-Requires: libubsan1%{_isa} >= 8.3.1
+Requires:             libubsan1%{_isa} >= 8.3.1
 %endif
 
 %description -n %{?scl_prefix}libubsan-devel
 This package contains Undefined Behavior Sanitizer static runtime library.
 
 %package -n liblsan
-Summary: The Leak Sanitizer runtime library
+Summary:              The Leak Sanitizer runtime library
 Requires(post): /sbin/install-info
 Requires(preun): /sbin/install-info
 
@@ -681,16 +675,16 @@ This package contains the Leak Sanitizer library
 which is used for -fsanitize=leak instrumented programs.
 
 %package -n %{?scl_prefix}liblsan-devel
-Summary: The Leak Sanitizer static library
-Requires: liblsan%{_isa} >= 5.1.1
+Summary:              The Leak Sanitizer static library
+Requires:             liblsan%{_isa} >= 5.1.1
 
 %description -n %{?scl_prefix}liblsan-devel
 This package contains Leak Sanitizer static runtime library.
 
 %package -n %{?scl_prefix}offload-nvptx
-Summary: Offloading compiler to NVPTX
-Requires: gcc >= 8.3.1
-Requires: libgomp-offload-nvptx >= 8.3.1
+Summary:              Offloading compiler to NVPTX
+Requires:             gcc >= 8.3.1
+Requires:             libgomp-offload-nvptx >= 8.3.1
 
 %description -n %{?scl_prefix}offload-nvptx
 The gcc-offload-nvptx package provides offloading support for
@@ -700,9 +694,9 @@ to NVidia PTX capable devices if available.
 
 %if %{build_annobin_plugin}
 %package -n %{?scl_prefix}gcc-plugin-annobin
-Summary: The annobin plugin for gcc, built by the installed version of gcc
-Requires: %{?scl_prefix}gcc = %{version}-%{release}
-BuildRequires: rpm-devel, binutils-devel, xz
+Summary:              The annobin plugin for gcc, built by the installed version of gcc
+Requires:             %{?scl_prefix}gcc = %{version}-%{release}
+BuildRequires:        rpm-devel, binutils-devel, xz
 
 %description -n %{?scl_prefix}gcc-plugin-annobin
 This package adds a version of the annobin plugin for gcc.  This version
@@ -736,6 +730,7 @@ so that there cannot be any synchronization problems.
 %patch12 -p0 -b .pr107468~
 %patch15 -p0 -b .static-libquadmath~
 %patch16 -p1 -b .fma~
+%patch17 -p1 -b .pr113960~
 
 %if 0%{?rhel} >= 6
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -801,10 +796,6 @@ cd ..
 %patch3019 -p1 -b .dts-test-19~
 %endif
 %patch3020 -p1 -b .typo
-
-%ifarch %{arm}
-%patch10000 -p1
-%endif
 
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
@@ -925,7 +916,7 @@ CC="$CC" CXX="$CXX" CFLAGS="$OPT_FLAGS" \
 	--target nvptx-none --enable-as-accelerator-for=%{gcc_target_platform} \
 	--enable-languages=c,c++,fortran,lto \
 	--prefix=%{_prefix} --mandir=%{_mandir} --infodir=%{_infodir} \
-	--with-bugurl=http://bugzilla.redhat.com/bugzilla \
+	--with-bugurl=https://bugs.rockylinux.org/ \
 	--enable-checking=release --with-system-zlib \
 	--with-gcc-major-version-only --without-isl
 make %{?_smp_mflags}
@@ -1032,7 +1023,7 @@ cd ../..
 # explicitly.
 CONFIGURE_OPTS="\
 	--prefix=%{_prefix} --mandir=%{_mandir} --infodir=%{_infodir} \
-	--with-bugurl=http://bugzilla.redhat.com/bugzilla \
+	--with-bugurl=https://bugs.rockylinux.org/ \
 	--enable-shared --enable-threads=posix --enable-checking=release \
 %ifarch ppc64le
 	--enable-targets=powerpcle-linux \
@@ -1157,9 +1148,6 @@ CONFIGURE_OPTS="\
 %endif
 %endif
 	--enable-decimal-float \
-%endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
@@ -3002,8 +2990,12 @@ fi
 %endif
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> 12.2.1-7.4.redsleeve
-- patched for armv6
+* Wed Apr  3 2024 Marek Polacek <polacek@redhat.com> 12.2.1-7.6
+- bump NVR (RHEL-30832)
+
+* Thu Mar 28 2024 Marek Polacek <polacek@redhat.com> 12.2.1-7.5
+- fix conditions for using memcmp in
+  std::lexicographical_compare_three_way (PR libstdc++/113960, RHEL-30832)
 
 * Fri Feb 10 2023 Marek Polacek <polacek@redhat.com> 12.2.1-7.4
 - avoid fma_chain for -march=alderlake and sapphirerapids (#2168919)

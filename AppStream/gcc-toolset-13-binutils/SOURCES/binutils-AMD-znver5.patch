@@ -1,0 +1,176 @@
+diff -rupN binutils.orig/gas/config/tc-i386.c binutils-2.40/gas/config/tc-i386.c
+--- binutils.orig/gas/config/tc-i386.c	2024-02-13 16:41:10.787729089 +0000
++++ binutils-2.40/gas/config/tc-i386.c	2024-02-13 16:52:35.402669140 +0000
+@@ -998,6 +998,7 @@ static const arch_entry cpu_arch[] =
+   ARCH (znver2, ZNVER, ZNVER2, false),
+   ARCH (znver3, ZNVER, ZNVER3, false),
+   ARCH (znver4, ZNVER, ZNVER4, false),
++  ARCH (znver5, ZNVER, ZNVER5, false),
+   ARCH (btver1, BT, BTVER1, false),
+   ARCH (btver2, BT, BTVER2, false),
+ 
+diff -rupN binutils.orig/gas/doc/c-i386.texi binutils-2.40/gas/doc/c-i386.texi
+--- binutils.orig/gas/doc/c-i386.texi	2024-02-13 16:41:10.789729089 +0000
++++ binutils-2.40/gas/doc/c-i386.texi	2024-02-13 16:52:35.572669132 +0000
+@@ -125,6 +125,7 @@ processor names are recognized:
+ @code{znver2},
+ @code{znver3},
+ @code{znver4},
++@code{znver5},
+ @code{btver1},
+ @code{btver2},
+ @code{generic32} and
+@@ -1477,7 +1478,8 @@ supported on the CPU specified.  The cho
+ @item @samp{k6} @tab @samp{k6_2} @tab @samp{athlon} @tab @samp{k8}
+ @item @samp{amdfam10} @tab @samp{bdver1} @tab @samp{bdver2} @tab @samp{bdver3}
+ @item @samp{bdver4} @tab @samp{znver1} @tab @samp{znver2} @tab @samp{znver3}
+-@item @samp{znver4} @tab @samp{btver1} @tab @samp{btver2} @tab @samp{generic32}
++@item @samp{znver4} @tab @samp{znver5} @tab @samp{btver1} @tab @samp{btver2}
++@item @samp{generic32}
+ @item @samp{generic64} @tab @samp{.cmov} @tab @samp{.fxsr} @tab @samp{.mmx}
+ @item @samp{.sse} @tab @samp{.sse2} @tab @samp{.sse3} @tab @samp{.sse4a}
+ @item @samp{.ssse3} @tab @samp{.sse4.1} @tab @samp{.sse4.2} @tab @samp{.sse4}
+diff -rupN binutils.orig/gas/testsuite/gas/i386/arch-15-znver5.d binutils-2.40/gas/testsuite/gas/i386/arch-15-znver5.d
+--- binutils.orig/gas/testsuite/gas/i386/arch-15-znver5.d	1970-01-01 01:00:00.000000000 +0100
++++ binutils-2.40/gas/testsuite/gas/i386/arch-15-znver5.d	2024-02-13 16:52:35.405669140 +0000
+@@ -0,0 +1,5 @@
++#source: arch-15.s
++#as: -march=znver5
++#objdump: -dw
++#name: i386 arch 15 (znver5)
++#dump: arch-15.d
+diff -rupN binutils.orig/gas/testsuite/gas/i386/arch-15.d binutils-2.40/gas/testsuite/gas/i386/arch-15.d
+--- binutils.orig/gas/testsuite/gas/i386/arch-15.d	1970-01-01 01:00:00.000000000 +0100
++++ binutils-2.40/gas/testsuite/gas/i386/arch-15.d	2024-02-13 16:52:35.405669140 +0000
+@@ -0,0 +1,13 @@
++#objdump: -dw
++#name: i386 arch 15
++
++.*:     file format .*
++
++Disassembly of section .text:
++
++0+ <.text>:
++[ 	]*[a-f0-9]+:[ 	]*c4 e2 59 50 d2[ 	]*\{vex\} vpdpbusd %xmm2,%xmm4,%xmm2
++[ 	]*[a-f0-9]+:[ 	]*0f 38 f9 01[ 	]*movdiri %eax,\(%ecx\)
++[ 	]*[a-f0-9]+:[ 	]*66 0f 38 f8 01[ 	]*movdir64b \(%ecx\),%eax
++[ 	]*[a-f0-9]+:[ 	]*62 f2 6f 48 68 d9[ 	]*vp2intersectd %zmm1,%zmm2,%k3
++#pass
+diff -rupN binutils.orig/gas/testsuite/gas/i386/arch-15.s binutils-2.40/gas/testsuite/gas/i386/arch-15.s
+--- binutils.orig/gas/testsuite/gas/i386/arch-15.s	1970-01-01 01:00:00.000000000 +0100
++++ binutils-2.40/gas/testsuite/gas/i386/arch-15.s	2024-02-13 16:52:35.405669140 +0000
+@@ -0,0 +1,7 @@
++# Test -march=
++	.text
++
++    {vex} vpdpbusd %xmm2, %xmm4, %xmm2    #AVX_VNNI
++    movdiri %eax, (%ecx)            #MOVDIRI
++    movdir64b (%ecx), %eax          #MOVDIR64B
++    vp2intersectd %zmm1, %zmm2, %k3 #AVX512_VP2INTERSECT
+diff -rupN binutils.orig/gas/testsuite/gas/i386/i386.exp binutils-2.40/gas/testsuite/gas/i386/i386.exp
+--- binutils.orig/gas/testsuite/gas/i386/i386.exp	2024-02-13 16:41:10.859729082 +0000
++++ binutils-2.40/gas/testsuite/gas/i386/i386.exp	2024-02-13 16:52:35.405669140 +0000
+@@ -199,6 +199,7 @@ if [gas_32_check] then {
+     run_dump_test "arch-13-znver2"
+     run_dump_test "arch-14-znver3"
+     run_dump_test "arch-14-znver4"
++    run_dump_test "arch-15-znver5"
+     run_dump_test "arch-10-btver1"
+     run_dump_test "arch-10-btver2"
+     run_list_test "arch-10-1" "-march=generic32 -I${srcdir}/$subdir -al"
+@@ -211,6 +212,7 @@ if [gas_32_check] then {
+     run_dump_test "arch-13"
+     run_dump_test "arch-14"
+     run_dump_test "arch-14-1"
++    run_dump_test "arch-15"
+     run_list_test "arch-dflt" "-march=generic32 -al"
+     run_list_test "arch-stk" "-march=generic32 -al"
+     run_dump_test "8087"
+diff -rupN binutils.orig/gas/testsuite/gas/i386/x86-64-arch-5-znver5.d binutils-2.40/gas/testsuite/gas/i386/x86-64-arch-5-znver5.d
+--- binutils.orig/gas/testsuite/gas/i386/x86-64-arch-5-znver5.d	1970-01-01 01:00:00.000000000 +0100
++++ binutils-2.40/gas/testsuite/gas/i386/x86-64-arch-5-znver5.d	2024-02-13 16:52:35.406669140 +0000
+@@ -0,0 +1,5 @@
++#source: x86-64-arch-5.s
++#as: -march=znver5
++#objdump: -dw
++#name: x86-64 arch 5 (znver5)
++#dump: x86-64-arch-5.d
+diff -rupN binutils.orig/gas/testsuite/gas/i386/x86-64-arch-5.d binutils-2.40/gas/testsuite/gas/i386/x86-64-arch-5.d
+--- binutils.orig/gas/testsuite/gas/i386/x86-64-arch-5.d	1970-01-01 01:00:00.000000000 +0100
++++ binutils-2.40/gas/testsuite/gas/i386/x86-64-arch-5.d	2024-02-13 16:52:35.406669140 +0000
+@@ -0,0 +1,14 @@
++#objdump: -dw
++#name: x86-64 arch 5
++
++.*:     file format .*
++
++Disassembly of section .text:
++
++0+ <.text>:
++[ 	]*[a-f0-9]+:[ 	]*c4 c2 59 50 d4[ 	]*\{vex\} vpdpbusd %xmm12,%xmm4,%xmm2
++[ 	]*[a-f0-9]+:[ 	]*48 0f 38 f9 01[ 	]*movdiri %rax,\(%rcx\)
++[ 	]*[a-f0-9]+:[ 	]*66 0f 38 f8 01[ 	]*movdir64b \(%rcx\),%rax
++[ 	]*[a-f0-9]+:[ 	]*62 f2 6f 48 68 d9[ 	]*vp2intersectd %zmm1,%zmm2,%k3
++[ 	]*[a-f0-9]+:[ 	]*0f 18 3d 78 56 34 12[ 	]*prefetchit0 0x12345678\(%rip\)        # 0x[0-9a-f]+
++#pass
+diff -rupN binutils.orig/gas/testsuite/gas/i386/x86-64-arch-5.s binutils-2.40/gas/testsuite/gas/i386/x86-64-arch-5.s
+--- binutils.orig/gas/testsuite/gas/i386/x86-64-arch-5.s	1970-01-01 01:00:00.000000000 +0100
++++ binutils-2.40/gas/testsuite/gas/i386/x86-64-arch-5.s	2024-02-13 16:52:35.406669140 +0000
+@@ -0,0 +1,8 @@
++# Test -march=
++	.text
++
++    {vex} vpdpbusd %xmm12, %xmm4, %xmm2     #AVX_VNNI
++    movdiri %rax, (%rcx)                    #MOVDIRI
++    movdir64b (%rcx), %rax                  #MOVDIR64B
++    vp2intersectd %zmm1, %zmm2, %k3         #AVX512_VP2INTERSECT
++    prefetchit0 0x12345678(%rip)            #prefetchi
+diff -rupN binutils.orig/opcodes/i386-gen.c binutils-2.40/opcodes/i386-gen.c
+--- binutils.orig/opcodes/i386-gen.c	2024-02-13 16:41:11.145729056 +0000
++++ binutils-2.40/opcodes/i386-gen.c	2024-02-13 16:52:35.406669140 +0000
+@@ -97,6 +97,8 @@ static const dependency isa_dependencies
+     "ZNVER2|INVLPGB|TLBSYNC|VAES|VPCLMULQDQ|INVPCID|SNP|OSPKE" },
+   { "ZNVER4",
+     "ZNVER3|AVX512F|AVX512DQ|AVX512IFMA|AVX512CD|AVX512BW|AVX512VL|AVX512_BF16|AVX512VBMI|AVX512_VBMI2|AVX512_VNNI|AVX512_BITALG|AVX512_VPOPCNTDQ|GFNI|RMPQUERY" },
++  { "ZNVER5",
++    "ZNVER4|AVX_VNNI|MOVDIRI|MOVDIR64B|AVX512_VP2INTERSECT|PREFETCHI" },
+   { "BTVER1",
+     "GENERIC64|FISTTP|CX16|Rdtscp|SSSE3|SSE4A|ABM|PRFCHW|CX16|Clflush|FISTTP|SVME" },
+   { "BTVER2",
+diff -rupN binutils.orig/opcodes/i386-init.h binutils-2.40/opcodes/i386-init.h
+--- binutils.orig/opcodes/i386-init.h	2024-02-13 16:41:11.145729056 +0000
++++ binutils-2.40/opcodes/i386-init.h	2024-02-13 17:32:50.339735343 +0000
+@@ -1431,6 +1431,15 @@
+       1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, \
+       0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0 } }
+ 
++#define CPU_ZNVER5_FLAGS \
++  { { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, \
++      0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, \
++      1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, \
++      0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, \
++      0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, \
++      1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, \
++      0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0 } }
++
+ #define CPU_BTVER1_FLAGS \
+   { { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, \
+       0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, \
+--- binutils.orig/gas/testsuite/gas/i386/i386.exp	2024-02-22 12:25:43.212505914 +0000
++++ binutils-2.40/gas/testsuite/gas/i386/i386.exp	2024-02-22 12:28:26.254563823 +0000
+@@ -922,6 +922,7 @@ if [gas_64_check] then {
+     run_dump_test "x86-64-arch-4"
+     run_dump_test "x86-64-arch-4-1"
+     run_dump_test "rmpquery"
++    run_dump_test "x86-64-arch-5"
+     run_dump_test "x86-64-arch-2-lzcnt"
+     run_dump_test "x86-64-arch-2-prefetchw"
+     run_dump_test "x86-64-arch-2-bdver1"
+@@ -932,6 +933,7 @@ if [gas_64_check] then {
+     run_dump_test "x86-64-arch-3-znver2"
+     run_dump_test "x86-64-arch-4-znver3"
+     run_dump_test "x86-64-arch-4-znver4"
++    run_dump_test "x86-64-arch-5-znver5"
+     run_dump_test "x86-64-arch-2-btver1"
+     run_dump_test "x86-64-arch-2-btver2"
+     run_list_test "x86-64-arch-2-1" "-march=generic64 -I${srcdir}/$subdir -al"

@@ -1,0 +1,351 @@
+From 09bc1c97130c4e646233ee3ea27ba03c226117d7 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 16 May 2023 11:29:49 +0900
+Subject: [PATCH] udev: make udev_builtin_run() take UdevEvent*
+
+No functional change, preparation for later commits.
+
+(cherry picked from commit 5668f3a7cfccca704ea8e8bdc84ca7e17a5f101e)
+
+Related: RHEL-5988
+---
+ src/udev/udev-builtin-blkid.c          |  3 ++-
+ src/udev/udev-builtin-btrfs.c          |  3 ++-
+ src/udev/udev-builtin-hwdb.c           |  3 ++-
+ src/udev/udev-builtin-input_id.c       |  6 ++----
+ src/udev/udev-builtin-keyboard.c       |  3 ++-
+ src/udev/udev-builtin-kmod.c           |  5 ++---
+ src/udev/udev-builtin-net_id.c         |  3 ++-
+ src/udev/udev-builtin-net_setup_link.c |  7 ++++---
+ src/udev/udev-builtin-path_id.c        |  5 ++---
+ src/udev/udev-builtin-uaccess.c        |  3 ++-
+ src/udev/udev-builtin-usb_id.c         |  5 ++---
+ src/udev/udev-builtin.c                |  7 ++++---
+ src/udev/udev-builtin.h                |  6 ++++--
+ src/udev/udev-event.c                  |  2 +-
+ src/udev/udev-rules.c                  |  2 +-
+ src/udev/udevadm-test-builtin.c        | 10 ++++++++--
+ 16 files changed, 42 insertions(+), 31 deletions(-)
+
+diff --git a/src/udev/udev-builtin-blkid.c b/src/udev/udev-builtin-blkid.c
+index 9f5646ffdd..63d1bd579d 100644
+--- a/src/udev/udev-builtin-blkid.c
++++ b/src/udev/udev-builtin-blkid.c
+@@ -237,7 +237,8 @@ static int probe_superblocks(blkid_probe pr) {
+         return blkid_do_safeprobe(pr);
+ }
+ 
+-static int builtin_blkid(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
++static int builtin_blkid(UdevEvent *event, int argc, char *argv[], bool test) {
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         const char *devnode, *root_partition = NULL, *data, *name;
+         _cleanup_(blkid_free_probep) blkid_probe pr = NULL;
+         bool noraid = false, is_gpt = false;
+diff --git a/src/udev/udev-builtin-btrfs.c b/src/udev/udev-builtin-btrfs.c
+index 8cd627807f..b36eadb47a 100644
+--- a/src/udev/udev-builtin-btrfs.c
++++ b/src/udev/udev-builtin-btrfs.c
+@@ -13,7 +13,8 @@
+ #include "udev-builtin.h"
+ #include "util.h"
+ 
+-static int builtin_btrfs(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
++static int builtin_btrfs(UdevEvent *event, int argc, char *argv[], bool test) {
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         struct btrfs_ioctl_vol_args args = {};
+         _cleanup_close_ int fd = -1;
+         int r;
+diff --git a/src/udev/udev-builtin-hwdb.c b/src/udev/udev-builtin-hwdb.c
+index 8d652e46fe..19e07e734f 100644
+--- a/src/udev/udev-builtin-hwdb.c
++++ b/src/udev/udev-builtin-hwdb.c
+@@ -118,7 +118,7 @@ next:
+         return r;
+ }
+ 
+-static int builtin_hwdb(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
++static int builtin_hwdb(UdevEvent *event, int argc, char *argv[], bool test) {
+         static const struct option options[] = {
+                 { "filter", required_argument, NULL, 'f' },
+                 { "device", required_argument, NULL, 'd' },
+@@ -131,6 +131,7 @@ static int builtin_hwdb(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[
+         const char *subsystem = NULL;
+         const char *prefix = NULL;
+         _cleanup_(sd_device_unrefp) sd_device *srcdev = NULL;
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         int r;
+ 
+         if (!hwdb)
+diff --git a/src/udev/udev-builtin-input_id.c b/src/udev/udev-builtin-input_id.c
+index 0742120248..4322ce04b3 100644
+--- a/src/udev/udev-builtin-input_id.c
++++ b/src/udev/udev-builtin-input_id.c
+@@ -356,8 +356,8 @@ static bool test_key(sd_device *dev,
+         return found;
+ }
+ 
+-static int builtin_input_id(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
+-        sd_device *pdev;
++static int builtin_input_id(UdevEvent *event, int argc, char *argv[], bool test) {
++        sd_device *pdev, *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         unsigned long bitmask_ev[NBITS(EV_MAX)];
+         unsigned long bitmask_abs[NBITS(ABS_MAX)];
+         unsigned long bitmask_key[NBITS(KEY_MAX)];
+@@ -367,8 +367,6 @@ static int builtin_input_id(sd_device *dev, sd_netlink **rtnl, int argc, char *a
+         bool is_pointer;
+         bool is_key;
+ 
+-        assert(dev);
+-
+         /* walk up the parental chain until we find the real input device; the
+          * argument is very likely a subdevice of this, like eventN */
+         for (pdev = dev; pdev; ) {
+diff --git a/src/udev/udev-builtin-keyboard.c b/src/udev/udev-builtin-keyboard.c
+index 6dd9eebd93..dac087a9e6 100644
+--- a/src/udev/udev-builtin-keyboard.c
++++ b/src/udev/udev-builtin-keyboard.c
+@@ -159,7 +159,8 @@ static int set_trackpoint_sensitivity(sd_device *dev, const char *value) {
+         return 0;
+ }
+ 
+-static int builtin_keyboard(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
++static int builtin_keyboard(UdevEvent *event, int argc, char *argv[], bool test) {
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         unsigned release[1024];
+         unsigned release_count = 0;
+         _cleanup_close_ int fd = -1;
+diff --git a/src/udev/udev-builtin-kmod.c b/src/udev/udev-builtin-kmod.c
+index eade042f35..3ab5c485f8 100644
+--- a/src/udev/udev-builtin-kmod.c
++++ b/src/udev/udev-builtin-kmod.c
+@@ -22,11 +22,10 @@ _printf_(6,0) static void udev_kmod_log(void *data, int priority, const char *fi
+         log_internalv(priority, 0, file, line, fn, format, args);
+ }
+ 
+-static int builtin_kmod(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
++static int builtin_kmod(UdevEvent *event, int argc, char *argv[], bool test) {
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         int r;
+ 
+-        assert(dev);
+-
+         if (!ctx)
+                 return 0;
+ 
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index c57568f8cb..cecf854b98 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -1109,7 +1109,8 @@ static int get_link_info(sd_device *dev, LinkInfo *info) {
+         return 0;
+ }
+ 
+-static int builtin_net_id(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
++static int builtin_net_id(UdevEvent *event, int argc, char *argv[], bool test) {
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         const char *prefix;
+         NetNames names = {};
+         LinkInfo info = {
+diff --git a/src/udev/udev-builtin-net_setup_link.c b/src/udev/udev-builtin-net_setup_link.c
+index ea7b1c5f60..4bf42cd492 100644
+--- a/src/udev/udev-builtin-net_setup_link.c
++++ b/src/udev/udev-builtin-net_setup_link.c
+@@ -10,14 +10,15 @@
+ 
+ static LinkConfigContext *ctx = NULL;
+ 
+-static int builtin_net_setup_link(sd_device *dev, sd_netlink **rtnl, int argc, char **argv, bool test) {
++static int builtin_net_setup_link(UdevEvent *event, int argc, char **argv, bool test) {
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         _cleanup_(link_freep) Link *link = NULL;
+         int r;
+ 
+         if (argc > 1)
+                 return log_device_error_errno(dev, SYNTHETIC_ERRNO(EINVAL), "This program takes no arguments.");
+ 
+-        r = link_new(ctx, rtnl, dev, &link);
++        r = link_new(ctx, &event->rtnl, dev, &link);
+         if (r == -ENODEV) {
+                 log_device_debug_errno(dev, r, "Link vanished while getting information, ignoring.");
+                 return 0;
+@@ -38,7 +39,7 @@ static int builtin_net_setup_link(sd_device *dev, sd_netlink **rtnl, int argc, c
+                 return log_device_error_errno(dev, r, "Failed to get link config: %m");
+         }
+ 
+-        r = link_apply_config(ctx, rtnl, link);
++        r = link_apply_config(ctx, &event->rtnl, link);
+         if (r == -ENODEV)
+                 log_device_debug_errno(dev, r, "Link vanished while applying configuration, ignoring.");
+         else if (r < 0)
+diff --git a/src/udev/udev-builtin-path_id.c b/src/udev/udev-builtin-path_id.c
+index d58a3d5d60..6f4d7cbc5b 100644
+--- a/src/udev/udev-builtin-path_id.c
++++ b/src/udev/udev-builtin-path_id.c
+@@ -581,15 +581,14 @@ static int find_real_nvme_parent(sd_device *dev, sd_device **ret) {
+         return 0;
+ }
+ 
+-static int builtin_path_id(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
++static int builtin_path_id(UdevEvent *event, int argc, char *argv[], bool test) {
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         _cleanup_(sd_device_unrefp) sd_device *dev_other_branch = NULL;
+         _cleanup_free_ char *path = NULL, *compat_path = NULL;
+         bool supported_transport = false, supported_parent = false;
+         const char *subsystem;
+         int r;
+ 
+-        assert(dev);
+-
+         /* walk up the chain of devices and compose path */
+         for (sd_device *parent = dev; parent; ) {
+                 const char *subsys, *sysname;
+diff --git a/src/udev/udev-builtin-uaccess.c b/src/udev/udev-builtin-uaccess.c
+index 6e73d99375..36c993cbb0 100644
+--- a/src/udev/udev-builtin-uaccess.c
++++ b/src/udev/udev-builtin-uaccess.c
+@@ -16,7 +16,8 @@
+ #include "log.h"
+ #include "udev-builtin.h"
+ 
+-static int builtin_uaccess(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
++static int builtin_uaccess(UdevEvent *event, int argc, char *argv[], bool test) {
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         const char *path = NULL, *seat;
+         bool changed_acl = false;
+         uid_t uid;
+diff --git a/src/udev/udev-builtin-usb_id.c b/src/udev/udev-builtin-usb_id.c
+index 847c2b8316..f3fc3cfdb3 100644
+--- a/src/udev/udev-builtin-usb_id.c
++++ b/src/udev/udev-builtin-usb_id.c
+@@ -224,7 +224,8 @@ static int dev_if_packed_info(sd_device *dev, char *ifs_str, size_t len) {
+  * 6.) If the device supplies a serial number, this number
+  *     is concatenated with the identification with an underscore '_'.
+  */
+-static int builtin_usb_id(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test) {
++static int builtin_usb_id(UdevEvent *event, int argc, char *argv[], bool test) {
++        sd_device *dev = ASSERT_PTR(ASSERT_PTR(event)->dev);
+         char vendor_str[64] = "";
+         char vendor_str_enc[256];
+         const char *vendor_id;
+@@ -250,8 +251,6 @@ static int builtin_usb_id(sd_device *dev, sd_netlink **rtnl, int argc, char *arg
+         const char *syspath, *sysname, *devtype, *interface_syspath;
+         int r;
+ 
+-        assert(dev);
+-
+         r = sd_device_get_syspath(dev, &syspath);
+         if (r < 0)
+                 return r;
+diff --git a/src/udev/udev-builtin.c b/src/udev/udev-builtin.c
+index c98c6fa714..c84db8855c 100644
+--- a/src/udev/udev-builtin.c
++++ b/src/udev/udev-builtin.c
+@@ -98,11 +98,12 @@ UdevBuiltinCommand udev_builtin_lookup(const char *command) {
+         return _UDEV_BUILTIN_INVALID;
+ }
+ 
+-int udev_builtin_run(sd_device *dev, sd_netlink **rtnl, UdevBuiltinCommand cmd, const char *command, bool test) {
++int udev_builtin_run(UdevEvent *event, UdevBuiltinCommand cmd, const char *command, bool test) {
+         _cleanup_strv_free_ char **argv = NULL;
+         int r;
+ 
+-        assert(dev);
++        assert(event);
++        assert(event->dev);
+         assert(cmd >= 0 && cmd < _UDEV_BUILTIN_MAX);
+         assert(command);
+ 
+@@ -115,7 +116,7 @@ int udev_builtin_run(sd_device *dev, sd_netlink **rtnl, UdevBuiltinCommand cmd,
+ 
+         /* we need '0' here to reset the internal state */
+         optind = 0;
+-        return builtins[cmd]->cmd(dev, rtnl, strv_length(argv), argv, test);
++        return builtins[cmd]->cmd(event, strv_length(argv), argv, test);
+ }
+ 
+ int udev_builtin_add_property(sd_device *dev, bool test, const char *key, const char *val) {
+diff --git a/src/udev/udev-builtin.h b/src/udev/udev-builtin.h
+index bcfec03aae..919d51e798 100644
+--- a/src/udev/udev-builtin.h
++++ b/src/udev/udev-builtin.h
+@@ -6,6 +6,8 @@
+ #include "sd-device.h"
+ #include "sd-netlink.h"
+ 
++#include "udev-event.h"
++
+ typedef enum UdevBuiltinCommand {
+ #if HAVE_BLKID
+         UDEV_BUILTIN_BLKID,
+@@ -30,7 +32,7 @@ typedef enum UdevBuiltinCommand {
+ 
+ typedef struct UdevBuiltin {
+         const char *name;
+-        int (*cmd)(sd_device *dev, sd_netlink **rtnl, int argc, char *argv[], bool test);
++        int (*cmd)(UdevEvent *event, int argc, char *argv[], bool test);
+         const char *help;
+         int (*init)(void);
+         void (*exit)(void);
+@@ -74,7 +76,7 @@ void udev_builtin_exit(void);
+ UdevBuiltinCommand udev_builtin_lookup(const char *command);
+ const char *udev_builtin_name(UdevBuiltinCommand cmd);
+ bool udev_builtin_run_once(UdevBuiltinCommand cmd);
+-int udev_builtin_run(sd_device *dev, sd_netlink **rtnl, UdevBuiltinCommand cmd, const char *command, bool test);
++int udev_builtin_run(UdevEvent *event, UdevBuiltinCommand cmd, const char *command, bool test);
+ void udev_builtin_list(void);
+ bool udev_builtin_should_reload(void);
+ int udev_builtin_add_property(sd_device *dev, bool test, const char *key, const char *val);
+diff --git a/src/udev/udev-event.c b/src/udev/udev-event.c
+index fab454ae37..cf90d6f205 100644
+--- a/src/udev/udev-event.c
++++ b/src/udev/udev-event.c
+@@ -1200,7 +1200,7 @@ void udev_event_execute_run(UdevEvent *event, usec_t timeout_usec, int timeout_s
+ 
+                 if (builtin_cmd != _UDEV_BUILTIN_INVALID) {
+                         log_device_debug(event->dev, "Running built-in command \"%s\"", command);
+-                        r = udev_builtin_run(event->dev, &event->rtnl, builtin_cmd, command, false);
++                        r = udev_builtin_run(event, builtin_cmd, command, false);
+                         if (r < 0)
+                                 log_device_debug_errno(event->dev, r, "Failed to run built-in command \"%s\", ignoring: %m", command);
+                 } else {
+diff --git a/src/udev/udev-rules.c b/src/udev/udev-rules.c
+index a8473041c3..9336ce1cd3 100644
+--- a/src/udev/udev-rules.c
++++ b/src/udev/udev-rules.c
+@@ -1972,7 +1972,7 @@ static int udev_rule_apply_token_to_event(
+ 
+                 log_rule_debug(dev, rules, "Importing properties from results of builtin command '%s'", buf);
+ 
+-                r = udev_builtin_run(dev, &event->rtnl, cmd, buf, false);
++                r = udev_builtin_run(event, cmd, buf, false);
+                 if (r < 0) {
+                         /* remember failure */
+                         log_rule_debug_errno(dev, rules, r, "Failed to run builtin '%s': %m", buf);
+diff --git a/src/udev/udevadm-test-builtin.c b/src/udev/udevadm-test-builtin.c
+index 5570eec789..5d1fafbd03 100644
+--- a/src/udev/udevadm-test-builtin.c
++++ b/src/udev/udevadm-test-builtin.c
+@@ -72,7 +72,7 @@ static int parse_argv(int argc, char *argv[]) {
+ }
+ 
+ int builtin_main(int argc, char *argv[], void *userdata) {
+-        _cleanup_(sd_netlink_unrefp) sd_netlink *rtnl = NULL;
++        _cleanup_(udev_event_freep) UdevEvent *event = NULL;
+         _cleanup_(sd_device_unrefp) sd_device *dev = NULL;
+         UdevBuiltinCommand cmd;
+         int r;
+@@ -97,7 +97,13 @@ int builtin_main(int argc, char *argv[], void *userdata) {
+                 goto finish;
+         }
+ 
+-        r = udev_builtin_run(dev, &rtnl, cmd, arg_command, true);
++        event = udev_event_new(dev, 0, NULL, LOG_DEBUG);
++        if (!event) {
++                r = log_oom();
++                goto finish;
++        }
++
++        r = udev_builtin_run(event, cmd, arg_command, true);
+         if (r < 0)
+                 log_debug_errno(r, "Builtin command '%s' fails: %m", arg_command);
+ 

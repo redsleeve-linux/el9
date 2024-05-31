@@ -1,0 +1,49 @@
+From fa2bce7c0447bd836fc8c2020ac714e4a47b9900 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 25 Jan 2023 11:54:44 +0100
+Subject: [PATCH] dlfcn: add new safe_dclose() helper
+
+Let's allow destructing loaded module handles in our usual way that is
+fine with NULL handles, and also returns the NULL handle again.
+
+(cherry picked from commit f2592ef0e113aef0e8e7141cab2b17521760b064)
+
+Related: RHEL-16182
+---
+ src/shared/dlfcn-util.h | 8 ++++++++
+ src/shared/tpm2-util.c  | 6 +-----
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/src/shared/dlfcn-util.h b/src/shared/dlfcn-util.h
+index d786d035d7..7bd5ff4595 100644
+--- a/src/shared/dlfcn-util.h
++++ b/src/shared/dlfcn-util.h
+@@ -20,3 +20,11 @@ int dlopen_many_sym_or_warn_sentinel(void **dlp, const char *filename, int log_l
+  * "foobar" is loaded into a variable "sym_foobar". */
+ #define DLSYM_ARG(arg) \
+         &sym_##arg, STRINGIFY(arg)
++
++static inline void *safe_dlclose(void *p) {
++        if (!p)
++                return NULL;
++
++        assert_se(dlclose(p) == 0);
++        return NULL;
++}
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 7e98ec851b..278cdf3692 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -110,11 +110,7 @@ void tpm2_context_destroy(struct tpm2_context *c) {
+                 sym_Esys_Finalize(&c->esys_context);
+ 
+         c->tcti_context = mfree(c->tcti_context);
+-
+-        if (c->tcti_dl) {
+-                dlclose(c->tcti_dl);
+-                c->tcti_dl = NULL;
+-        }
++        c->tcti_dl = safe_dlclose(c->tcti_dl);
+ }
+ 
+ static inline void Esys_Finalize_wrapper(ESYS_CONTEXT **c) {

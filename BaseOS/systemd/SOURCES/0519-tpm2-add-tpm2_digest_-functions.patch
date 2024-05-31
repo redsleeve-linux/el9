@@ -1,0 +1,271 @@
+From 6aa706de80fa716b7d54adfc4094884707518d95 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Wed, 14 Dec 2022 10:46:13 -0500
+Subject: [PATCH] tpm2: add tpm2_digest_*() functions
+
+These functions allow extending (or initializing) a TPM2B_DIGEST with additional
+data, using a specified hash operation. This is needed to perform hash
+calculations instead of relying on the TPM to perform the calculations in
+trial sessions.
+
+(cherry picked from commit da92d39a8577e792075009782d419b423414ad6e)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c |  86 ++++++++++++++++++++++++++++++++---
+ src/shared/tpm2-util.h |  13 ++++++
+ src/test/test-tpm2.c   | 100 +++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 194 insertions(+), 5 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 002e2c01da..d397c505f5 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -1384,6 +1384,83 @@ static void hash_pin(const char *pin, size_t len, TPM2B_AUTH *auth) {
+         sha256_finish_ctx(&hash, auth->buffer);
+ }
+ 
++/* Hash data into the digest.
++ *
++ * If 'extend' is true, the hashing operation starts with the existing digest hash (and the digest is
++ * required to have a hash and its size must be correct). If 'extend' is false, the digest size is
++ * initialized to the correct size for 'alg' and the hashing operation does not include any existing digest
++ * hash. If 'extend' is false and no data is provided, the digest is initialized to a zero digest.
++ *
++ * On success, the digest hash will be updated with the hashing operation result and the digest size will be
++ * correct for 'alg'.
++ *
++ * This currently only provides SHA256, so 'alg' must be TPM2_ALG_SHA256. */
++int tpm2_digest_many(
++                TPMI_ALG_HASH alg,
++                TPM2B_DIGEST *digest,
++                const struct iovec data[],
++                size_t n_data,
++                bool extend) {
++
++        struct sha256_ctx ctx;
++
++        assert(digest);
++        assert(data || n_data == 0);
++
++        if (alg != TPM2_ALG_SHA256)
++                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
++                                       "Hash algorithm not supported: 0x%x", alg);
++
++        if (extend && digest->size != SHA256_DIGEST_SIZE)
++                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
++                                       "Digest size 0x%x, require 0x%x",
++                                       digest->size, (unsigned)SHA256_DIGEST_SIZE);
++
++        /* Since we're hardcoding SHA256 (for now), we can check this at compile time. */
++        assert_cc(sizeof(digest->buffer) >= SHA256_DIGEST_SIZE);
++
++        CLEANUP_ERASE(ctx);
++
++        sha256_init_ctx(&ctx);
++
++        if (extend)
++                sha256_process_bytes(digest->buffer, digest->size, &ctx);
++        else {
++                *digest = (TPM2B_DIGEST){ .size = SHA256_DIGEST_SIZE, };
++                if (n_data == 0) /* If not extending and no data, return zero hash */
++                        return 0;
++        }
++
++        for (size_t i = 0; i < n_data; i++)
++                sha256_process_bytes(data[i].iov_base, data[i].iov_len, &ctx);
++
++        sha256_finish_ctx(&ctx, digest->buffer);
++
++        return 0;
++}
++
++/* Same as tpm2_digest_many() but data is contained in TPM2B_DIGEST[]. The digests may be any size digests. */
++int tpm2_digest_many_digests(
++                TPMI_ALG_HASH alg,
++                TPM2B_DIGEST *digest,
++                const TPM2B_DIGEST data[],
++                size_t n_data,
++                bool extend) {
++
++        _cleanup_free_ struct iovec *iovecs = NULL;
++
++        assert(data || n_data == 0);
++
++        iovecs = new(struct iovec, n_data);
++        if (!iovecs)
++                return log_oom();
++
++        for (size_t i = 0; i < n_data; i++)
++                iovecs[i] = IOVEC_MAKE((void*) data[i].buffer, data[i].size);
++
++        return tpm2_digest_many(alg, digest, iovecs, n_data, extend);
++}
++
+ static bool tpm2_is_encryption_session(Tpm2Context *c, const Tpm2Handle *session) {
+         TPMA_SESSION flags = 0;
+         TSS2_RC rc;
+@@ -1868,11 +1945,10 @@ static int tpm2_build_sealing_policy(
+ 
+                         /* TPM2_VerifySignature() will only verify the RSA part of the RSA+SHA256 signature,
+                          * hence we need to do the SHA256 part ourselves, first */
+-                        TPM2B_DIGEST signature_hash = {
+-                                .size = SHA256_DIGEST_SIZE,
+-                        };
+-                        assert(sizeof(signature_hash.buffer) >= SHA256_DIGEST_SIZE);
+-                        sha256_direct(approved_policy->buffer, approved_policy->size, signature_hash.buffer);
++                        TPM2B_DIGEST signature_hash = *approved_policy;
++                        r = tpm2_digest_rehash(TPM2_ALG_SHA256, &signature_hash);
++                        if (r < 0)
++                                return r;
+ 
+                         TPMT_SIGNATURE policy_signature = {
+                                 .sigAlg = TPM2_ALG_RSASSA,
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 3c4d045197..2744cd13bb 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -4,6 +4,7 @@
+ #include <stdbool.h>
+ 
+ #include "bitfield.h"
++#include "io-util.h"
+ #include "json.h"
+ #include "macro.h"
+ #include "sha256.h"
+@@ -72,6 +73,18 @@ extern TSS2_RC (*sym_Tss2_MU_TPM2B_PUBLIC_Unmarshal)(uint8_t const buffer[], siz
+ 
+ int dlopen_tpm2(void);
+ 
++int tpm2_digest_many(TPMI_ALG_HASH alg, TPM2B_DIGEST *digest, const struct iovec data[], size_t count, bool extend);
++static inline int tpm2_digest_buffer(TPMI_ALG_HASH alg, TPM2B_DIGEST *digest, const void *data, size_t len, bool extend) {
++        return tpm2_digest_many(alg, digest, &IOVEC_MAKE((void*) data, len), 1, extend);
++}
++int tpm2_digest_many_digests(TPMI_ALG_HASH alg, TPM2B_DIGEST *digest, const TPM2B_DIGEST data[], size_t count, bool extend);
++static inline int tpm2_digest_rehash(TPMI_ALG_HASH alg, TPM2B_DIGEST *digest) {
++        return tpm2_digest_many(alg, digest, NULL, 0, true);
++}
++static inline int tpm2_digest_init(TPMI_ALG_HASH alg, TPM2B_DIGEST *digest) {
++        return tpm2_digest_many(alg, digest, NULL, 0, false);
++}
++
+ int tpm2_seal(const char *device, uint32_t hash_pcr_mask, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, void **ret_pcr_hash, size_t *ret_pcr_hash_size, uint16_t *ret_pcr_bank, uint16_t *ret_primary_alg, void **ret_srk_buf, size_t *ret_srk_buf_size);
+ int tpm2_unseal(const char *device, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, JsonVariant *signature, const char *pin, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, const void *srk_buf, size_t srk_buf_size, void **ret_secret, size_t *ret_secret_size);
+ 
+diff --git a/src/test/test-tpm2.c b/src/test/test-tpm2.c
+index 2c696e443d..dfbea7b19a 100644
+--- a/src/test/test-tpm2.c
++++ b/src/test/test-tpm2.c
+@@ -1,5 +1,6 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
++#include "hexdecoct.h"
+ #include "tpm2-util.h"
+ #include "tests.h"
+ 
+@@ -500,6 +501,105 @@ TEST(tpm2_get_primary_template) {
+         }
+ }
+ 
++static bool digest_check(const TPM2B_DIGEST *digest, const char *expect) {
++        _cleanup_free_ char *h = NULL;
++
++        assert_se(digest);
++        assert_se(expect);
++
++        h = hexmem(digest->buffer, digest->size);
++        assert_se(h);
++
++        return streq(expect, h);
++}
++
++static void digest_init_sha256(TPM2B_DIGEST *digest, const char *hash) {
++        _cleanup_free_ void *h = NULL;
++        size_t s = 0;
++
++        assert_se(strlen(hash) == SHA256_DIGEST_SIZE * 2);
++        assert_se(strlen(hash) <= sizeof(digest->buffer) * 2);
++
++        assert_se(unhexmem(hash, strlen(hash), &h, &s) == 0);
++        assert_se(s == SHA256_DIGEST_SIZE);
++
++        memcpy_safe(digest->buffer, h, s);
++        digest->size = s;
++
++        assert_se(digest_check(digest, hash));
++}
++
++TEST(digest_many) {
++        TPM2B_DIGEST d, d0, d1, d2, d3, d4;
++
++        digest_init_sha256(&d0, "0000000000000000000000000000000000000000000000000000000000000000");
++        digest_init_sha256(&d1, "17b7703d9d00776310ba032e88c1a8c2a9c630ebdd799db622f6631530789175");
++        digest_init_sha256(&d2, "12998c017066eb0d2a70b94e6ed3192985855ce390f321bbdb832022888bd251");
++        digest_init_sha256(&d3, "c3a65887fedd3fb4f5d0047e906dff830bcbd1293160909eb4b05f485e7387ad");
++        digest_init_sha256(&d4, "6491fb4bc08fc0b2ef47fc63db57e249917885e69d8c0d99667df83a59107a33");
++
++        /* tpm2_digest_init, tpm2_digest_rehash */
++        d = (TPM2B_DIGEST){ .size = 1, .buffer = { 2, }, };
++        assert_se(tpm2_digest_init(TPM2_ALG_SHA256, &d) == 0);
++        assert_se(digest_check(&d, "0000000000000000000000000000000000000000000000000000000000000000"));
++        assert_se(tpm2_digest_rehash(TPM2_ALG_SHA256, &d) == 0);
++        assert_se(digest_check(&d, "66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925"));
++
++        d = d1;
++        assert_se(tpm2_digest_rehash(TPM2_ALG_SHA256, &d) == 0);
++        assert_se(digest_check(&d, "ab55014b5ace12ba70c3acc887db571585a83539aad3633d252a710f268f405c"));
++        assert_se(tpm2_digest_init(TPM2_ALG_SHA256, &d) == 0);
++        assert_se(digest_check(&d, "0000000000000000000000000000000000000000000000000000000000000000"));
++
++        /* tpm2_digest_many_digests */
++        assert_se(tpm2_digest_many_digests(TPM2_ALG_SHA256, &d, &d2, 1, false) == 0);
++        assert_se(digest_check(&d, "56571a1be3fbeab18d215f549095915a004b5788ca0d535be668559129a76f25"));
++        assert_se(tpm2_digest_many_digests(TPM2_ALG_SHA256, &d, &d2, 1, true) == 0);
++        assert_se(digest_check(&d, "99dedaee8f4d8d10a8be184399fde8740d5e17ff783ee5c288a4486e4ce3a1fe"));
++
++        const TPM2B_DIGEST da1[] = { d2, d3, };
++        assert_se(tpm2_digest_many_digests(TPM2_ALG_SHA256, &d, da1, ELEMENTSOF(da1), false) == 0);
++        assert_se(digest_check(&d, "525aa13ef9a61827778ec3acf16fbb23b65ae8770b8fb2684d3a33f9457dd6d8"));
++        assert_se(tpm2_digest_many_digests(TPM2_ALG_SHA256, &d, da1, ELEMENTSOF(da1), true) == 0);
++        assert_se(digest_check(&d, "399ca2aa98963d1bd81a2b58a7e5cda24bba1be88fb4da9aa73d97706846566b"));
++
++        const TPM2B_DIGEST da2[] = { d3, d2, d0 };
++        assert_se(tpm2_digest_many_digests(TPM2_ALG_SHA256, &d, da2, ELEMENTSOF(da2), false) == 0);
++        assert_se(digest_check(&d, "b26fd22db74d4cd896bff01c61aa498a575e4a553a7fb5a322a5fee36954313e"));
++        assert_se(tpm2_digest_many_digests(TPM2_ALG_SHA256, &d, da2, ELEMENTSOF(da2), true) == 0);
++        assert_se(digest_check(&d, "091e79a5b09d4048df49a680f966f3ff67910afe185c3baf9704c9ca45bcf259"));
++
++        const TPM2B_DIGEST da3[] = { d4, d4, d4, d4, d3, d4, d4, d4, d4, };
++        assert_se(tpm2_digest_many_digests(TPM2_ALG_SHA256, &d, da3, ELEMENTSOF(da3), false) == 0);
++        assert_se(digest_check(&d, "8eca947641b6002df79dfb571a7f78b7d0a61370a366f722386dfbe444d18830"));
++        assert_se(tpm2_digest_many_digests(TPM2_ALG_SHA256, &d, da3, ELEMENTSOF(da3), true) == 0);
++        assert_se(digest_check(&d, "f9ba17bc0bbe8794e9bcbf112e4d59a11eb68fffbcd5516a746e4857829dff04"));
++
++        /* tpm2_digest_buffer */
++        const uint8_t b1[] = { 1, 2, 3, 4, };
++        assert_se(tpm2_digest_buffer(TPM2_ALG_SHA256, &d, b1, ELEMENTSOF(b1), false) == 0);
++        assert_se(digest_check(&d, "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a"));
++        assert_se(tpm2_digest_buffer(TPM2_ALG_SHA256, &d, b1, ELEMENTSOF(b1), true) == 0);
++        assert_se(digest_check(&d, "ff3bd307b287e9b29bb572f6ccfd19deb0106d0c4c3c5cfe8a1d03a396092ed4"));
++
++        const void *b2 = d2.buffer;
++        assert_se(tpm2_digest_buffer(TPM2_ALG_SHA256, &d, b2, d2.size, false) == 0);
++        assert_se(digest_check(&d, "56571a1be3fbeab18d215f549095915a004b5788ca0d535be668559129a76f25"));
++        assert_se(tpm2_digest_buffer(TPM2_ALG_SHA256, &d, b2, d2.size, true) == 0);
++        assert_se(digest_check(&d, "99dedaee8f4d8d10a8be184399fde8740d5e17ff783ee5c288a4486e4ce3a1fe"));
++
++        /* tpm2_digest_many */
++        const struct iovec iov1[] = {
++                IOVEC_MAKE((void*) b1, ELEMENTSOF(b1)),
++                IOVEC_MAKE(d2.buffer, d2.size),
++                IOVEC_MAKE(d3.buffer, d3.size),
++        };
++        assert_se(tpm2_digest_many(TPM2_ALG_SHA256, &d, iov1, ELEMENTSOF(iov1), false) == 0);
++        assert_se(digest_check(&d, "cd7bde4a047af976b6f1b282309976229be59f96a78aa186de32a1aee488ab09"));
++        assert_se(tpm2_digest_many(TPM2_ALG_SHA256, &d, iov1, ELEMENTSOF(iov1), true) == 0);
++        assert_se(digest_check(&d, "02ecb0628264235111e0053e271092981c8b15d59cd46617836bee3149a4ecb0"));
++}
++
+ #endif /* HAVE_TPM2 */
+ 
+ DEFINE_TEST_MAIN(LOG_DEBUG);

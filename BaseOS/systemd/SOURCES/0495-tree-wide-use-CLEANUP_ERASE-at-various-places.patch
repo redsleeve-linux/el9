@@ -1,0 +1,494 @@
+From a86b58ed1419b9af8a486dcaf95608eb07241965 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 10 Jan 2023 12:39:58 +0100
+Subject: [PATCH] tree-wide: use CLEANUP_ERASE() at various places
+
+Let's use this new macro wherever it makes sense, as it allows us to
+shorten or clean-up paths, and makes it less likely to miss a return
+path.
+
+(cherry picked from commit 692597c84395ad2b3f8e221bb1eca55a9dfc544f)
+
+Related: RHEL-16182
+---
+ src/home/homework-fscrypt.c   | 58 ++++++++++--------------------
+ src/shared/ask-password-api.c | 66 +++++++++++++----------------------
+ src/shared/creds-util.c       | 24 ++++++-------
+ src/shared/ethtool-util.c     | 11 +++---
+ src/shared/tpm2-util.c        | 15 ++++----
+ 5 files changed, 67 insertions(+), 107 deletions(-)
+
+diff --git a/src/home/homework-fscrypt.c b/src/home/homework-fscrypt.c
+index bd32393d93..455a4c88fc 100644
+--- a/src/home/homework-fscrypt.c
++++ b/src/home/homework-fscrypt.c
+@@ -58,10 +58,10 @@ static int fscrypt_upload_volume_key(
+         };
+         memcpy(key.raw, volume_key, volume_key_size);
+ 
++        CLEANUP_ERASE(key);
++
+         /* Upload to the kernel */
+         serial = add_key("logon", description, &key, sizeof(key), where);
+-        explicit_bzero_safe(&key, sizeof(key));
+-
+         if (serial < 0)
+                 return log_error_errno(errno, "Failed to install master key in keyring: %m");
+ 
+@@ -124,20 +124,18 @@ static int fscrypt_slot_try_one(
+          *      resulting hash.
+          */
+ 
++        CLEANUP_ERASE(derived);
++
+         if (PKCS5_PBKDF2_HMAC(
+                             password, strlen(password),
+                             salt, salt_size,
+                             0xFFFF, EVP_sha512(),
+-                            sizeof(derived), derived) != 1) {
+-                r = log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "PBKDF2 failed");
+-                goto finish;
+-        }
++                            sizeof(derived), derived) != 1)
++                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "PBKDF2 failed");
+ 
+         context = EVP_CIPHER_CTX_new();
+-        if (!context) {
+-                r = log_oom();
+-                goto finish;
+-        }
++        if (!context)
++                return log_oom();
+ 
+         /* We use AES256 in counter mode */
+         assert_se(cc = EVP_aes_256_ctr());
+@@ -145,13 +143,8 @@ static int fscrypt_slot_try_one(
+         /* We only use the first half of the derived key */
+         assert(sizeof(derived) >= (size_t) EVP_CIPHER_key_length(cc));
+ 
+-        if (EVP_DecryptInit_ex(context, cc, NULL, derived, NULL) != 1)  {
+-                r = log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to initialize decryption context.");
+-                goto finish;
+-        }
+-
+-        /* Flush out the derived key now, we don't need it anymore */
+-        explicit_bzero_safe(derived, sizeof(derived));
++        if (EVP_DecryptInit_ex(context, cc, NULL, derived, NULL) != 1)
++                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to initialize decryption context.");
+ 
+         decrypted_size = encrypted_size + EVP_CIPHER_key_length(cc) * 2;
+         decrypted = malloc(decrypted_size);
+@@ -184,10 +177,6 @@ static int fscrypt_slot_try_one(
+                 *ret_decrypted_size = decrypted_size;
+ 
+         return 0;
+-
+-finish:
+-        explicit_bzero_safe(derived, sizeof(derived));
+-        return r;
+ }
+ 
+ static int fscrypt_slot_try_many(
+@@ -414,20 +403,18 @@ static int fscrypt_slot_set(
+         if (r < 0)
+                 return log_error_errno(r, "Failed to generate salt: %m");
+ 
++        CLEANUP_ERASE(derived);
++
+         if (PKCS5_PBKDF2_HMAC(
+                             password, strlen(password),
+                             salt, sizeof(salt),
+                             0xFFFF, EVP_sha512(),
+-                            sizeof(derived), derived) != 1) {
+-                r = log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "PBKDF2 failed");
+-                goto finish;
+-        }
++                            sizeof(derived), derived) != 1)
++                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "PBKDF2 failed");
+ 
+         context = EVP_CIPHER_CTX_new();
+-        if (!context) {
+-                r = log_oom();
+-                goto finish;
+-        }
++        if (!context)
++                return log_oom();
+ 
+         /* We use AES256 in counter mode */
+         cc = EVP_aes_256_ctr();
+@@ -435,13 +422,8 @@ static int fscrypt_slot_set(
+         /* We only use the first half of the derived key */
+         assert(sizeof(derived) >= (size_t) EVP_CIPHER_key_length(cc));
+ 
+-        if (EVP_EncryptInit_ex(context, cc, NULL, derived, NULL) != 1)  {
+-                r = log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to initialize encryption context.");
+-                goto finish;
+-        }
+-
+-        /* Flush out the derived key now, we don't need it anymore */
+-        explicit_bzero_safe(derived, sizeof(derived));
++        if (EVP_EncryptInit_ex(context, cc, NULL, derived, NULL) != 1)
++                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to initialize encryption context.");
+ 
+         encrypted_size = volume_key_size + EVP_CIPHER_key_length(cc) * 2;
+         encrypted = malloc(encrypted_size);
+@@ -478,10 +460,6 @@ static int fscrypt_slot_set(
+         log_info("Written key slot %s.", label);
+ 
+         return 0;
+-
+-finish:
+-        explicit_bzero_safe(derived, sizeof(derived));
+-        return r;
+ }
+ 
+ int home_create_fscrypt(
+diff --git a/src/shared/ask-password-api.c b/src/shared/ask-password-api.c
+index 871af2ec99..5f05271caa 100644
+--- a/src/shared/ask-password-api.c
++++ b/src/shared/ask-password-api.c
+@@ -253,6 +253,8 @@ int ask_password_plymouth(
+         if (r < 0)
+                 return r;
+ 
++        CLEANUP_ERASE(buffer);
++
+         pollfd[POLL_SOCKET].fd = fd;
+         pollfd[POLL_SOCKET].events = POLLIN;
+         pollfd[POLL_INOTIFY].fd = notify;
+@@ -266,20 +268,16 @@ int ask_password_plymouth(
+                 else
+                         timeout = USEC_INFINITY;
+ 
+-                if (flag_file && access(flag_file, F_OK) < 0) {
+-                        r = -errno;
+-                        goto finish;
+-                }
++                if (flag_file && access(flag_file, F_OK) < 0)
++                        return -errno;
+ 
+                 r = ppoll_usec(pollfd, notify >= 0 ? 2 : 1, timeout);
+                 if (r == -EINTR)
+                         continue;
+                 if (r < 0)
+-                        goto finish;
+-                if (r == 0) {
+-                        r = -ETIME;
+-                        goto finish;
+-                }
++                        return r;
++                if (r == 0)
++                        return -ETIME;
+ 
+                 if (notify >= 0 && pollfd[POLL_INOTIFY].revents != 0)
+                         (void) flush_fd(notify);
+@@ -292,13 +290,10 @@ int ask_password_plymouth(
+                         if (ERRNO_IS_TRANSIENT(errno))
+                                 continue;
+ 
+-                        r = -errno;
+-                        goto finish;
+-                }
+-                if (k == 0) {
+-                        r = -EIO;
+-                        goto finish;
++                        return -errno;
+                 }
++                if (k == 0)
++                        return -EIO;
+ 
+                 p += k;
+ 
+@@ -310,14 +305,12 @@ int ask_password_plymouth(
+                                  * with a normal password request */
+                                 packet = mfree(packet);
+ 
+-                                if (asprintf(&packet, "*\002%c%s%n", (int) (strlen(message) + 1), message, &n) < 0) {
+-                                        r = -ENOMEM;
+-                                        goto finish;
+-                                }
++                                if (asprintf(&packet, "*\002%c%s%n", (int) (strlen(message) + 1), message, &n) < 0)
++                                        return -ENOMEM;
+ 
+                                 r = loop_write(fd, packet, n+1, true);
+                                 if (r < 0)
+-                                        goto finish;
++                                        return r;
+ 
+                                 flags &= ~ASK_PASSWORD_ACCEPT_CACHED;
+                                 p = 0;
+@@ -325,8 +318,7 @@ int ask_password_plymouth(
+                         }
+ 
+                         /* No password, because UI not shown */
+-                        r = -ENOENT;
+-                        goto finish;
++                        return -ENOENT;
+ 
+                 } else if (IN_SET(buffer[0], 2, 9)) {
+                         uint32_t size;
+@@ -338,35 +330,25 @@ int ask_password_plymouth(
+ 
+                         memcpy(&size, buffer+1, sizeof(size));
+                         size = le32toh(size);
+-                        if (size + 5 > sizeof(buffer)) {
+-                                r = -EIO;
+-                                goto finish;
+-                        }
++                        if (size + 5 > sizeof(buffer))
++                                return -EIO;
+ 
+                         if (p-5 < size)
+                                 continue;
+ 
+                         l = strv_parse_nulstr(buffer + 5, size);
+-                        if (!l) {
+-                                r = -ENOMEM;
+-                                goto finish;
+-                        }
++                        if (!l)
++                                return -ENOMEM;
+ 
+                         *ret = l;
+                         break;
+ 
+-                } else {
++                } else
+                         /* Unknown packet */
+-                        r = -EIO;
+-                        goto finish;
+-                }
++                        return -EIO;
+         }
+ 
+-        r = 0;
+-
+-finish:
+-        explicit_bzero_safe(buffer, sizeof(buffer));
+-        return r;
++        return 0;
+ }
+ 
+ #define NO_ECHO "(no echo) "
+@@ -428,6 +410,8 @@ int ask_password_tty(
+                         return -errno;
+         }
+ 
++        CLEANUP_ERASE(passphrase);
++
+         /* If the caller didn't specify a TTY, then use the controlling tty, if we can. */
+         if (ttyfd < 0)
+                 ttyfd = cttyfd = open("/dev/tty", O_RDWR|O_NOCTTY|O_CLOEXEC);
+@@ -631,7 +615,6 @@ int ask_password_tty(
+         }
+ 
+         x = strndup(passphrase, p);
+-        explicit_bzero_safe(passphrase, sizeof(passphrase));
+         if (!x) {
+                 r = -ENOMEM;
+                 goto finish;
+@@ -891,6 +874,8 @@ int ask_password_agent(
+                         goto finish;
+                 }
+ 
++                CLEANUP_ERASE(passphrase);
++
+                 cmsg_close_all(&msghdr);
+ 
+                 if (n == 0) {
+@@ -915,7 +900,6 @@ int ask_password_agent(
+                                 l = strv_new("");
+                         else
+                                 l = strv_parse_nulstr(passphrase+1, n-1);
+-                        explicit_bzero_safe(passphrase, n);
+                         if (!l) {
+                                 r = -ENOMEM;
+                                 goto finish;
+diff --git a/src/shared/creds-util.c b/src/shared/creds-util.c
+index ecf90e2084..9ac0320c58 100644
+--- a/src/shared/creds-util.c
++++ b/src/shared/creds-util.c
+@@ -165,7 +165,6 @@ static int make_credential_host_secret(
+                 void **ret_data,
+                 size_t *ret_size) {
+ 
+-        struct credential_host_secret_format buf;
+         _cleanup_free_ char *t = NULL;
+         _cleanup_close_ int fd = -1;
+         int r;
+@@ -189,21 +188,23 @@ static int make_credential_host_secret(
+         if (r < 0)
+                 log_debug_errno(r, "Failed to set file attributes for secrets file, ignoring: %m");
+ 
+-        buf = (struct credential_host_secret_format) {
++        struct credential_host_secret_format buf = {
+                 .machine_id = machine_id,
+         };
+ 
++        CLEANUP_ERASE(buf);
++
+         r = crypto_random_bytes(buf.data, sizeof(buf.data));
+         if (r < 0)
+-                goto finish;
++                goto fail;
+ 
+         r = loop_write(fd, &buf, sizeof(buf), false);
+         if (r < 0)
+-                goto finish;
++                goto fail;
+ 
+         if (fsync(fd) < 0) {
+                 r = -errno;
+-                goto finish;
++                goto fail;
+         }
+ 
+         warn_not_encrypted(fd, flags, dirname, fn);
+@@ -211,17 +212,17 @@ static int make_credential_host_secret(
+         if (t) {
+                 r = rename_noreplace(dfd, t, dfd, fn);
+                 if (r < 0)
+-                        goto finish;
++                        goto fail;
+ 
+                 t = mfree(t);
+         } else if (linkat(fd, "", dfd, fn, AT_EMPTY_PATH) < 0) {
+                 r = -errno;
+-                goto finish;
++                goto fail;
+         }
+ 
+         if (fsync(dfd) < 0) {
+                 r = -errno;
+-                goto finish;
++                goto fail;
+         }
+ 
+         if (ret_data) {
+@@ -230,7 +231,7 @@ static int make_credential_host_secret(
+                 copy = memdup(buf.data, sizeof(buf.data));
+                 if (!copy) {
+                         r = -ENOMEM;
+-                        goto finish;
++                        goto fail;
+                 }
+ 
+                 *ret_data = copy;
+@@ -239,13 +240,12 @@ static int make_credential_host_secret(
+         if (ret_size)
+                 *ret_size = sizeof(buf.data);
+ 
+-        r = 0;
++        return 0;
+ 
+-finish:
++fail:
+         if (t && unlinkat(dfd, t, 0) < 0)
+                 log_debug_errno(errno, "Failed to remove temporary credential key: %m");
+ 
+-        explicit_bzero_safe(&buf, sizeof(buf));
+         return r;
+ }
+ 
+diff --git a/src/shared/ethtool-util.c b/src/shared/ethtool-util.c
+index e39b2f754b..1900537917 100644
+--- a/src/shared/ethtool-util.c
++++ b/src/shared/ethtool-util.c
+@@ -434,6 +434,8 @@ int ethtool_set_wol(
+ 
+         strscpy(ifr.ifr_name, sizeof(ifr.ifr_name), ifname);
+ 
++        CLEANUP_ERASE(ecmd);
++
+         if (ioctl(*ethtool_fd, SIOCETHTOOL, &ifr) < 0)
+                 return -errno;
+ 
+@@ -466,16 +468,11 @@ int ethtool_set_wol(
+                 need_update = true;
+         }
+ 
+-        if (!need_update) {
+-                explicit_bzero_safe(&ecmd, sizeof(ecmd));
++        if (!need_update)
+                 return 0;
+-        }
+ 
+         ecmd.cmd = ETHTOOL_SWOL;
+-        r = RET_NERRNO(ioctl(*ethtool_fd, SIOCETHTOOL, &ifr));
+-
+-        explicit_bzero_safe(&ecmd, sizeof(ecmd));
+-        return r;
++        return RET_NERRNO(ioctl(*ethtool_fd, SIOCETHTOOL, &ifr));
+ }
+ 
+ int ethtool_set_nic_buffer_size(int *ethtool_fd, const char *ifname, const netdev_ring_param *ring) {
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index d1a4e9cd11..7e98ec851b 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -778,13 +778,14 @@ static void hash_pin(const char *pin, size_t len, TPM2B_AUTH *auth) {
+ 
+         assert(auth);
+         assert(pin);
++
+         auth->size = SHA256_DIGEST_SIZE;
+ 
++        CLEANUP_ERASE(hash);
++
+         sha256_init_ctx(&hash);
+         sha256_process_bytes(pin, len, &hash);
+         sha256_finish_ctx(&hash, auth->buffer);
+-
+-        explicit_bzero_safe(&hash, sizeof(hash));
+ }
+ 
+ static int tpm2_make_encryption_session(
+@@ -816,11 +817,11 @@ static int tpm2_make_encryption_session(
+         if (pin) {
+                 TPM2B_AUTH auth = {};
+ 
++                CLEANUP_ERASE(auth);
++
+                 hash_pin(pin, strlen(pin), &auth);
+ 
+                 rc = sym_Esys_TR_SetAuth(c, bind_key, &auth);
+-                /* ESAPI knows about it, so clear it from our memory */
+-                explicit_bzero_safe(&auth, sizeof(auth));
+                 if (rc != TSS2_RC_SUCCESS)
+                         return log_error_errno(
+                                                SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+@@ -1412,8 +1413,8 @@ int tpm2_seal(const char *device,
+         static const TPML_PCR_SELECTION creation_pcr = {};
+         _cleanup_(erase_and_freep) void *secret = NULL;
+         _cleanup_free_ void *blob = NULL, *hash = NULL;
+-        TPM2B_SENSITIVE_CREATE hmac_sensitive;
+         ESYS_TR primary = ESYS_TR_NONE, session = ESYS_TR_NONE;
++        TPM2B_SENSITIVE_CREATE hmac_sensitive;
+         TPMI_ALG_PUBLIC primary_alg;
+         TPM2B_PUBLIC hmac_template;
+         TPMI_ALG_HASH pcr_bank;
+@@ -1453,6 +1454,8 @@ int tpm2_seal(const char *device,
+ 
+         start = now(CLOCK_MONOTONIC);
+ 
++        CLEANUP_ERASE(hmac_sensitive);
++
+         r = tpm2_context_init(device, &c);
+         if (r < 0)
+                 return r;
+@@ -1541,7 +1544,6 @@ int tpm2_seal(const char *device,
+         }
+ 
+         secret = memdup(hmac_sensitive.sensitive.data.buffer, hmac_sensitive.sensitive.data.size);
+-        explicit_bzero_safe(hmac_sensitive.sensitive.data.buffer, hmac_sensitive.sensitive.data.size);
+         if (!secret) {
+                 r = log_oom();
+                 goto finish;
+@@ -1602,7 +1604,6 @@ int tpm2_seal(const char *device,
+         r = 0;
+ 
+ finish:
+-        explicit_bzero_safe(&hmac_sensitive, sizeof(hmac_sensitive));
+         primary = tpm2_flush_context_verbose(c.esys_context, primary);
+         session = tpm2_flush_context_verbose(c.esys_context, session);
+         return r;

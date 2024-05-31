@@ -1,0 +1,276 @@
+From b76a221b28bb19f8e0bd80e20aeac7b56e2281ee Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Fri, 21 Jul 2023 15:49:16 -0400
+Subject: [PATCH] cryptenroll: allow specifying handle index of key to use for
+ sealing
+
+This defaults to the SRK index.
+
+(cherry picked from commit 382bfd90c316dfdd39066e42ead12e47522738fe)
+
+Related: RHEL-16182
+---
+ man/systemd-cryptenroll.xml        | 20 ++++++++++++
+ src/cryptenroll/cryptenroll-tpm2.c |  2 ++
+ src/cryptenroll/cryptenroll-tpm2.h |  4 +--
+ src/cryptenroll/cryptenroll.c      | 14 ++++++++-
+ src/partition/repart.c             |  1 +
+ src/shared/creds-util.c            |  1 +
+ src/shared/tpm2-util.c             | 50 +++++++++++++++++++++++-------
+ src/shared/tpm2-util.h             |  2 +-
+ 8 files changed, 79 insertions(+), 15 deletions(-)
+
+diff --git a/man/systemd-cryptenroll.xml b/man/systemd-cryptenroll.xml
+index 28e315bd1c..979e57d126 100644
+--- a/man/systemd-cryptenroll.xml
++++ b/man/systemd-cryptenroll.xml
+@@ -375,6 +375,26 @@
+         enrollment to.</para></listitem>
+       </varlistentry>
+ 
++      <varlistentry>
++        <term><option>--tpm2-seal-key-handle=</option><replaceable>HANDLE</replaceable></term>
++
++        <listitem><para>Configures which parent key to use for sealing, using the TPM handle (index) of the
++        key. This is used to "seal" (encrypt) a secret and must be used later to "unseal" (decrypt) the
++        secret. Expects a hexadecimal 32bit integer, optionally prefixed with
++        <literal>0x</literal>. Allowable values are any handle index in the persistent
++        (<literal>0x81000000</literal>-<literal>0x81ffffff</literal>) or transient
++        (<literal>0x80000000</literal>-<literal>0x80ffffff</literal>) ranges. Since transient handles are
++        lost after a TPM reset, and may be flushed during TPM context switching, they should not be used
++        except for very specific use cases, e.g. testing.</para>
++
++        <para>The default is the Storage Root Key (SRK) handle index <literal>0x81000001</literal>. A value
++        of 0 will use the default. For the SRK handle, a new key will be created and stored in the TPM if one
++        does not already exist; for any other handle, the key must already exist in the TPM at the specified
++        handle index.</para>
++
++        <para>This should not be changed unless you know what you are doing.</para></listitem>
++      </varlistentry>
++
+       <varlistentry>
+         <term><option>--tpm2-pcrs=</option><arg rep="repeat">PCR</arg></term>
+ 
+diff --git a/src/cryptenroll/cryptenroll-tpm2.c b/src/cryptenroll/cryptenroll-tpm2.c
+index 0155f1a6ef..98c45f42f6 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.c
++++ b/src/cryptenroll/cryptenroll-tpm2.c
+@@ -133,6 +133,7 @@ int enroll_tpm2(struct crypt_device *cd,
+                 const void *volume_key,
+                 size_t volume_key_size,
+                 const char *device,
++                uint32_t seal_key_handle,
+                 Tpm2PCRValue *hash_pcr_values,
+                 size_t n_hash_pcr_values,
+                 const char *pubkey_path,
+@@ -255,6 +256,7 @@ int enroll_tpm2(struct crypt_device *cd,
+                 return r;
+ 
+         r = tpm2_seal(tpm2_context,
++                      seal_key_handle,
+                       &policy,
+                       pin_str,
+                       &secret, &secret_size,
+diff --git a/src/cryptenroll/cryptenroll-tpm2.h b/src/cryptenroll/cryptenroll-tpm2.h
+index d43a9a8ffe..8a57bdda01 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.h
++++ b/src/cryptenroll/cryptenroll-tpm2.h
+@@ -8,9 +8,9 @@
+ #include "tpm2-util.h"
+ 
+ #if HAVE_TPM2
+-int enroll_tpm2(struct crypt_device *cd, const void *volume_key, size_t volume_key_size, const char *device, Tpm2PCRValue *hash_pcrs, size_t n_hash_pcrs, const char *pubkey_path, uint32_t pubkey_pcr_mask, const char *signature_path, bool use_pin);
++int enroll_tpm2(struct crypt_device *cd, const void *volume_key, size_t volume_key_size, const char *device, uint32_t seal_key_handle, Tpm2PCRValue *hash_pcrs, size_t n_hash_pcrs, const char *pubkey_path, uint32_t pubkey_pcr_mask, const char *signature_path, bool use_pin);
+ #else
+-static inline int enroll_tpm2(struct crypt_device *cd, const void *volume_key, size_t volume_key_size, const char *device, Tpm2PCRValue *hash_pcrs, size_t n_hash_pcrs, const char *pubkey_path, uint32_t pubkey_pcr_mask, const char *signature_path, bool use_pin) {
++static inline int enroll_tpm2(struct crypt_device *cd, const void *volume_key, size_t volume_key_size, const char *device, uint32_t seal_key_handle, Tpm2PCRValue *hash_pcrs, size_t n_hash_pcrs, const char *pubkey_path, uint32_t pubkey_pcr_mask, const char *signature_path, bool use_pin) {
+         return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                "TPM2 key enrollment not supported.");
+ }
+diff --git a/src/cryptenroll/cryptenroll.c b/src/cryptenroll/cryptenroll.c
+index aeef45eea6..5ace7a9787 100644
+--- a/src/cryptenroll/cryptenroll.c
++++ b/src/cryptenroll/cryptenroll.c
+@@ -33,6 +33,7 @@ static char *arg_unlock_keyfile = NULL;
+ static char *arg_pkcs11_token_uri = NULL;
+ static char *arg_fido2_device = NULL;
+ static char *arg_tpm2_device = NULL;
++static uint32_t arg_tpm2_seal_key_handle = 0;
+ static Tpm2PCRValue *arg_tpm2_hash_pcr_values = NULL;
+ static size_t arg_tpm2_n_hash_pcr_values = 0;
+ static bool arg_tpm2_hash_pcr_values_use_default = true;
+@@ -121,6 +122,8 @@ static int help(void) {
+                "                       Whether to require user verification to unlock the volume\n"
+                "     --tpm2-device=PATH\n"
+                "                       Enroll a TPM2 device\n"
++               "     --tpm2-seal-key-handle=HANDLE\n"
++               "                       Specify handle of key to use for sealing\n"
+                "     --tpm2-pcrs=PCR1+PCR2+PCR3+…\n"
+                "                       Specify TPM2 PCRs to seal against\n"
+                "     --tpm2-public-key=PATH\n"
+@@ -153,6 +156,7 @@ static int parse_argv(int argc, char *argv[]) {
+                 ARG_PKCS11_TOKEN_URI,
+                 ARG_FIDO2_DEVICE,
+                 ARG_TPM2_DEVICE,
++                ARG_TPM2_SEAL_KEY_HANDLE,
+                 ARG_TPM2_PCRS,
+                 ARG_TPM2_PUBLIC_KEY,
+                 ARG_TPM2_PUBLIC_KEY_PCRS,
+@@ -178,6 +182,7 @@ static int parse_argv(int argc, char *argv[]) {
+                 { "fido2-with-user-presence",     required_argument, NULL, ARG_FIDO2_WITH_UP         },
+                 { "fido2-with-user-verification", required_argument, NULL, ARG_FIDO2_WITH_UV         },
+                 { "tpm2-device",                  required_argument, NULL, ARG_TPM2_DEVICE           },
++                { "tpm2-seal-key-handle",         required_argument, NULL, ARG_TPM2_SEAL_KEY_HANDLE  },
+                 { "tpm2-pcrs",                    required_argument, NULL, ARG_TPM2_PCRS             },
+                 { "tpm2-public-key",              required_argument, NULL, ARG_TPM2_PUBLIC_KEY       },
+                 { "tpm2-public-key-pcrs",         required_argument, NULL, ARG_TPM2_PUBLIC_KEY_PCRS  },
+@@ -337,6 +342,13 @@ static int parse_argv(int argc, char *argv[]) {
+                         break;
+                 }
+ 
++                case ARG_TPM2_SEAL_KEY_HANDLE:
++                        r = safe_atou32_full(optarg, 16, &arg_tpm2_seal_key_handle);
++                        if (r < 0)
++                                return log_error_errno(r, "Could not parse TPM2 seal key handle index '%s': %m", optarg);
++
++                        break;
++
+                 case ARG_TPM2_PCRS:
+                         arg_tpm2_hash_pcr_values_use_default = false;
+                         r = tpm2_parse_pcr_argument_append(optarg, &arg_tpm2_hash_pcr_values, &arg_tpm2_n_hash_pcr_values);
+@@ -667,7 +679,7 @@ static int run(int argc, char *argv[]) {
+                 break;
+ 
+         case ENROLL_TPM2:
+-                slot = enroll_tpm2(cd, vk, vks, arg_tpm2_device, arg_tpm2_hash_pcr_values, arg_tpm2_n_hash_pcr_values, arg_tpm2_public_key, arg_tpm2_public_key_pcr_mask, arg_tpm2_signature, arg_tpm2_pin);
++                slot = enroll_tpm2(cd, vk, vks, arg_tpm2_device, arg_tpm2_seal_key_handle, arg_tpm2_hash_pcr_values, arg_tpm2_n_hash_pcr_values, arg_tpm2_public_key, arg_tpm2_public_key_pcr_mask, arg_tpm2_signature, arg_tpm2_pin);
+                 break;
+ 
+         case _ENROLL_TYPE_INVALID:
+diff --git a/src/partition/repart.c b/src/partition/repart.c
+index 481680768a..2b3b384743 100644
+--- a/src/partition/repart.c
++++ b/src/partition/repart.c
+@@ -3079,6 +3079,7 @@ static int partition_encrypt(
+                         return log_error_errno(r, "Could not calculate sealing policy digest: %m");
+ 
+                 r = tpm2_seal(tpm2_context,
++                              /* seal_key_handle= */ 0,
+                               &policy,
+                               /* pin= */ NULL,
+                               &secret, &secret_size,
+diff --git a/src/shared/creds-util.c b/src/shared/creds-util.c
+index e269f1283c..27548a0eec 100644
+--- a/src/shared/creds-util.c
++++ b/src/shared/creds-util.c
+@@ -684,6 +684,7 @@ int encrypt_credential_and_warn(
+                         return log_error_errno(r, "Could not calculate sealing policy digest: %m");
+ 
+                 r = tpm2_seal(tpm2_context,
++                              /* seal_key_handle= */ 0,
+                               &tpm2_policy,
+                               /* pin= */ NULL,
+                               &tpm2_key, &tpm2_key_size,
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 6e6cbe076f..b7f55ad7d3 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -780,20 +780,23 @@ int tpm2_index_to_handle(
+ 
+         assert(c);
+ 
+-        /* Let's restrict this, at least for now, to allow only some handle types. */
++        /* Only allow persistent, transient, or NV index handle types. */
+         switch (TPM2_HANDLE_TYPE(index)) {
+         case TPM2_HT_PERSISTENT:
+         case TPM2_HT_NV_INDEX:
+         case TPM2_HT_TRANSIENT:
+                 break;
+         case TPM2_HT_PCR:
++                /* PCR handles are referenced by their actual index number and do not need a Tpm2Handle */
+                 return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                        "Invalid handle 0x%08" PRIx32 " (in PCR range).", index);
+         case TPM2_HT_HMAC_SESSION:
+         case TPM2_HT_POLICY_SESSION:
++                /* Session indexes are only used internally by tpm2-tss (or lower code) */
+                 return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                        "Invalid handle 0x%08" PRIx32 " (in session range).", index);
+-        case TPM2_HT_PERMANENT: /* Permanent handles are defined, e.g. ESYS_TR_RH_OWNER. */
++        case TPM2_HT_PERMANENT:
++                /* Permanent handles are defined, e.g. ESYS_TR_RH_OWNER. */
+                 return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
+                                        "Invalid handle 0x%08" PRIx32 " (in permanent range).", index);
+         default:
+@@ -3872,6 +3875,7 @@ static int tpm2_deserialize(
+ }
+ 
+ int tpm2_seal(Tpm2Context *c,
++              uint32_t seal_key_handle,
+               const TPM2B_DIGEST *policy,
+               const char *pin,
+               void **ret_secret,
+@@ -3945,18 +3949,42 @@ int tpm2_seal(Tpm2Context *c,
+         _cleanup_(tpm2_handle_freep) Tpm2Handle *primary_handle = NULL;
+         if (ret_srk_buf) {
+                 _cleanup_(Esys_Freep) TPM2B_PUBLIC *primary_public = NULL;
+-                r = tpm2_get_or_create_srk(
+-                                c,
+-                                /* session= */ NULL,
+-                                &primary_public,
+-                                /* ret_name= */ NULL,
+-                                /* ret_qname= */ NULL,
+-                                &primary_handle);
+-                if (r < 0)
+-                        return r;
++
++                if (IN_SET(seal_key_handle, 0, TPM2_SRK_HANDLE)) {
++                        r = tpm2_get_or_create_srk(
++                                        c,
++                                        /* session= */ NULL,
++                                        &primary_public,
++                                        /* ret_name= */ NULL,
++                                        /* ret_qname= */ NULL,
++                                        &primary_handle);
++                        if (r < 0)
++                                return r;
++                } else if (IN_SET(TPM2_HANDLE_TYPE(seal_key_handle), TPM2_HT_TRANSIENT, TPM2_HT_PERSISTENT)) {
++                        r = tpm2_index_to_handle(
++                                        c,
++                                        seal_key_handle,
++                                        /* session= */ NULL,
++                                        &primary_public,
++                                        /* ret_name= */ NULL,
++                                        /* ret_qname= */ NULL,
++                                        &primary_handle);
++                        if (r < 0)
++                                return r;
++                        if (r == 0)
++                                /* We do NOT automatically create anything other than the SRK */
++                                return log_debug_errno(SYNTHETIC_ERRNO(ENOENT),
++                                                       "No handle found at index 0x%" PRIx32, seal_key_handle);
++                } else
++                        return log_debug_errno(SYNTHETIC_ERRNO(EINVAL),
++                                               "Seal key handle 0x%" PRIx32 " is neither transient nor persistent.",
++                                               seal_key_handle);
+ 
+                 primary_alg = primary_public->publicArea.type;
+         } else {
++                if (seal_key_handle != 0)
++                        log_debug("Using primary alg sealing, but seal key handle also provided; ignoring seal key handle.");
++
+                 /* TODO: force all callers to provide ret_srk_buf, so we can stop sealing with the legacy templates. */
+                 primary_alg = TPM2_ALG_ECC;
+ 
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 15ca677c1c..8d60d43c51 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -174,7 +174,7 @@ int tpm2_calculate_sealing_policy(const Tpm2PCRValue *pcr_values, size_t n_pcr_v
+ 
+ int tpm2_get_or_create_srk(Tpm2Context *c, const Tpm2Handle *session, TPM2B_PUBLIC **ret_public, TPM2B_NAME **ret_name, TPM2B_NAME **ret_qname, Tpm2Handle **ret_handle);
+ 
+-int tpm2_seal(Tpm2Context *c, const TPM2B_DIGEST *policy, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, uint16_t *ret_primary_alg, void **ret_srk_buf, size_t *ret_srk_buf_size);
++int tpm2_seal(Tpm2Context *c, uint32_t seal_key_handle, const TPM2B_DIGEST *policy, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, uint16_t *ret_primary_alg, void **ret_srk_buf, size_t *ret_srk_buf_size);
+ int tpm2_unseal(Tpm2Context *c, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, JsonVariant *signature, const char *pin, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, const void *srk_buf, size_t srk_buf_size, void **ret_secret, size_t *ret_secret_size);
+ 
+ #if HAVE_OPENSSL

@@ -1,0 +1,61 @@
+From d0e7305306407992bebbf6785a03cf2062d8359b Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Fri, 12 May 2023 00:51:19 +0100
+Subject: [PATCH] efi: set EFIVAR to stop Shim from uninstalling its protocol
+
+We'll use it from the stub to validate files. Requires Shim 5.18.
+By default, Shim uninstalls its protocol when calling StartImage(),
+so when loading systemd-boot via shim and then loading an UKI, the
+UKI's sd-stub will no longer be able to use the shim verification
+protocol by default.
+
+(cherry picked from commit e1f1b5fc62f721a3a4c14d97ad01447b2ac07d6d)
+
+Related: RHEL-16952
+---
+ src/boot/efi/boot.c | 4 ++++
+ src/boot/efi/shim.c | 9 +++++++++
+ src/boot/efi/shim.h | 1 +
+ 3 files changed, 14 insertions(+)
+
+diff --git a/src/boot/efi/boot.c b/src/boot/efi/boot.c
+index d859ffe0b8..5a9bfc9646 100644
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -2644,6 +2644,10 @@ static EFI_STATUS real_main(EFI_HANDLE image) {
+ 
+         init_usec = time_usec();
+ 
++        /* Ask Shim to leave its protocol around, so that the stub can use it to validate PEs.
++         * By default, Shim uninstalls its protocol when calling StartImage(). */
++        shim_retain_protocol();
++
+         err = BS->OpenProtocol(
+                         image,
+                         MAKE_GUID_PTR(EFI_LOADED_IMAGE_PROTOCOL),
+diff --git a/src/boot/efi/shim.c b/src/boot/efi/shim.c
+index 5da298c10a..d2fd680bbc 100644
+--- a/src/boot/efi/shim.c
++++ b/src/boot/efi/shim.c
+@@ -100,3 +100,12 @@ EFI_STATUS shim_load_image(EFI_HANDLE parent, const EFI_DEVICE_PATH *device_path
+ 
+         return ret;
+ }
++
++void shim_retain_protocol(void) {
++        uint8_t value = 1;
++
++        /* Ask Shim to avoid uninstalling its security protocol, so that we can use it from sd-stub to
++         * validate PE addons. By default, Shim uninstalls its protocol when calling StartImage().
++         * Requires Shim 15.8. */
++        (void) efivar_set_raw(MAKE_GUID_PTR(SHIM_LOCK), u"ShimRetainProtocol", &value, sizeof(value), 0);
++}
+diff --git a/src/boot/efi/shim.h b/src/boot/efi/shim.h
+index 6d213f5efa..23fdc0923f 100644
+--- a/src/boot/efi/shim.h
++++ b/src/boot/efi/shim.h
+@@ -14,3 +14,4 @@
+ 
+ bool shim_loaded(void);
+ EFI_STATUS shim_load_image(EFI_HANDLE parent, const EFI_DEVICE_PATH *device_path, EFI_HANDLE *ret_image);
++void shim_retain_protocol(void);

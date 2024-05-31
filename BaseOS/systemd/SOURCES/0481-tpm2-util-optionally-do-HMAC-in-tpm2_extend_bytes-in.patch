@@ -1,0 +1,100 @@
+From 8bc4975bcffdefd46b1fd95ccf4edf7287d2c3d3 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 14 Oct 2022 14:38:35 +0200
+Subject: [PATCH] tpm2-util: optionally do HMAC in tpm2_extend_bytes() in case
+ we process sensitive data
+
+When measuring data into a PCR we are supposed to hash the data on the
+CPU and then pass the hash value over the wire to the TPM2. That's all
+good as long as the data we intend to measure is not sensitive.
+
+Let's be extra careful though if we want to measure sensitive data, for
+example the root file system volume key. Instead of just hashing that
+and passing it over the wire to the TPM2, let's do a HMAC signature
+instead. It's also a hash operation, but should protect our secret
+reasonably well and not leak direct information about it to wiretappers.
+
+(cherry picked from commit 9885c8745d313588350325e8e2110887bf78c442)
+
+Related: RHEL-16182
+---
+ src/boot/pcrphase.c    |  2 +-
+ src/shared/tpm2-util.c | 25 +++++++++++++++++++++----
+ src/shared/tpm2-util.h |  2 +-
+ 3 files changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/src/boot/pcrphase.c b/src/boot/pcrphase.c
+index 62bdf0ad29..1f3dc4ab3a 100644
+--- a/src/boot/pcrphase.c
++++ b/src/boot/pcrphase.c
+@@ -219,7 +219,7 @@ static int run(int argc, char *argv[]) {
+ 
+         log_debug("Measuring '%s' into PCR index %u, banks %s.", word, TPM_PCR_INDEX_KERNEL_IMAGE, joined);
+ 
+-        r = tpm2_extend_bytes(c.esys_context, arg_banks, TPM_PCR_INDEX_KERNEL_IMAGE, word, length); /* → PCR 11 */
++        r = tpm2_extend_bytes(c.esys_context, arg_banks, TPM_PCR_INDEX_KERNEL_IMAGE, word, length, NULL, 0); /* → PCR 11 */
+         if (r < 0)
+                 return r;
+ 
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 336c681c71..aca7f22e54 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -1913,14 +1913,22 @@ int tpm2_extend_bytes(
+                 char **banks,
+                 unsigned pcr_index,
+                 const void *data,
+-                size_t sz) {
++                size_t data_size,
++                const void *secret,
++                size_t secret_size) {
+ 
+ #if HAVE_OPENSSL
+         TPML_DIGEST_VALUES values = {};
+         TSS2_RC rc;
+ 
+         assert(c);
+-        assert(data || sz == 0);
++        assert(data || data_size == 0);
++        assert(secret || secret_size == 0);
++
++        if (data_size == SIZE_MAX)
++                data_size = strlen(data);
++        if (secret_size == SIZE_MAX)
++                secret_size = strlen(secret);
+ 
+         if (pcr_index >= TPM2_PCRS_MAX)
+                 return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "Can't measure into unsupported PCR %u, refusing.", pcr_index);
+@@ -1946,8 +1954,17 @@ int tpm2_extend_bytes(
+ 
+                 values.digests[values.count].hashAlg = id;
+ 
+-                if (EVP_Digest(data, sz, (unsigned char*) &values.digests[values.count].digest, NULL, implementation, NULL) != 1)
+-                        return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "Failed to hash word.");
++                /* So here's a twist: sometimes we want to measure secrets (e.g. root file system volume
++                 * key), but we'd rather not leak a literal hash of the secret to the TPM (given that the
++                 * wire is unprotected, and some other subsystem might use the simple, literal hash of the
++                 * secret for other purposes, maybe because it needs a shorter secret derived from it for
++                 * some unrelated purpose, who knows). Hence we instead measure an HMAC signature of a
++                 * private non-secret string instead. */
++                if (secret_size > 0) {
++                        if (!HMAC(implementation, secret, secret_size, data, data_size, (unsigned char*) &values.digests[values.count].digest, NULL))
++                                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "Failed to calculate HMAC of data to measure.");
++                } else if (EVP_Digest(data, data_size, (unsigned char*) &values.digests[values.count].digest, NULL, implementation, NULL) != 1)
++                        return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE), "Failed to hash data to measure.");
+ 
+                 values.count++;
+         }
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 4cab52a949..96e6c31b0a 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -70,7 +70,7 @@ static inline void Esys_Freep(void *p) {
+ int tpm2_get_good_pcr_banks(ESYS_CONTEXT *c, uint32_t pcr_mask, TPMI_ALG_HASH **ret_banks);
+ int tpm2_get_good_pcr_banks_strv(ESYS_CONTEXT *c, uint32_t pcr_mask, char ***ret);
+ 
+-int tpm2_extend_bytes(ESYS_CONTEXT *c, char **banks, unsigned pcr_index, const void *data, size_t sz);
++int tpm2_extend_bytes(ESYS_CONTEXT *c, char **banks, unsigned pcr_index, const void *data, size_t data_size, const void *secret, size_t secret_size);
+ 
+ #else
+ struct tpm2_context;

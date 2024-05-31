@@ -1,0 +1,141 @@
+From 466da97e11cebf84a293789d0f4f38779244a5b3 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 11 Nov 2022 17:36:29 +0100
+Subject: [PATCH] bootctl,bootspec: make use of CHASE_PROHIBIT_SYMLINKS
+ whenever we access the ESP/XBOOTLDR
+
+Let's make use of the new flag whenever we access the ESP or XBOOTLDR.
+The resources we make use of in these partitions can't possibly use
+symlinks (because UEFI knows no symlink concept), and they are untrusted
+territory, hence under no circumstances we should be tricked into
+following symlinks that shouldn't be there in the first place.
+
+Of course, you might argue thta ESP/XBOOTLDR are VFAT and thus don#t
+know symlinks. But the thing is, they don#t have to be. Firmware can
+support other file systems too, and people can use efifs to gain access
+to arbitrary Linux file systems from EFI. Hence, let's better be safe
+than sorry.
+
+(cherry picked from commit b353d5eee9e8df0aa2f4cbb1bfb0a46a963ba78f)
+
+Related: RHEL-16952
+---
+ src/boot/bootctl.c    | 18 +++++++++---------
+ src/shared/bootspec.c |  8 ++++----
+ 2 files changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/src/boot/bootctl.c b/src/boot/bootctl.c
+index a0ca2afec2..e830d45486 100644
+--- a/src/boot/bootctl.c
++++ b/src/boot/bootctl.c
+@@ -485,7 +485,7 @@ static int enumerate_binaries(
+         assert(previous);
+         assert(is_first);
+ 
+-        r = chase_symlinks_and_opendir(path, esp_path, CHASE_PREFIX_ROOT, &p, &d);
++        r = chase_symlinks_and_opendir(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
+         if (r == -ENOENT)
+                 return 0;
+         if (r < 0)
+@@ -918,10 +918,10 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
+         if (!p)
+                 return log_oom();
+ 
+-        r = chase_symlinks(p, root, CHASE_PREFIX_ROOT, &source_path, NULL);
++        r = chase_symlinks(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &source_path, NULL);
+         /* If we had a root directory to try, we didn't find it and we are in auto mode, retry on the host */
+         if (r == -ENOENT && root && arg_install_source == ARG_INSTALL_SOURCE_AUTO)
+-                r = chase_symlinks(p, NULL, CHASE_PREFIX_ROOT, &source_path, NULL);
++                r = chase_symlinks(p, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &source_path, NULL);
+         if (r < 0)
+                 return log_error_errno(r,
+                                        "Failed to resolve path %s%s%s: %m",
+@@ -933,7 +933,7 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
+         if (!q)
+                 return log_oom();
+ 
+-        r = chase_symlinks(q, esp_path, CHASE_PREFIX_ROOT | CHASE_NONEXISTENT, &dest_path, NULL);
++        r = chase_symlinks(q, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT, &dest_path, NULL);
+         if (r < 0)
+                 return log_error_errno(r, "Failed to resolve path %s under directory %s: %m", q, esp_path);
+ 
+@@ -950,7 +950,7 @@ static int copy_one_file(const char *esp_path, const char *name, bool force) {
+                 v = strjoina("/EFI/BOOT/BOOT", e);
+                 ascii_strupper(strrchr(v, '/') + 1);
+ 
+-                r = chase_symlinks(v, esp_path, CHASE_PREFIX_ROOT | CHASE_NONEXISTENT, &default_dest_path, NULL);
++                r = chase_symlinks(v, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_NONEXISTENT, &default_dest_path, NULL);
+                 if (r < 0)
+                         return log_error_errno(r, "Failed to resolve path %s under directory %s: %m", v, esp_path);
+ 
+@@ -968,10 +968,10 @@ static int install_binaries(const char *esp_path, const char *arch, bool force)
+         _cleanup_free_ char *path = NULL;
+         int r;
+ 
+-        r = chase_symlinks_and_opendir(BOOTLIBDIR, root, CHASE_PREFIX_ROOT, &path, &d);
++        r = chase_symlinks_and_opendir(BOOTLIBDIR, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &path, &d);
+         /* If we had a root directory to try, we didn't find it and we are in auto mode, retry on the host */
+         if (r == -ENOENT && root && arg_install_source == ARG_INSTALL_SOURCE_AUTO)
+-                r = chase_symlinks_and_opendir(BOOTLIBDIR, NULL, CHASE_PREFIX_ROOT, &path, &d);
++                r = chase_symlinks_and_opendir(BOOTLIBDIR, NULL, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &path, &d);
+         if (r < 0)
+                 return log_error_errno(r, "Failed to open boot loader directory %s%s: %m", strempty(root), BOOTLIBDIR);
+ 
+@@ -1141,7 +1141,7 @@ static int install_variables(
+                 return 0;
+         }
+ 
+-        r = chase_symlinks_and_access(path, esp_path, CHASE_PREFIX_ROOT, F_OK, NULL, NULL);
++        r = chase_symlinks_and_access(path, esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL, NULL);
+         if (r == -ENOENT)
+                 return 0;
+         if (r < 0)
+@@ -1172,7 +1172,7 @@ static int remove_boot_efi(const char *esp_path) {
+         _cleanup_free_ char *p = NULL;
+         int r, c = 0;
+ 
+-        r = chase_symlinks_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT, &p, &d);
++        r = chase_symlinks_and_opendir("/EFI/BOOT", esp_path, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &p, &d);
+         if (r == -ENOENT)
+                 return 0;
+         if (r < 0)
+diff --git a/src/shared/bootspec.c b/src/shared/bootspec.c
+index fe44b5e9d2..9352416af5 100644
+--- a/src/shared/bootspec.c
++++ b/src/shared/bootspec.c
+@@ -507,7 +507,7 @@ static int boot_loader_read_conf_path(BootConfig *config, const char *root, cons
+         assert(config);
+         assert(path);
+ 
+-        r = chase_symlinks_and_fopen_unlocked(path, root, CHASE_PREFIX_ROOT, "re", &full, &f);
++        r = chase_symlinks_and_fopen_unlocked(path, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, "re", &full, &f);
+         if (r == -ENOENT)
+                 return 0;
+         if (r < 0)
+@@ -609,7 +609,7 @@ static int boot_entries_find_type1(
+         assert(root);
+         assert(dir);
+ 
+-        dir_fd = chase_symlinks_and_open(dir, root, CHASE_PREFIX_ROOT, O_DIRECTORY|O_CLOEXEC, &full);
++        dir_fd = chase_symlinks_and_open(dir, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, O_DIRECTORY|O_CLOEXEC, &full);
+         if (dir_fd == -ENOENT)
+                 return 0;
+         if (dir_fd < 0)
+@@ -869,7 +869,7 @@ static int boot_entries_find_unified(
+         assert(config);
+         assert(dir);
+ 
+-        r = chase_symlinks_and_opendir(dir, root, CHASE_PREFIX_ROOT, &full, &d);
++        r = chase_symlinks_and_opendir(dir, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, &full, &d);
+         if (r == -ENOENT)
+                 return 0;
+         if (r < 0)
+@@ -1282,7 +1282,7 @@ static void boot_entry_file_list(
+         assert(p);
+         assert(ret_status);
+ 
+-        int status = chase_symlinks_and_access(p, root, CHASE_PREFIX_ROOT, F_OK, NULL, NULL);
++        int status = chase_symlinks_and_access(p, root, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, F_OK, NULL, NULL);
+ 
+         printf("%13s%s ", strempty(field), field ? ":" : " ");
+         if (status < 0) {

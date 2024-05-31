@@ -1,0 +1,50 @@
+From 2d6ce79b1d727cd85d3504706da9c2eca6dc72fe Mon Sep 17 00:00:00 2001
+From: "Jason A. Donenfeld" <Jason@zx2c4.com>
+Date: Wed, 16 Nov 2022 19:34:53 +0100
+Subject: [PATCH] boot: do not truncate random seed file
+
+There are concerns about the FAT file system driver exploding if we try
+to do this, so just leave the bytes zeroed out instead.
+
+(cherry picked from commit 5d29d07b342397a8ecc4bea96f53595a03dd94f1)
+
+Related: RHEL-16952
+---
+ src/boot/efi/random-seed.c | 17 ++++++++++++-----
+ 1 file changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/src/boot/efi/random-seed.c b/src/boot/efi/random-seed.c
+index e11e345e88..471398fbf1 100644
+--- a/src/boot/efi/random-seed.c
++++ b/src/boot/efi/random-seed.c
+@@ -268,7 +268,7 @@ EFI_STATUS process_random_seed(EFI_FILE *root_dir) {
+         sha256_finish_ctx(&hash, random_bytes);
+ 
+         size = sizeof(random_bytes);
+-        /* If the file size is too large, zero out the remaining bytes on disk, and then truncate. */
++        /* If the file size is too large, zero out the remaining bytes on disk. */
+         if (size < info->FileSize) {
+                 err = handle->SetPosition(handle, size);
+                 if (err != EFI_SUCCESS)
+@@ -285,10 +285,17 @@ EFI_STATUS process_random_seed(EFI_FILE *root_dir) {
+                 err = handle->SetPosition(handle, 0);
+                 if (err != EFI_SUCCESS)
+                         return log_error_status_stall(err, L"Failed to seek to beginning of random seed file: %r", err);
+-                info->FileSize = size;
+-                err = handle->SetInfo(handle, &GenericFileInfo, info->Size, info);
+-                if (err != EFI_SUCCESS)
+-                        return log_error_status_stall(err, L"Failed to truncate random seed file: %r", err);
++
++                /* We could truncate the file here with something like:
++                 *
++                 *     info->FileSize = size;
++                 *     err = handle->SetInfo(handle, &GenericFileInfo, info->Size, info);
++                 *     if (err != EFI_SUCCESS)
++                 *             return log_error_status_stall(err, L"Failed to truncate random seed file: %r", err);
++                 *
++                 * But this is considered slightly risky, because EFI filesystem drivers are a little bit
++                 * flimsy. So instead we rely on userspace eventually truncating this when it writes a new
++                 * seed. For now the best we do is zero it. */
+         }
+         /* Update the random seed on disk before we use it */
+         wsize = size;

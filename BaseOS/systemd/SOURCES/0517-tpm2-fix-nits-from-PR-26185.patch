@@ -1,0 +1,76 @@
+From ec8f1d04f4f10ac1cd2de0ef750199253cba2bf2 Mon Sep 17 00:00:00 2001
+From: William Roberts <william.c.roberts@intel.com>
+Date: Tue, 4 Apr 2023 11:14:17 -0500
+Subject: [PATCH] tpm2: fix nits from PR #26185
+
+Fixes:
+  - Comment style
+  - Alignment style
+  - cleanup macro usage
+  - incorrect error message[1]
+
+1. Thanks to tempusfugit991@gmail.com for pointing out the error
+message mistake.
+
+Signed-off-by: William Roberts <william.c.roberts@intel.com>
+(cherry picked from commit 96181b7a893da444fa9adcd1e7c95769d97c2a95)
+
+Related: RHEL-16182
+---
+ src/cryptenroll/cryptenroll-tpm2.c | 2 +-
+ src/shared/creds-util.c            | 6 ++----
+ src/shared/tpm2-util.c             | 4 ++--
+ 3 files changed, 5 insertions(+), 7 deletions(-)
+
+diff --git a/src/cryptenroll/cryptenroll-tpm2.c b/src/cryptenroll/cryptenroll-tpm2.c
+index ab43135dc7..a2f57ecff4 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.c
++++ b/src/cryptenroll/cryptenroll-tpm2.c
+@@ -142,7 +142,7 @@ int enroll_tpm2(struct crypt_device *cd,
+         _cleanup_(erase_and_freep) void *secret = NULL;
+         _cleanup_(json_variant_unrefp) JsonVariant *v = NULL, *signature_json = NULL;
+         _cleanup_(erase_and_freep) char *base64_encoded = NULL;
+-        _cleanup_(freep) void *srk_buf = NULL;
++        _cleanup_free_ void *srk_buf = NULL;
+         size_t secret_size, blob_size, hash_size, pubkey_size = 0, srk_buf_size = 0;
+         _cleanup_free_ void *blob = NULL, *hash = NULL, *pubkey = NULL;
+         uint16_t pcr_bank, primary_alg;
+diff --git a/src/shared/creds-util.c b/src/shared/creds-util.c
+index f55c4ac96e..902275215a 100644
+--- a/src/shared/creds-util.c
++++ b/src/shared/creds-util.c
+@@ -989,10 +989,8 @@ int decrypt_credential_and_warn(
+                                     le32toh(z->size));
+                 }
+ 
+-                /*
+-                 * TODO: Add the SRK data to the credential structure so it can be plumbed
+-                 * through and used to verify the TPM session.
+-                 */
++                 // TODO: Add the SRK data to the credential structure so it can be plumbed
++                 // through and used to verify the TPM session.
+                 r = tpm2_unseal(tpm2_device,
+                                 le64toh(t->pcr_mask),
+                                 le16toh(t->pcr_bank),
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 55153e79f4..ab88b94f1f 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -556,7 +556,7 @@ static int tpm2_make_primary(
+         if (use_srk_model) {
+                 r = make_lock_file("/run/systemd/tpm2-srk-init", LOCK_EX, &srk_lock);
+                 if (r < 0)
+-                        return log_error_errno(r, "Failed to take network zone lock: %m");
++                        return log_error_errno(r, "Failed to take TPM SRK lock: %m");
+         }
+ 
+         /* Find existing SRK and use it if present */
+@@ -571,7 +571,7 @@ static int tpm2_make_primary(
+ 
+                         if (alg != 0 && alg != got_alg)
+                                 log_warning("Caller asked for specific algorithm %u, but existing SRK is %u, ignoring",
+-                                                alg, got_alg);
++                                            alg, got_alg);
+ 
+                         if (ret_alg)
+                                 *ret_alg = alg;

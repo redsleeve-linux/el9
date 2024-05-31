@@ -1,0 +1,244 @@
+From 6f074919107765848b9aaf14d9efcee88910cf36 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 16 Nov 2022 21:37:20 +0100
+Subject: [PATCH] dlfcn-util: add static asserts ensuring our sym_xyz() func
+ ptrs match the types from the official headers
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Make sure that the sym_xyz function pointers have the types that the
+functions we'll assign them have.
+
+And of course, this found a number of incompatibilities right-away, in
+particular in the bpf hookup.
+
+(Doing this will trigger deprecation warnings from libbpf. I simply
+turned them off locally now, since we are well aware of what we are
+doing in that regard.)
+
+There's one return type fix (bool → int), that actually matters I think,
+as it might have created an incompatibility on some archs.
+
+(cherry picked from commit 7736a71fd2c4f0704db2e0d110959f817829cb85)
+
+Related: RHEL-16182
+---
+ src/shared/bpf-compat.h      |  2 +-
+ src/shared/bpf-dlopen.c      | 50 +++++++++++++++++++++++++++++++-----
+ src/shared/bpf-dlopen.h      |  4 +--
+ src/shared/cryptsetup-util.c | 10 ++++++++
+ src/shared/dlfcn-util.h      |  4 +++
+ src/shared/idn-util.c        |  4 +--
+ src/shared/idn-util.h        |  2 +-
+ 7 files changed, 64 insertions(+), 12 deletions(-)
+
+diff --git a/src/shared/bpf-compat.h b/src/shared/bpf-compat.h
+index 04ade82fc1..9ccb7d8205 100644
+--- a/src/shared/bpf-compat.h
++++ b/src/shared/bpf-compat.h
+@@ -25,7 +25,7 @@ struct bpf_map_create_opts;
+  *  - before the compat static inline helpers that use them.
+  * When removing this file move these back to bpf-dlopen.h */
+ extern int (*sym_bpf_map_create)(enum bpf_map_type,  const char *, __u32, __u32, __u32, const struct bpf_map_create_opts *);
+-extern bool (*sym_libbpf_probe_bpf_prog_type)(enum bpf_prog_type, const void *);
++extern int (*sym_libbpf_probe_bpf_prog_type)(enum bpf_prog_type, const void *);
+ 
+ /* compat symbols removed in libbpf 1.0 */
+ extern int (*sym_bpf_create_map)(enum bpf_map_type, int key_size, int value_size, int max_entries, __u32 map_flags);
+diff --git a/src/shared/bpf-dlopen.c b/src/shared/bpf-dlopen.c
+index 2556053cbb..15301aee60 100644
+--- a/src/shared/bpf-dlopen.c
++++ b/src/shared/bpf-dlopen.c
+@@ -6,8 +6,20 @@
+ #include "strv.h"
+ 
+ #if HAVE_LIBBPF
+-struct bpf_link* (*sym_bpf_program__attach_cgroup)(struct bpf_program *, int);
+-struct bpf_link* (*sym_bpf_program__attach_lsm)(struct bpf_program *);
++
++/* libbpf changed types of function prototypes around, so we need to disable some type checking for older
++ * libbpf. We consider everything older than 0.7 too old for accurate type checks. */
++#if defined(__LIBBPF_CURRENT_VERSION_GEQ)
++#if __LIBBPF_CURRENT_VERSION_GEQ(0, 7)
++#define MODERN_LIBBPF 1
++#endif
++#endif
++#if !defined(MODERN_LIBBPF)
++#define MODERN_LIBBPF 0
++#endif
++
++struct bpf_link* (*sym_bpf_program__attach_cgroup)(const struct bpf_program *, int);
++struct bpf_link* (*sym_bpf_program__attach_lsm)(const struct bpf_program *);
+ int (*sym_bpf_link__fd)(const struct bpf_link *);
+ int (*sym_bpf_link__destroy)(struct bpf_link *);
+ int (*sym_bpf_map__fd)(const struct bpf_map *);
+@@ -22,7 +34,7 @@ int (*sym_bpf_object__load_skeleton)(struct bpf_object_skeleton *);
+ int (*sym_bpf_object__attach_skeleton)(struct bpf_object_skeleton *);
+ void (*sym_bpf_object__detach_skeleton)(struct bpf_object_skeleton *);
+ void (*sym_bpf_object__destroy_skeleton)(struct bpf_object_skeleton *);
+-bool (*sym_libbpf_probe_bpf_prog_type)(enum bpf_prog_type, const void *);
++int (*sym_libbpf_probe_bpf_prog_type)(enum bpf_prog_type, const void *);
+ const char* (*sym_bpf_program__name)(const struct bpf_program *);
+ libbpf_print_fn_t (*sym_libbpf_set_print)(libbpf_print_fn_t);
+ long (*sym_libbpf_get_error)(const void *);
+@@ -49,6 +61,8 @@ int dlopen_bpf(void) {
+         void *dl;
+         int r;
+ 
++        DISABLE_WARNING_DEPRECATED_DECLARATIONS;
++
+         dl = dlopen("libbpf.so.1", RTLD_LAZY);
+         if (!dl) {
+                 /* libbpf < 1.0.0 (we rely on 0.1.0+) provide most symbols we care about, but
+@@ -61,14 +75,29 @@ int dlopen_bpf(void) {
+                                                "neither libbpf.so.1 nor libbpf.so.0 are installed: %s", dlerror());
+ 
+                 /* symbols deprecated in 1.0 we use as compat */
+-                r = dlsym_many_or_warn(dl, LOG_DEBUG,
++                r = dlsym_many_or_warn(
++                                dl, LOG_DEBUG,
++#if MODERN_LIBBPF
++                                /* Don't exist anymore in new libbpf, hence cannot type check them */
++                                DLSYM_ARG_FORCE(bpf_create_map),
++                                DLSYM_ARG_FORCE(bpf_probe_prog_type));
++#else
+                                 DLSYM_ARG(bpf_create_map),
+                                 DLSYM_ARG(bpf_probe_prog_type));
++#endif
+         } else {
+                 /* symbols available from 0.7.0 */
+-                r = dlsym_many_or_warn(dl, LOG_DEBUG,
++                r = dlsym_many_or_warn(
++                                dl, LOG_DEBUG,
++#if MODERN_LIBBPF
+                                 DLSYM_ARG(bpf_map_create),
+-                                DLSYM_ARG(libbpf_probe_bpf_prog_type));
++                                DLSYM_ARG(libbpf_probe_bpf_prog_type)
++#else
++                                /* These symbols did not exist in old libbpf, hence we cannot type check them */
++                                DLSYM_ARG_FORCE(bpf_map_create),
++                                DLSYM_ARG_FORCE(libbpf_probe_bpf_prog_type)
++#endif
++                );
+         }
+ 
+         r = dlsym_many_or_warn(
+@@ -86,8 +115,14 @@ int dlopen_bpf(void) {
+                         DLSYM_ARG(bpf_object__attach_skeleton),
+                         DLSYM_ARG(bpf_object__detach_skeleton),
+                         DLSYM_ARG(bpf_object__destroy_skeleton),
++#if MODERN_LIBBPF
+                         DLSYM_ARG(bpf_program__attach_cgroup),
+                         DLSYM_ARG(bpf_program__attach_lsm),
++#else
++                        /* libbpf added a "const" to function parameters where it should not have, ignore this type incompatibility */
++                        DLSYM_ARG_FORCE(bpf_program__attach_cgroup),
++                        DLSYM_ARG_FORCE(bpf_program__attach_lsm),
++#endif
+                         DLSYM_ARG(bpf_program__name),
+                         DLSYM_ARG(libbpf_set_print),
+                         DLSYM_ARG(libbpf_get_error));
+@@ -96,6 +131,9 @@ int dlopen_bpf(void) {
+ 
+         /* We set the print helper unconditionally. Otherwise libbpf will emit not useful log messages. */
+         (void) sym_libbpf_set_print(bpf_print_func);
++
++        REENABLE_WARNING;
++
+         return r;
+ }
+ 
+diff --git a/src/shared/bpf-dlopen.h b/src/shared/bpf-dlopen.h
+index 95951e63e0..0750abc56b 100644
+--- a/src/shared/bpf-dlopen.h
++++ b/src/shared/bpf-dlopen.h
+@@ -8,8 +8,8 @@
+ 
+ #include "bpf-compat.h"
+ 
+-extern struct bpf_link* (*sym_bpf_program__attach_cgroup)(struct bpf_program *, int);
+-extern struct bpf_link* (*sym_bpf_program__attach_lsm)(struct bpf_program *);
++extern struct bpf_link* (*sym_bpf_program__attach_cgroup)(const struct bpf_program *, int);
++extern struct bpf_link* (*sym_bpf_program__attach_lsm)(const struct bpf_program *);
+ extern int (*sym_bpf_link__fd)(const struct bpf_link *);
+ extern int (*sym_bpf_link__destroy)(struct bpf_link *);
+ extern int (*sym_bpf_map__fd)(const struct bpf_map *);
+diff --git a/src/shared/cryptsetup-util.c b/src/shared/cryptsetup-util.c
+index 401e7a3f9c..84358c2792 100644
+--- a/src/shared/cryptsetup-util.c
++++ b/src/shared/cryptsetup-util.c
+@@ -193,6 +193,14 @@ int dlopen_cryptsetup(void) {
+ #if HAVE_LIBCRYPTSETUP
+         int r;
+ 
++        /* libcryptsetup added crypt_reencrypt() in 2.2.0, and marked it obsolete in 2.4.0, replacing it with
++         * crypt_reencrypt_run(), which takes one extra argument but is otherwise identical. The old call is
++         * still available though, and given we want to support 2.2.0 for a while longer, we'll stick to the
++         * old symbol. Howerver, the old symbols now has a GCC deprecation decorator, hence let's turn off
++         * warnings about this for now. */
++
++        DISABLE_WARNING_DEPRECATED_DECLARATIONS;
++
+         r = dlopen_many_sym_or_warn(
+                         &cryptsetup_dl, "libcryptsetup.so.12", LOG_DEBUG,
+                         DLSYM_ARG(crypt_activate_by_passphrase),
+@@ -238,6 +246,8 @@ int dlopen_cryptsetup(void) {
+         if (r <= 0)
+                 return r;
+ 
++        REENABLE_WARNING;
++
+         /* Redirect the default logging calls of libcryptsetup to our own logging infra. (Note that
+          * libcryptsetup also maintains per-"struct crypt_device" log functions, which we'll also set
+          * whenever allocating a "struct crypt_device" context. Why set both? To be defensive: maybe some
+diff --git a/src/shared/dlfcn-util.h b/src/shared/dlfcn-util.h
+index 7bd5ff4595..ca632f4e1f 100644
+--- a/src/shared/dlfcn-util.h
++++ b/src/shared/dlfcn-util.h
+@@ -19,6 +19,10 @@ int dlopen_many_sym_or_warn_sentinel(void **dlp, const char *filename, int log_l
+  * that each library symbol to resolve will be placed in a variable with the "sym_" prefix, i.e. a symbol
+  * "foobar" is loaded into a variable "sym_foobar". */
+ #define DLSYM_ARG(arg) \
++        ({ assert_cc(__builtin_types_compatible_p(typeof(sym_##arg), typeof(&arg))); &sym_##arg; }), STRINGIFY(arg)
++
++/* libbpf is a bit confused about type-safety and API compatibility. Provide a macro that can tape over that mess. Sad. */
++#define DLSYM_ARG_FORCE(arg) \
+         &sym_##arg, STRINGIFY(arg)
+ 
+ static inline void *safe_dlclose(void *p) {
+diff --git a/src/shared/idn-util.c b/src/shared/idn-util.c
+index d4108d0c8e..6f36688dc0 100644
+--- a/src/shared/idn-util.c
++++ b/src/shared/idn-util.c
+@@ -17,7 +17,7 @@ static void* idn_dl = NULL;
+ 
+ #if HAVE_LIBIDN2
+ int (*sym_idn2_lookup_u8)(const uint8_t* src, uint8_t** lookupname, int flags) = NULL;
+-const char *(*sym_idn2_strerror)(int rc) = NULL;
++const char *(*sym_idn2_strerror)(int rc) _const_ = NULL;
+ int (*sym_idn2_to_unicode_8z8z)(const char * input, char ** output, int flags) = NULL;
+ 
+ int dlopen_idn(void) {
+@@ -31,7 +31,7 @@ int dlopen_idn(void) {
+ 
+ #if HAVE_LIBIDN
+ int (*sym_idna_to_ascii_4i)(const uint32_t * in, size_t inlen, char *out, int flags);
+-int (*sym_idna_to_unicode_44i)(const uint32_t * in, size_t inlen,uint32_t * out, size_t * outlen, int flags);
++int (*sym_idna_to_unicode_44i)(const uint32_t * in, size_t inlen, uint32_t * out, size_t * outlen, int flags);
+ char* (*sym_stringprep_ucs4_to_utf8)(const uint32_t * str, ssize_t len, size_t * items_read, size_t * items_written);
+ uint32_t* (*sym_stringprep_utf8_to_ucs4)(const char *str, ssize_t len, size_t *items_written);
+ 
+diff --git a/src/shared/idn-util.h b/src/shared/idn-util.h
+index 4698eed3b8..e64bd99747 100644
+--- a/src/shared/idn-util.h
++++ b/src/shared/idn-util.h
+@@ -20,7 +20,7 @@ static inline int dlopen_idn(void) {
+ 
+ #if HAVE_LIBIDN2
+ extern int (*sym_idn2_lookup_u8)(const uint8_t* src, uint8_t** lookupname, int flags);
+-extern const char *(*sym_idn2_strerror)(int rc);
++extern const char *(*sym_idn2_strerror)(int rc) _const_;
+ extern int (*sym_idn2_to_unicode_8z8z)(const char * input, char ** output, int flags);
+ #endif
+ 

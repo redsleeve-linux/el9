@@ -1,0 +1,33 @@
+From 594d2eb17d4548313eddf4e13ac8c734b268ae93 Mon Sep 17 00:00:00 2001
+From: Jan Macku <jamacku@redhat.com>
+Date: Mon, 7 Aug 2023 15:11:00 +0200
+Subject: [PATCH] ci(lint): exclude `.in` files from ShellCheck lint
+
+Exclude all `.in` files because they may contain unsupported syntax, and
+they have to be preprocessed first. For example:
+
+```sh
+Error: SHELLCHECK_WARNING:
+./src/rpm/systemd-update-helper.in:130:37: warning[SC1083]: This { is literal. Check expression (missing ;/\n?) or quote it.
+```
+
+Related to: https://github.com/systemd/systemd/pull/28521
+
+(cherry picked from commit 97eb82682126e7f3ee956a025078ea2b801955cb)
+
+Related: RHEL-1086
+---
+ .github/workflows/differential-shellcheck.yml | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/.github/workflows/differential-shellcheck.yml b/.github/workflows/differential-shellcheck.yml
+index 3662126304..0d3eee48e2 100644
+--- a/.github/workflows/differential-shellcheck.yml
++++ b/.github/workflows/differential-shellcheck.yml
+@@ -32,4 +32,6 @@ jobs:
+       - name: Differential ShellCheck
+         uses: redhat-plumbers-in-action/differential-shellcheck@v4
+         with:
++          # exclude all `.in` files because they may contain unsupported syntax, and they have to be preprocessed first
++          exclude-path: '**/*.in'
+           token: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,38 @@
+From 35a698a6c8f5eff9c20869c361b2488024987d8c Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 10 Feb 2023 18:22:57 +0900
+Subject: [PATCH] cryptenroll: drop deadcode
+
+Follow-up for b0fc23fae51d244d2c33d70c10003aa5d5840223.
+
+After the commit, 'signature_path' is now always non-NULL, hence the
+condition can be dropped.
+
+Fixes CID#1504492.
+
+(cherry picked from commit 645063d1bb309137f884d9c9f01d2b7d01ab2ca8)
+
+Related: RHEL-16182
+---
+ src/cryptenroll/cryptenroll-tpm2.c | 8 ++------
+ 1 file changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/src/cryptenroll/cryptenroll-tpm2.c b/src/cryptenroll/cryptenroll-tpm2.c
+index d9de9aa96c..631aeea3b5 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.c
++++ b/src/cryptenroll/cryptenroll-tpm2.c
+@@ -203,12 +203,8 @@ int enroll_tpm2(struct crypt_device *cd,
+                  * This is optional however, skip it if it's not explicitly provided. */
+ 
+                 r = tpm2_load_pcr_signature(signature_path, &signature_json);
+-                if (r < 0) {
+-                        if (signature_path || r != -ENOENT)
+-                                return log_debug_errno(r, "Failed to read TPM PCR signature: %m");
+-
+-                        log_debug_errno(r, "Failed to read TPM2 PCR signature, proceeding without: %m");
+-                }
++                if (r < 0)
++                        return log_debug_errno(r, "Failed to read TPM PCR signature: %m");
+         }
+ 
+         _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;

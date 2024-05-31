@@ -1,0 +1,110 @@
+From 5d8a176526175a9d7bf762c46245492bf056bdc8 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Fri, 7 Jul 2023 10:11:07 -0400
+Subject: [PATCH] openssl: add ecc_edch()
+
+Add function to perform ECC EDCH.
+
+(cherry picked from commit 779b80d8039ae3925ce6a52f97f9d53586ae931e)
+
+Related: RHEL-16182
+---
+ src/shared/openssl-util.c | 42 +++++++++++++++++++++++++++++++++++++++
+ src/shared/openssl-util.h |  2 ++
+ src/test/test-openssl.c   | 19 ++++++++++++++++++
+ 3 files changed, 63 insertions(+)
+
+diff --git a/src/shared/openssl-util.c b/src/shared/openssl-util.c
+index 19ec385bf0..c8eadd9c63 100644
+--- a/src/shared/openssl-util.c
++++ b/src/shared/openssl-util.c
+@@ -894,6 +894,48 @@ int ecc_pkey_new(int curve_id, EVP_PKEY **ret) {
+         return 0;
+ }
+ 
++/* Perform ECDH to derive an ECC shared secret between the provided private key and public peer key. For two
++ * keys, this will result in the same shared secret in either direction; ECDH using Alice's private key and
++ * Bob's public (peer) key will result in the same shared secret as ECDH using Bob's private key and Alice's
++ * public (peer) key. On success, this returns 0 and provides the shared secret; otherwise this returns an
++ * error. */
++int ecc_ecdh(const EVP_PKEY *private_pkey,
++             const EVP_PKEY *peer_pkey,
++             void **ret_shared_secret,
++             size_t *ret_shared_secret_size) {
++
++        assert(private_pkey);
++        assert(peer_pkey);
++        assert(ret_shared_secret);
++        assert(ret_shared_secret_size);
++
++        _cleanup_(EVP_PKEY_CTX_freep) EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new((EVP_PKEY*) private_pkey, NULL);
++        if (!ctx)
++                return log_openssl_errors("Failed to create new EVP_PKEY_CTX");
++
++        if (EVP_PKEY_derive_init(ctx) <= 0)
++                return log_openssl_errors("Failed to initialize EVP_PKEY_CTX");
++
++        if (EVP_PKEY_derive_set_peer(ctx, (EVP_PKEY*) peer_pkey) <= 0)
++                return log_openssl_errors("Failed to set ECC derive peer");
++
++        size_t shared_secret_size;
++        if (EVP_PKEY_derive(ctx, NULL, &shared_secret_size) <= 0)
++                return log_openssl_errors("Failed to get ECC shared secret size");
++
++        _cleanup_free_ void *shared_secret = malloc(shared_secret_size);
++        if (!shared_secret)
++                return log_oom_debug();
++
++        if (EVP_PKEY_derive(ctx, (unsigned char*) shared_secret, &shared_secret_size) <= 0)
++                return log_openssl_errors("Failed to derive ECC shared secret");
++
++        *ret_shared_secret = TAKE_PTR(shared_secret);
++        *ret_shared_secret_size = shared_secret_size;
++
++        return 0;
++}
++
+ int pubkey_fingerprint(EVP_PKEY *pk, const EVP_MD *md, void **ret, size_t *ret_size) {
+         _cleanup_(EVP_MD_CTX_freep) EVP_MD_CTX* m = NULL;
+         _cleanup_free_ void *d = NULL, *h = NULL;
+diff --git a/src/shared/openssl-util.h b/src/shared/openssl-util.h
+index 2e894fba80..0fea0c5df0 100644
+--- a/src/shared/openssl-util.h
++++ b/src/shared/openssl-util.h
+@@ -104,6 +104,8 @@ int ecc_pkey_to_curve_x_y(const EVP_PKEY *pkey, int *ret_curve_id, void **ret_x,
+ 
+ int ecc_pkey_new(int curve_id, EVP_PKEY **ret);
+ 
++int ecc_ecdh(const EVP_PKEY *private_pkey, const EVP_PKEY *peer_pkey, void **ret_shared_secret, size_t *ret_shared_secret_size);
++
+ int pubkey_fingerprint(EVP_PKEY *pk, const EVP_MD *md, void **ret, size_t *ret_size);
+ 
+ #else
+diff --git a/src/test/test-openssl.c b/src/test/test-openssl.c
+index 9d2a1ad0c2..1653c0dc9d 100644
+--- a/src/test/test-openssl.c
++++ b/src/test/test-openssl.c
+@@ -425,4 +425,23 @@ TEST(openssl_cipher) {
+                 /* expected= */ NULL);
+ }
+ 
++TEST(ecc_ecdh) {
++        _cleanup_(EVP_PKEY_freep) EVP_PKEY *pkeyA = NULL, *pkeyB = NULL, *pkeyC = NULL;
++        _cleanup_free_ void *secretAB = NULL, *secretBA = NULL, *secretAC = NULL, *secretCA = NULL;
++        size_t secretAB_size, secretBA_size, secretAC_size, secretCA_size;
++
++        assert_se(ecc_pkey_new(NID_X9_62_prime256v1, &pkeyA) >= 0);
++        assert_se(ecc_pkey_new(NID_X9_62_prime256v1, &pkeyB) >= 0);
++        assert_se(ecc_pkey_new(NID_X9_62_prime256v1, &pkeyC) >= 0);
++
++        assert_se(ecc_ecdh(pkeyA, pkeyB, &secretAB, &secretAB_size) >= 0);
++        assert_se(ecc_ecdh(pkeyB, pkeyA, &secretBA, &secretBA_size) >= 0);
++        assert_se(ecc_ecdh(pkeyA, pkeyC, &secretAC, &secretAC_size) >= 0);
++        assert_se(ecc_ecdh(pkeyC, pkeyA, &secretCA, &secretCA_size) >= 0);
++
++        assert_se(memcmp_nn(secretAB, secretAB_size, secretBA, secretBA_size) == 0);
++        assert_se(memcmp_nn(secretAC, secretAC_size, secretCA, secretCA_size) == 0);
++        assert_se(memcmp_nn(secretAC, secretAC_size, secretAB, secretAB_size) != 0);
++}
++
+ DEFINE_TEST_MAIN(LOG_DEBUG);

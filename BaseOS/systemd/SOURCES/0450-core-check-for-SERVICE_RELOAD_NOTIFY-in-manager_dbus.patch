@@ -1,0 +1,40 @@
+From 036f0593b33ddc0f40a333d790a276c3cffe862e Mon Sep 17 00:00:00 2001
+From: msizanoen1 <msizanoen@qtmlabs.xyz>
+Date: Tue, 2 May 2023 16:59:07 +0700
+Subject: [PATCH] core: check for SERVICE_RELOAD_NOTIFY in
+ manager_dbus_is_running
+
+This ensures that systemd won't erronously disconnect from the system
+bus in case a bus recheck is triggered immediately after the bus service
+emits `RELOADING=1`.
+
+This fixes an issue where systemd-logind sometimes randomly stops
+receiving `UnitRemoved` after a system update.
+
+This also handles SERVICE_RELOAD_SIGNAL just in case somebody ever
+creates a D-Bus broker implementation that uses `Type=notify-reload`.
+
+(cherry picked from commit 845824acddf2e7e08c94afe7cfee6e50a682c947)
+
+Related: RHEL-6090
+---
+ src/core/manager.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/manager.c b/src/core/manager.c
+index b34103d7d3..eeee395b90 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -1696,7 +1696,11 @@ static bool manager_dbus_is_running(Manager *m, bool deserialized) {
+         u = manager_get_unit(m, SPECIAL_DBUS_SERVICE);
+         if (!u)
+                 return false;
+-        if (!IN_SET((deserialized ? SERVICE(u)->deserialized_state : SERVICE(u)->state), SERVICE_RUNNING, SERVICE_RELOAD))
++        if (!IN_SET((deserialized ? SERVICE(u)->deserialized_state : SERVICE(u)->state),
++                    SERVICE_RUNNING,
++                    SERVICE_RELOAD,
++                    SERVICE_RELOAD_NOTIFY,
++                    SERVICE_RELOAD_SIGNAL))
+                 return false;
+ 
+         return true;

@@ -1,0 +1,87 @@
+From 99294ed904d04eff1b1f05390e64d92f9d824853 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Fri, 11 Nov 2022 17:31:34 +0100
+Subject: [PATCH] chase-symlinks: add new flag for prohibiting any following of
+ symlinks
+
+This is useful when operating in the ESP, which is untrusted territory,
+and where under no circumstances we should be tricked by symlinks into
+doing anything we don't want to.
+
+(cherry picked from commit d43e78b643535da398345d5ae680a96d7b65940e)
+
+Related: RHEL-16952
+---
+ src/basic/chase-symlinks.c | 18 ++++++++++++++++++
+ src/basic/chase-symlinks.h |  1 +
+ src/test/test-fs-util.c    |  9 +++++++++
+ 3 files changed, 28 insertions(+)
+
+diff --git a/src/basic/chase-symlinks.c b/src/basic/chase-symlinks.c
+index ac55311f4d..e10370d0d2 100644
+--- a/src/basic/chase-symlinks.c
++++ b/src/basic/chase-symlinks.c
+@@ -57,6 +57,21 @@ static int log_autofs_mount_point(int fd, const char *path, ChaseSymlinksFlags f
+                                  strna(n1), path);
+ }
+ 
++static int log_prohibited_symlink(int fd, ChaseSymlinksFlags flags) {
++        _cleanup_free_ char *n1 = NULL;
++
++        assert(fd >= 0);
++
++        if (!FLAGS_SET(flags, CHASE_WARN))
++                return -EREMCHG;
++
++        (void) fd_get_path(fd, &n1);
++
++        return log_warning_errno(SYNTHETIC_ERRNO(EREMCHG),
++                                 "Detected symlink where not symlink is allowed at %s, refusing.",
++                                 strna(n1));
++}
++
+ int chase_symlinks(
+                 const char *path,
+                 const char *original_root,
+@@ -302,6 +317,9 @@ int chase_symlinks(
+                 if (S_ISLNK(st.st_mode) && !((flags & CHASE_NOFOLLOW) && isempty(todo))) {
+                         _cleanup_free_ char *destination = NULL;
+ 
++                        if (flags & CHASE_PROHIBIT_SYMLINKS)
++                                return log_prohibited_symlink(child, flags);
++
+                         /* This is a symlink, in this case read the destination. But let's make sure we
+                          * don't follow symlinks without bounds. */
+                         if (--max_follow <= 0)
+diff --git a/src/basic/chase-symlinks.h b/src/basic/chase-symlinks.h
+index a9ee58f9f7..8f69bf3eed 100644
+--- a/src/basic/chase-symlinks.h
++++ b/src/basic/chase-symlinks.h
+@@ -17,6 +17,7 @@ typedef enum ChaseSymlinksFlags {
+                                      * right-most component refers to symlink, return O_PATH fd of the symlink. */
+         CHASE_WARN        = 1 << 7, /* Emit an appropriate warning when an error is encountered.
+                                      * Note: this may do an NSS lookup, hence this flag cannot be used in PID 1. */
++        CHASE_PROHIBIT_SYMLINKS  = 1 << 8, /* Refuse all symlinks */
+ } ChaseSymlinksFlags;
+ 
+ bool unsafe_transition(const struct stat *a, const struct stat *b);
+diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
+index 9c1ced7591..16f04d6889 100644
+--- a/src/test/test-fs-util.c
++++ b/src/test/test-fs-util.c
+@@ -387,6 +387,15 @@ TEST(chase_symlinks) {
+         assert_se(path_equal(path_startswith(result, p), "usr"));
+         result = mfree(result);
+ 
++        /* Test CHASE_PROHIBIT_SYMLINKS */
++
++        assert_se(chase_symlinks("top/dot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, NULL, NULL) == -EREMCHG);
++        assert_se(chase_symlinks("top/dot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_WARN, NULL, NULL) == -EREMCHG);
++        assert_se(chase_symlinks("top/dotdot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, NULL, NULL) == -EREMCHG);
++        assert_se(chase_symlinks("top/dotdot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_WARN, NULL, NULL) == -EREMCHG);
++        assert_se(chase_symlinks("top/dot/dot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS, NULL, NULL) == -EREMCHG);
++        assert_se(chase_symlinks("top/dot/dot", temp, CHASE_PREFIX_ROOT|CHASE_PROHIBIT_SYMLINKS|CHASE_WARN, NULL, NULL) == -EREMCHG);
++
+  cleanup:
+         assert_se(rm_rf(temp, REMOVE_ROOT|REMOVE_PHYSICAL) >= 0);
+ }

@@ -1,0 +1,169 @@
+From 67238a5417fb32649b83f2da65356908abbcd821 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Tue, 3 Oct 2023 10:25:19 -0400
+Subject: [PATCH] tpm2: allow using tpm2_get_srk_template() without tpm
+
+The SRK templates are defined by specification, so move the check for TPM
+support to the tpm2_get_best_srk_template() function, and allow anyone to get
+the ECC and RSA templates.
+
+Also add test to verify the SRK templates are correct.
+
+(cherry picked from commit 788933379d9ab219ba085021d0d19ac5d0372cea)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c | 69 +++++++++++++++++++++++-------------------
+ src/shared/tpm2-util.h |  2 ++
+ src/test/test-tpm2.c   | 25 +++++++++++++++
+ 3 files changed, 65 insertions(+), 31 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index a16e611f27..1751c82450 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -1110,9 +1110,8 @@ static int tpm2_get_legacy_template(TPMI_ALG_PUBLIC alg, TPMT_PUBLIC *ret_templa
+  * SRK-compatible). Preferably, the TPM should contain a shared SRK located at the reserved shared SRK handle
+  * (see TPM2_SRK_HANDLE in tpm2-util.h, and tpm2_get_srk() below).
+  *
+- * The alg must be TPM2_ALG_RSA or TPM2_ALG_ECC. Returns error if the requested template is not supported on
+- * this TPM. Also see tpm2_get_best_srk_template() below. */
+-static int tpm2_get_srk_template(Tpm2Context *c, TPMI_ALG_PUBLIC alg, TPMT_PUBLIC *ret_template) {
++ * Returns 0 if the specified algorithm is ECC or RSA, otherwise -EOPNOTSUPP. */
++int tpm2_get_srk_template(TPMI_ALG_PUBLIC alg, TPMT_PUBLIC *ret_template) {
+         /* The attributes are the same between ECC and RSA templates. This has the changes specified in the
+          * Provisioning Guidance document, specifically:
+          * TPMA_OBJECT_USERWITHAUTH is added.
+@@ -1161,47 +1160,55 @@ static int tpm2_get_srk_template(Tpm2Context *c, TPMI_ALG_PUBLIC alg, TPMT_PUBLI
+                 },
+         };
+ 
+-        assert(c);
+         assert(ret_template);
+ 
+-        if (alg == TPM2_ALG_ECC) {
+-                if (!tpm2_supports_alg(c, TPM2_ALG_ECC))
+-                        return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+-                                               "TPM does not support ECC.");
+-
+-                if (!tpm2_supports_ecc_curve(c, srk_ecc.parameters.eccDetail.curveID))
+-                        return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+-                                               "TPM does not support ECC-NIST-P256 curve.");
+-
+-                if (!tpm2_supports_tpmt_public(c, &srk_ecc))
+-                        return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+-                                               "TPM does not support SRK ECC template L-2.");
+-
++        switch (alg) {
++        case TPM2_ALG_ECC:
+                 *ret_template = srk_ecc;
+                 return 0;
+-        }
+-
+-        if (alg == TPM2_ALG_RSA) {
+-                if (!tpm2_supports_alg(c, TPM2_ALG_RSA))
+-                        return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+-                                               "TPM does not support RSA.");
+-
+-                if (!tpm2_supports_tpmt_public(c, &srk_rsa))
+-                        return log_debug_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+-                                               "TPM does not support SRK RSA template L-1.");
+-
++        case TPM2_ALG_RSA:
+                 *ret_template = srk_rsa;
+                 return 0;
+         }
+ 
+-        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "Unsupported SRK alg: 0x%x.", alg);
++        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "No SRK for algorithm 0x%" PRIx16, alg);
+ }
+ 
+ /* Get the best supported SRK template. ECC is preferred, then RSA. */
+ static int tpm2_get_best_srk_template(Tpm2Context *c, TPMT_PUBLIC *ret_template) {
+-        if (tpm2_get_srk_template(c, TPM2_ALG_ECC, ret_template) >= 0 ||
+-            tpm2_get_srk_template(c, TPM2_ALG_RSA, ret_template) >= 0)
++        TPMT_PUBLIC template;
++        int r;
++
++        assert(c);
++        assert(ret_template);
++
++        r = tpm2_get_srk_template(TPM2_ALG_ECC, &template);
++        if (r < 0)
++                return r;
++
++        if (!tpm2_supports_alg(c, TPM2_ALG_ECC))
++                log_debug("TPM does not support ECC.");
++        else if (!tpm2_supports_ecc_curve(c, template.parameters.eccDetail.curveID))
++                log_debug("TPM does not support ECC-NIST-P256 curve.");
++        else if (!tpm2_supports_tpmt_public(c, &template))
++                log_debug("TPM does not support SRK ECC template L-2.");
++        else {
++                *ret_template = template;
+                 return 0;
++        }
++
++        r = tpm2_get_srk_template(TPM2_ALG_RSA, &template);
++        if (r < 0)
++                return r;
++
++        if (!tpm2_supports_alg(c, TPM2_ALG_RSA))
++                log_debug("TPM does not support RSA.");
++        else if (!tpm2_supports_tpmt_public(c, &template))
++                log_debug("TPM does not support SRK RSA template L-1.");
++        else {
++                *ret_template = template;
++                return 0;
++        }
+ 
+         return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
+                                "TPM does not support either SRK template L-1 (RSA) or L-2 (ECC).");
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index c980567819..fe26b98e76 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -181,6 +181,8 @@ int tpm2_calculate_policy_authorize(const TPM2B_PUBLIC *public, const TPM2B_DIGE
+ int tpm2_calculate_policy_pcr(const Tpm2PCRValue *pcr_values, size_t n_pcr_values, TPM2B_DIGEST *digest);
+ int tpm2_calculate_sealing_policy(const Tpm2PCRValue *pcr_values, size_t n_pcr_values, const TPM2B_PUBLIC *public, bool use_pin, TPM2B_DIGEST *digest);
+ 
++int tpm2_get_srk_template(TPMI_ALG_PUBLIC alg, TPMT_PUBLIC *ret_template);
++
+ int tpm2_get_or_create_srk(Tpm2Context *c, const Tpm2Handle *session, TPM2B_PUBLIC **ret_public, TPM2B_NAME **ret_name, TPM2B_NAME **ret_qname, Tpm2Handle **ret_handle);
+ 
+ int tpm2_seal(Tpm2Context *c, uint32_t seal_key_handle, const TPM2B_DIGEST *policy, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, uint16_t *ret_primary_alg, void **ret_srk_buf, size_t *ret_srk_buf_size);
+diff --git a/src/test/test-tpm2.c b/src/test/test-tpm2.c
+index 3df6258934..8a27ffc7db 100644
+--- a/src/test/test-tpm2.c
++++ b/src/test/test-tpm2.c
+@@ -960,6 +960,31 @@ TEST(calculate_policy_pcr) {
+         assert_se(digest_check(&d, "7481fd1b116078eb3ac2456e4ad542c9b46b9b8eb891335771ca8e7c8f8e4415"));
+ }
+ 
++TEST(tpm2_get_srk_template) {
++        TPMT_PUBLIC rsa;
++        assert_se(tpm2_get_srk_template(TPM2_ALG_RSA, &rsa) >= 0);
++        assert_se(rsa.type == TPM2_ALG_RSA);
++        assert_se(rsa.nameAlg == TPM2_ALG_SHA256);
++        assert_se(rsa.objectAttributes == 0x30472);
++        assert_se(rsa.parameters.rsaDetail.symmetric.algorithm == TPM2_ALG_AES);
++        assert_se(rsa.parameters.rsaDetail.symmetric.keyBits.sym == 128);
++        assert_se(rsa.parameters.rsaDetail.symmetric.mode.sym == TPM2_ALG_CFB);
++        assert_se(rsa.parameters.rsaDetail.scheme.scheme == TPM2_ALG_NULL);
++        assert_se(rsa.parameters.rsaDetail.keyBits == 2048);
++
++        TPMT_PUBLIC ecc;
++        assert_se(tpm2_get_srk_template(TPM2_ALG_ECC, &ecc) >= 0);
++        assert_se(ecc.type == TPM2_ALG_ECC);
++        assert_se(ecc.nameAlg == TPM2_ALG_SHA256);
++        assert_se(ecc.objectAttributes == 0x30472);
++        assert_se(ecc.parameters.eccDetail.symmetric.algorithm == TPM2_ALG_AES);
++        assert_se(ecc.parameters.eccDetail.symmetric.keyBits.sym == 128);
++        assert_se(ecc.parameters.eccDetail.symmetric.mode.sym == TPM2_ALG_CFB);
++        assert_se(ecc.parameters.eccDetail.scheme.scheme == TPM2_ALG_NULL);
++        assert_se(ecc.parameters.eccDetail.kdf.scheme == TPM2_ALG_NULL);
++        assert_se(ecc.parameters.eccDetail.curveID == TPM2_ECC_NIST_P256);
++}
++
+ static void check_test_parms(Tpm2Context *c) {
+         assert(c);
+ 

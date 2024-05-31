@@ -1,0 +1,184 @@
+From 1b6c4b7d68582bb7865405a143b6217ce9616b8d Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Tue, 27 Jun 2023 15:04:59 -0400
+Subject: [PATCH] openssl: add kdf_kb_hmac_derive()
+
+Add function to perform key-based (KB) key derivation function (KDF) using
+hash-based message authentication code (HMAC).
+
+Also alphabetize openssl-util.c header list, and include string-util.h.
+
+(cherry picked from commit a65a25bec74d893881f0c452ece5111b1ab4e01b)
+
+Related: RHEL-16182
+---
+ src/shared/openssl-util.c | 91 ++++++++++++++++++++++++++++++++++++++-
+ src/shared/openssl-util.h |  5 +++
+ src/test/test-openssl.c   | 16 +++++++
+ 3 files changed, 110 insertions(+), 2 deletions(-)
+
+diff --git a/src/shared/openssl-util.c b/src/shared/openssl-util.c
+index 20c1885efb..9107f198cb 100644
+--- a/src/shared/openssl-util.c
++++ b/src/shared/openssl-util.c
+@@ -1,9 +1,10 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
+-#include "fd-util.h"
+-#include "openssl-util.h"
+ #include "alloc-util.h"
++#include "fd-util.h"
+ #include "hexdecoct.h"
++#include "openssl-util.h"
++#include "string-util.h"
+ 
+ #if HAVE_OPENSSL
+ /* For each error in the the Openssl thread error queue, log the provided message and the Openssl error
+@@ -236,6 +237,92 @@ int openssl_hmac_many(
+         return 0;
+ }
+ 
++/* Perform Key-Based HMAC KDF. The mode must be "COUNTER" or "FEEDBACK". The parameter naming is from the
++ * Openssl api, and maps to SP800-108 naming as "...key, salt, info, and seed correspond to KI, Label,
++ * Context, and IV (respectively)...". The derive_size parameter specifies how many bytes are derived.
++ *
++ * For more details see: https://www.openssl.org/docs/manmaster/man7/EVP_KDF-KB.html */
++int kdf_kb_hmac_derive(
++                const char *mode,
++                const char *digest,
++                const void *key,
++                size_t key_size,
++                const void *salt,
++                size_t salt_size,
++                const void *info,
++                size_t info_size,
++                const void *seed,
++                size_t seed_size,
++                size_t derive_size,
++                void **ret) {
++
++#if OPENSSL_VERSION_MAJOR >= 3
++        assert(mode);
++        assert(strcaseeq(mode, "COUNTER") || strcaseeq(mode, "FEEDBACK"));
++        assert(digest);
++        assert(key || key_size == 0);
++        assert(salt || salt_size == 0);
++        assert(info || info_size == 0);
++        assert(seed || seed_size == 0);
++        assert(derive_size > 0);
++        assert(ret);
++
++        _cleanup_(EVP_KDF_freep) EVP_KDF *kdf = EVP_KDF_fetch(NULL, "KBKDF", NULL);
++        if (!kdf)
++                return log_openssl_errors("Failed to create new EVP_KDF");
++
++        _cleanup_(EVP_KDF_CTX_freep) EVP_KDF_CTX *ctx = EVP_KDF_CTX_new(kdf);
++        if (!ctx)
++                return log_openssl_errors("Failed to create new EVP_KDF_CTX");
++
++        _cleanup_(OSSL_PARAM_BLD_freep) OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
++        if (!bld)
++                return log_openssl_errors("Failed to create new OSSL_PARAM_BLD");
++
++        if (!OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_KDF_PARAM_MAC, (char*) "HMAC", 0))
++                return log_openssl_errors("Failed to add KDF-KB OSSL_KDF_PARAM_MAC");
++
++        if (!OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_KDF_PARAM_MODE, (char*) mode, 0))
++                return log_openssl_errors("Failed to add KDF-KB OSSL_KDF_PARAM_MODE");
++
++        if (!OSSL_PARAM_BLD_push_utf8_string(bld, OSSL_KDF_PARAM_DIGEST, (char*) digest, 0))
++                return log_openssl_errors("Failed to add KDF-KB OSSL_KDF_PARAM_DIGEST");
++
++        if (key)
++                if (!OSSL_PARAM_BLD_push_octet_string(bld, OSSL_KDF_PARAM_KEY, (char*) key, key_size))
++                        return log_openssl_errors("Failed to add KDF-KB OSSL_KDF_PARAM_KEY");
++
++        if (salt)
++                if (!OSSL_PARAM_BLD_push_octet_string(bld, OSSL_KDF_PARAM_SALT, (char*) salt, salt_size))
++                        return log_openssl_errors("Failed to add KDF-KB OSSL_KDF_PARAM_SALT");
++
++        if (info)
++                if (!OSSL_PARAM_BLD_push_octet_string(bld, OSSL_KDF_PARAM_INFO, (char*) info, info_size))
++                        return log_openssl_errors("Failed to add KDF-KB OSSL_KDF_PARAM_INFO");
++
++        if (seed)
++                if (!OSSL_PARAM_BLD_push_octet_string(bld, OSSL_KDF_PARAM_SEED, (char*) seed, seed_size))
++                        return log_openssl_errors("Failed to add KDF-KB OSSL_KDF_PARAM_SEED");
++
++        _cleanup_(OSSL_PARAM_freep) OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(bld);
++        if (!params)
++                return log_openssl_errors("Failed to build KDF-KB OSSL_PARAM");
++
++        _cleanup_free_ void *buf = malloc(derive_size);
++        if (!buf)
++                return log_oom_debug();
++
++        if (EVP_KDF_derive(ctx, buf, derive_size, params) <= 0)
++                return log_openssl_errors("Openssl KDF-KB derive failed");
++
++        *ret = TAKE_PTR(buf);
++
++        return 0;
++#else
++        return log_debug_errno(SYNTHETIC_ERRNO(EOPNOTSUPP), "KDF-KB requires openssl >= 3.");
++#endif
++}
++
+ int rsa_encrypt_bytes(
+                 EVP_PKEY *pkey,
+                 const void *decrypted_key,
+diff --git a/src/shared/openssl-util.h b/src/shared/openssl-util.h
+index 5fe7ca341f..a927819932 100644
+--- a/src/shared/openssl-util.h
++++ b/src/shared/openssl-util.h
+@@ -23,6 +23,7 @@
+ #  endif
+ #  if OPENSSL_VERSION_MAJOR >= 3
+ #    include <openssl/core_names.h>
++#    include <openssl/kdf.h>
+ #    include <openssl/param_build.h>
+ #  endif
+ 
+@@ -40,6 +41,8 @@ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(SSL*, SSL_free, NULL);
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(BIO*, BIO_free, NULL);
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_MD_CTX*, EVP_MD_CTX_free, NULL);
+ #if OPENSSL_VERSION_MAJOR >= 3
++DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_KDF*, EVP_KDF_free, NULL);
++DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_KDF_CTX*, EVP_KDF_CTX_free, NULL);
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_MAC*, EVP_MAC_free, NULL);
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_MAC_CTX*, EVP_MAC_CTX_free, NULL);
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(EVP_MD*, EVP_MD_free, NULL);
+@@ -74,6 +77,8 @@ static inline int openssl_hmac(const char *digest_alg, const void *key, size_t k
+         return openssl_hmac_many(digest_alg, key, key_size, &IOVEC_MAKE((void*) buf, len), 1, ret_digest, ret_digest_size);
+ }
+ 
++int kdf_kb_hmac_derive(const char *mode, const char *digest, const void *key, size_t key_size, const void *salt, size_t salt_size, const void *info, size_t info_size, const void *seed, size_t seed_size, size_t derive_size, void **ret);
++
+ int rsa_encrypt_bytes(EVP_PKEY *pkey, const void *decrypted_key, size_t decrypted_key_size, void **ret_encrypt_key, size_t *ret_encrypt_key_size);
+ 
+ int rsa_oaep_encrypt_bytes(const EVP_PKEY *pkey, const char *digest_alg, const char *label, const void *decrypted_key, size_t decrypted_key_size, void **ret_encrypt_key, size_t *ret_encrypt_key_size);
+diff --git a/src/test/test-openssl.c b/src/test/test-openssl.c
+index 676438f76d..a354b524f0 100644
+--- a/src/test/test-openssl.c
++++ b/src/test/test-openssl.c
+@@ -297,4 +297,20 @@ TEST(hmac_many) {
+         DEFINE_HMAC_SHA256_TEST(key3, "5BE1F4D9C2AFAA2BB3F58FCE967BC7D3084BB8F512659875BDA634991145B0F0", i1, i1, i1, i4, i4, i4, i4, i3, i3, i2);
+ }
+ 
++TEST(kdf_kb_hmac_derive) {
++#if OPENSSL_VERSION_MAJOR >= 3
++        _cleanup_free_ void *derived_key = NULL;
++
++        DEFINE_HEX_PTR(key, "d7ac57124f28371eacaec475b74869d26b4cd64586412a607ce0a9e0c63d468c");
++        const char *salt = "salty chocolate";
++        DEFINE_HEX_PTR(info, "6721a2012d9554f5a64593ed3eaa8fe15e6a21e1c8c8736ea4d234eb55b9e31a");
++        DEFINE_HEX_PTR(expected_derived_key, "A9DA9CEEB9578DBE7DD2862F82898B086E85FF2D10C4E8EC5BD99D0D7F003A2DE1574EB4BD789C03EF5235259BCB3A009DA303EA4DB4CA6BF507DB7C5A063279");
++
++        assert_se(kdf_kb_hmac_derive("COUNTER", "SHA256", key, key_len, salt, strlen(salt), info, info_len, /* seed= */ NULL, /* seed_size= */ 0, 64, &derived_key) >= 0);
++        assert_se(memcmp_nn(derived_key, 64, expected_derived_key, expected_derived_key_len) == 0);
++#else
++        log_tests_skipped("KDF-KB requires Openssl >= 3");
++#endif
++}
++
+ DEFINE_TEST_MAIN(LOG_DEBUG);

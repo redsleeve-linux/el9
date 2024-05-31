@@ -1,0 +1,212 @@
+From 7d2ce56f8ce505b3976b1c8dd435478c163db964 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Wed, 17 May 2023 17:16:23 -0400
+Subject: [PATCH] tpm2: replace _cleanup_tpm2_* macros with _cleanup_()
+
+Remove _cleanup_tpm2_context_ and _cleanup_tpm2_handle_ macros, replacing their
+use with _cleanup_(tpm2_context_unrefp) and _cleanup_(tpm2_handle_freep),
+respectively.
+
+(cherry picked from commit 1dc8f51841f2a552da8924c4d5501c7b1c757ba8)
+
+Related: RHEL-16182
+---
+ src/boot/pcrphase.c         |  2 +-
+ src/cryptsetup/cryptsetup.c |  2 +-
+ src/shared/tpm2-util.c      | 30 +++++++++++++++---------------
+ src/shared/tpm2-util.h      |  2 --
+ src/test/test-tpm2.c        |  2 +-
+ 5 files changed, 18 insertions(+), 20 deletions(-)
+
+diff --git a/src/boot/pcrphase.c b/src/boot/pcrphase.c
+index 57e31e6cad..16d71e6a22 100644
+--- a/src/boot/pcrphase.c
++++ b/src/boot/pcrphase.c
+@@ -340,7 +340,7 @@ static int run(int argc, char *argv[]) {
+                 return EXIT_SUCCESS;
+         }
+ 
+-        _cleanup_tpm2_context_ Tpm2Context *c = NULL;
++        _cleanup_(tpm2_context_unrefp) Tpm2Context *c = NULL;
+         r = tpm2_context_new(arg_tpm2_device, &c);
+         if (r < 0)
+                 return r;
+diff --git a/src/cryptsetup/cryptsetup.c b/src/cryptsetup/cryptsetup.c
+index b384897e4f..674d222db6 100644
+--- a/src/cryptsetup/cryptsetup.c
++++ b/src/cryptsetup/cryptsetup.c
+@@ -837,7 +837,7 @@ static int measure_volume_key(
+         }
+ 
+ #if HAVE_TPM2
+-        _cleanup_tpm2_context_ Tpm2Context *c = NULL;
++        _cleanup_(tpm2_context_unrefp) Tpm2Context *c = NULL;
+         r = tpm2_context_new(arg_tpm2_device, &c);
+         if (r < 0)
+                 return r;
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 91f66aaaf4..bc3ae8340d 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -323,7 +323,7 @@ static const TPMT_SYM_DEF SESSION_TEMPLATE_SYM_AES_128_CFB = {
+ };
+ 
+ int tpm2_context_new(const char *device, Tpm2Context **ret_context) {
+-        _cleanup_tpm2_context_ Tpm2Context *context = NULL;
++        _cleanup_(tpm2_context_unrefp) Tpm2Context *context = NULL;
+         TSS2_RC rc;
+         int r;
+ 
+@@ -469,7 +469,7 @@ Tpm2Handle *tpm2_handle_free(Tpm2Handle *handle) {
+         if (!handle)
+                 return NULL;
+ 
+-        _cleanup_tpm2_context_ Tpm2Context *context = (Tpm2Context*)handle->tpm2_context;
++        _cleanup_(tpm2_context_unrefp) Tpm2Context *context = (Tpm2Context*)handle->tpm2_context;
+         if (context && !handle->keep)
+                 tpm2_handle_flush(context->esys_context, handle->esys_handle);
+ 
+@@ -477,7 +477,7 @@ Tpm2Handle *tpm2_handle_free(Tpm2Handle *handle) {
+ }
+ 
+ int tpm2_handle_new(Tpm2Context *context, Tpm2Handle **ret_handle) {
+-        _cleanup_tpm2_handle_ Tpm2Handle *handle = NULL;
++        _cleanup_(tpm2_handle_freep) Tpm2Handle *handle = NULL;
+ 
+         assert(ret_handle);
+ 
+@@ -754,7 +754,7 @@ static int tpm2_make_primary(
+ 
+         ts = now(CLOCK_MONOTONIC);
+ 
+-        _cleanup_tpm2_handle_ Tpm2Handle *primary = NULL;
++        _cleanup_(tpm2_handle_freep) Tpm2Handle *primary = NULL;
+         r = tpm2_handle_new(c, &primary);
+         if (r < 0)
+                 return r;
+@@ -1688,7 +1688,7 @@ static int tpm2_make_encryption_session(
+         /* Start a salted, unbound HMAC session with a well-known key (e.g. primary key) as tpmKey, which
+          * means that the random salt will be encrypted with the well-known key. That way, only the TPM can
+          * recover the salt, which is then used for key derivation. */
+-        _cleanup_tpm2_handle_ Tpm2Handle *session = NULL;
++        _cleanup_(tpm2_handle_freep) Tpm2Handle *session = NULL;
+         r = tpm2_handle_new(c, &session);
+         if (r < 0)
+                 return r;
+@@ -1746,7 +1746,7 @@ static int tpm2_make_policy_session(
+ 
+         log_debug("Starting policy session.");
+ 
+-        _cleanup_tpm2_handle_ Tpm2Handle *session = NULL;
++        _cleanup_(tpm2_handle_freep) Tpm2Handle *session = NULL;
+         r = tpm2_handle_new(c, &session);
+         if (r < 0)
+                 return r;
+@@ -2307,7 +2307,7 @@ static int tpm2_policy_authorize(
+ 
+         log_debug("Adding PCR signature policy.");
+ 
+-        _cleanup_tpm2_handle_ Tpm2Handle *pubkey_handle = NULL;
++        _cleanup_(tpm2_handle_freep) Tpm2Handle *pubkey_handle = NULL;
+         r = tpm2_handle_new(c, &pubkey_handle);
+         if (r < 0)
+                 return r;
+@@ -2579,7 +2579,7 @@ int tpm2_seal(const char *device,
+ 
+         CLEANUP_ERASE(hmac_sensitive);
+ 
+-        _cleanup_tpm2_context_ Tpm2Context *c = NULL;
++        _cleanup_(tpm2_context_unrefp) Tpm2Context *c = NULL;
+         r = tpm2_context_new(device, &c);
+         if (r < 0)
+                 return r;
+@@ -2662,13 +2662,13 @@ int tpm2_seal(const char *device,
+         if (r < 0)
+                 return log_error_errno(r, "Failed to generate secret key: %m");
+ 
+-        _cleanup_tpm2_handle_ Tpm2Handle *primary_handle = NULL;
++        _cleanup_(tpm2_handle_freep) Tpm2Handle *primary_handle = NULL;
+         TPMI_ALG_PUBLIC primary_alg;
+         r = tpm2_make_primary(c, /* alg = */0, !!ret_srk_buf, &primary_alg, &primary_handle);
+         if (r < 0)
+                 return r;
+ 
+-        _cleanup_tpm2_handle_ Tpm2Handle *encryption_session = NULL;
++        _cleanup_(tpm2_handle_freep) Tpm2Handle *encryption_session = NULL;
+         r = tpm2_make_encryption_session(c, primary_handle, &TPM2_HANDLE_NONE, &encryption_session);
+         if (r < 0)
+                 return r;
+@@ -2829,13 +2829,13 @@ int tpm2_unseal(const char *device,
+                 return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+                                        "Failed to unmarshal public key: %s", sym_Tss2_RC_Decode(rc));
+ 
+-        _cleanup_tpm2_context_ Tpm2Context *c = NULL;
++        _cleanup_(tpm2_context_unrefp) Tpm2Context *c = NULL;
+         r = tpm2_context_new(device, &c);
+         if (r < 0)
+                 return r;
+ 
+         /* If their is a primary key we trust, like an SRK, use it */
+-        _cleanup_tpm2_handle_ Tpm2Handle *primary = NULL;
++        _cleanup_(tpm2_handle_freep) Tpm2Handle *primary = NULL;
+         if (srk_buf) {
+ 
+                 r = tpm2_handle_new(c, &primary);
+@@ -2868,7 +2868,7 @@ int tpm2_unseal(const char *device,
+          * SRK model, the tpmKey is verified. In the non-srk model, with pin, the bindKey
+          * provides protections.
+          */
+-        _cleanup_tpm2_handle_ Tpm2Handle *hmac_key = NULL;
++        _cleanup_(tpm2_handle_freep) Tpm2Handle *hmac_key = NULL;
+         r = tpm2_handle_new(c, &hmac_key);
+         if (r < 0)
+                 return r;
+@@ -2917,13 +2917,13 @@ int tpm2_unseal(const char *device,
+         if (r < 0)
+                 return r;
+ 
+-        _cleanup_tpm2_handle_ Tpm2Handle *encryption_session = NULL;
++        _cleanup_(tpm2_handle_freep) Tpm2Handle *encryption_session = NULL;
+         r = tpm2_make_encryption_session(c, primary, hmac_key, &encryption_session);
+         if (r < 0)
+                 return r;
+ 
+         for (unsigned i = RETRY_UNSEAL_MAX;; i--) {
+-                _cleanup_tpm2_handle_ Tpm2Handle *policy_session = NULL;
++                _cleanup_(tpm2_handle_freep) Tpm2Handle *policy_session = NULL;
+                 _cleanup_(Esys_Freep) TPM2B_DIGEST *policy_digest = NULL;
+                 r = tpm2_make_policy_session(
+                                 c,
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 764104ed58..a03bee148b 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -76,7 +76,6 @@ int tpm2_context_new(const char *device, Tpm2Context **ret_context);
+ Tpm2Context *tpm2_context_ref(Tpm2Context *context);
+ Tpm2Context *tpm2_context_unref(Tpm2Context *context);
+ DEFINE_TRIVIAL_CLEANUP_FUNC(Tpm2Context*, tpm2_context_unref);
+-#define _cleanup_tpm2_context_ _cleanup_(tpm2_context_unrefp)
+ 
+ typedef struct {
+         Tpm2Context *tpm2_context;
+@@ -90,7 +89,6 @@ static const Tpm2Handle TPM2_HANDLE_NONE = _tpm2_handle(NULL, ESYS_TR_NONE);
+ int tpm2_handle_new(Tpm2Context *context, Tpm2Handle **ret_handle);
+ Tpm2Handle *tpm2_handle_free(Tpm2Handle *handle);
+ DEFINE_TRIVIAL_CLEANUP_FUNC(Tpm2Handle*, tpm2_handle_free);
+-#define _cleanup_tpm2_handle_ _cleanup_(tpm2_handle_freep)
+ 
+ int tpm2_supports_alg(Tpm2Context *c, TPM2_ALG_ID alg);
+ 
+diff --git a/src/test/test-tpm2.c b/src/test/test-tpm2.c
+index 130a968273..75e207e9d9 100644
+--- a/src/test/test-tpm2.c
++++ b/src/test/test-tpm2.c
+@@ -716,7 +716,7 @@ TEST(calculate_policy_pcr) {
+ TEST(tpm_required_tests) {
+         int r;
+ 
+-        _cleanup_tpm2_context_ Tpm2Context *c = NULL;
++        _cleanup_(tpm2_context_unrefp) Tpm2Context *c = NULL;
+         r = tpm2_context_new(NULL, &c);
+         if (r < 0) {
+                 log_tests_skipped("Could not find TPM");

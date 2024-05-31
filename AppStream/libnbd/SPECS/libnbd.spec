@@ -1,21 +1,18 @@
-# Do this until the feature is fixed in Fedora.
-%undefine _package_note_flags
-
 # If we should verify tarball signature with GPGv2.
 %global verify_tarball_signature 1
 
 # If there are patches which touch autotools files, set this to 1.
-%global patches_touch_autotools %{nil}
+%global patches_touch_autotools 1
 
 # The source directory.
-%global source_directory 1.16-stable
+%global source_directory 1.18-stable
 
 Name:           libnbd
-Version:        1.16.0
-Release:        1%{?dist}.redsleeve
+Version:        1.18.1
+Release:        3%{?dist}
 Summary:        NBD client library in userspace
 
-License:        LGPLv2+
+License:        LGPL-2.0-or-later AND BSD-3-Clause
 URL:            https://gitlab.com/nbdkit/libnbd
 
 Source0:        http://libguestfs.org/download/libnbd/%{source_directory}/%{name}-%{version}.tar.gz
@@ -29,9 +26,12 @@ Source2:       libguestfs.keyring
 Source3:        copy-patches.sh
 
 # Patches are stored in the upstream repository:
-# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.3/
+# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.4/
 
-# (no patches)
+# Patches.
+Patch0001:     0001-generator-Fix-assertion-in-ext-mode-BLOCK_STATUS-CVE.patch
+Patch0002:     0002-docs-Fix-incorrect-xref-in-libnbd-release-notes-for-.patch
+Patch0003:     0003-tests-Check-behavior-of-nbd_set_strict_mode-STRICT_A.patch
 
 %if 0%{patches_touch_autotools}
 BuildRequires: autoconf, automake, libtool
@@ -60,10 +60,12 @@ BuildRequires:  ubdsrv-devel >= 1.0-3.rc6
 # For the Python 3 bindings.
 BuildRequires:  python3-devel
 
+%ifnarch %{ix86}
 # For the OCaml bindings.
 BuildRequires:  ocaml
 BuildRequires:  ocaml-findlib-devel
 BuildRequires:  ocaml-ocamldoc
+%endif
 
 # Only for building the examples.
 BuildRequires:  glib2-devel
@@ -86,7 +88,7 @@ BuildRequires:  util-linux
 # nbdkit for i686.  These are only needed for the test suite so make
 # them optional.  This reduces our test exposure on 32 bit platforms,
 # although there is still Fedora/armv7 and some upstream testing.
-%ifnarch %{ix86} %{arm}
+%ifnarch %{ix86}
 BuildRequires:  qemu-img
 BuildRequires:  nbdkit
 BuildRequires:  nbdkit-data-plugin
@@ -96,6 +98,11 @@ BuildRequires:  nbdkit-null-plugin
 BuildRequires:  nbdkit-pattern-plugin
 BuildRequires:  nbdkit-sh-plugin
 BuildRequires:  nbdkit-sparse-random-plugin
+%endif
+
+%ifnarch %{ix86}
+# The OCaml runtime system does not provide this symbol
+%global __ocaml_requires_opts -x Stdlib__Callback
 %endif
 
 
@@ -122,7 +129,6 @@ The key features are:
 
 %package devel
 Summary:        Development headers for %{name}
-License:        LGPLv2+ and BSD
 Requires:       %{name}%{?_isa} = %{version}-%{release}
 
 
@@ -130,6 +136,7 @@ Requires:       %{name}%{?_isa} = %{version}-%{release}
 This package contains development headers for %{name}.
 
 
+%ifnarch %{ix86}
 %package -n ocaml-%{name}
 Summary:        OCaml language bindings for %{name}
 Requires:       %{name}%{?_isa} = %{version}-%{release}
@@ -148,6 +155,7 @@ Requires:       ocaml-%{name}%{?_isa} = %{version}-%{release}
 This package contains OCaml language development package for
 %{name}.  Install this if you want to compile OCaml software which
 uses %{name}.
+%endif
 
 
 %package -n python3-%{name}
@@ -166,7 +174,6 @@ python3-%{name} contains Python 3 bindings for %{name}.
 
 %package -n nbdfuse
 Summary:        FUSE support for %{name}
-License:        LGPLv2+ and BSD
 Requires:       %{name}%{?_isa} = %{version}-%{release}
 Recommends:     fuse3
 
@@ -178,7 +185,6 @@ This package contains FUSE support for %{name}.
 %if !0%{?rhel}
 %package -n nbdublk
 Summary:        Userspace NBD block device
-License:        LGPLv2+
 Requires:       %{name}%{?_isa} = %{version}-%{release}
 Recommends:     kernel >= 6.0.0
 Recommends:     %{_sbindir}/ublk
@@ -220,9 +226,14 @@ autoreconf -i
     --with-tls-priority=@LIBNBD,SYSTEM \
     PYTHON=%{__python3} \
     --enable-python \
+%ifnarch %{ix86}
     --enable-ocaml \
+%else
+    --disable-ocaml \
+%endif
     --enable-fuse \
-    --disable-golang
+    --disable-golang \
+    --disable-rust
 
 make %{?_smp_mflags}
 
@@ -235,6 +246,11 @@ find $RPM_BUILD_ROOT -name '*.la' -delete
 
 # Delete the golang man page since we're not distributing the bindings.
 rm $RPM_BUILD_ROOT%{_mandir}/man3/libnbd-golang.3*
+
+%ifarch %{ix86}
+# Delete the OCaml man page on i686.
+rm $RPM_BUILD_ROOT%{_mandir}/man3/libnbd-ocaml.3*
+%endif
 
 %if 0%{?rhel}
 # Delete nbdublk on RHEL.
@@ -308,12 +324,12 @@ make %{?_smp_mflags} check || {
 %{_mandir}/man3/nbd_*.3*
 
 
+%ifnarch %{ix86}
 %files -n ocaml-%{name}
-%{_libdir}/ocaml/nbd
-%exclude %{_libdir}/ocaml/nbd/*.a
-%exclude %{_libdir}/ocaml/nbd/*.cmxa
-%exclude %{_libdir}/ocaml/nbd/*.cmx
-%exclude %{_libdir}/ocaml/nbd/*.mli
+%dir %{_libdir}/ocaml/nbd
+%{_libdir}/ocaml/nbd/META
+%{_libdir}/ocaml/nbd/*.cma
+%{_libdir}/ocaml/nbd/*.cmi
 %{_libdir}/ocaml/stublibs/dllmlnbd.so
 %{_libdir}/ocaml/stublibs/dllmlnbd.so.owner
 
@@ -321,13 +337,16 @@ make %{?_smp_mflags} check || {
 %files -n ocaml-%{name}-devel
 %doc ocaml/examples/*.ml
 %license ocaml/examples/LICENSE-FOR-EXAMPLES
-%{_libdir}/ocaml/nbd/*.a
+%ifarch %{ocaml_native_compiler}
 %{_libdir}/ocaml/nbd/*.cmxa
 %{_libdir}/ocaml/nbd/*.cmx
+%endif
+%{_libdir}/ocaml/nbd/*.a
 %{_libdir}/ocaml/nbd/*.mli
 %{_mandir}/man3/libnbd-ocaml.3*
 %{_mandir}/man3/NBD.3*
 %{_mandir}/man3/NBD.*.3*
+%endif
 
 
 %files -n python3-%{name}
@@ -364,8 +383,17 @@ make %{?_smp_mflags} check || {
 
 
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.16.0-1.redsleeve
-- fixed builddeps for arm
+* Mon Nov 13 2023 Eric Blake <eblake@redhat.com> - 1.18.1-3
+- Backport unit test of recent libnbd API addition
+  resolves: RHEL-16292
+
+* Wed Nov 01 2023 Richard W.M. Jones <rjones@redhat.com> - 1.18.1-2
+- Fix assertion in ext-mode BLOCK_STATUS (CVE-2023-5871)
+  resolves: RHEL-15143
+
+* Tue Oct 24 2023 Richard W.M. Jones <rjones@redhat.com> - 1.18.1-1
+- Rebase to 1.18.1
+  resolves: RHEL-14476
 
 * Tue Apr 18 2023 Richard W.M. Jones <rjones@redhat.com> - 1.16.0-1
 - Rebase to 1.16.0

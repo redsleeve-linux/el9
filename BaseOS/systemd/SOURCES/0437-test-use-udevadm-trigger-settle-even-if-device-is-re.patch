@@ -1,0 +1,37 @@
+From ff755f035485eab0317d1320caa2748d5d4a2d78 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 27 Oct 2022 05:48:05 +0900
+Subject: [PATCH] test: use 'udevadm trigger --settle' even if device is
+ renamed
+
+(cherry picked from commit ff4d2a09fd141474cb552d4b5bd5a53d9748a1b4)
+
+Related: RHEL-5988
+---
+ test/units/testsuite-17.02.sh | 6 ++----
+ 1 file changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/test/units/testsuite-17.02.sh b/test/units/testsuite-17.02.sh
+index ed3b39d074..82f9fd1f62 100755
+--- a/test/units/testsuite-17.02.sh
++++ b/test/units/testsuite-17.02.sh
+@@ -61,9 +61,7 @@ EOF
+ 
+ udevadm control --log-priority=debug --reload --timeout=30
+ 
+-# FIXME(?): the 'add' uevent is broadcast as for 'foobar', instead of 'hoge'. Hence, we cannot use --settle here.
+-# See issue #25115.
+-udevadm trigger --action=add /sys/devices/virtual/net/hoge
++udevadm trigger --action=add --settle /sys/devices/virtual/net/hoge
+ udevadm wait --timeout=30 --settle /sys/devices/virtual/net/foobar
+ assert_not_in "ID_RENAMING=" "$(udevadm info /sys/devices/virtual/net/foobar)"
+ timeout 30 bash -c 'while [[ "$(systemctl show --property=ActiveState --value /sys/devices/virtual/net/hoge)" != "inactive" ]]; do sleep .5; done'
+@@ -71,7 +69,7 @@ timeout 30 bash -c 'while [[ "$(systemctl show --property=ActiveState --value /s
+ timeout 30 bash -c 'while [[ "$(systemctl show --property=ActiveState --value /sys/devices/virtual/net/foobar)" != "active" ]]; do sleep .5; done'
+ timeout 30 bash -c 'while [[ "$(systemctl show --property=ActiveState --value /sys/subsystem/net/devices/foobar)" != "active" ]]; do sleep .5; done'
+ 
+-udevadm trigger --action=add /sys/devices/virtual/net/foobar
++udevadm trigger --action=add --settle /sys/devices/virtual/net/foobar
+ udevadm wait --timeout=30 --settle /sys/devices/virtual/net/hoge
+ assert_not_in "ID_RENAMING=" "$(udevadm info /sys/devices/virtual/net/hoge)"
+ timeout 30 bash -c 'while [[ "$(systemctl show --property=ActiveState --value /sys/devices/virtual/net/hoge)" != "active" ]]; do sleep .5; done'

@@ -1,0 +1,153 @@
+From 0a7c17aa28306a70f40f374f382c0c27046172c4 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Thu, 31 Aug 2023 09:10:40 -0400
+Subject: [PATCH] tpm2: change tpm2_unseal() to accept Tpm2Context instead of
+ device string
+
+This matches the change to tpm2_seal(), which now accepts a Tpm2Context instead
+of a device string.
+
+This also allows using the same TPM context for sealing and unsealing, which
+will be required by (future) test code when sealing/unsealing using a transient
+key.
+
+(cherry picked from commit db7fdf152b5811c2d83e967010bcde8d435e5bc4)
+
+Related: RHEL-16182
+---
+ src/cryptenroll/cryptenroll-tpm2.c            |  2 +-
+ src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c |  7 ++++++-
+ src/cryptsetup/cryptsetup-tpm2.c              |  9 +++++++--
+ src/shared/creds-util.c                       |  7 ++++++-
+ src/shared/tpm2-util.c                        | 11 +----------
+ src/shared/tpm2-util.h                        |  2 +-
+ 6 files changed, 22 insertions(+), 16 deletions(-)
+
+diff --git a/src/cryptenroll/cryptenroll-tpm2.c b/src/cryptenroll/cryptenroll-tpm2.c
+index 96e0183d4f..0155f1a6ef 100644
+--- a/src/cryptenroll/cryptenroll-tpm2.c
++++ b/src/cryptenroll/cryptenroll-tpm2.c
+@@ -282,7 +282,7 @@ int enroll_tpm2(struct crypt_device *cd,
+                 size_t secret2_size;
+ 
+                 log_debug("Unsealing for verification...");
+-                r = tpm2_unseal(device,
++                r = tpm2_unseal(tpm2_context,
+                                 hash_pcr_mask,
+                                 hash_pcr_bank,
+                                 pubkey, pubkey_size,
+diff --git a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
+index 71334129a6..630a2d8d3e 100644
+--- a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
+@@ -79,7 +79,12 @@ int acquire_luks2_key(
+                         return log_error_errno(r, "Failed to load PCR signature: %m");
+         }
+ 
+-        r = tpm2_unseal(device,
++        _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;
++        r = tpm2_context_new(device, &tpm2_context);
++        if (r < 0)
++                return log_error_errno(r, "Failed to create TPM2 context: %m");
++
++        r = tpm2_unseal(tpm2_context,
+                         hash_pcr_mask,
+                         pcr_bank,
+                         pubkey, pubkey_size,
+diff --git a/src/cryptsetup/cryptsetup-tpm2.c b/src/cryptsetup/cryptsetup-tpm2.c
+index ffb399a0b2..c049b8a313 100644
+--- a/src/cryptsetup/cryptsetup-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tpm2.c
+@@ -127,8 +127,13 @@ int acquire_tpm2_key(
+                         return log_error_errno(r, "Failed to load pcr signature: %m");
+         }
+ 
++        _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;
++        r = tpm2_context_new(device, &tpm2_context);
++        if (r < 0)
++                return log_error_errno(r, "Failed to create TPM2 context: %m");
++
+         if (!(flags & TPM2_FLAGS_USE_PIN)) {
+-                r = tpm2_unseal(device,
++                r = tpm2_unseal(tpm2_context,
+                                 hash_pcr_mask,
+                                 pcr_bank,
+                                 pubkey, pubkey_size,
+@@ -175,7 +180,7 @@ int acquire_tpm2_key(
+                         /* no salting needed, backwards compat with non-salted pins */
+                         b64_salted_pin = TAKE_PTR(pin_str);
+ 
+-                r = tpm2_unseal(device,
++                r = tpm2_unseal(tpm2_context,
+                                 hash_pcr_mask,
+                                 pcr_bank,
+                                 pubkey, pubkey_size,
+diff --git a/src/shared/creds-util.c b/src/shared/creds-util.c
+index 783fe75ca6..e269f1283c 100644
+--- a/src/shared/creds-util.c
++++ b/src/shared/creds-util.c
+@@ -1026,9 +1026,14 @@ int decrypt_credential_and_warn(
+                                     le32toh(z->size));
+                 }
+ 
++                _cleanup_(tpm2_context_unrefp) Tpm2Context *tpm2_context = NULL;
++                r = tpm2_context_new(tpm2_device, &tpm2_context);
++                if (r < 0)
++                        return r;
++
+                  // TODO: Add the SRK data to the credential structure so it can be plumbed
+                  // through and used to verify the TPM session.
+-                r = tpm2_unseal(tpm2_device,
++                r = tpm2_unseal(tpm2_context,
+                                 le64toh(t->pcr_mask),
+                                 le16toh(t->pcr_bank),
+                                 z ? z->data : NULL,
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 853761d50a..01deb6ebac 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -4022,7 +4022,7 @@ int tpm2_seal(Tpm2Context *c,
+ 
+ #define RETRY_UNSEAL_MAX 30u
+ 
+-int tpm2_unseal(const char *device,
++int tpm2_unseal(Tpm2Context *c,
+                 uint32_t hash_pcr_mask,
+                 uint16_t pcr_bank,
+                 const void *pubkey,
+@@ -4053,10 +4053,6 @@ int tpm2_unseal(const char *device,
+         assert(TPM2_PCR_MASK_VALID(hash_pcr_mask));
+         assert(TPM2_PCR_MASK_VALID(pubkey_pcr_mask));
+ 
+-        r = dlopen_tpm2();
+-        if (r < 0)
+-                return r;
+-
+         /* So here's what we do here: We connect to the TPM2 chip. As we do when sealing we generate a
+          * "primary" key on the TPM2 chip, with the same parameters as well as a PCR-bound policy session.
+          * Given we pass the same parameters, this will result in the same "primary" key, and same policy
+@@ -4073,11 +4069,6 @@ int tpm2_unseal(const char *device,
+         if (r < 0)
+                 return log_debug_errno(r, "Could not extract parts from blob: %m");
+ 
+-        _cleanup_(tpm2_context_unrefp) Tpm2Context *c = NULL;
+-        r = tpm2_context_new(device, &c);
+-        if (r < 0)
+-                return r;
+-
+         /* Older code did not save the pcr_bank, and unsealing needed to detect the best pcr bank to use,
+          * so we need to handle that legacy situation. */
+         if (pcr_bank == UINT16_MAX) {
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 35c13eda82..d8a221a7d6 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -173,7 +173,7 @@ int tpm2_marshal_blob(const TPM2B_PUBLIC *public, const TPM2B_PRIVATE *private,
+ int tpm2_unmarshal_blob(const void *blob, size_t blob_size, TPM2B_PUBLIC *ret_public, TPM2B_PRIVATE *ret_private);
+ 
+ int tpm2_seal(Tpm2Context *c, const TPM2B_DIGEST *policy, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, uint16_t *ret_primary_alg, void **ret_srk_buf, size_t *ret_srk_buf_size);
+-int tpm2_unseal(const char *device, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, JsonVariant *signature, const char *pin, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, const void *srk_buf, size_t srk_buf_size, void **ret_secret, size_t *ret_secret_size);
++int tpm2_unseal(Tpm2Context *c, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, JsonVariant *signature, const char *pin, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, const void *srk_buf, size_t srk_buf_size, void **ret_secret, size_t *ret_secret_size);
+ 
+ #if HAVE_OPENSSL
+ int tpm2_tpm2b_public_to_openssl_pkey(const TPM2B_PUBLIC *public, EVP_PKEY **ret);

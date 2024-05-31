@@ -1,0 +1,166 @@
+From fef242735b987c1870bcd0460cc0c802e78a3cde Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 2 Jan 2023 17:25:46 +0100
+Subject: [PATCH] networkd: implement Type=notify-reload protocol
+
+(cherry picked from commit 0e07cdb0e77d0322bc866b5e13abbe38e988059d)
+
+Related: RHEL-6090
+---
+ src/network/networkd-manager-bus.c | 13 +-------
+ src/network/networkd-manager.c     | 48 ++++++++++++++++++++++++++----
+ src/network/networkd-manager.h     |  2 ++
+ src/network/networkd.c             |  2 --
+ units/systemd-networkd.service.in  |  3 +-
+ 5 files changed, 47 insertions(+), 21 deletions(-)
+
+diff --git a/src/network/networkd-manager-bus.c b/src/network/networkd-manager-bus.c
+index 2ab3aaadc2..67f951df69 100644
+--- a/src/network/networkd-manager-bus.c
++++ b/src/network/networkd-manager-bus.c
+@@ -197,7 +197,6 @@ static int bus_method_reconfigure_link(sd_bus_message *message, void *userdata,
+ 
+ static int bus_method_reload(sd_bus_message *message, void *userdata, sd_bus_error *error) {
+         Manager *manager = userdata;
+-        Link *link;
+         int r;
+ 
+         r = bus_verify_polkit_async(message, CAP_NET_ADMIN,
+@@ -209,20 +208,10 @@ static int bus_method_reload(sd_bus_message *message, void *userdata, sd_bus_err
+         if (r == 0)
+                 return 1; /* Polkit will call us back */
+ 
+-        r = netdev_load(manager, true);
++        r = manager_reload(manager);
+         if (r < 0)
+                 return r;
+ 
+-        r = network_reload(manager);
+-        if (r < 0)
+-                return r;
+-
+-        HASHMAP_FOREACH(link, manager->links_by_index) {
+-                r = link_reconfigure(link, /* force = */ false);
+-                if (r < 0)
+-                        return r;
+-        }
+-
+         return sd_bus_reply_method_return(message, NULL);
+ }
+ 
+diff --git a/src/network/networkd-manager.c b/src/network/networkd-manager.c
+index cdfd29bc0e..362ee84b09 100644
+--- a/src/network/networkd-manager.c
++++ b/src/network/networkd-manager.c
+@@ -483,6 +483,14 @@ static int signal_restart_callback(sd_event_source *s, const struct signalfd_sig
+         return sd_event_exit(sd_event_source_get_event(s), 0);
+ }
+ 
++static int signal_reload_callback(sd_event_source *s, const struct signalfd_siginfo *si, void *userdata) {
++        Manager *m = ASSERT_PTR(userdata);
++
++        manager_reload(m);
++
++        return 0;
++}
++
+ static int manager_set_keep_configuration(Manager *m) {
+         int r;
+ 
+@@ -517,12 +525,11 @@ int manager_setup(Manager *m) {
+         if (r < 0)
+                 return r;
+ 
+-        assert_se(sigprocmask_many(SIG_SETMASK, NULL, SIGINT, SIGTERM, SIGUSR2, -1) >= 0);
+-
+         (void) sd_event_set_watchdog(m->event, true);
+-        (void) sd_event_add_signal(m->event, NULL, SIGTERM, signal_terminate_callback, m);
+-        (void) sd_event_add_signal(m->event, NULL, SIGINT, signal_terminate_callback, m);
+-        (void) sd_event_add_signal(m->event, NULL, SIGUSR2, signal_restart_callback, m);
++        (void) sd_event_add_signal(m->event, NULL, SIGTERM | SD_EVENT_SIGNAL_PROCMASK, signal_terminate_callback, m);
++        (void) sd_event_add_signal(m->event, NULL, SIGINT | SD_EVENT_SIGNAL_PROCMASK, signal_terminate_callback, m);
++        (void) sd_event_add_signal(m->event, NULL, SIGUSR2 | SD_EVENT_SIGNAL_PROCMASK, signal_restart_callback, m);
++        (void) sd_event_add_signal(m->event, NULL, SIGHUP | SD_EVENT_SIGNAL_PROCMASK, signal_reload_callback, m);
+ 
+         r = sd_event_add_post(m->event, NULL, manager_dirty_handler, m);
+         if (r < 0)
+@@ -1078,3 +1085,34 @@ int manager_set_timezone(Manager *m, const char *tz) {
+ 
+         return 0;
+ }
++
++int manager_reload(Manager *m) {
++        Link *link;
++        int r;
++
++        assert(m);
++
++        (void) sd_notifyf(/* unset= */ false,
++                          "RELOADING=1\n"
++                          "STATUS=Reloading configuration...\n"
++                          "MONOTONIC_USEC=" USEC_FMT, now(CLOCK_MONOTONIC));
++
++        r = netdev_load(m, /* reload= */ true);
++        if (r < 0)
++                goto finish;
++
++        r = network_reload(m);
++        if (r < 0)
++                goto finish;
++
++        HASHMAP_FOREACH(link, m->links_by_index) {
++                r = link_reconfigure(link, /* force = */ false);
++                if (r < 0)
++                        goto finish;
++        }
++
++        r = 0;
++finish:
++        (void) sd_notify(/* unset= */ false, NOTIFY_READY);
++        return r;
++}
+diff --git a/src/network/networkd-manager.h b/src/network/networkd-manager.h
+index 40e6092f85..e6183af0e4 100644
+--- a/src/network/networkd-manager.h
++++ b/src/network/networkd-manager.h
+@@ -115,4 +115,6 @@ int manager_enumerate(Manager *m);
+ int manager_set_hostname(Manager *m, const char *hostname);
+ int manager_set_timezone(Manager *m, const char *timezone);
+ 
++int manager_reload(Manager *m);
++
+ DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
+diff --git a/src/network/networkd.c b/src/network/networkd.c
+index d61769d9f3..68760e8ff4 100644
+--- a/src/network/networkd.c
++++ b/src/network/networkd.c
+@@ -81,8 +81,6 @@ static int run(int argc, char *argv[]) {
+         if (r < 0)
+                 log_warning_errno(r, "Could not create runtime directory 'lldp': %m");
+ 
+-        assert_se(sigprocmask_many(SIG_BLOCK, NULL, SIGTERM, SIGINT, -1) >= 0);
+-
+         r = manager_new(&m, /* test_mode = */ false);
+         if (r < 0)
+                 return log_error_errno(r, "Could not create manager: %m");
+diff --git a/units/systemd-networkd.service.in b/units/systemd-networkd.service.in
+index d15129e7f0..d8b935a358 100644
+--- a/units/systemd-networkd.service.in
++++ b/units/systemd-networkd.service.in
+@@ -24,7 +24,6 @@ BusName=org.freedesktop.network1
+ CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_BROADCAST CAP_NET_RAW
+ DeviceAllow=char-* rw
+ ExecStart=!!{{ROOTLIBEXECDIR}}/systemd-networkd
+-ExecReload=networkctl reload
+ FileDescriptorStoreMax=512
+ LockPersonality=yes
+ MemoryDenyWriteExecute=yes
+@@ -48,7 +47,7 @@ RuntimeDirectoryPreserve=yes
+ SystemCallArchitectures=native
+ SystemCallErrorNumber=EPERM
+ SystemCallFilter=@system-service
+-Type=notify
++Type=notify-reload
+ User=systemd-network
+ {{SERVICE_WATCHDOG}}
+ 

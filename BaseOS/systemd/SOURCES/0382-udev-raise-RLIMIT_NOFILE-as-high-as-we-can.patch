@@ -1,0 +1,43 @@
+From 5221edaee281175e3a8ba3e676ba5622085eb1ef Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 26 Sep 2023 09:52:05 +0200
+Subject: [PATCH] udev: raise RLIMIT_NOFILE as high as we can
+
+We might need a lot of fds on large systems, hence raise RLIMIT_NOFILE
+to what the service manager allows us, which is quite a lot these days.
+
+udev already sets FORK_RLIMIT_NOFILE_SAFE when forking of chilren, thus
+ensuring that forked off processes get their RLIMIT_NOFILE soft limit
+reset to 1K for compat with crappy old select().
+
+Replaces: #29298
+Fixes: #28583
+(cherry picked from commit 1617424ce76d797d081dd6cb1082b954c4d2bf38)
+
+Resolves: RHEL-11040
+---
+ src/udev/udevd.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/udev/udevd.c b/src/udev/udevd.c
+index e3a2742733..ccc3c0eece 100644
+--- a/src/udev/udevd.c
++++ b/src/udev/udevd.c
+@@ -55,6 +55,7 @@
+ #include "pretty-print.h"
+ #include "proc-cmdline.h"
+ #include "process-util.h"
++#include "rlimit-util.h"
+ #include "selinux-util.h"
+ #include "signal-util.h"
+ #include "socket-util.h"
+@@ -2040,6 +2041,9 @@ int run_udevd(int argc, char *argv[]) {
+         if (r < 0)
+                 return r;
+ 
++        /* Make sure we can have plenty fds (for example for pidfds) */
++        (void) rlimit_nofile_bump(-1);
++
+         r = RET_NERRNO(mkdir("/run/udev", 0755));
+         if (r < 0 && r != -EEXIST)
+                 return log_error_errno(r, "Failed to create /run/udev: %m");

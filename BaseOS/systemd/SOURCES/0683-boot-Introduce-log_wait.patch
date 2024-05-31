@@ -1,0 +1,220 @@
+From e2493416cd85725a1198a391f9b1f93e1e9db88e Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Sun, 5 Jun 2022 13:19:21 +0200
+Subject: [PATCH] boot: Introduce log_wait
+
+Instead of stalling for every log message as it appears we now wait for
+several messages at strategic locations.
+
+(cherry picked from commit 6ac54809deefddccc7861b5a2cfa4d766cf1aa3b)
+
+Related: RHEL-16952
+---
+ src/boot/efi/boot.c      | 18 +++++++++++++-----
+ src/boot/efi/console.c   |  1 +
+ src/boot/efi/graphics.c  |  7 ++++---
+ src/boot/efi/linux.c     |  1 +
+ src/boot/efi/linux_x86.c |  1 +
+ src/boot/efi/log.c       | 13 +++++++++++--
+ src/boot/efi/log.h       |  1 +
+ src/boot/efi/stub.c      | 19 +++++++++++++------
+ src/boot/efi/util.c      |  1 +
+ 9 files changed, 46 insertions(+), 16 deletions(-)
+
+diff --git a/src/boot/efi/boot.c b/src/boot/efi/boot.c
+index 1e7b7a0fa7..1e94aa57b1 100644
+--- a/src/boot/efi/boot.c
++++ b/src/boot/efi/boot.c
+@@ -2612,7 +2612,7 @@ static EFI_STATUS discover_root_dir(EFI_LOADED_IMAGE_PROTOCOL *loaded_image, EFI
+                 return open_volume(loaded_image->DeviceHandle, ret_dir);
+ }
+ 
+-EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
++static EFI_STATUS real_main(EFI_HANDLE image) {
+         EFI_LOADED_IMAGE_PROTOCOL *loaded_image;
+         _cleanup_(file_closep) EFI_FILE *root_dir = NULL;
+         _cleanup_(config_free) Config config = {};
+@@ -2621,11 +2621,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+         uint64_t init_usec;
+         bool menu = false;
+ 
+-        InitializeLib(image, sys_table);
+         init_usec = time_usec();
+-        debug_hook(L"systemd-boot");
+-        /* Uncomment the next line if you need to wait for debugger. */
+-        // debug_break();
+ 
+         err = BS->OpenProtocol(image,
+                         &LoadedImageProtocol,
+@@ -2714,3 +2710,15 @@ out:
+         BS->CloseProtocol(image, &LoadedImageProtocol, image, NULL);
+         return err;
+ }
++
++EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
++        InitializeLib(image, sys_table);
++
++        debug_hook(L"systemd-boot");
++        /* Uncomment the next line if you need to wait for debugger. */
++        // debug_break();
++
++        EFI_STATUS err = real_main(image);
++        log_wait();
++        return err;
++}
+diff --git a/src/boot/efi/console.c b/src/boot/efi/console.c
+index b876ff2bd7..001b82854b 100644
+--- a/src/boot/efi/console.c
++++ b/src/boot/efi/console.c
+@@ -188,6 +188,7 @@ static EFI_STATUS change_mode(int64_t mode) {
+         mode = CLAMP(mode, CONSOLE_MODE_RANGE_MIN, CONSOLE_MODE_RANGE_MAX);
+         old_mode = MAX(CONSOLE_MODE_RANGE_MIN, ST->ConOut->Mode->Mode);
+ 
++        log_wait();
+         err = ST->ConOut->SetMode(ST->ConOut, mode);
+         if (err == EFI_SUCCESS)
+                 return EFI_SUCCESS;
+diff --git a/src/boot/efi/graphics.c b/src/boot/efi/graphics.c
+index dc646bce1f..350d1bc434 100644
+--- a/src/boot/efi/graphics.c
++++ b/src/boot/efi/graphics.c
+@@ -25,16 +25,17 @@ EFI_STATUS graphics_mode(bool on) {
+                 return err == EFI_NOT_FOUND ? EFI_SUCCESS : err;
+ 
+         /* check current mode */
+-        err =ConsoleControl->GetMode(ConsoleControl, &current, &uga_exists, &stdin_locked);
++        err = ConsoleControl->GetMode(ConsoleControl, &current, &uga_exists, &stdin_locked);
+         if (err != EFI_SUCCESS)
+                 return err;
+ 
+         /* do not touch the mode */
+-        new  = on ? EfiConsoleControlScreenGraphics : EfiConsoleControlScreenText;
++        new = on ? EfiConsoleControlScreenGraphics : EfiConsoleControlScreenText;
+         if (new == current)
+                 return EFI_SUCCESS;
+ 
+-        err =ConsoleControl->SetMode(ConsoleControl, new);
++        log_wait();
++        err = ConsoleControl->SetMode(ConsoleControl, new);
+ 
+         /* some firmware enables the cursor when switching modes */
+         ST->ConOut->EnableCursor(ST->ConOut, false);
+diff --git a/src/boot/efi/linux.c b/src/boot/efi/linux.c
+index 2ae68ec295..727e507101 100644
+--- a/src/boot/efi/linux.c
++++ b/src/boot/efi/linux.c
+@@ -142,6 +142,7 @@ EFI_STATUS linux_exec(
+         if (err != EFI_SUCCESS)
+                 return log_error_status(err, "Error registering initrd: %m");
+ 
++        log_wait();
+         err = BS->StartImage(kernel_image, NULL, NULL);
+ 
+         /* Try calling the kernel compat entry point if one exists. */
+diff --git a/src/boot/efi/linux_x86.c b/src/boot/efi/linux_x86.c
+index cbd92201b6..eaae988d97 100644
+--- a/src/boot/efi/linux_x86.c
++++ b/src/boot/efi/linux_x86.c
+@@ -209,6 +209,7 @@ EFI_STATUS linux_exec_efi_handover(
+         boot_params->hdr.ramdisk_size = initrd_length;
+         boot_params->ext_ramdisk_size = ((uint64_t) initrd_length) >> 32;
+ 
++        log_wait();
+         linux_efi_handover(parent, (uintptr_t) linux_buffer, boot_params);
+         return EFI_LOAD_ERROR;
+ }
+diff --git a/src/boot/efi/log.c b/src/boot/efi/log.c
+index 38e7c5a8a8..b1a613e4e5 100644
+--- a/src/boot/efi/log.c
++++ b/src/boot/efi/log.c
+@@ -5,6 +5,8 @@
+ 
+ #include "log.h"
+ 
++static unsigned log_count = 0;
++
+ void efi_assert(const char *expr, const char *file, unsigned line, const char *function) {
+         log_error("systemd-boot assertion '%s' failed at %s:%u@%s. Halting.", expr, file, line, function);
+         for (;;)
+@@ -28,7 +30,14 @@ EFI_STATUS log_internal(EFI_STATUS status, const char *format, ...) {
+         ST->ConOut->OutputString(ST->ConOut, (char16_t *) u"\r\n");
+         ST->ConOut->SetAttribute(ST->ConOut, attr);
+ 
+-        /* Give the user a chance to see the message. */
+-        BS->Stall(3 * 1000 * 1000);
++        log_count++;
+         return status;
+ }
++
++void log_wait(void) {
++        if (log_count == 0)
++                return;
++
++        BS->Stall(MIN(4u, log_count) * 2500 * 1000);
++        log_count = 0;
++}
+diff --git a/src/boot/efi/log.h b/src/boot/efi/log.h
+index c6e8d626ce..f24034fd78 100644
+--- a/src/boot/efi/log.h
++++ b/src/boot/efi/log.h
+@@ -3,6 +3,7 @@
+ 
+ #include "efi-string.h"
+ 
++void log_wait(void);
+ _gnu_printf_(2, 3) EFI_STATUS log_internal(EFI_STATUS status, const char *format, ...);
+ #define log_error_status(status, ...) log_internal(status, __VA_ARGS__)
+ #define log_error(...) log_internal(EFI_INVALID_PARAMETER, __VA_ARGS__)
+diff --git a/src/boot/efi/stub.c b/src/boot/efi/stub.c
+index f9c023e11c..f71f041a2f 100644
+--- a/src/boot/efi/stub.c
++++ b/src/boot/efi/stub.c
+@@ -180,7 +180,7 @@ static bool use_load_options(
+         return true;
+ }
+ 
+-EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
++static EFI_STATUS real_main(EFI_HANDLE image) {
+         _cleanup_free_ void *credential_initrd = NULL, *global_credential_initrd = NULL, *sysext_initrd = NULL, *pcrsig_initrd = NULL, *pcrpkey_initrd = NULL;
+         size_t credential_initrd_size = 0, global_credential_initrd_size = 0, sysext_initrd_size = 0, pcrsig_initrd_size = 0, pcrpkey_initrd_size = 0;
+         size_t linux_size, initrd_size, dt_size;
+@@ -194,11 +194,6 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+         uint64_t loader_features = 0;
+         EFI_STATUS err;
+ 
+-        InitializeLib(image, sys_table);
+-        debug_hook(L"systemd-stub");
+-        /* Uncomment the next line if you need to wait for debugger. */
+-        // debug_break();
+-
+         err = BS->OpenProtocol(
+                         image,
+                         &LoadedImageProtocol,
+@@ -426,3 +421,15 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
+         graphics_mode(false);
+         return err;
+ }
++
++EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys_table) {
++        InitializeLib(image, sys_table);
++
++        debug_hook(L"systemd-stub");
++        /* Uncomment the next line if you need to wait for debugger. */
++        // debug_break();
++
++        EFI_STATUS err = real_main(image);
++        log_wait();
++        return err;
++}
+diff --git a/src/boot/efi/util.c b/src/boot/efi/util.c
+index 320bddec1b..aa7b1fa1a2 100644
+--- a/src/boot/efi/util.c
++++ b/src/boot/efi/util.c
+@@ -333,6 +333,7 @@ void print_at(size_t x, size_t y, size_t attr, const char16_t *str) {
+ }
+ 
+ void clear_screen(size_t attr) {
++        log_wait();
+         ST->ConOut->SetAttribute(ST->ConOut, attr);
+         ST->ConOut->ClearScreen(ST->ConOut);
+ }

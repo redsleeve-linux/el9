@@ -1,0 +1,52 @@
+From dd9aa5ffe940ac6d5204a04fce5faafc3fc01924 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Mon, 2 Jan 2023 17:35:23 +0100
+Subject: [PATCH] logind: implement Type=notify-reload protocol properly
+
+So close already. Let's add the two missing notifications too.
+
+Fixes: #18484
+(cherry picked from commit 5d71e463f49518c7702467f6145484afa31bf8ba)
+
+Related: RHEL-6090
+---
+ src/login/logind.c              | 6 ++++++
+ units/systemd-logind.service.in | 1 +
+ 2 files changed, 7 insertions(+)
+
+diff --git a/src/login/logind.c b/src/login/logind.c
+index cdca5ca58c..0348b19c05 100644
+--- a/src/login/logind.c
++++ b/src/login/logind.c
+@@ -1014,6 +1014,11 @@ static int manager_dispatch_reload_signal(sd_event_source *s, const struct signa
+         Manager *m = userdata;
+         int r;
+ 
++        (void) sd_notifyf(/* unset= */ false,
++                          "RELOADING=1\n"
++                          "STATUS=Reloading configuration...\n"
++                          "MONOTONIC_USEC=" USEC_FMT, now(CLOCK_MONOTONIC));
++
+         manager_reset_config(m);
+         r = manager_parse_config_file(m);
+         if (r < 0)
+@@ -1021,6 +1026,7 @@ static int manager_dispatch_reload_signal(sd_event_source *s, const struct signa
+         else
+                 log_info("Config file reloaded.");
+ 
++        (void) sd_notify(/* unset= */ false, NOTIFY_READY);
+         return 0;
+ }
+ 
+diff --git a/units/systemd-logind.service.in b/units/systemd-logind.service.in
+index 042ea75d7a..24f5ddaa17 100644
+--- a/units/systemd-logind.service.in
++++ b/units/systemd-logind.service.in
+@@ -58,6 +58,7 @@ StateDirectory=systemd/linger
+ SystemCallArchitectures=native
+ SystemCallErrorNumber=EPERM
+ SystemCallFilter=@system-service
++Type=notify-reload
+ {{SERVICE_WATCHDOG}}
+ 
+ # Increase the default a bit in order to allow many simultaneous logins since

@@ -1,0 +1,121 @@
+From 8f899f5abca4c233cf9679c74cbd3839a03e77c2 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Fri, 8 Sep 2023 13:14:38 -0400
+Subject: [PATCH] tpm2: cache TPM's supported ECC curves
+
+This brings the tpm2_supports_ecc_curve() api in line with the other
+tpm2_supports_*() functions, of returning a boolean.
+
+(cherry picked from commit 639dca030bc14b71b3dba0a486f282de316b3e65)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c | 57 +++++++++++++++++++++++++++++++-----------
+ src/shared/tpm2-util.h |  3 +++
+ 2 files changed, 45 insertions(+), 15 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 01deb6ebac..966b524000 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -282,6 +282,39 @@ static int tpm2_cache_capabilities(Tpm2Context *c) {
+                 current_cc = TPMA_CC_TO_TPM2_CC(commands.commandAttributes[commands.count - 1]) + 1;
+         }
+ 
++        /* Cache the ECC curves. The spec isn't actually clear if ECC curves can be added/removed
++         * while running, but that would be crazy, so let's hope it is not possible. */
++        TPM2_ECC_CURVE current_ecc_curve = TPM2_ECC_NONE;
++        for (;;) {
++                r = tpm2_get_capability(
++                                c,
++                                TPM2_CAP_ECC_CURVES,
++                                current_ecc_curve,
++                                TPM2_MAX_ECC_CURVES,
++                                &capability);
++                if (r < 0)
++                        return r;
++
++                TPML_ECC_CURVE ecc_curves = capability.eccCurves;
++
++                /* ECC support isn't required */
++                if (ecc_curves.count == 0)
++                        break;
++
++                if (!GREEDY_REALLOC_APPEND(
++                                c->capability_ecc_curves,
++                                c->n_capability_ecc_curves,
++                                ecc_curves.eccCurves,
++                                ecc_curves.count))
++                        return log_oom_debug();
++
++                if (r == 0)
++                        break;
++
++                /* Set current_ecc_curve to index after last ecc curve the TPM provided */
++                current_ecc_curve = ecc_curves.eccCurves[ecc_curves.count - 1] + 1;
++        }
++
+         /* Cache the PCR capabilities, which are safe to cache, as the only way they can change is
+          * TPM2_PCR_Allocate(), which changes the allocation after the next _TPM_Init(). If the TPM is
+          * reinitialized while we are using it, all our context and sessions will be invalid, so we can
+@@ -351,23 +384,16 @@ bool tpm2_supports_command(Tpm2Context *c, TPM2_CC command) {
+         return tpm2_get_capability_command(c, command, NULL);
+ }
+ 
+-/* Returns 1 if the TPM supports the ECC curve, 0 if not, or < 0 for any error. */
+-static int tpm2_supports_ecc_curve(Tpm2Context *c, TPM2_ECC_CURVE curve) {
+-        TPMU_CAPABILITIES capability;
+-        int r;
+-
+-        /* The spec explicitly states the TPM2_ECC_CURVE should be cast to uint32_t. */
+-        r = tpm2_get_capability(c, TPM2_CAP_ECC_CURVES, (uint32_t) curve, 1, &capability);
+-        if (r < 0)
+-                return r;
++/* Returns true if the TPM supports the ECC curve, otherwise false. */
++bool tpm2_supports_ecc_curve(Tpm2Context *c, TPM2_ECC_CURVE ecc_curve) {
++        assert(c);
+ 
+-        TPML_ECC_CURVE eccCurves = capability.eccCurves;
+-        if (eccCurves.count == 0 || eccCurves.eccCurves[0] != curve) {
+-                log_debug("TPM does not support ECC curve 0x%02" PRIx16 ".", curve);
+-                return 0;
+-        }
++        FOREACH_ARRAY(curve, c->capability_ecc_curves, c->n_capability_ecc_curves)
++                if (*curve == ecc_curve)
++                        return true;
+ 
+-        return 1;
++        log_debug("TPM does not support ECC curve 0x%" PRIx16 ".", ecc_curve);
++        return false;
+ }
+ 
+ /* Query the TPM for populated handles.
+@@ -515,6 +541,7 @@ static Tpm2Context *tpm2_context_free(Tpm2Context *c) {
+ 
+         c->capability_algorithms = mfree(c->capability_algorithms);
+         c->capability_commands = mfree(c->capability_commands);
++        c->capability_ecc_curves = mfree(c->capability_ecc_curves);
+ 
+         return mfree(c);
+ }
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index d8a221a7d6..26050c9c55 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -47,6 +47,8 @@ typedef struct {
+         size_t n_capability_algorithms;
+         TPMA_CC *capability_commands;
+         size_t n_capability_commands;
++        TPM2_ECC_CURVE *capability_ecc_curves;
++        size_t n_capability_ecc_curves;
+         TPML_PCR_SELECTION capability_pcrs;
+ } Tpm2Context;
+ 
+@@ -103,6 +105,7 @@ int tpm2_create_loaded(Tpm2Context *c, const Tpm2Handle *parent, const Tpm2Handl
+ 
+ bool tpm2_supports_alg(Tpm2Context *c, TPM2_ALG_ID alg);
+ bool tpm2_supports_command(Tpm2Context *c, TPM2_CC command);
++bool tpm2_supports_ecc_curve(Tpm2Context *c, TPM2_ECC_CURVE ecc_curve);
+ 
+ bool tpm2_test_parms(Tpm2Context *c, TPMI_ALG_PUBLIC alg, const TPMU_PUBLIC_PARMS *parms);
+ 

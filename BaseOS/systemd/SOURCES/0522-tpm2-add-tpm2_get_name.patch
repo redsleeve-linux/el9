@@ -1,0 +1,251 @@
+From 4f9f6fce5c45c8f9aabe73a428420cfb380e9974 Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Wed, 14 Dec 2022 10:46:13 -0500
+Subject: [PATCH] tpm2: add tpm2_get_name()
+
+This adds functions to get the "name" of a key. The key "name", as defined
+by the TPM2 spec, includes its entire public area (with attribute fields),
+not only its key fingerprint.
+
+A function is added to calculate the name of a provided key public area,
+as well as a function to get the name of a key which is present in the TPM.
+
+(cherry picked from commit dbae4b9535ceb0a94affe34eab700900f4fbd93d)
+
+Related: RHEL-16182
+---
+ src/shared/tpm2-util.c | 115 ++++++++++++++++++++++++++++++++++++++---
+ src/shared/tpm2-util.h |   4 ++
+ src/test/test-tpm2.c   |  43 +++++++++++++++
+ 3 files changed, 154 insertions(+), 8 deletions(-)
+
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index ac8569878c..629e1bc5ce 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -65,6 +65,8 @@ TSS2_RC (*sym_Tss2_MU_TPM2B_PRIVATE_Marshal)(TPM2B_PRIVATE const *src, uint8_t b
+ TSS2_RC (*sym_Tss2_MU_TPM2B_PRIVATE_Unmarshal)(uint8_t const buffer[], size_t buffer_size, size_t *offset, TPM2B_PRIVATE  *dest) = NULL;
+ TSS2_RC (*sym_Tss2_MU_TPM2B_PUBLIC_Marshal)(TPM2B_PUBLIC const *src, uint8_t buffer[], size_t buffer_size, size_t *offset) = NULL;
+ TSS2_RC (*sym_Tss2_MU_TPM2B_PUBLIC_Unmarshal)(uint8_t const buffer[], size_t buffer_size, size_t *offset, TPM2B_PUBLIC *dest) = NULL;
++TSS2_RC (*sym_Tss2_MU_TPMT_HA_Marshal)(TPMT_HA const *src, uint8_t buffer[], size_t buffer_size, size_t *offset) = NULL;
++TSS2_RC (*sym_Tss2_MU_TPMT_PUBLIC_Marshal)(TPMT_PUBLIC const *src, uint8_t buffer[], size_t buffer_size, size_t *offset) = NULL;
+ 
+ int dlopen_tpm2(void) {
+         int r;
+@@ -114,7 +116,9 @@ int dlopen_tpm2(void) {
+                         DLSYM_ARG(Tss2_MU_TPM2B_PRIVATE_Marshal),
+                         DLSYM_ARG(Tss2_MU_TPM2B_PRIVATE_Unmarshal),
+                         DLSYM_ARG(Tss2_MU_TPM2B_PUBLIC_Marshal),
+-                        DLSYM_ARG(Tss2_MU_TPM2B_PUBLIC_Unmarshal));
++                        DLSYM_ARG(Tss2_MU_TPM2B_PUBLIC_Unmarshal),
++                        DLSYM_ARG(Tss2_MU_TPMT_HA_Marshal),
++                        DLSYM_ARG(Tss2_MU_TPMT_PUBLIC_Marshal));
+ }
+ 
+ static Tpm2Context *tpm2_context_free(Tpm2Context *c) {
+@@ -970,6 +974,11 @@ static void tpm2_log_debug_digest(const TPM2B_DIGEST *digest, const char *msg) {
+                 tpm2_log_debug_buffer(digest->buffer, digest->size, msg ?: "Digest");
+ }
+ 
++static void tpm2_log_debug_name(const TPM2B_NAME *name, const char *msg) {
++        if (name)
++                tpm2_log_debug_buffer(name->name, name->size, msg ?: "Name");
++}
++
+ static int tpm2_get_policy_digest(
+                 Tpm2Context *c,
+                 const Tpm2Handle *session,
+@@ -1815,6 +1824,100 @@ static int find_signature(
+ #endif
+ }
+ 
++/* Calculates the "name" of a public key.
++ *
++ * As specified in TPM2 spec "Part 1: Architecture", a key's "name" is its nameAlg value followed by a hash
++ * of its TPM2 public area, all properly marshalled. This allows a key's "name" to be dependent not only on
++ * the key fingerprint, but also on the TPM2-specific fields that associated with the key (i.e. all fields in
++ * TPMT_PUBLIC). Note that this means an existing key may not change any of its TPMT_PUBLIC fields, since
++ * that would also change the key name.
++ *
++ * Since we (currently) hardcode to always using SHA256 for hashing, this returns an error if the public key
++ * nameAlg is not TPM2_ALG_SHA256. */
++int tpm2_calculate_name(const TPMT_PUBLIC *public, TPM2B_NAME *ret_name) {
++        TSS2_RC rc;
++        int r;
++
++        assert(public);
++        assert(ret_name);
++
++        r = dlopen_tpm2();
++        if (r < 0)
++                return log_error_errno(r, "TPM2 support not installed: %m");
++
++        if (public->nameAlg != TPM2_ALG_SHA256)
++                return log_error_errno(SYNTHETIC_ERRNO(EOPNOTSUPP),
++                                       "Unsupported nameAlg: 0x%x",
++                                       public->nameAlg);
++
++        _cleanup_free_ uint8_t *buf = NULL;
++        size_t size = 0;
++
++        buf = (uint8_t*) new(TPMT_PUBLIC, 1);
++        if (!buf)
++                return log_oom();
++
++        rc = sym_Tss2_MU_TPMT_PUBLIC_Marshal(public, buf, sizeof(TPMT_PUBLIC), &size);
++        if (rc != TSS2_RC_SUCCESS)
++                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
++                                       "Failed to marshal public key: %s", sym_Tss2_RC_Decode(rc));
++
++        TPM2B_DIGEST digest = {};
++        r = tpm2_digest_buffer(TPM2_ALG_SHA256, &digest, buf, size, /* extend= */ false);
++        if (r < 0)
++                return r;
++
++        TPMT_HA ha = {
++                .hashAlg = TPM2_ALG_SHA256,
++        };
++        assert(digest.size <= sizeof(ha.digest.sha256));
++        memcpy_safe(ha.digest.sha256, digest.buffer, digest.size);
++
++        TPM2B_NAME name;
++        size = 0;
++        rc = sym_Tss2_MU_TPMT_HA_Marshal(&ha, name.name, sizeof(name.name), &size);
++        if (rc != TSS2_RC_SUCCESS)
++                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
++                                       "Failed to marshal key name: %s", sym_Tss2_RC_Decode(rc));
++        name.size = size;
++
++        tpm2_log_debug_name(&name, "Calculated name");
++
++        *ret_name = name;
++
++        return 0;
++}
++
++/* Get the "name" of a key from the TPM.
++ *
++ * The "name" of a key is explained above in tpm2_calculate_name().
++ *
++ * The handle must reference a key already present in the TPM. It may be either a public key only, or a
++ * public/private keypair. */
++static int tpm2_get_name(
++                Tpm2Context *c,
++                const Tpm2Handle *handle,
++                TPM2B_NAME **ret_name) {
++
++        _cleanup_(Esys_Freep) TPM2B_NAME *name = NULL;
++        TSS2_RC rc;
++
++        assert(c);
++        assert(handle);
++        assert(ret_name);
++
++        rc = sym_Esys_TR_GetName(c->esys_context, handle->esys_handle, &name);
++        if (rc != TSS2_RC_SUCCESS)
++                return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
++                                       "Failed to get name of public key from TPM: %s", sym_Tss2_RC_Decode(rc));
++
++        tpm2_log_debug_name(name, "Object name");
++
++        *ret_name = TAKE_PTR(name);
++
++        return 0;
++}
++
+ static int tpm2_build_sealing_policy(
+                 Tpm2Context *c,
+                 const Tpm2Handle *session,
+@@ -1883,13 +1986,9 @@ static int tpm2_build_sealing_policy(
+ 
+                 /* Acquire the "name" of what we just loaded */
+                 _cleanup_(Esys_Freep) TPM2B_NAME *pubkey_name = NULL;
+-                rc = sym_Esys_TR_GetName(
+-                                c->esys_context,
+-                                pubkey_handle->esys_handle,
+-                                &pubkey_name);
+-                if (rc != TSS2_RC_SUCCESS)
+-                        return log_error_errno(SYNTHETIC_ERRNO(ENOTRECOVERABLE),
+-                                               "Failed to get name of public key from TPM: %s", sym_Tss2_RC_Decode(rc));
++                r = tpm2_get_name(c, pubkey_handle, &pubkey_name);
++                if (r < 0)
++                        return r;
+ 
+                 /* Put together the PCR policy we want to use */
+                 TPML_PCR_SELECTION pcr_selection;
+diff --git a/src/shared/tpm2-util.h b/src/shared/tpm2-util.h
+index 2744cd13bb..a23f383e5a 100644
+--- a/src/shared/tpm2-util.h
++++ b/src/shared/tpm2-util.h
+@@ -70,6 +70,8 @@ extern TSS2_RC (*sym_Tss2_MU_TPM2B_PRIVATE_Marshal)(TPM2B_PRIVATE const *src, ui
+ extern TSS2_RC (*sym_Tss2_MU_TPM2B_PRIVATE_Unmarshal)(uint8_t const buffer[], size_t buffer_size, size_t *offset, TPM2B_PRIVATE  *dest);
+ extern TSS2_RC (*sym_Tss2_MU_TPM2B_PUBLIC_Marshal)(TPM2B_PUBLIC const *src, uint8_t buffer[], size_t buffer_size, size_t *offset);
+ extern TSS2_RC (*sym_Tss2_MU_TPM2B_PUBLIC_Unmarshal)(uint8_t const buffer[], size_t buffer_size, size_t *offset, TPM2B_PUBLIC *dest);
++extern TSS2_RC (*sym_Tss2_MU_TPMT_HA_Marshal)(TPMT_HA const *src, uint8_t buffer[], size_t buffer_size, size_t *offset);
++extern TSS2_RC (*sym_Tss2_MU_TPMT_PUBLIC_Marshal)(TPMT_PUBLIC const *src, uint8_t buffer[], size_t buffer_size, size_t *offset);
+ 
+ int dlopen_tpm2(void);
+ 
+@@ -85,6 +87,8 @@ static inline int tpm2_digest_init(TPMI_ALG_HASH alg, TPM2B_DIGEST *digest) {
+         return tpm2_digest_many(alg, digest, NULL, 0, false);
+ }
+ 
++int tpm2_calculate_name(const TPMT_PUBLIC *public, TPM2B_NAME *ret_name);
++
+ int tpm2_seal(const char *device, uint32_t hash_pcr_mask, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, const char *pin, void **ret_secret, size_t *ret_secret_size, void **ret_blob, size_t *ret_blob_size, void **ret_pcr_hash, size_t *ret_pcr_hash_size, uint16_t *ret_pcr_bank, uint16_t *ret_primary_alg, void **ret_srk_buf, size_t *ret_srk_buf_size);
+ int tpm2_unseal(const char *device, uint32_t hash_pcr_mask, uint16_t pcr_bank, const void *pubkey, size_t pubkey_size, uint32_t pubkey_pcr_mask, JsonVariant *signature, const char *pin, uint16_t primary_alg, const void *blob, size_t blob_size, const void *policy_hash, size_t policy_hash_size, const void *srk_buf, size_t srk_buf_size, void **ret_secret, size_t *ret_secret_size);
+ 
+diff --git a/src/test/test-tpm2.c b/src/test/test-tpm2.c
+index dfbea7b19a..2515f79e57 100644
+--- a/src/test/test-tpm2.c
++++ b/src/test/test-tpm2.c
+@@ -600,6 +600,49 @@ TEST(digest_many) {
+         assert_se(digest_check(&d, "02ecb0628264235111e0053e271092981c8b15d59cd46617836bee3149a4ecb0"));
+ }
+ 
++static void tpm2b_public_init(TPM2B_PUBLIC *public) {
++        TPMT_PUBLIC tpmt = {
++                .type = TPM2_ALG_RSA,
++                .nameAlg = TPM2_ALG_SHA256,
++                .objectAttributes = TPMA_OBJECT_RESTRICTED|TPMA_OBJECT_DECRYPT|TPMA_OBJECT_FIXEDTPM|TPMA_OBJECT_FIXEDPARENT|TPMA_OBJECT_SENSITIVEDATAORIGIN|TPMA_OBJECT_USERWITHAUTH,
++                .parameters.rsaDetail = {
++                        .symmetric = {
++                                .algorithm = TPM2_ALG_AES,
++                                .keyBits.aes = 128,
++                                .mode.aes = TPM2_ALG_CFB,
++                        },
++                        .scheme.scheme = TPM2_ALG_NULL,
++                        .keyBits = 2048,
++                },
++        };
++
++        const char *key = "9ec7341c52093ac40a1965a5df10432513c539adcf905e30577ab6ebc88ffe53cd08cef12ed9bec6125432f4fada3629b8b96d31b8f507aa35029188fe396da823fcb236027f7fbb01b0da3d87be7f999390449ced604bdf7e26c48657cc0671000f1147da195c3861c96642e54427cb7a11572e07567ec3fd6316978abc4bd92b27bb0a0e4958e599804eeb41d682b3b7fc1f960209f80a4fb8a1b64abfd96bf5d554e73cdd6ad1c8becb4fcf5e8f0c3e621d210e5e2f308f6520ad9a966779231b99f06c5989e5a23a9415c8808ab89ce81117632e2f8461cd4428bded40979236aeadafe8de3f51660a45e1dbc87694e6a36360201cca3ff9e7263e712727";
++        _cleanup_free_ void *mem = NULL;
++        size_t len = 0;
++        assert_se(unhexmem(key, strlen(key), &mem, &len) == 0);
++        assert_se(len <= sizeof(tpmt.unique.rsa.buffer));
++        memcpy_safe(tpmt.unique.rsa.buffer, mem, len);
++        tpmt.unique.rsa.size = len;
++
++        public->publicArea = tpmt;
++}
++
++TEST(calculate_name) {
++        TPM2B_PUBLIC public;
++        TPM2B_NAME name;
++
++        tpm2b_public_init(&public);
++        assert_se(tpm2_calculate_name(&public.publicArea, &name) == 0);
++        assert_se(name.size == SHA256_DIGEST_SIZE + 2);
++
++        const char *expect = "000be78f74a470dd92e979ca067cdb2293a35f075e8560b436bd2ccea5da21486a07";
++        _cleanup_free_ char *h = hexmem(name.name, name.size);
++        assert_se(h);
++
++        assert_se(strlen(expect) == strlen(h));
++        assert_se(streq(expect, h));
++}
++
+ #endif /* HAVE_TPM2 */
+ 
+ DEFINE_TEST_MAIN(LOG_DEBUG);

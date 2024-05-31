@@ -5,17 +5,59 @@
 #   https://github.com/rust-lang/cargo/issues/6397
 # But we can set CARGO_HOME locally, which is a good idea anyway to make sure
 # it never writes to ~/.cargo during rpmbuild.
-%__cargo %{_bindir}/env CARGO_HOME=.cargo %{_bindir}/cargo
-%__rustc %{_bindir}/rustc
-%__rustdoc %{_bindir}/rustdoc
+%__rustc /usr/bin/rustc
+%__rustdoc /usr/bin/rustdoc
 
-# Enable optimization, debuginfo, and link hardening.
-%__global_rustflags -Copt-level=3 -Cdebuginfo=2 -Clink-arg=-Wl,-z,relro,-z,now
+# rustflags_opt_level: default optimization level
+#
+# It corresponds to the "-Copt-level" rustc command line option.
+%rustflags_opt_level 3
 
-%__global_rustflags_toml [%{lua:
-    for arg in string.gmatch(rpm.expand("%{__global_rustflags}"), "%S+") do
-        print('"' .. arg .. '", ')
-    end}]
+# rustflags_debuginfo: default verbosity of debug information
+#
+# It corresponds to the "-Cdebuginfo" rustc command line option.
+# In some cases, it might be required to override this macro with "1" or even
+# "0", if memory usage gets too high during builds on some resource-constrained
+# architectures (most likely on 32-bit architectures), which will however
+# reduce the quality of the produced debug symbols.
+%rustflags_debuginfo 2
+
+# rustflags_codegen_units: default number of parallel code generation units
+#
+# The default value of "1" results in generation of better code, but comes at
+# the cost of longer build times.
+%rustflags_codegen_units 1
+
+# build_rustflags: default compiler flags for rustc (RUSTFLAGS)
+#
+# -Copt-level: set optimization level (default: highest optimization level)
+# -Cdebuginfo: set debuginfo verbosity (default: full debug information)
+# -Ccodegen-units: set number of parallel code generation units (default: 1)
+# -Cforce-frame-pointers: force inclusion of frame pointers (default: enabled
+#       on x86_64 and aarch64 on Fedora 37+)
+#
+# Additionally, some linker flags are set which correspond to the default
+# Fedora compiler flags for hardening and for embedding package versions into
+# compiled binaries.
+#
+# ref. https://doc.rust-lang.org/rustc/codegen-options/index.html
+%build_rustflags %{shrink:
+  -Copt-level=%rustflags_opt_level
+  -Cdebuginfo=%rustflags_debuginfo
+  -Ccodegen-units=%rustflags_codegen_units
+  %{expr:0%{?_include_frame_pointers} && ("%{_arch}" != "ppc64le" && "%{_arch}" != "s390x" && "%{_arch}" != "i386") ? "-Cforce-frame-pointers=yes" : ""}
+  %[0%{?_package_note_status} ? "-Clink-arg=%_package_note_flags" : ""]
+}
+
+# Move cargo call under build_rustflags. It was discovered that this macro file
+# was updated but for some reason or another, this was at the top referencing a
+# variable that was not defined yet. @label
+%__cargo /usr/bin/env CARGO_HOME=.cargo RUSTFLAGS='%{build_rustflags}' /usr/bin/cargo
+
+# __cargo_common_opts: common command line flags for cargo
+#
+# _smp_mflags: run builds and tests in parallel
+%__cargo_common_opts %{?_smp_mflags}
 
 %cargo_prep(V:) (\
 %{__mkdir} -p .cargo \
@@ -23,7 +65,11 @@ cat > .cargo/config << EOF \
 [build]\
 rustc = "%{__rustc}"\
 rustdoc = "%{__rustdoc}"\
-rustflags = %{__global_rustflags_toml}\
+\
+[env]\
+CFLAGS = "%{build_cflags}"\
+CXXFLAGS = "%{build_cxxflags}"\
+LDFLAGS = "%{build_ldflags}"\
 \
 [install]\
 root = "%{buildroot}%{_prefix}"\
@@ -44,8 +90,104 @@ EOF\
 %endif\
 )
 
-%cargo_build %__cargo build --release %{?_smp_mflags}
+# __cargo_parse_opts: function-like macro which parses common flags into the
+#       equivalent command-line flags for cargo
+%__cargo_parse_opts(naf:) %{shrink:\
+%{-f:%{-a:%{error:Can't specify both -f(%{-f*}) and -a}}} \
+  %{-n:--no-default-features}                             \
+  %{-a:--all-features}                                    \
+  %{-f:--features %{-f*}}                                 \
+  %{nil}
+}
 
-%cargo_test %__cargo test --release %{?_smp_mflags} --no-fail-fast
+# NB: cargo_build/test/install do not use the -n/-a/-f argument parsing like
+# Fedora's rust-packaging, because that change would break anyone that's
+# already passing arguments directly to cargo after the macro. Instead, one can
+# explicitly use --no-default-features, --all-features, or --features XYZ.
 
-%cargo_install %__cargo install --no-track --path .
+# cargo_build: builds the crate with cargo
+%cargo_build \
+%{shrink:\
+  %{__cargo} build                                   \
+    %{__cargo_common_opts}                           \
+    --release                                        \
+}
+
+# cargo_test: runs the test suite with cargo
+#
+# To pass command-line arguments to the cargo test runners directly (for
+# example, to skip certain tests during package builds), the
+# "cargo test" argument parsing need to be bypassed,
+# i.e. "%%cargo_test -- --skip foo" for skipping all tests with names that
+# match "foo".
+%cargo_test \
+%{shrink:\
+  %{__cargo} test                                    \
+    %{__cargo_common_opts}                           \
+    --release                                        \
+    --no-fail-fast                                   \
+}
+
+# cargo_install: install files into the buildroot
+#
+# For "binary" crates, this macro installs all "bin" build targets to _bindir
+# inside the buildroot. The "--no-track" option prevents the creation of the
+# "$CARGO_HOME/.crates.toml" file, which is used to keep track of which version
+# of a specific binary has been installed, but which conflicts between builds
+# of different Rust applications and is not needed when building RPM packages.
+%cargo_install \
+%{shrink:                                                         \
+  %{__cargo} install                                              \
+    %{__cargo_common_opts}                                        \
+    --no-track                                                    \
+    --path .                                                      \
+}                                                                 \
+
+# cargo_license: print license information for all crate dependencies
+#
+# The "no-build,no-dev,no-proc-macro" argument results in only crates which are
+# linked into the final binary to be considered.
+#
+# Additionally, deprecated SPDX syntax ("/" instead of "OR") is normalized
+# before sorting the results to ensure reproducible output of this macro.
+#
+# This macro must be called with the same feature flags as other cargo macros,
+# in particular, "cargo_build", otherwise its output will be incomplete.
+#
+# The "cargo tree" command called by this macro will fail if there are missing
+# (optional) dependencies.
+%cargo_license(naf:)\
+%{shrink:\
+    %{__cargo} tree                                                 \
+    --workspace                                                     \
+    --offline                                                       \
+    --edges no-build,no-dev,no-proc-macro                           \
+    --no-dedupe                                                     \
+    --target all                                                    \
+    %{__cargo_parse_opts %{-n} %{-a} %{-f:-f%{-f*}}}                \
+    --prefix none                                                   \
+    --format "{l}: {p}"                                             \
+    | sed -e "s: ($(pwd)[^)]*)::g" -e "s: / :/:g" -e "s:/: OR :g"   \
+    | sort -u
+}
+
+# cargo_license_summary: print license summary for all crate dependencies
+#
+# This macro works in the same way as cargo_license, except that it only prints
+# a list of licenses, and not the complete license information for every crate
+# in the dependency tree. This is useful for determining the correct License
+# tag for packages that contain compiled Rust binaries.
+%cargo_license_summary(naf:)\
+%{shrink:\
+    %{__cargo} tree                                                 \
+    --workspace                                                     \
+    --offline                                                       \
+    --edges no-build,no-dev,no-proc-macro                           \
+    --no-dedupe                                                     \
+    --target all                                                    \
+    %{__cargo_parse_opts %{-n} %{-a} %{-f:-f%{-f*}}}                \
+    --prefix none                                                   \
+    --format "# {l}"                                                \
+    | sed -e "s: / :/:g" -e "s:/: OR :g"                            \
+    | sort -u                                                       \
+}

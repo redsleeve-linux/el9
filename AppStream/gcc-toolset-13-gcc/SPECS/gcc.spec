@@ -5,14 +5,14 @@ BuildRequires: scl-utils-build
 %{?scl:%global __strip %%{_scl_root}/usr/bin/strip}
 %{?scl:%global __objdump %%{_scl_root}/usr/bin/objdump}
 %{?scl:%scl_package gcc}
-%global DATE 20230614
-%global gitrev 0d7019741b037c7e9c4e57d6de3bce6bb2ed8026
-%global gcc_version 13.1.1
+%global DATE 20231205
+%global gitrev f783814ad6a04ae5ef44595216596a2b75eda15b
+%global gcc_version 13.2.1
 %global gcc_major 13
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 4
-%global nvptx_tools_gitrev 93e00909ceb9cbbc104f0fcba56c0361ffb3ca4b
+%global gcc_release 6
+%global nvptx_tools_gitrev aa3404ad5a496cda5d79a50bedb1344fd63e8763
 %global newlib_cygwin_gitrev 9e09d6ed83cce4777a5950412647ccc603040409
 %global mpc_version 1.0.3
 %global isl_version 0.24
@@ -149,7 +149,7 @@ BuildRequires: scl-utils-build
 Summary: GCC version 13
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.2%{?dist}.redsleeve
+Release: %{gcc_release}.3%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -329,6 +329,7 @@ Patch8: gcc13-no-add-needed.patch
 Patch9: gcc13-Wno-format-security.patch
 Patch10: gcc13-rh1574936.patch
 Patch11: gcc13-d-shared-libphobos.patch
+Patch12: gcc13-pr110792.patch
 
 Patch50: isl-rh2155127.patch
 
@@ -358,12 +359,9 @@ Patch3016: 0019-xfails.patch
 Patch3017: 0020-more-fixes.patch
 Patch3018: 0021-libstdc++-disable-tests.patch
 Patch3019: 0022-libstdc++-revert-behavior.patch
-Patch3020: gcc13-testsuite-no-ssp.patch
 Patch3021: gcc13-testsuite-p10.patch
-Patch3022: gcc13-testsuite-plugin.patch
-
-Patch10000: gcc6-decimal-rtti-arm.patch
-Patch10001: gcc13-nonshared-arm.patch
+Patch3023: gcc13-testsuite-dwarf.patch
+Patch3024: gcc13-testsuite-aarch64-add-fno-stack-protector.patch
 
 %if 0%{?rhel} == 9
 %global nonsharedver 110
@@ -381,9 +379,6 @@ Patch10001: gcc13-nonshared-arm.patch
 %if 0%{?scl:1}
 %global _gnu %{nil}
 %else
-%global _gnu -gnueabi
-%endif
-%ifarch %{arm}
 %global _gnu -gnueabi
 %endif
 %ifarch sparcv9
@@ -700,6 +695,7 @@ so that there cannot be any synchronization problems.
 %patch -P10 -p0 -b .rh1574936~
 %endif
 %patch -P11 -p0 -b .d-shared-libphobos~
+%patch -P12 -p0 -b .pr110792~
 
 %if 0%{?rhel} >= 6
 %patch -P100 -p1 -b .fortran-fdec-duplicates~
@@ -745,14 +741,9 @@ rm -f libphobos/testsuite/libphobos.gc/forkgc2.d
 %if 0%{?rhel} <= 7
 %patch -P3019 -p1 -b .dts-test-19~
 %endif
-%patch -P3020 -p1 -b .dts-test-20~
 %patch -P3021 -p1 -b .dts-test-21~
-%patch -P3022 -p1 -b .dts-test-22~
-
-%ifarch %{arm}
-%patch10000 -p1
-%patch10001 -p1
-%endif
+%patch -P3023 -p1 -b .dts-test-23~
+%patch -P3024 -p1 -b .dts-test-24~
 
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
@@ -936,7 +927,7 @@ CONFIGURE_OPTS="\
 %endif
 	--with-system-zlib --enable-__cxa_atexit --disable-libunwind-exceptions \
 	--enable-gnu-unique-object --enable-linker-build-id --with-gcc-major-version-only \
-	--enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=%{_datadir}/zoneinfo \
+	--enable-libstdcxx-backtrace --with-libstdcxx-zoneinfo=%{_root_datadir}/zoneinfo \
 %ifnarch %{mips}
 	--with-linker-hash-style=gnu \
 %endif
@@ -1048,9 +1039,6 @@ CONFIGURE_OPTS="\
 %endif
 %endif
 	--enable-decimal-float \
-%endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
@@ -1958,7 +1946,7 @@ rm -f %{buildroot}%{_prefix}/%{_lib}/libssp*
 rm -f %{buildroot}%{_prefix}/%{_lib}/libvtv* || :
 rm -f %{buildroot}/lib/cpp
 rm -f %{buildroot}/%{_lib}/libgcc_s*
-rm -f %{buildroot}%{_prefix}/bin/{f95,gccbug,gnatgcc*}
+rm -f %{buildroot}%{_prefix}/bin/{gccbug,gnatgcc*}
 rm -f %{buildroot}%{_prefix}/bin/%{gcc_target_platform}-gfortran
 %if 0%{!?scl:1}
 rm -f %{buildroot}%{_prefix}/bin/{*c++*,cc,cpp}
@@ -2630,6 +2618,7 @@ fi
 
 %files gfortran
 %{_prefix}/bin/gfortran
+%{_prefix}/bin/f95
 %if 0%{?scl:1}
 %{_mandir}/man1/gfortran.1*
 %{_infodir}/gfortran*
@@ -2918,8 +2907,55 @@ fi
 %endif
 
 %changelog
-* Mon Nov 27 2023 Jacco Ligthart <jacco@redsleeve.org> 13.1.1-4.2.redsleeve
-- patched for armv6
+* Tue Jan  9 2024 Marek Polacek <polacek@redhat.com> 13.2.1-6.3
+- use the system dir in --with-libstdcxx-zoneinfo (RHEL-21093)
+
+* Fri Dec 15 2023 Marek Polacek <polacek@redhat.com> 13.2.1-6.2
+- fix for libstdc++_nonshared.a on ppc64le (RHEL-17960)
+
+* Mon Dec 11 2023 Marek Polacek <polacek@redhat.com> 13.2.1-6.1
+- add f95 (RHEL-17655)
+
+* Wed Dec  6 2023 Marek Polacek <polacek@redhat.com> 13.2.1-6
+- update from releases/gcc-13 branch
+  - PRs c++/33799, c++/102191, c++/111703, c++/112269, c++/112301, c++/112633,
+	c/112339, fortran/111880, fortran/112764, libgomp/111413,
+	libstdc++/112348, libstdc++/112491, libstdc++/112607,
+	middle-end/111497, target/53372, target/110411, target/111408,
+	target/111815, target/111828, target/112672, tree-optimization/111137,
+	tree-optimization/111465, tree-optimization/111967,
+	tree-optimization/112496
+- add -fno-stack-protector to aarch64 tests (RHEL-17684)
+
+* Mon Nov 13 2023 Marek Polacek <polacek@redhat.com> 13.2.1-5
+- update from releases/gcc-13 branch
+  - PRs c++/89038, c/111884, d/110712, d/112270, fortran/67740, fortran/97245,
+	fortran/111837, fortran/112316, libbacktrace/111315,
+	libbacktrace/112263, libstdc++/110944, libstdc++/111172,
+	libstdc++/111936, libstdc++/112089, libstdc++/112314,
+	middle-end/111253, middle-end/111818, modula2/111756, modula2/112110,
+	target/101177, target/110170, target/111001, target/111366,
+	target/111367, target/111380, target/111935, target/112443,
+	tree-optimization/111397, tree-optimization/111445,
+	tree-optimization/111489, tree-optimization/111583,
+	tree-optimization/111614, tree-optimization/111622,
+	tree-optimization/111694, tree-optimization/111764,
+	tree-optimization/111820, tree-optimization/111833,
+	tree-optimization/111917
+  - fix aarch64 RA ICE (#2241139, PR target/111528)
+- fix ia32 doubleword rotates (#2238781, PR target/110792)
+
+* Thu Nov  9 2023 Marek Polacek <polacek@redhat.com> 13.2.1-4
+- update from releases/gcc-13 branch
+  - PRs ada/110488, ada/111434, c++/99631, c++/111471, c++/111485, c++/111493,
+	c++/111512, fortran/68155, fortran/92586, fortran/111674,
+	libstdc++/108046, libstdc++/111050, libstdc++/111102,
+	libstdc++/111511, middle-end/111699, modula2/111510, target/111121,
+	target/111411, tree-optimization/110315, tree-optimization/110386,
+	tree-optimization/111331, tree-optimization/111519
+
+* Thu Jul  6 2023 Marek Polacek <polacek@redhat.com> 13.1.1-4.3
+- fix utf-1.C with -gdwarf-4 (#2217506)
 
 * Tue Jun 27 2023 Marek Polacek <polacek@redhat.com> 13.1.1-4.2
 - fix switch to -gdwarf-4 on RHEL 8 (#2217938)

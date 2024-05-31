@@ -17,6 +17,7 @@ def files(root):
 
 o_libs = open('.file-list-libs', 'w')
 o_udev = open('.file-list-udev', 'w')
+o_ukify = open('.file-list-ukify', 'w')
 o_boot = open('.file-list-boot', 'w')
 o_pam = open('.file-list-pam', 'w')
 o_rpm_macros = open('.file-list-rpm-macros', 'w')
@@ -59,6 +60,8 @@ for file in files(buildroot):
         o = o_rpm_macros
     elif '/usr/lib/systemd/tests' in n:
         o = o_tests
+    elif 'ukify' in n:
+        o = o_ukify
     elif re.search(r'/libsystemd-(shared|core)-.*\.so$', n):
         o = o_main
     elif re.search(r'/libcryptsetup-token-systemd-.*\.so$', n):
@@ -165,7 +168,8 @@ for file in files(buildroot):
                        oomd\.conf|
                        oomctl|
                        org.freedesktop.oom1|
-                       systemd-oomd
+                       systemd-oomd|
+                       systemd-oom\.conf
     ''', n, re.X):
         o = o_oomd
 

@@ -6,8 +6,8 @@
 
 Summary:              Red Hat specific rpm configuration files
 Name:                 redhat-rpm-config
-Version:              201
-Release:              1%{?dist}.redsleeve
+Version:              207
+Release:              1%{?dist}
 # No version specified.
 License:              GPL+
 URL:                  https://src.fedoraproject.org/rpms/redhat-rpm-config
@@ -89,7 +89,6 @@ Source801:            forge.lua
 Source900:            buildflags.md
 
 
-Patch1: macros-arm.patch
 
 BuildArch:            noarch
 BuildRequires:        perl-generators
@@ -132,6 +131,7 @@ Requires:             %{_bindir}/xargs
 
 # for brp-llvm-compile-lto-elf
 Requires:             (llvm if clang)
+Requires:             (gawk if clang)
 
 # -fstack-clash-protection and -fcf-protection require GCC 8.
 Conflicts:            gcc < 8.0.1-0.22
@@ -173,8 +173,6 @@ install -p -m 644 -t %{buildroot}%{_fileattrsdir} *.attr
 mkdir -p %{buildroot}%{_rpmluadir}/fedora/{rpm,srpm}
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora common.lua
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
-
-patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
 
 # This trigger is used to decide which version of the annobin plugin for gcc
 # should be used.  See comments in the script for full details.
@@ -258,15 +256,31 @@ patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
 %doc buildflags.md
 
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart <jaco@redsleeve.org> 201-1.el9.redsleeve
-- patched for sha1 build-ids on arm when using clang
-- cherry picked from https://src.fedoraproject.org/rpms/redhat-rpm-config/pull-request/155
-
-* Wed Oct 18 2023 Release Engineering <releng@rockylinux.org> - 201-1
+* Tue Apr 02 2024 Release Engineering <releng@rockylinux.org> - 207-1
 - Add Rocky to dist.sh
 
-* Wed Oct 18 2023 Release Engineering <releng@rockylinux.org> - 201-1
+* Tue Apr 02 2024 Release Engineering <releng@rockylinux.org> - 207-1
 - Change Red Hat to Rocky and add Rocky to dist.sh
+
+* Thu Jan 18 2024 Miro Hrončok <mhroncok@redhat.com> - 207-1
+- brp-python-bytecompile: Pass --invalidation-mode=timestamp to compileall
+- Resolves: RHEL-22139
+
+* Mon Oct 02 2023 Nikita Popov <npopov@redhat.com> - 206-1
+- Use correct format specifier in brp-llvm-compile-lto-elf
+
+* Fri Sep 29 2023 Nikita Popov <npopov@redhat.com> - 205-1
+- Fix the fix for brp-llvm-compile-lto-elf
+
+* Tue Sep 26 2023 Florian Weimer <fweimer@redhat.com> - 204-1
+- Enable PIC mode for assembler files (RHEL-6298)
+
+* Wed Sep 13 2023 Florian Weimer <fweimer@redhat.com> - 203-1
+- Rebuild against more recent downstream branch (#2234024)
+
+* Fri Aug 25 2023 Nikita Popov <npopov@redhat.com> - 202-1
+- Fix brp-llvm-compile-lto-elf parallelism with hardlinks
+- Resolves: rhbz#2234024
 
 * Mon May 08 2023 Nikita Popov <npopov@redhat.com> - 201-1
 - Add llvm dependency if clang toolchain used

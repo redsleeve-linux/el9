@@ -1,0 +1,169 @@
+From 4c9eb27048c07b0cf93377344ddfe2f8980a88e4 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 1 Dec 2022 15:37:59 +0100
+Subject: [PATCH] blkid-util: define enum for blkid_do_safeprobe() return
+ values
+
+libblkid really should define an enum for this on its own, but it
+currently doesn't and returns literal numeric values. Lets make this
+more readable by adding our own symbolic names via an enum.
+
+(cherry picked from commit 2e3944b872cf57dbccdda14ec66772e8fdd2273b)
+
+Related: RHEL-16182
+---
+ src/home/homework-luks.c   | 16 ++++++++++------
+ src/partition/repart.c     |  9 +++++----
+ src/shared/blkid-util.h    | 10 ++++++++++
+ src/shared/dissect-image.c | 16 ++++++++++------
+ src/shared/find-esp.c      | 10 ++++++----
+ 5 files changed, 41 insertions(+), 20 deletions(-)
+
+diff --git a/src/home/homework-luks.c b/src/home/homework-luks.c
+index 53fa61b103..8795707f6e 100644
+--- a/src/home/homework-luks.c
++++ b/src/home/homework-luks.c
+@@ -148,10 +148,12 @@ static int probe_file_system_by_fd(
+ 
+         errno = 0;
+         r = blkid_do_safeprobe(b);
+-        if (IN_SET(r, -2, 1)) /* nothing found or ambiguous result */
++        if (r == _BLKID_SAFEPROBE_ERROR)
++                return errno_or_else(EIO);
++        if (IN_SET(r, _BLKID_SAFEPROBE_AMBIGUOUS, _BLKID_SAFEPROBE_NOT_FOUND))
+                 return -ENOPKG;
+-        if (r != 0)
+-                return errno > 0 ? -errno : -EIO;
++
++        assert(r == _BLKID_SAFEPROBE_FOUND);
+ 
+         (void) blkid_probe_lookup_value(b, "TYPE", &fstype, NULL);
+         if (!fstype)
+@@ -665,10 +667,12 @@ static int luks_validate(
+ 
+         errno = 0;
+         r = blkid_do_safeprobe(b);
+-        if (IN_SET(r, -2, 1)) /* nothing found or ambiguous result */
++        if (r == _BLKID_SAFEPROBE_ERROR)
++                return errno_or_else(EIO);
++        if (IN_SET(r, _BLKID_SAFEPROBE_AMBIGUOUS, _BLKID_SAFEPROBE_NOT_FOUND))
+                 return -ENOPKG;
+-        if (r != 0)
+-                return errno > 0 ? -errno : -EIO;
++
++        assert(r == _BLKID_SAFEPROBE_FOUND);
+ 
+         (void) blkid_probe_lookup_value(b, "TYPE", &fstype, NULL);
+         if (streq_ptr(fstype, "crypto_LUKS")) {
+diff --git a/src/partition/repart.c b/src/partition/repart.c
+index 8875e09389..cbd900969e 100644
+--- a/src/partition/repart.c
++++ b/src/partition/repart.c
+@@ -4604,12 +4604,14 @@ static int resolve_copy_blocks_auto_candidate(
+ 
+         errno = 0;
+         r = blkid_do_safeprobe(b);
+-        if (IN_SET(r, -2, 1)) { /* nothing found or ambiguous result */
++        if (r == _BLKID_SAFEPROBE_ERROR)
++                return log_error_errno(errno_or_else(EIO), "Unable to probe for partition table of '%s': %m", p);
++        if (IN_SET(r, _BLKID_SAFEPROBE_AMBIGUOUS, _BLKID_SAFEPROBE_NOT_FOUND)) {
+                 log_debug("Didn't find partition table on block device '%s'.", p);
+                 return false;
+         }
+-        if (r != 0)
+-                return log_error_errno(errno_or_else(EIO), "Unable to probe for partition table of '%s': %m", p);
++
++        assert(r == _BLKID_SAFEPROBE_FOUND);
+ 
+         (void) blkid_probe_lookup_value(b, "PTTYPE", &pttype, NULL);
+         if (!streq_ptr(pttype, "gpt")) {
+@@ -4621,7 +4623,6 @@ static int resolve_copy_blocks_auto_candidate(
+         pl = blkid_probe_get_partitions(b);
+         if (!pl)
+                 return log_error_errno(errno_or_else(EIO), "Unable read partition table of '%s': %m", p);
+-        errno = 0;
+ 
+         pp = blkid_partlist_devno_to_partition(pl, partition_devno);
+         if (!pp) {
+diff --git a/src/shared/blkid-util.h b/src/shared/blkid-util.h
+index aa444990fd..5df39eccfc 100644
+--- a/src/shared/blkid-util.h
++++ b/src/shared/blkid-util.h
+@@ -7,4 +7,14 @@
+ #  include "macro.h"
+ 
+ DEFINE_TRIVIAL_CLEANUP_FUNC_FULL(blkid_probe, blkid_free_probe, NULL);
++
++/* Define symbolic names for blkid_do_safeprobe() return values, since blkid only uses literal numbers. We
++ * prefix these symbolic definitions with underscores, to not invade libblkid's namespace needlessly. */
++enum {
++        _BLKID_SAFEPROBE_FOUND     =  0,
++        _BLKID_SAFEPROBE_NOT_FOUND =  1,
++        _BLKID_SAFEPROBE_AMBIGUOUS = -2,
++        _BLKID_SAFEPROBE_ERROR     = -1,
++};
++
+ #endif
+diff --git a/src/shared/dissect-image.c b/src/shared/dissect-image.c
+index d2abd5a087..7721769061 100644
+--- a/src/shared/dissect-image.c
++++ b/src/shared/dissect-image.c
+@@ -201,14 +201,16 @@ int probe_filesystem_full(int fd, const char *path, char **ret_fstype) {
+ 
+         errno = 0;
+         r = blkid_do_safeprobe(b);
+-        if (r == 1)
++        if (r == _BLKID_SAFEPROBE_NOT_FOUND)
+                 goto not_found;
+-        if (r == -2)
++        if (r == _BLKID_SAFEPROBE_AMBIGUOUS)
+                 return log_debug_errno(SYNTHETIC_ERRNO(EUCLEAN),
+                                        "Results ambiguous for partition %s", path);
+-        if (r != 0)
++        if (r == _BLKID_SAFEPROBE_ERROR)
+                 return log_debug_errno(errno_or_else(EIO), "Failed to probe partition %s: %m", path);
+ 
++        assert(r == _BLKID_SAFEPROBE_FOUND);
++
+         (void) blkid_probe_lookup_value(b, "TYPE", &fstype, NULL);
+ 
+         if (fstype) {
+@@ -506,10 +508,12 @@ static int dissect_image(
+ 
+         errno = 0;
+         r = blkid_do_safeprobe(b);
+-        if (IN_SET(r, -2, 1))
+-                return log_debug_errno(SYNTHETIC_ERRNO(ENOPKG), "Failed to identify any partition table.");
+-        if (r != 0)
++        if (r == _BLKID_SAFEPROBE_ERROR)
+                 return errno_or_else(EIO);
++        if (IN_SET(r, _BLKID_SAFEPROBE_AMBIGUOUS, _BLKID_SAFEPROBE_NOT_FOUND))
++                return log_debug_errno(SYNTHETIC_ERRNO(ENOPKG), "Failed to identify any partition table.");
++
++        assert(r == _BLKID_SAFEPROBE_FOUND);
+ 
+         if ((!(flags & DISSECT_IMAGE_GPT_ONLY) &&
+             (flags & DISSECT_IMAGE_GENERIC_ROOT)) ||
+diff --git a/src/shared/find-esp.c b/src/shared/find-esp.c
+index fa234c8b5f..f005432887 100644
+--- a/src/shared/find-esp.c
++++ b/src/shared/find-esp.c
+@@ -571,12 +571,14 @@ static int verify_xbootldr_blkid(
+ 
+         errno = 0;
+         r = blkid_do_safeprobe(b);
+-        if (r == -2)
++        if (r == _BLKID_SAFEPROBE_AMBIGUOUS)
+                 return log_error_errno(SYNTHETIC_ERRNO(ENODEV), "%s: File system is ambiguous.", node);
+-        else if (r == 1)
++        if (r == _BLKID_SAFEPROBE_NOT_FOUND)
+                 return log_error_errno(SYNTHETIC_ERRNO(ENODEV), "%s: File system does not contain a label.", node);
+-        else if (r != 0)
+-                return log_error_errno(errno ?: SYNTHETIC_ERRNO(EIO), "%s: Failed to probe file system: %m", node);
++        if (r == _BLKID_SAFEPROBE_ERROR)
++                return log_error_errno(errno_or_else(EIO), "%s: Failed to probe file system: %m", node);
++
++        assert(r == _BLKID_SAFEPROBE_FOUND);
+ 
+         r = blkid_probe_lookup_value(b, "PART_ENTRY_SCHEME", &type, NULL);
+         if (r != 0)

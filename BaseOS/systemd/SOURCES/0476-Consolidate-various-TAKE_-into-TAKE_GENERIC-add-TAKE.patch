@@ -1,0 +1,105 @@
+From faa2d81c6c5733d2eaa28d142f88917ed9c8300b Mon Sep 17 00:00:00 2001
+From: Dan Streetman <ddstreet@ieee.org>
+Date: Tue, 6 Dec 2022 13:07:34 -0500
+Subject: [PATCH] Consolidate various TAKE_* into TAKE_GENERIC(), add
+ TAKE_STRUCT()
+
+(cherry picked from commit 40c5cc2b214fd47ebfe85786a2a220bd3e9f275a)
+
+Related: RHEL-16182
+---
+ src/basic/fd-util.h                 |  8 +-------
+ src/basic/process-util.h            | 10 ++--------
+ src/fundamental/macro-fundamental.h | 17 +++++++++++------
+ src/shared/keyring-util.h           | 10 ++--------
+ 4 files changed, 16 insertions(+), 29 deletions(-)
+
+diff --git a/src/basic/fd-util.h b/src/basic/fd-util.h
+index 29c7d86f27..1fdb8c8fcb 100644
+--- a/src/basic/fd-util.h
++++ b/src/basic/fd-util.h
+@@ -90,13 +90,7 @@ static inline int make_null_stdio(void) {
+ }
+ 
+ /* Like TAKE_PTR() but for file descriptors, resetting them to -1 */
+-#define TAKE_FD(fd)                             \
+-        ({                                      \
+-                int *_fd_ = &(fd);              \
+-                int _ret_ = *_fd_;              \
+-                *_fd_ = -1;                     \
+-                _ret_;                          \
+-        })
++#define TAKE_FD(fd) TAKE_GENERIC(fd, int, -1)
+ 
+ /* Like free_and_replace(), but for file descriptors */
+ #define close_and_replace(a, b)                 \
+diff --git a/src/basic/process-util.h b/src/basic/process-util.h
+index ed2f73673e..e49bc47b2c 100644
+--- a/src/basic/process-util.h
++++ b/src/basic/process-util.h
+@@ -176,14 +176,8 @@ int get_oom_score_adjust(int *ret);
+ 
+ assert_cc(TASKS_MAX <= (unsigned long) PID_T_MAX);
+ 
+-/* Like TAKE_PTR() but for child PIDs, resetting them to 0 */
+-#define TAKE_PID(pid)                           \
+-        ({                                      \
+-                pid_t *_ppid_ = &(pid);         \
+-                pid_t _pid_ = *_ppid_;          \
+-                *_ppid_ = 0;                    \
+-                _pid_;                          \
+-        })
++/* Like TAKE_PTR() but for pid_t, resetting them to 0 */
++#define TAKE_PID(pid) TAKE_GENERIC(pid, pid_t, 0)
+ 
+ int pidfd_get_pid(int fd, pid_t *ret);
+ 
+diff --git a/src/fundamental/macro-fundamental.h b/src/fundamental/macro-fundamental.h
+index faab16ab31..e0665d9dcb 100644
+--- a/src/fundamental/macro-fundamental.h
++++ b/src/fundamental/macro-fundamental.h
+@@ -299,13 +299,18 @@
+ 
+ /* Takes inspiration from Rust's Option::take() method: reads and returns a pointer, but at the same time
+  * resets it to NULL. See: https://doc.rust-lang.org/std/option/enum.Option.html#method.take */
+-#define TAKE_PTR(ptr)                           \
+-        ({                                      \
+-                typeof(ptr) *_pptr_ = &(ptr);   \
+-                typeof(ptr) _ptr_ = *_pptr_;    \
+-                *_pptr_ = NULL;                 \
+-                _ptr_;                          \
++#define TAKE_GENERIC(var, type, nullvalue)                       \
++        ({                                                       \
++                type *_pvar_ = &(var);                           \
++                type _var_ = *_pvar_;                            \
++                type _nullvalue_ = nullvalue;                    \
++                *_pvar_ = _nullvalue_;                           \
++                _var_;                                           \
+         })
++#define TAKE_PTR_TYPE(ptr, type) TAKE_GENERIC(ptr, type, NULL)
++#define TAKE_PTR(ptr) TAKE_PTR_TYPE(ptr, typeof(ptr))
++#define TAKE_STRUCT_TYPE(s, type) TAKE_GENERIC(s, type, {})
++#define TAKE_STRUCT(s) TAKE_STRUCT_TYPE(s, typeof(s))
+ 
+ /*
+  * STRLEN - return the length of a string literal, minus the trailing NUL byte.
+diff --git a/src/shared/keyring-util.h b/src/shared/keyring-util.h
+index 838e990b80..c8c53f1be1 100644
+--- a/src/shared/keyring-util.h
++++ b/src/shared/keyring-util.h
+@@ -5,13 +5,7 @@
+ 
+ #include "missing_keyctl.h"
+ 
+-/* TAKE_FD but for key_serial_t instead of fds */
+-#define TAKE_KEY_SERIAL(key_serial)                             \
+-        ({                                                      \
+-                key_serial_t *_key_serialp_ = &(key_serial);    \
+-                key_serial_t _key_serial_ = *_key_serialp_;     \
+-                *_key_serialp_ = -1;                            \
+-                _key_serial_;                                   \
+-        })
++/* Like TAKE_PTR() but for key_serial_t, resetting them to -1 */
++#define TAKE_KEY_SERIAL(key_serial) TAKE_GENERIC(key_serial, key_serial_t, -1)
+ 
+ int keyring_read(key_serial_t serial, void **ret, size_t *ret_size);

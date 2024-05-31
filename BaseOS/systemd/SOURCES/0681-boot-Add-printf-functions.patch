@@ -1,0 +1,843 @@
+From 6f7f7bb71af6047458a41c0f7135a8d31df840c4 Mon Sep 17 00:00:00 2001
+From: Jan Janssen <medhefgo@web.de>
+Date: Fri, 10 Jun 2022 18:55:24 +0200
+Subject: [PATCH] boot: Add printf functions
+
+(cherry picked from commit 7c4536a9af986332eaac8db292b22d59b4977f04)
+
+Related: RHEL-16952
+---
+ src/boot/efi/efi-string.c      | 491 +++++++++++++++++++++++++++++++++
+ src/boot/efi/efi-string.h      |  26 ++
+ src/boot/efi/fuzz-efi-printf.c |  76 +++++
+ src/boot/efi/meson.build       |   1 +
+ src/boot/efi/missing_efi.h     |  12 +
+ src/boot/efi/test-efi-string.c | 142 ++++++++++
+ 6 files changed, 748 insertions(+)
+ create mode 100644 src/boot/efi/fuzz-efi-printf.c
+
+diff --git a/src/boot/efi/efi-string.c b/src/boot/efi/efi-string.c
+index 79c296eda3..860dfc00b2 100644
+--- a/src/boot/efi/efi-string.c
++++ b/src/boot/efi/efi-string.c
+@@ -2,10 +2,12 @@
+ 
+ #include <stdbool.h>
+ #include <stdint.h>
++#include <wchar.h>
+ 
+ #include "efi-string.h"
+ 
+ #if SD_BOOT
++#  include "missing_efi.h"
+ #  include "util.h"
+ #else
+ #  include <stdlib.h>
+@@ -378,6 +380,495 @@ bool efi_fnmatch(const char16_t *pattern, const char16_t *haystack) {
+ DEFINE_PARSE_NUMBER(char, parse_number8);
+ DEFINE_PARSE_NUMBER(char16_t, parse_number16);
+ 
++static const char * const warn_table[] = {
++        [EFI_SUCCESS]               = "Success",
++#if SD_BOOT
++        [EFI_WARN_UNKNOWN_GLYPH]    = "Unknown glyph",
++        [EFI_WARN_DELETE_FAILURE]   = "Delete failure",
++        [EFI_WARN_WRITE_FAILURE]    = "Write failure",
++        [EFI_WARN_BUFFER_TOO_SMALL] = "Buffer too small",
++        [EFI_WARN_STALE_DATA]       = "Stale data",
++        [EFI_WARN_FILE_SYSTEM]      = "File system",
++        [EFI_WARN_RESET_REQUIRED]   = "Reset required",
++#endif
++};
++
++/* Errors have MSB set, remove it to keep the table compact. */
++#define NOERR(err) ((err) & ~EFI_ERROR_MASK)
++
++static const char * const err_table[] = {
++        [NOERR(EFI_ERROR_MASK)]           = "Error",
++        [NOERR(EFI_LOAD_ERROR)]           = "Load error",
++#if SD_BOOT
++        [NOERR(EFI_INVALID_PARAMETER)]    = "Invalid parameter",
++        [NOERR(EFI_UNSUPPORTED)]          = "Unsupported",
++        [NOERR(EFI_BAD_BUFFER_SIZE)]      = "Bad buffer size",
++        [NOERR(EFI_BUFFER_TOO_SMALL)]     = "Buffer too small",
++        [NOERR(EFI_NOT_READY)]            = "Not ready",
++        [NOERR(EFI_DEVICE_ERROR)]         = "Device error",
++        [NOERR(EFI_WRITE_PROTECTED)]      = "Write protected",
++        [NOERR(EFI_OUT_OF_RESOURCES)]     = "Out of resources",
++        [NOERR(EFI_VOLUME_CORRUPTED)]     = "Volume corrupt",
++        [NOERR(EFI_VOLUME_FULL)]          = "Volume full",
++        [NOERR(EFI_NO_MEDIA)]             = "No media",
++        [NOERR(EFI_MEDIA_CHANGED)]        = "Media changed",
++        [NOERR(EFI_NOT_FOUND)]            = "Not found",
++        [NOERR(EFI_ACCESS_DENIED)]        = "Access denied",
++        [NOERR(EFI_NO_RESPONSE)]          = "No response",
++        [NOERR(EFI_NO_MAPPING)]           = "No mapping",
++        [NOERR(EFI_TIMEOUT)]              = "Time out",
++        [NOERR(EFI_NOT_STARTED)]          = "Not started",
++        [NOERR(EFI_ALREADY_STARTED)]      = "Already started",
++        [NOERR(EFI_ABORTED)]              = "Aborted",
++        [NOERR(EFI_ICMP_ERROR)]           = "ICMP error",
++        [NOERR(EFI_TFTP_ERROR)]           = "TFTP error",
++        [NOERR(EFI_PROTOCOL_ERROR)]       = "Protocol error",
++        [NOERR(EFI_INCOMPATIBLE_VERSION)] = "Incompatible version",
++        [NOERR(EFI_SECURITY_VIOLATION)]   = "Security violation",
++        [NOERR(EFI_CRC_ERROR)]            = "CRC error",
++        [NOERR(EFI_END_OF_MEDIA)]         = "End of media",
++        [29]                              = "Reserved (29)",
++        [30]                              = "Reserved (30)",
++        [NOERR(EFI_END_OF_FILE)]          = "End of file",
++        [NOERR(EFI_INVALID_LANGUAGE)]     = "Invalid language",
++        [NOERR(EFI_COMPROMISED_DATA)]     = "Compromised data",
++        [NOERR(EFI_IP_ADDRESS_CONFLICT)]  = "IP address conflict",
++        [NOERR(EFI_HTTP_ERROR)]           = "HTTP error",
++#endif
++};
++
++static const char *status_to_string(EFI_STATUS status) {
++        if (status <= ELEMENTSOF(warn_table) - 1)
++                return warn_table[status];
++        if (status >= EFI_ERROR_MASK && status <= ((ELEMENTSOF(err_table) - 1) | EFI_ERROR_MASK))
++                return err_table[NOERR(status)];
++        return NULL;
++}
++
++typedef struct {
++        size_t padded_len; /* Field width in printf. */
++        size_t len;        /* Precision in printf. */
++        bool pad_zero;
++        bool align_left;
++        bool alternative_form;
++        bool long_arg;
++        bool longlong_arg;
++        bool have_field_width;
++
++        const char *str;
++        const wchar_t *wstr;
++
++        /* For numbers. */
++        bool is_signed;
++        bool lowercase;
++        int8_t base;
++        char sign_pad; /* For + and (space) flags. */
++} SpecifierContext;
++
++typedef struct {
++        char16_t stack_buf[128]; /* We use stack_buf first to avoid allocations in most cases. */
++        char16_t *dyn_buf;       /* Allocated buf or NULL if stack_buf is used. */
++        char16_t *buf;           /* Points to the current active buf. */
++        size_t n_buf;            /* Len of buf (in char16_t's, not bytes!). */
++        size_t n;                /* Used len of buf (in char16_t's). This is always <n_buf. */
++
++        EFI_STATUS status;
++        const char *format;
++        va_list ap;
++} FormatContext;
++
++static void grow_buf(FormatContext *ctx, size_t need) {
++        assert(ctx);
++
++        assert_se(!__builtin_add_overflow(ctx->n, need, &need));
++
++        if (need < ctx->n_buf)
++                return;
++
++        /* Greedily allocate if we can. */
++        if (__builtin_mul_overflow(need, 2, &ctx->n_buf))
++                ctx->n_buf = need;
++
++        /* We cannot use realloc here as ctx->buf may be ctx->stack_buf, which we cannot free. */
++        char16_t *new_buf = xnew(char16_t, ctx->n_buf);
++        memcpy(new_buf, ctx->buf, ctx->n * sizeof(*ctx->buf));
++
++        free(ctx->dyn_buf);
++        ctx->buf = ctx->dyn_buf = new_buf;
++}
++
++static void push_padding(FormatContext *ctx, char pad, size_t len) {
++        assert(ctx);
++        while (len > 0) {
++                len--;
++                ctx->buf[ctx->n++] = pad;
++        }
++}
++
++static bool push_str(FormatContext *ctx, SpecifierContext *sp) {
++        assert(ctx);
++        assert(sp);
++
++        sp->padded_len = LESS_BY(sp->padded_len, sp->len);
++
++        grow_buf(ctx, sp->padded_len + sp->len);
++
++        if (!sp->align_left)
++                push_padding(ctx, ' ', sp->padded_len);
++
++        /* In userspace unit tests we cannot just memcpy() the wide string. */
++        if (sp->wstr && sizeof(wchar_t) == sizeof(char16_t)) {
++                memcpy(ctx->buf + ctx->n, sp->wstr, sp->len * sizeof(*sp->wstr));
++                ctx->n += sp->len;
++        } else
++                for (size_t i = 0; i < sp->len; i++)
++                        ctx->buf[ctx->n++] = sp->str ? sp->str[i] : sp->wstr[i];
++
++        if (sp->align_left)
++                push_padding(ctx, ' ', sp->padded_len);
++
++        assert(ctx->n < ctx->n_buf);
++        return true;
++}
++
++static bool push_num(FormatContext *ctx, SpecifierContext *sp, uint64_t u) {
++        const char *digits = sp->lowercase ? "0123456789abcdef" : "0123456789ABCDEF";
++        char16_t tmp[32];
++        size_t n = 0;
++
++        assert(ctx);
++        assert(sp);
++        assert(IN_SET(sp->base, 10, 16));
++
++        /* "%.0u" prints nothing if value is 0. */
++        if (u == 0 && sp->len == 0)
++                return true;
++
++        if (sp->is_signed && (int64_t) u < 0) {
++                /* We cannot just do "u = -(int64_t)u" here because -INT64_MIN overflows. */
++
++                uint64_t rem = -((int64_t) u % sp->base);
++                u = (int64_t) u / -sp->base;
++                tmp[n++] = digits[rem];
++                sp->sign_pad = '-';
++        }
++
++        while (u > 0 || n == 0) {
++                uint64_t rem = u % sp->base;
++                u /= sp->base;
++                tmp[n++] = digits[rem];
++        }
++
++        /* Note that numbers never get truncated! */
++        size_t prefix = (sp->sign_pad != 0 ? 1 : 0) + (sp->alternative_form ? 2 : 0);
++        size_t number_len = prefix + MAX(n, sp->len);
++        grow_buf(ctx, MAX(sp->padded_len, number_len));
++
++        size_t padding = 0;
++        if (sp->pad_zero)
++                /* Leading zeroes go after the sign or 0x prefix. */
++                number_len = MAX(number_len, sp->padded_len);
++        else
++                padding = LESS_BY(sp->padded_len, number_len);
++
++        if (!sp->align_left)
++                push_padding(ctx, ' ', padding);
++
++        if (sp->sign_pad != 0)
++                ctx->buf[ctx->n++] = sp->sign_pad;
++        if (sp->alternative_form) {
++                ctx->buf[ctx->n++] = '0';
++                ctx->buf[ctx->n++] = sp->lowercase ? 'x' : 'X';
++        }
++
++        push_padding(ctx, '0', LESS_BY(number_len, n + prefix));
++
++        while (n > 0)
++                ctx->buf[ctx->n++] = tmp[--n];
++
++        if (sp->align_left)
++                push_padding(ctx, ' ', padding);
++
++        assert(ctx->n < ctx->n_buf);
++        return true;
++}
++
++/* This helps unit testing. */
++#if SD_BOOT
++#  define NULLSTR "(null)"
++#  define wcsnlen strnlen16
++#else
++#  define NULLSTR "(nil)"
++#endif
++
++static bool handle_format_specifier(FormatContext *ctx, SpecifierContext *sp) {
++        /* Parses one item from the format specifier in ctx and put the info into sp. If we are done with
++         * this specifier returns true, otherwise this function should be called again. */
++
++        /* This implementation assumes 32bit ints. Also note that all types smaller than int are promoted to
++         * int in vararg functions, which is why we fetch only ints for any such types. The compiler would
++         * otherwise warn about fetching smaller types. */
++        assert_cc(sizeof(int) == 4);
++        assert_cc(sizeof(wchar_t) <= sizeof(int));
++        assert_cc(sizeof(intmax_t) <= sizeof(long long));
++
++        assert(ctx);
++        assert(sp);
++
++        switch (*ctx->format) {
++        case '#':
++                sp->alternative_form = true;
++                return false;
++        case '.':
++                sp->have_field_width = true;
++                return false;
++        case '-':
++                sp->align_left = true;
++                return false;
++        case '+':
++        case ' ':
++                sp->sign_pad = *ctx->format;
++                return false;
++
++        case '0':
++                if (!sp->have_field_width) {
++                        sp->pad_zero = true;
++                        return false;
++                }
++
++                /* If field width has already been provided then 0 is part of precision (%.0s). */
++                _fallthrough_;
++
++        case '*':
++        case '1' ... '9': {
++                int64_t i;
++
++                if (*ctx->format == '*')
++                        i = va_arg(ctx->ap, int);
++                else {
++                        uint64_t u;
++                        if (!parse_number8(ctx->format, &u, &ctx->format) || u > INT_MAX)
++                                assert_not_reached();
++                        ctx->format--; /* Point it back to the last digit. */
++                        i = u;
++                }
++
++                if (sp->have_field_width) {
++                        /* Negative precision is ignored. */
++                        if (i >= 0)
++                                sp->len = (size_t) i;
++                } else {
++                        /* Negative field width is treated as positive field width with '-' flag. */
++                        if (i < 0) {
++                                i *= -1;
++                                sp->align_left = true;
++                        }
++                        sp->padded_len = i;
++                }
++
++                return false;
++        }
++
++        case 'h':
++                if (*(ctx->format + 1) == 'h')
++                        ctx->format++;
++                /* char/short gets promoted to int, nothing to do here. */
++                return false;
++
++        case 'l':
++                if (*(ctx->format + 1) == 'l') {
++                        ctx->format++;
++                        sp->longlong_arg = true;
++                } else
++                        sp->long_arg = true;
++                return false;
++
++        case 'z':
++                sp->long_arg = sizeof(size_t) == sizeof(long);
++                sp->longlong_arg = !sp->long_arg && sizeof(size_t) == sizeof(long long);
++                return false;
++
++        case 'j':
++                sp->long_arg = sizeof(intmax_t) == sizeof(long);
++                sp->longlong_arg = !sp->long_arg && sizeof(intmax_t) == sizeof(long long);
++                return false;
++
++        case 't':
++                sp->long_arg = sizeof(ptrdiff_t) == sizeof(long);
++                sp->longlong_arg = !sp->long_arg && sizeof(ptrdiff_t) == sizeof(long long);
++                return false;
++
++        case '%':
++                sp->str = "%";
++                sp->len = 1;
++                return push_str(ctx, sp);
++
++        case 'c':
++                sp->wstr = &(wchar_t){ va_arg(ctx->ap, int) };
++                sp->len = 1;
++                return push_str(ctx, sp);
++
++        case 's':
++                if (sp->long_arg) {
++                        sp->wstr = va_arg(ctx->ap, const wchar_t *) ?: L"(null)";
++                        sp->len = wcsnlen(sp->wstr, sp->len);
++                } else {
++                        sp->str = va_arg(ctx->ap, const char *) ?: "(null)";
++                        sp->len = strnlen8(sp->str, sp->len);
++                }
++                return push_str(ctx, sp);
++
++        case 'd':
++        case 'i':
++        case 'u':
++        case 'x':
++        case 'X':
++                sp->lowercase = *ctx->format == 'x';
++                sp->is_signed = IN_SET(*ctx->format, 'd', 'i');
++                sp->base = IN_SET(*ctx->format, 'x', 'X') ? 16 : 10;
++                if (sp->len == SIZE_MAX)
++                        sp->len = 1;
++
++                uint64_t v;
++                if (sp->longlong_arg)
++                        v = sp->is_signed ? (uint64_t) va_arg(ctx->ap, long long) :
++                                            va_arg(ctx->ap, unsigned long long);
++                else if (sp->long_arg)
++                        v = sp->is_signed ? (uint64_t) va_arg(ctx->ap, long) : va_arg(ctx->ap, unsigned long);
++                else
++                        v = sp->is_signed ? (uint64_t) va_arg(ctx->ap, int) : va_arg(ctx->ap, unsigned);
++
++                return push_num(ctx, sp, v);
++
++        case 'p': {
++                const void *ptr = va_arg(ctx->ap, const void *);
++                if (!ptr) {
++                        sp->str = NULLSTR;
++                        sp->len = STRLEN(NULLSTR);
++                        return push_str(ctx, sp);
++                }
++
++                sp->base = 16;
++                sp->lowercase = true;
++                sp->alternative_form = true;
++                sp->len = 0; /* Precision is ignored for %p. */
++                return push_num(ctx, sp, (uintptr_t) ptr);
++        }
++
++        case 'm': {
++                sp->str = status_to_string(ctx->status);
++                if (sp->str) {
++                        sp->len = strlen8(sp->str);
++                        return push_str(ctx, sp);
++                }
++
++                sp->base = 16;
++                sp->lowercase = true;
++                sp->alternative_form = true;
++                sp->len = 0;
++                return push_num(ctx, sp, ctx->status);
++        }
++
++        default:
++                assert_not_reached();
++        }
++}
++
++/* printf_internal is largely compatible to userspace vasprintf. Any features omitted should trigger asserts.
++ *
++ * Supported:
++ *  - Flags: #, 0, +, -, space
++ *  - Lengths: h, hh, l, ll, z, j, t
++ *  - Specifiers: %, c, s, u, i, d, x, X, p, m
++ *  - Precision and width (inline or as int arg using *)
++ *
++ * Notable differences:
++ *  - Passing NULL to %s is permitted and will print "(null)"
++ *  - %p will also use "(null)"
++ *  - The provided EFI_STATUS is used for %m instead of errno
++ *  - "\n" is translated to "\r\n" */
++_printf_(2, 0) static char16_t *printf_internal(EFI_STATUS status, const char *format, va_list ap, bool ret) {
++        assert(format);
++
++        FormatContext ctx = {
++                .buf = ctx.stack_buf,
++                .n_buf = ELEMENTSOF(ctx.stack_buf),
++                .format = format,
++                .status = status,
++        };
++
++        /* We cannot put this into the struct without making a copy. */
++        va_copy(ctx.ap, ap);
++
++        while (*ctx.format != '\0') {
++                SpecifierContext sp = { .len = SIZE_MAX };
++
++                switch (*ctx.format) {
++                case '%':
++                        ctx.format++;
++                        while (!handle_format_specifier(&ctx, &sp))
++                                ctx.format++;
++                        ctx.format++;
++                        break;
++                case '\n':
++                        ctx.format++;
++                        sp.str = "\r\n";
++                        sp.len = 2;
++                        push_str(&ctx, &sp);
++                        break;
++                default:
++                        sp.str = ctx.format++;
++                        while (!IN_SET(*ctx.format, '%', '\n', '\0'))
++                                ctx.format++;
++                        sp.len = ctx.format - sp.str;
++                        push_str(&ctx, &sp);
++                }
++        }
++
++        va_end(ctx.ap);
++
++        assert(ctx.n < ctx.n_buf);
++        ctx.buf[ctx.n++] = '\0';
++
++        if (ret) {
++                if (ctx.dyn_buf)
++                        return TAKE_PTR(ctx.dyn_buf);
++
++                char16_t *ret_buf = xnew(char16_t, ctx.n);
++                memcpy(ret_buf, ctx.buf, ctx.n * sizeof(*ctx.buf));
++                return ret_buf;
++        }
++
++#if SD_BOOT
++        ST->ConOut->OutputString(ST->ConOut, ctx.buf);
++#endif
++
++        return mfree(ctx.dyn_buf);
++}
++
++void printf_status(EFI_STATUS status, const char *format, ...) {
++        va_list ap;
++        va_start(ap, format);
++        printf_internal(status, format, ap, false);
++        va_end(ap);
++}
++
++void vprintf_status(EFI_STATUS status, const char *format, va_list ap) {
++        printf_internal(status, format, ap, false);
++}
++
++char16_t *xasprintf_status(EFI_STATUS status, const char *format, ...) {
++        va_list ap;
++        va_start(ap, format);
++        char16_t *ret = printf_internal(status, format, ap, true);
++        va_end(ap);
++        return ret;
++}
++
++char16_t *xvasprintf_status(EFI_STATUS status, const char *format, va_list ap) {
++        return printf_internal(status, format, ap, true);
++}
++
+ #if SD_BOOT
+ /* To provide the actual implementation for these we need to remove the redirection to the builtins. */
+ #  undef memcmp
+diff --git a/src/boot/efi/efi-string.h b/src/boot/efi/efi-string.h
+index aaa9b399c8..2a28db3593 100644
+--- a/src/boot/efi/efi-string.h
++++ b/src/boot/efi/efi-string.h
+@@ -1,6 +1,7 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ #pragma once
+ 
++#include <stdarg.h>
+ #include <stdbool.h>
+ #include <stddef.h>
+ #include <uchar.h>
+@@ -109,7 +110,32 @@ bool efi_fnmatch(const char16_t *pattern, const char16_t *haystack);
+ bool parse_number8(const char *s, uint64_t *ret_u, const char **ret_tail);
+ bool parse_number16(const char16_t *s, uint64_t *ret_u, const char16_t **ret_tail);
+ 
++typedef size_t EFI_STATUS;
++
++#if !SD_BOOT
++/* Provide these for unit testing. */
++enum {
++        EFI_ERROR_MASK = ((EFI_STATUS) 1 << (sizeof(EFI_STATUS) * CHAR_BIT - 1)),
++        EFI_SUCCESS = 0,
++        EFI_LOAD_ERROR = 1 | EFI_ERROR_MASK,
++};
++#endif
++
++#ifdef __clang__
++#  define _gnu_printf_(a, b) _printf_(a, b)
++#else
++#  define _gnu_printf_(a, b) __attribute__((format(gnu_printf, a, b)))
++#endif
++
++_gnu_printf_(2, 3) void printf_status(EFI_STATUS status, const char *format, ...);
++_gnu_printf_(2, 0) void vprintf_status(EFI_STATUS status, const char *format, va_list ap);
++_gnu_printf_(2, 3) _warn_unused_result_ char16_t *xasprintf_status(EFI_STATUS status, const char *format, ...);
++_gnu_printf_(2, 0) _warn_unused_result_ char16_t *xvasprintf_status(EFI_STATUS status, const char *format, va_list ap);
++
+ #if SD_BOOT
++#  define printf(...) printf_status(EFI_SUCCESS, __VA_ARGS__)
++#  define xasprintf(...) xasprintf_status(EFI_SUCCESS, __VA_ARGS__)
++
+ /* The compiler normally has knowledge about standard functions such as memcmp, but this is not the case when
+  * compiling with -ffreestanding. By referring to builtins, the compiler can check arguments and do
+  * optimizations again. Note that we still need to provide implementations as the compiler is free to not
+diff --git a/src/boot/efi/fuzz-efi-printf.c b/src/boot/efi/fuzz-efi-printf.c
+new file mode 100644
+index 0000000000..218a427cef
+--- /dev/null
++++ b/src/boot/efi/fuzz-efi-printf.c
+@@ -0,0 +1,76 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++
++#include "alloc-util.h"
++#include "efi-string.h"
++#include "fuzz.h"
++#include "utf8.h"
++
++typedef struct {
++        EFI_STATUS status;
++        int16_t field_width;
++        int16_t precision;
++        const void *ptr;
++        char c;
++        unsigned char uchar;
++        signed char schar;
++        unsigned short ushort;
++        signed short sshort;
++        unsigned int uint;
++        signed int sint;
++        unsigned long ulong;
++        signed long slong;
++        unsigned long long ulonglong;
++        signed long long slonglong;
++        size_t size;
++        ssize_t ssize;
++        intmax_t intmax;
++        uintmax_t uintmax;
++        ptrdiff_t ptrdiff;
++        char str[];
++} Input;
++
++#define PRINTF_ONE(...)                                                        \
++        ({                                                                     \
++                _cleanup_free_ char16_t *_ret = xasprintf_status(__VA_ARGS__); \
++                DO_NOT_OPTIMIZE(_ret);                                         \
++        })
++
++int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
++        if (outside_size_range(size, sizeof(Input), 1024 * 1024))
++                return 0;
++
++        const Input *i = (const Input *) data;
++        size_t len = size - offsetof(Input, str);
++
++        PRINTF_ONE(i->status, "%*.*s", i->field_width, (int) len, i->str);
++        PRINTF_ONE(i->status, "%*.*ls", i->field_width, (int) (len / sizeof(wchar_t)), (const wchar_t *) i->str);
++
++        PRINTF_ONE(i->status, "%% %*.*m", i->field_width, i->precision);
++        PRINTF_ONE(i->status, "%*p", i->field_width, i->ptr);
++        PRINTF_ONE(i->status, "%*c %12340c %56789c", i->field_width, i->c, i->c, i->c);
++
++        PRINTF_ONE(i->status, "%*.*hhu", i->field_width, i->precision, i->uchar);
++        PRINTF_ONE(i->status, "%*.*hhi", i->field_width, i->precision, i->schar);
++        PRINTF_ONE(i->status, "%*.*hu", i->field_width, i->precision, i->ushort);
++        PRINTF_ONE(i->status, "%*.*hi", i->field_width, i->precision, i->sshort);
++        PRINTF_ONE(i->status, "%*.*u", i->field_width, i->precision, i->uint);
++        PRINTF_ONE(i->status, "%*.*i", i->field_width, i->precision, i->sint);
++        PRINTF_ONE(i->status, "%*.*lu", i->field_width, i->precision, i->ulong);
++        PRINTF_ONE(i->status, "%*.*li", i->field_width, i->precision, i->slong);
++        PRINTF_ONE(i->status, "%*.*llu", i->field_width, i->precision, i->ulonglong);
++        PRINTF_ONE(i->status, "%*.*lli", i->field_width, i->precision, i->slonglong);
++
++        PRINTF_ONE(i->status, "%+*.*hhi", i->field_width, i->precision, i->schar);
++        PRINTF_ONE(i->status, "%-*.*hi", i->field_width, i->precision, i->sshort);
++        PRINTF_ONE(i->status, "% *.*i", i->field_width, i->precision, i->sint);
++        PRINTF_ONE(i->status, "%0*li", i->field_width, i->slong);
++        PRINTF_ONE(i->status, "%#*.*llx", i->field_width, i->precision, i->ulonglong);
++
++        PRINTF_ONE(i->status, "%-*.*zx", i->field_width, i->precision, i->size);
++        PRINTF_ONE(i->status, "% *.*zi", i->field_width, i->precision, i->ssize);
++        PRINTF_ONE(i->status, "%0*ji", i->field_width, i->intmax);
++        PRINTF_ONE(i->status, "%#0*jX", i->field_width, i->uintmax);
++        PRINTF_ONE(i->status, "%*.*ti", i->field_width, i->precision, i->ptrdiff);
++
++        return 0;
++}
+diff --git a/src/boot/efi/meson.build b/src/boot/efi/meson.build
+index bba3b62d3c..ed332262e8 100644
+--- a/src/boot/efi/meson.build
++++ b/src/boot/efi/meson.build
+@@ -423,6 +423,7 @@ if efi_arch[1] in ['ia32', 'x86_64', 'arm', 'aarch64']
+         fuzzers += [
+                 [files('fuzz-bcd.c', 'bcd.c', 'efi-string.c')],
+                 [files('fuzz-efi-string.c', 'efi-string.c')],
++                [files('fuzz-efi-printf.c', 'efi-string.c')],
+         ]
+ endif
+ 
+diff --git a/src/boot/efi/missing_efi.h b/src/boot/efi/missing_efi.h
+index b446e0399f..a71c8fa7e2 100644
+--- a/src/boot/efi/missing_efi.h
++++ b/src/boot/efi/missing_efi.h
+@@ -417,3 +417,15 @@ struct EFI_BOOT_MANAGER_POLICY_PROTOCOL {
+                 EFI_GUID *Class);
+ };
+ #endif
++
++#ifndef EFI_WARN_UNKNOWN_GLYPH
++#  define EFI_WARN_UNKNOWN_GLYPH 1
++#endif
++
++#ifndef EFI_WARN_RESET_REQUIRED
++#  define EFI_WARN_STALE_DATA 5
++#  define EFI_WARN_FILE_SYSTEM 6
++#  define EFI_WARN_RESET_REQUIRED 7
++#  define EFI_IP_ADDRESS_CONFLICT EFIERR(34)
++#  define EFI_HTTP_ERROR EFIERR(35)
++#endif
+diff --git a/src/boot/efi/test-efi-string.c b/src/boot/efi/test-efi-string.c
+index 7b43e1d629..c26973d8bd 100644
+--- a/src/boot/efi/test-efi-string.c
++++ b/src/boot/efi/test-efi-string.c
+@@ -468,6 +468,148 @@ TEST(parse_number16) {
+         assert_se(streq16(tail, u"rest"));
+ }
+ 
++_printf_(1, 2) static void test_printf_one(const char *format, ...) {
++        va_list ap, ap_efi;
++        va_start(ap, format);
++        va_copy(ap_efi, ap);
++
++        _cleanup_free_ char *buf = NULL;
++        int r = vasprintf(&buf, format, ap);
++        assert_se(r >= 0);
++        log_info("/* %s(%s) -> \"%.100s\" */", __func__, format, buf);
++
++        _cleanup_free_ char16_t *buf_efi = xvasprintf_status(0, format, ap_efi);
++
++        bool eq = true;
++        for (size_t i = 0; i <= (size_t) r; i++) {
++                if (buf[i] != buf_efi[i])
++                        eq = false;
++                buf[i] = buf_efi[i];
++        }
++
++        log_info("%.100s", buf);
++        assert_se(eq);
++
++        va_end(ap);
++        va_end(ap_efi);
++}
++
++TEST(xvasprintf_status) {
++#pragma GCC diagnostic push
++#pragma GCC diagnostic ignored "-Wformat-zero-length"
++        test_printf_one("");
++#pragma GCC diagnostic pop
++        test_printf_one("string");
++        test_printf_one("%%-%%%%");
++
++        test_printf_one("%p %p %32p %*p %*p", NULL, (void *) 0xF, &errno, 0, &saved_argc, 20, &saved_argv);
++        test_printf_one("%-10p %-32p %-*p %-*p", NULL, &errno, 0, &saved_argc, 20, &saved_argv);
++
++        test_printf_one("%c %3c %*c %*c %-8c", '1', '!', 0, 'a', 9, '_', '>');
++
++        test_printf_one("%s %s %s", "012345", "6789", "ab");
++        test_printf_one("%.4s %.4s %.4s %.0s", "cdefgh", "ijkl", "mn", "@");
++        test_printf_one("%8s %8s %8s", "opqrst", "uvwx", "yz");
++        test_printf_one("%8.4s %8.4s %8.4s %8.0s", "ABCDEF", "GHIJ", "KL", "$");
++        test_printf_one("%4.8s %4.8s %4.8s", "ABCDEFGHIJ", "ABCDEFGH", "ABCD");
++
++        test_printf_one("%.*s %.*s %.*s %.*s", 4, "012345", 4, "6789", 4, "ab", 0, "&");
++        test_printf_one("%*s %*s %*s", 8, "cdefgh", 8, "ijkl", 8, "mn");
++        test_printf_one("%*.*s %*.*s %*.*s %*.*s", 8, 4, "opqrst", 8, 4, "uvwx", 8, 4, "yz", 8, 0, "#");
++        test_printf_one("%*.*s %*.*s %*.*s", 3, 8, "OPQRST", 3, 8, "UVWX", 3, 8, "YZ");
++
++        test_printf_one("%ls %ls %ls", L"012345", L"6789", L"ab");
++        test_printf_one("%.4ls %.4ls %.4ls %.0ls", L"cdefgh", L"ijkl", L"mn", L"@");
++        test_printf_one("%8ls %8ls %8ls", L"opqrst", L"uvwx", L"yz");
++        test_printf_one("%8.4ls %8.4ls %8.4ls %8.0ls", L"ABCDEF", L"GHIJ", L"KL", L"$");
++        test_printf_one("%4.8ls %4.8ls %4.8ls", L"ABCDEFGHIJ", L"ABCDEFGH", L"ABCD");
++
++        test_printf_one("%.*ls %.*ls %.*ls %.*ls", 4, L"012345", 4, L"6789", 4, L"ab", 0, L"&");
++        test_printf_one("%*ls %*ls %*ls", 8, L"cdefgh", 8, L"ijkl", 8, L"mn");
++        test_printf_one("%*.*ls %*.*ls %*.*ls %*.*ls", 8, 4, L"opqrst", 8, 4, L"uvwx", 8, 4, L"yz", 8, 0, L"#");
++        test_printf_one("%*.*ls %*.*ls %*.*ls", 3, 8, L"OPQRST", 3, 8, L"UVWX", 3, 8, L"YZ");
++
++        test_printf_one("%-14s %-10.0s %-10.3s", "left", "", "chopped");
++        test_printf_one("%-14ls %-10.0ls %-10.3ls", L"left", L"", L"chopped");
++
++        test_printf_one("%.6s", (char[]){ 'n', 'o', ' ', 'n', 'u', 'l' });
++        test_printf_one("%.6ls", (wchar_t[]){ 'n', 'o', ' ', 'n', 'u', 'l' });
++
++        test_printf_one("%u %u %u", 0U, 42U, 1234567890U);
++        test_printf_one("%i %i %i", 0, -42, -1234567890);
++        test_printf_one("%x %x %x", 0x0U, 0x42U, 0x123ABCU);
++        test_printf_one("%X %X %X", 0x1U, 0x43U, 0x234BCDU);
++        test_printf_one("%#x %#x %#x", 0x2U, 0x44U, 0x345CDEU);
++        test_printf_one("%#X %#X %#X", 0x3U, 0x45U, 0x456FEDU);
++
++        test_printf_one("%u %lu %llu %zu", UINT_MAX, ULONG_MAX, ULLONG_MAX, SIZE_MAX);
++        test_printf_one("%i %i %zi", INT_MIN, INT_MAX, SSIZE_MAX);
++        test_printf_one("%li %li %lli %lli", LONG_MIN, LONG_MAX, LLONG_MIN, LLONG_MAX);
++        test_printf_one("%x %#lx %llx %#zx", UINT_MAX, ULONG_MAX, ULLONG_MAX, SIZE_MAX);
++        test_printf_one("%X %#lX %llX %#zX", UINT_MAX, ULONG_MAX, ULLONG_MAX, SIZE_MAX);
++        test_printf_one("%ju %ji %ji", UINTMAX_MAX, INTMAX_MIN, INTMAX_MAX);
++        test_printf_one("%ti %ti", PTRDIFF_MIN, PTRDIFF_MAX);
++
++        test_printf_one("%" PRIu32 " %" PRIi32 " %" PRIi32, UINT32_MAX, INT32_MIN, INT32_MAX);
++        test_printf_one("%" PRIx32 " %" PRIX32, UINT32_MAX, UINT32_MAX);
++        test_printf_one("%#" PRIx32 " %#" PRIX32, UINT32_MAX, UINT32_MAX);
++
++        test_printf_one("%" PRIu64 " %" PRIi64 " %" PRIi64, UINT64_MAX, INT64_MIN, INT64_MAX);
++        test_printf_one("%" PRIx64 " %" PRIX64, UINT64_MAX, UINT64_MAX);
++        test_printf_one("%#" PRIx64 " %#" PRIX64, UINT64_MAX, UINT64_MAX);
++
++        test_printf_one("%.11u %.11i %.11x %.11X %#.11x %#.11X", 1U, -2, 3U, 0xA1U, 0xB2U, 0xC3U);
++        test_printf_one("%13u %13i %13x %13X %#13x %#13X", 4U, -5, 6U, 0xD4U, 0xE5U, 0xF6U);
++        test_printf_one("%9.5u %9.5i %9.5x %9.5X %#9.5x %#9.5X", 7U, -8, 9U, 0xA9U, 0xB8U, 0xC7U);
++        test_printf_one("%09u %09i %09x %09X %#09x %#09X", 4U, -5, 6U, 0xD6U, 0xE5U, 0xF4U);
++
++        test_printf_one("%*u %.*u %*i %.*i", 15, 42U, 15, 43U, 15, -42, 15, -43);
++        test_printf_one("%*.*u %*.*i", 14, 10, 13U, 14, 10, -14);
++        test_printf_one("%*x %*X %.*x %.*X", 15, 0x1AU, 15, 0x2BU, 15, 0x3CU, 15, 0x4DU);
++        test_printf_one("%#*x %#*X %#.*x %#.*X", 15, 0xA1U, 15, 0xB2U, 15, 0xC3U, 15, 0xD4U);
++        test_printf_one("%*.*x %*.*X", 14, 10, 0x1AU, 14, 10, 0x2BU);
++        test_printf_one("%#*.*x %#*.*X", 14, 10, 0x3CU, 14, 10, 0x4DU);
++
++        test_printf_one("%+.5i %+.5i % .7i % .7i", -15, 51, -15, 51);
++        test_printf_one("%+5.i %+5.i % 7.i % 7.i", -15, 51, -15, 51);
++
++        test_printf_one("%-10u %-10i %-10x %#-10X %- 10i", 1u, -2, 0xA2D2u, 0XB3F4u, -512);
++        test_printf_one("%-10.6u %-10.6i %-10.6x %#-10.6X %- 10.6i", 1u, -2, 0xA2D2u, 0XB3F4u, -512);
++        test_printf_one("%-6.10u %-6.10i %-6.10x %#-6.10X %- 6.10i", 3u, -4, 0x2A2Du, 0X3B4Fu, -215);
++        test_printf_one("%*.u %.*i %.*i", -4, 9u, -4, 8, -4, -6);
++
++        test_printf_one("%.0u %.0i %.0x %.0X", 0u, 0, 0u, 0u);
++        test_printf_one("%.*u %.*i %.*x %.*X", 0, 0u, 0, 0, 0, 0u, 0, 0u);
++        test_printf_one("%*u %*i %*x %*X", -1, 0u, -1, 0, -1, 0u, -1, 0u);
++
++        test_printf_one("%*s%*s%*s", 256, "", 256, "", 4096, ""); /* Test buf growing. */
++        test_printf_one("%0*i%0*i%0*i", 256, 0, 256, 0, 4096, 0); /* Test buf growing. */
++        test_printf_one("%0*i", INT16_MAX, 0); /* Poor programmer's memzero. */
++
++        /* Non printf-compatible behavior tests below. */
++        char16_t *s;
++
++        assert_se(s = xasprintf_status(0, "\n \r \r\n"));
++        assert_se(streq16(s, u"\r\n \r \r\r\n"));
++        s = mfree(s);
++
++        assert_se(s = xasprintf_status(EFI_SUCCESS, "%m"));
++        assert_se(streq16(s, u"Success"));
++        s = mfree(s);
++
++        assert_se(s = xasprintf_status(EFI_SUCCESS, "%15m"));
++        assert_se(streq16(s, u"        Success"));
++        s = mfree(s);
++
++        assert_se(s = xasprintf_status(EFI_LOAD_ERROR, "%m"));
++        assert_se(streq16(s, u"Load error"));
++        s = mfree(s);
++
++        assert_se(s = xasprintf_status(0x42, "%m"));
++        assert_se(streq16(s, u"0x42"));
++        s = mfree(s);
++}
++
+ TEST(efi_memcmp) {
+         assert_se(efi_memcmp(NULL, NULL, 0) == 0);
+         assert_se(efi_memcmp(NULL, NULL, 1) == 0);

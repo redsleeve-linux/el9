@@ -17,12 +17,8 @@ URL: https://www.python.org/
 #global prerel ...
 %global upstream_version %{general_version}%{?prerel}
 Version: %{general_version}%{?prerel:~%{prerel}}
-Release: 1%{?dist}.redsleeve
+Release: 3%{?dist}
 License: Python
-
-%ifarch armv6hl
-%define _gnu "-gnueabihf"
-%endif
 
 
 # ==================================
@@ -412,6 +408,26 @@ Patch353: 00353-architecture-names-upstream-downstream.patch
 # The second patch is Red Hat configuration, see KB for documentation:
 # - https://access.redhat.com/articles/7004769
 Patch397: 00397-tarfile-filter.patch
+
+# 00414 #
+#
+# Skip test_pair() and test_speech128() of test_zlib on s390x since
+# they fail if zlib uses the s390x hardware accelerator.
+Patch414: 00414-skip_test_zlib_s390x.patch
+
+# 00415 #
+# [CVE-2023-27043] gh-102988: Reject malformed addresses in email.parseaddr() (#111116)
+#
+# Detect email address parsing errors and return empty tuple to
+# indicate the parsing error (old API). Add an optional 'strict'
+# parameter to getaddresses() and parseaddr() functions. Patch by
+# Thomas Dwyer.
+#
+# Upstream PR: https://github.com/python/cpython/pull/111116
+#
+# Second patch implmenets the possibility to restore the old behavior via
+# config file or environment variable.
+Patch415: 00415-cve-2023-27043-gh-102988-reject-malformed-addresses-in-email-parseaddr-111116.patch
 
 # (New patches go here ^^^)
 #
@@ -1011,10 +1027,10 @@ InstallPython() {
 %endif # with gdb_hooks
 
   # Rename the -devel script that differs on different arches to arch specific name
-#  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
-#  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
-#    %{buildroot}%{_bindir}/python${LDVersion}-config
-#    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
+  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
+  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
+    %{buildroot}%{_bindir}/python${LDVersion}-config
+    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
 
   # Make python3-devel multilib-ready
   mv %{buildroot}%{_includedir}/python${LDVersion}/pyconfig.h \
@@ -1199,7 +1215,7 @@ ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python
 ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python%{pybasever}
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python-config
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-config
-#ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
+ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
 # There were also executables with %%{LDVERSION_optimized} in RHEL 8,
 # but since Python 3.8 %%{LDVERSION_optimized} == %%{pybasever}.
 # We list both in the %%files section to assert this.
@@ -1207,7 +1223,7 @@ ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-p
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python-debug
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}
 ln -s %{_bindir}/python%{LDVERSION_debug}-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-config
-#ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
+ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
 %endif
 %endif
 
@@ -1591,7 +1607,7 @@ CheckPython optimized
 
 %{_bindir}/python%{pybasever}-config
 %{_bindir}/python%{LDVERSION_optimized}-config
-#%{_bindir}/python%{LDVERSION_optimized}-*-config
+%{_bindir}/python%{LDVERSION_optimized}-*-config
 %{_libdir}/libpython%{LDVERSION_optimized}.so
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}.pc
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}-embed.pc
@@ -1602,8 +1618,8 @@ CheckPython optimized
 %{_libexecdir}/platform-python-config
 %{_libexecdir}/platform-python%{pybasever}-config
 %{_libexecdir}/platform-python%{LDVERSION_optimized}-config
-#%{_libexecdir}/platform-python%{pybasever}-*-config
-#%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
+%{_libexecdir}/platform-python%{pybasever}-*-config
+%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
 %endif
 
 
@@ -1763,7 +1779,7 @@ CheckPython optimized
 %{pylibdir}/config-%{LDVERSION_debug}-%{platform_triplet}
 %{_includedir}/python%{LDVERSION_debug}
 %{_bindir}/python%{LDVERSION_debug}-config
-#%{_bindir}/python%{LDVERSION_debug}-*-config
+%{_bindir}/python%{LDVERSION_debug}-*-config
 %{_libdir}/libpython%{LDVERSION_debug}.so
 %{_libdir}/libpython%{LDVERSION_debug}.so.%{py_SOVERSION}
 %{_libdir}/pkgconfig/python-%{LDVERSION_debug}.pc
@@ -1773,7 +1789,7 @@ CheckPython optimized
 %{_libexecdir}/platform-python-debug
 %{_libexecdir}/platform-python%{LDVERSION_debug}
 %{_libexecdir}/platform-python%{LDVERSION_debug}-config
-#%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
+%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
 %endif
 
 # Analog of the -tools subpackage's files:
@@ -1814,8 +1830,13 @@ CheckPython optimized
 # ======================================================
 
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 3.9.18-1.redsleeve
-- three minor changes for armv6
+* Wed Jan 24 2024 Lumír Balhar <lbalhar@redhat.com> - 3.9.18-3
+- Fix tests on s390x with hw acceleration
+Resolves: RHEL-13043
+
+* Thu Jan 04 2024 Lumír Balhar <lbalhar@redhat.com> - 3.9.18-2
+- Security fix for CVE-2023-27043
+Resolves: RHEL-20613
 
 * Thu Sep 07 2023 Charalampos Stratakis <cstratak@redhat.com> - 3.9.18-1
 - Update to 3.9.18
