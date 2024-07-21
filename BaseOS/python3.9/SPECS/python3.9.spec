@@ -17,7 +17,7 @@ URL: https://www.python.org/
 #global prerel ...
 %global upstream_version %{general_version}%{?prerel}
 Version: %{general_version}%{?prerel:~%{prerel}}
-Release: 3%{?dist}
+Release: 3%{?dist}.1
 License: Python
 
 
@@ -428,6 +428,27 @@ Patch414: 00414-skip_test_zlib_s390x.patch
 # Second patch implmenets the possibility to restore the old behavior via
 # config file or environment variable.
 Patch415: 00415-cve-2023-27043-gh-102988-reject-malformed-addresses-in-email-parseaddr-111116.patch
+
+# 00422 # a353cebef737c41420dc7ae2469dd657371b8881
+# Fix tests for XMLPullParser with Expat 2.6.0
+#
+# Feeding the parser by too small chunks defers parsing to prevent
+# CVE-2023-52425. Future versions of Expat may be more reactive.
+Patch422: 00422-fix-tests-for-xmlpullparser-with-expat-2-6-0.patch
+
+# 00426 #
+# CVE-2023-6597: Path traversal on tempfile.TemporaryDirectory
+# Fixed upstream:
+# https://github.com/python/cpython/commit/d54e22a669ae6e987199bb5d2c69bb5a46b0083b
+# Tracking bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=2276518
+Patch426: 00426-CVE-2023-6597.patch
+
+# 00427 #
+# CVE-2024-0450: The zipfile module is vulnerable to zip-bombs leading to denial of service
+# Fixed upstream:
+# https://github.com/python/cpython/commit/a2c59992e9e8d35baba9695eb186ad6c6ff85c51
+# Tracking bugzilla: https://bugzilla.redhat.com/show_bug.cgi?id=2276525
+Patch427: 00427-CVE-2024-0450.patch
 
 # (New patches go here ^^^)
 #
@@ -1830,6 +1851,11 @@ CheckPython optimized
 # ======================================================
 
 %changelog
+* Thu May 16 2024 Charalampos Stratakis <cstratak@redhat.com> - 3.9.18-3.1
+- Security fixes for CVE-2023-6597 and CVE-2024-0450
+- Fix tests for XMLPullParser with Expat with fixed CVE
+Resolves: RHEL-33887, RHEL-34287
+
 * Wed Jan 24 2024 Lumír Balhar <lbalhar@redhat.com> - 3.9.18-3
 - Fix tests on s390x with hw acceleration
 Resolves: RHEL-13043
