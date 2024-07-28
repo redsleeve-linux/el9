@@ -1,0 +1,91 @@
+From 382003bde3db1c82989dfe25c5a1ddb457473186 Mon Sep 17 00:00:00 2001
+From: progier389 <progier@redhat.com>
+Date: Tue, 21 Nov 2023 11:57:44 +0100
+Subject: [PATCH] Issue 5984 - Crash when paged result search are abandoned -
+ fix2 (#5987)
+
+Chasing several rabbits at the same time is a bad idea !
+and I mixed branches and unwillingly pushed one commit for #5980 in #5984
+just before the PR #5985 merge ! -:(
+Hopefully it does not break anything but just logs some useless crap if instance fails to starts.
+Anyway This commit reverts the change about __init.py
+and also do a minor code cleanup (removed a trailing space) in abandon.c
+
+Issue #5984
+
+Reviewed by: @tbordaz Thanks !
+
+(cherry picked from commit df7dd8320424f7ab616c9ad8086a6874ff8bf859)
+---
+ ldap/servers/slapd/abandon.c  |  2 +-
+ src/lib389/lib389/__init__.py | 27 +--------------------------
+ 2 files changed, 2 insertions(+), 27 deletions(-)
+
+diff --git a/ldap/servers/slapd/abandon.c b/ldap/servers/slapd/abandon.c
+index 964d28836..2dd1ee320 100644
+--- a/ldap/servers/slapd/abandon.c
++++ b/ldap/servers/slapd/abandon.c
+@@ -43,7 +43,7 @@ do_abandon(Slapi_PBlock *pb)
+         struct timespec hr_time_end;
+         int nentries;
+         int opid;
+-    } o_copy; 
++    } o_copy;
+ 
+     slapi_pblock_get(pb, SLAPI_OPERATION, &pb_op);
+     slapi_pblock_get(pb, SLAPI_CONNECTION, &pb_conn);
+diff --git a/src/lib389/lib389/__init__.py b/src/lib389/lib389/__init__.py
+index 6a941dbe7..7590ec442 100644
+--- a/src/lib389/lib389/__init__.py
++++ b/src/lib389/lib389/__init__.py
+@@ -1048,24 +1048,6 @@ class DirSrv(SimpleLDAPObject, object):
+ 
+         self.state = DIRSRV_STATE_OFFLINE
+ 
+-    def dump_errorlog(self):
+-        '''
+-            Its logs all errors messages within the error log that occured 
+-            after the last startup.
+-        '''
+-        if os.path.isfile(self.errlog):
+-            lines = []
+-            with open(self.errlog, 'r') as file:
+-                for line in file:
+-                    if "starting up" in line:
+-                        lines = []
+-                    for key in ( 'DEBUG', 'INFO', 'NOTICE', 'WARN' ):
+-                        if key in line:
+-                            lines.append(line)
+-                            break
+-            for line in lines:
+-                self.log.error(line)
+-
+     def start(self, timeout=120, post_open=True):
+         '''
+             It starts an instance and rebind it. Its final state after rebind
+@@ -1089,13 +1071,7 @@ class DirSrv(SimpleLDAPObject, object):
+         if self.with_systemd():
+             self.log.debug("systemd status -> True")
+             # Do systemd things here ...
+-            try:
+-                subprocess.check_output(["systemctl", "start", "dirsrv@%s" % self.serverid], stderr=subprocess.STDOUT)
+-            except subprocess.CalledProcessError as e:
+-                self.dump_errorlog()
+-                self.log.error('Failed to start dirsrv@%s: "%s"' % (self.serverid, e.output.decode()))
+-                self.log.error(e)
+-                raise ValueError('Failed to start DS')
++            subprocess.check_output(["systemctl", "start", "dirsrv@%s" % self.serverid], stderr=subprocess.STDOUT)
+         else:
+             self.log.debug("systemd status -> False")
+             # Start the process.
+@@ -1119,7 +1095,6 @@ class DirSrv(SimpleLDAPObject, object):
+                 self.log.debug("DEBUG: starting with %s" % cmd)
+                 output = subprocess.check_output(*cmd, env=env, stderr=subprocess.STDOUT)
+             except subprocess.CalledProcessError as e:
+-                self.dump_errorlog()
+                 self.log.error('Failed to start ns-slapd: "%s"' % e.output.decode())
+                 self.log.error(e)
+                 raise ValueError('Failed to start DS')
+-- 
+2.41.0
+

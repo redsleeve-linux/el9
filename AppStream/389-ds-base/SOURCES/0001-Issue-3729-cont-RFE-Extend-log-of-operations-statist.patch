@@ -1,0 +1,294 @@
+From 8b89bf22dea16956e4a21174f28ec11f32fc2db4 Mon Sep 17 00:00:00 2001
+From: tbordaz <tbordaz@redhat.com>
+Date: Mon, 21 Nov 2022 11:41:15 +0100
+Subject: [PATCH 1/3] Issue 3729 - (cont) RFE Extend log of operations
+ statistics in access log (#5538)
+
+Bug description:
+	This is a continuation of the #3729
+	The previous fix did not manage internal SRCH, so
+	statistics of internal SRCH were not logged
+
+Fix description:
+	For internal operation log_op_stat uses
+	connid/op_id/op_internal_id/op_nested_count that have been
+	computed log_result
+
+	For direct operation log_op_stat uses info from the
+	operation itself (o_connid and o_opid)
+
+	log_op_stat relies on operation_type rather than
+	o_tag that is not available for internal operation
+
+relates: #3729
+
+Reviewed by: Pierre Rogier
+---
+ .../tests/suites/ds_logs/ds_logs_test.py      | 90 ++++++++++++++++++-
+ ldap/servers/slapd/proto-slap.h               |  2 +-
+ ldap/servers/slapd/result.c                   | 74 +++++++++------
+ 3 files changed, 136 insertions(+), 30 deletions(-)
+
+diff --git a/dirsrvtests/tests/suites/ds_logs/ds_logs_test.py b/dirsrvtests/tests/suites/ds_logs/ds_logs_test.py
+index 865a6d0a3..67605438b 100644
+--- a/dirsrvtests/tests/suites/ds_logs/ds_logs_test.py
++++ b/dirsrvtests/tests/suites/ds_logs/ds_logs_test.py
+@@ -13,7 +13,7 @@ import pytest
+ import subprocess
+ from lib389._mapped_object import DSLdapObject
+ from lib389.topologies import topology_st
+-from lib389.plugins import AutoMembershipPlugin, ReferentialIntegrityPlugin, AutoMembershipDefinitions
++from lib389.plugins import AutoMembershipPlugin, ReferentialIntegrityPlugin, AutoMembershipDefinitions, MemberOfPlugin
+ from lib389.idm.user import UserAccounts
+ from lib389.idm.group import Groups
+ from lib389.idm.organizationalunit import OrganizationalUnits
+@@ -1254,6 +1254,94 @@ def test_stat_index(topology_st, request):
+ 
+     request.addfinalizer(fin)
+ 
++def test_stat_internal_op(topology_st, request):
++    """Check that statistics can also be collected for internal operations
++
++    :id: 19f393bd-5866-425a-af7a-4dade06d5c77
++    :setup: Standalone Instance
++    :steps:
++        1. Check that nsslapd-statlog-level is 0 (default)
++        2. Enable memberof plugins
++        3. Create a user
++        4. Remove access log (to only detect new records)
++        5. Enable statistic logging nsslapd-statlog-level=1
++        6. Check that on direct SRCH there is no 'Internal' Stat records
++        7. Remove access log (to only detect new records)
++        8. Add group with the user, so memberof triggers internal search
++           and check it exists 'Internal' Stat records
++    :expectedresults:
++        1. Success
++        2. Success
++        3. Success
++        4. Success
++        5. Success
++        6. Success
++        7. Success
++        8. Success
++    """
++
++    inst = topology_st.standalone
++
++    # Step 1
++    log.info("Assert nsslapd-statlog-level is by default 0")
++    assert topology_st.standalone.config.get_attr_val_int("nsslapd-statlog-level") == 0
++
++    # Step 2
++    memberof = MemberOfPlugin(inst)
++    memberof.enable()
++    inst.restart()
++
++    # Step 3 Add setup entries
++    users = UserAccounts(inst, DEFAULT_SUFFIX, rdn=None)
++    user = users.create(properties={'uid': 'test_1',
++                                    'cn': 'test_1',
++                                    'sn': 'test_1',
++                                    'description': 'member',
++                                    'uidNumber': '1000',
++                                    'gidNumber': '2000',
++                                    'homeDirectory': '/home/testuser'})
++    # Step 4 reset accesslog
++    topology_st.standalone.stop()
++    lpath = topology_st.standalone.ds_access_log._get_log_path()
++    os.unlink(lpath)
++    topology_st.standalone.start()
++
++    # Step 5 enable statistics
++    log.info("Set nsslapd-statlog-level: 1 to enable indexing statistics")
++    topology_st.standalone.config.set("nsslapd-statlog-level", "1")
++
++    # Step 6 for direct SRCH only non internal STAT records
++    entries = topology_st.standalone.search_s(DEFAULT_SUFFIX, ldap.SCOPE_SUBTREE, "uid=test_1")
++    topology_st.standalone.stop()
++    assert topology_st.standalone.ds_access_log.match('.*STAT read index.*')
++    assert topology_st.standalone.ds_access_log.match('.*STAT read index: attribute.*')
++    assert topology_st.standalone.ds_access_log.match('.*STAT read index: duration.*')
++    assert not topology_st.standalone.ds_access_log.match('.*Internal.*STAT.*')
++    topology_st.standalone.start()
++
++    # Step 7 reset accesslog
++    topology_st.standalone.stop()
++    lpath = topology_st.standalone.ds_access_log._get_log_path()
++    os.unlink(lpath)
++    topology_st.standalone.start()
++
++    # Step 8 trigger internal searches and check internal stat records
++    groups = Groups(inst, DEFAULT_SUFFIX, rdn=None)
++    group = groups.create(properties={'cn': 'mygroup',
++                                      'member': 'uid=test_1,%s' % DEFAULT_SUFFIX,
++                                      'description': 'group'})
++    topology_st.standalone.restart()
++    assert topology_st.standalone.ds_access_log.match('.*Internal.*STAT read index.*')
++    assert topology_st.standalone.ds_access_log.match('.*Internal.*STAT read index: attribute.*')
++    assert topology_st.standalone.ds_access_log.match('.*Internal.*STAT read index: duration.*')
++
++    def fin():
++        log.info('Deleting user/group')
++        user.delete()
++        group.delete()
++
++    request.addfinalizer(fin)
++
+ if __name__ == '__main__':
+     # Run isolated
+     # -s for DEBUG mode
+diff --git a/ldap/servers/slapd/proto-slap.h b/ldap/servers/slapd/proto-slap.h
+index 77832797b..c63ad8e74 100644
+--- a/ldap/servers/slapd/proto-slap.h
++++ b/ldap/servers/slapd/proto-slap.h
+@@ -515,7 +515,7 @@ long long config_get_pw_minage(void);
+ long long config_get_pw_warning(void);
+ int config_get_errorlog_level(void);
+ int config_get_accesslog_level(void);
+-int config_get_statlog_level();
++int config_get_statlog_level(void);
+ int config_get_securitylog_level(void);
+ int config_get_auditlog_logging_enabled(void);
+ int config_get_auditfaillog_logging_enabled(void);
+diff --git a/ldap/servers/slapd/result.c b/ldap/servers/slapd/result.c
+index c8b363cce..2ba205e04 100644
+--- a/ldap/servers/slapd/result.c
++++ b/ldap/servers/slapd/result.c
+@@ -33,7 +33,7 @@ static long current_conn_count;
+ static PRLock *current_conn_count_mutex;
+ static int flush_ber(Slapi_PBlock *pb, Connection *conn, Operation *op, BerElement *ber, int type);
+ static char *notes2str(unsigned int notes, char *buf, size_t buflen);
+-static void log_op_stat(Slapi_PBlock *pb);
++static void log_op_stat(Slapi_PBlock *pb, uint64_t connid, int32_t op_id, int32_t op_internal_id, int32_t op_nested_count);
+ static void log_result(Slapi_PBlock *pb, Operation *op, int err, ber_tag_t tag, int nentries);
+ static void log_entry(Operation *op, Slapi_Entry *e);
+ static void log_referral(Operation *op);
+@@ -2000,65 +2000,82 @@ notes2str(unsigned int notes, char *buf, size_t buflen)
+     return (buf);
+ }
+ 
++#define STAT_LOG_CONN_OP_FMT_INT_INT "conn=Internal(%" PRIu64 ") op=%d(%d)(%d)"
++#define STAT_LOG_CONN_OP_FMT_EXT_INT "conn=%" PRIu64 " (Internal) op=%d(%d)(%d)"
+ static void
+-log_op_stat(Slapi_PBlock *pb)
++log_op_stat(Slapi_PBlock *pb, uint64_t connid, int32_t op_id, int32_t op_internal_id, int32_t op_nested_count)
+ {
+-
+-    Connection *conn = NULL;
+     Operation *op = NULL;
+     Op_stat *op_stat;
+     struct timespec duration;
+     char stat_etime[ETIME_BUFSIZ] = {0};
++    int internal_op;
+ 
+     if (config_get_statlog_level() == 0) {
+         return;
+     }
+ 
+-    slapi_pblock_get(pb, SLAPI_CONNECTION, &conn);
+     slapi_pblock_get(pb, SLAPI_OPERATION, &op);
++    internal_op = operation_is_flag_set(op, OP_FLAG_INTERNAL);
+     op_stat = op_stat_get_operation_extension(pb);
+ 
+-    if (conn == NULL || op == NULL || op_stat == NULL) {
++    if (op == NULL || op_stat == NULL) {
+         return;
+     }
+     /* process the operation */
+-    switch (op->o_tag) {
+-        case LDAP_REQ_BIND:
+-        case LDAP_REQ_UNBIND:
+-        case LDAP_REQ_ADD:
+-        case LDAP_REQ_DELETE:
+-        case LDAP_REQ_MODRDN:
+-        case LDAP_REQ_MODIFY:
+-        case LDAP_REQ_COMPARE:
++    switch (operation_get_type(op)) {
++        case SLAPI_OPERATION_BIND:
++        case SLAPI_OPERATION_UNBIND:
++        case SLAPI_OPERATION_ADD:
++        case SLAPI_OPERATION_DELETE:
++        case SLAPI_OPERATION_MODRDN:
++        case SLAPI_OPERATION_MODIFY:
++        case SLAPI_OPERATION_COMPARE:
++        case SLAPI_OPERATION_EXTENDED:
+             break;
+-        case LDAP_REQ_SEARCH:
++        case SLAPI_OPERATION_SEARCH:
+             if ((LDAP_STAT_READ_INDEX & config_get_statlog_level()) &&
+                 op_stat->search_stat) {
+                 struct component_keys_lookup *key_info;
+                 for (key_info = op_stat->search_stat->keys_lookup; key_info; key_info = key_info->next) {
+-                    slapi_log_stat(LDAP_STAT_READ_INDEX,
+-                                   "conn=%" PRIu64 " op=%d STAT read index: attribute=%s key(%s)=%s --> count %d\n",
+-                                   op->o_connid, op->o_opid,
+-                                   key_info->attribute_type, key_info->index_type, key_info->key,
+-                                   key_info->id_lookup_cnt);
++                    if (internal_op) {
++                        slapi_log_stat(LDAP_STAT_READ_INDEX,
++                                       connid == 0 ? STAT_LOG_CONN_OP_FMT_INT_INT "STAT read index: attribute=%s key(%s)=%s --> count %d\n":
++                                                     STAT_LOG_CONN_OP_FMT_EXT_INT "STAT read index: attribute=%s key(%s)=%s --> count %d\n",
++                                       connid, op_id, op_internal_id, op_nested_count,
++                                       key_info->attribute_type, key_info->index_type, key_info->key,
++                                       key_info->id_lookup_cnt);
++                    } else {
++                        slapi_log_stat(LDAP_STAT_READ_INDEX,
++                                       "conn=%" PRIu64 " op=%d STAT read index: attribute=%s key(%s)=%s --> count %d\n",
++                                       connid, op_id,
++                                       key_info->attribute_type, key_info->index_type, key_info->key,
++                                       key_info->id_lookup_cnt);
++                    }
+                 }
+                
+                 /* total elapsed time */
+                 slapi_timespec_diff(&op_stat->search_stat->keys_lookup_end, &op_stat->search_stat->keys_lookup_start, &duration);
+                 snprintf(stat_etime, ETIME_BUFSIZ, "%" PRId64 ".%.09" PRId64 "", (int64_t)duration.tv_sec, (int64_t)duration.tv_nsec);
+-                slapi_log_stat(LDAP_STAT_READ_INDEX,
+-                               "conn=%" PRIu64 " op=%d STAT read index: duration %s\n",
+-                               op->o_connid, op->o_opid, stat_etime); 
++                if (internal_op) {
++                    slapi_log_stat(LDAP_STAT_READ_INDEX,
++                                   connid == 0 ? STAT_LOG_CONN_OP_FMT_INT_INT "STAT read index: duration %s\n":
++                                                 STAT_LOG_CONN_OP_FMT_EXT_INT "STAT read index: duration %s\n",
++                                   connid, op_id, op_internal_id, op_nested_count, stat_etime);
++                } else {
++                    slapi_log_stat(LDAP_STAT_READ_INDEX,
++                                   "conn=%" PRIu64 " op=%d STAT read index: duration %s\n",
++                                   op->o_connid, op->o_opid, stat_etime);
++                }
+             }
+             break;
+-        case LDAP_REQ_ABANDON_30:
+-        case LDAP_REQ_ABANDON:
++        case SLAPI_OPERATION_ABANDON:
+             break;
+ 
+         default:
+             slapi_log_err(SLAPI_LOG_ERR,
+-                          "log_op_stat", "Ignoring unknown LDAP request (conn=%" PRIu64 ", tag=0x%lx)\n",
+-                          conn->c_connid, op->o_tag);
++                          "log_op_stat", "Ignoring unknown LDAP request (conn=%" PRIu64 ", op_type=0x%lx)\n",
++                          connid, operation_get_type(op));
+             break;
+     }
+ }
+@@ -2218,7 +2235,7 @@ log_result(Slapi_PBlock *pb, Operation *op, int err, ber_tag_t tag, int nentries
+             } else {
+                 ext_str = "";
+             }
+-            log_op_stat(pb);
++            log_op_stat(pb, op->o_connid, op->o_opid, 0, 0);
+             slapi_log_access(LDAP_DEBUG_STATS,
+                              "conn=%" PRIu64 " op=%d RESULT err=%d"
+                              " tag=%" BERTAG_T " nentries=%d wtime=%s optime=%s etime=%s%s%s%s\n",
+@@ -2233,6 +2250,7 @@ log_result(Slapi_PBlock *pb, Operation *op, int err, ber_tag_t tag, int nentries
+             }
+         } else {
+             int optype;
++            log_op_stat(pb, connid, op_id, op_internal_id, op_nested_count);
+ #define LOG_MSG_FMT " tag=%" BERTAG_T " nentries=%d wtime=%s optime=%s etime=%s%s%s\n"
+             slapi_log_access(LDAP_DEBUG_ARGS,
+                              connid == 0 ? LOG_CONN_OP_FMT_INT_INT LOG_MSG_FMT :
+-- 
+2.38.1
+

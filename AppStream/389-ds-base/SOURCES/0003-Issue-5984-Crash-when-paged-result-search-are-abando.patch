@@ -1,0 +1,388 @@
+From dc091325814d9ac74d238c7e14cac8b9112b3271 Mon Sep 17 00:00:00 2001
+From: progier389 <progier@redhat.com>
+Date: Fri, 17 Nov 2023 14:41:51 +0100
+Subject: [PATCH] Issue 5984 - Crash when paged result search are abandoned
+ (#5985)
+
+* Issue 5984 - Crash when paged result search are abandoned
+
+Problem:
+  Fix #4551 has changed the lock that protects the paged result data
+  within a connection. But the abandon operation attempts to free
+  the paged search result with the connection lock.
+  This leads to race condition and double free causing an heap
+  corruption and a SIGSEGV.
+
+  Solution:
+   - Get a copy of the operation data that needs to be logged.
+   - Unlock the connection mutex (to avoid deadlock risk)
+   - Free the paged result while holding the paged result lock.
+
+Issue: 5984
+
+Reviewed by: @tbordaz (Thanks!)
+
+(cherry picked from commit 06bd0862956672eb76276cab5c1dd906fe5a7eec)
+---
+ .../paged_results/paged_results_test.py       | 107 ++++++++++++++++--
+ ldap/servers/slapd/abandon.c                  |  23 ++--
+ ldap/servers/slapd/opshared.c                 |   4 +-
+ ldap/servers/slapd/pagedresults.c             |   8 +-
+ ldap/servers/slapd/proto-slap.h               |   2 +-
+ src/lib389/lib389/__init__.py                 |  27 ++++-
+ 6 files changed, 150 insertions(+), 21 deletions(-)
+
+diff --git a/dirsrvtests/tests/suites/paged_results/paged_results_test.py b/dirsrvtests/tests/suites/paged_results/paged_results_test.py
+index d490c4af2..cdafa834a 100644
+--- a/dirsrvtests/tests/suites/paged_results/paged_results_test.py
++++ b/dirsrvtests/tests/suites/paged_results/paged_results_test.py
+@@ -7,7 +7,8 @@
+ # --- END COPYRIGHT BLOCK ---
+ #
+ import socket
+-from random import sample
++from random import sample, randrange
++
+ import pytest
+ from ldap.controls import SimplePagedResultsControl, GetEffectiveRightsControl
+ from lib389.tasks import *
+@@ -16,6 +17,10 @@ from lib389.topologies import topology_st
+ from lib389._constants import DN_LDBM, DN_DM, DEFAULT_SUFFIX
+ from lib389._controls import SSSRequestControl
+ from lib389.idm.user import UserAccount, UserAccounts
++from lib389.cli_base import FakeArgs
++from lib389.config import LDBMConfig
++from lib389.dbgen import dbgen_users
++
+ from lib389.idm.organization import Organization
+ from lib389.idm.organizationalunit import OrganizationalUnit
+ from lib389.backend import Backends
+@@ -42,11 +47,56 @@ NEW_BACKEND_1 = 'parent_base'
+ NEW_BACKEND_2 = 'child_base'
+ 
+ OLD_HOSTNAME = socket.gethostname()
+-socket.sethostname('localhost')
++if os.getuid() == 0:
++    socket.sethostname('localhost')
+ HOSTNAME = socket.gethostname()
+ IP_ADDRESS = socket.gethostbyname(HOSTNAME)
+ OLD_IP_ADDRESS = socket.gethostbyname(OLD_HOSTNAME)
+ 
++
++@pytest.fixture(scope="module")
++def create_40k_users(topology_st, request):
++    inst = topology_st.standalone
++
++    # Prepare return value
++    retval = FakeArgs()
++    retval.inst = inst
++    retval.bename = '40k'
++    retval.suffix = f'o={retval.bename}'
++    retval.ldif_file = f'{inst.get_ldif_dir()}/{retval.bename}.ldif'
++
++    # Create new backend
++    bes = Backends(inst)
++    be_1 = bes.create(properties={
++        'cn': retval.bename,
++        'nsslapd-suffix': retval.suffix,
++    })
++
++    # Set paged search lookthrough limit
++    ldbmconfig = LDBMConfig(inst)
++    ldbmconfig.replace('nsslapd-pagedlookthroughlimit', b'100000')
++
++    # Create ldif and import it.
++    dbgen_users(inst, 40000, retval.ldif_file, retval.suffix)
++    # tasks = Tasks(inst)
++    # args = {TASK_WAIT: True}
++    # tasks.importLDIF(retval.suffix, None, retval.ldif_file, args)
++    inst.stop()
++    assert inst.ldif2db(retval.bename, None, None, None, retval.ldif_file, None)
++    inst.start()
++
++    # And set an aci allowing anonymous read
++    log.info('Adding ACI to allow our test user to search')
++    ACI_TARGET = '(targetattr != "userPassword || aci")'
++    ACI_ALLOW = '(version 3.0; acl "Enable anonymous access";allow (read, search, compare)'
++    ACI_SUBJECT = '(userdn = "ldap:///anyone");)'
++    ACI_BODY = ACI_TARGET + ACI_ALLOW + ACI_SUBJECT
++    o_1 = Organization(inst, retval.suffix)
++    o_1.set('aci', ACI_BODY)
++
++    return retval
++
++
+ @pytest.fixture(scope="module")
+ def create_user(topology_st, request):
+     """User for binding operation"""
+@@ -71,8 +121,10 @@ def create_user(topology_st, request):
+ 
+     def fin():
+         log.info('Deleting user simplepaged_test')
+-        user.delete()
+-        socket.sethostname(OLD_HOSTNAME)
++        if not DEBUGGING:
++            user.delete()
++        if os.getuid() == 0:
++            socket.sethostname(OLD_HOSTNAME)
+ 
+     request.addfinalizer(fin)
+ 
+@@ -175,7 +227,7 @@ def change_conf_attr(topology_st, suffix, attr_name, attr_value):
+     return attr_value_bck
+ 
+ 
+-def paged_search(conn, suffix, controls, search_flt, searchreq_attrlist):
++def paged_search(conn, suffix, controls, search_flt, searchreq_attrlist, abandon_rate=0):
+     """Search at the DEFAULT_SUFFIX with ldap.SCOPE_SUBTREE
+     using Simple Paged Control(should the first item in the
+     list controls.
+@@ -195,9 +247,16 @@ def paged_search(conn, suffix, controls, search_flt, searchreq_attrlist):
+                                                     req_pr_ctrl.size,
+                                                     str(controls)))
+     msgid = conn.search_ext(suffix, ldap.SCOPE_SUBTREE, search_flt, searchreq_attrlist, serverctrls=controls)
++    log.info('Getting page %d' % (pages,))
+     while True:
+-        log.info('Getting page %d' % (pages,))
+-        rtype, rdata, rmsgid, rctrls = conn.result3(msgid)
++        try:
++            rtype, rdata, rmsgid, rctrls = conn.result3(msgid, timeout=0.001)
++        except ldap.TIMEOUT:
++            if pages > 0 and abandon_rate>0 and randrange(100)<abandon_rate:
++                conn.abandon(msgid)
++                log.info('Paged result search is abandonned.')
++                return all_results
++            continue
+         log.debug('Data: {}'.format(rdata))
+         all_results.extend(rdata)
+         pages += 1
+@@ -217,6 +276,7 @@ def paged_search(conn, suffix, controls, search_flt, searchreq_attrlist):
+                 break  # No more pages available
+         else:
+             break
++        log.info('Getting page %d' % (pages,))
+ 
+     assert not pctrls[0].cookie
+     return all_results
+@@ -1191,6 +1251,39 @@ def test_maxsimplepaged_per_conn_failure(topology_st, create_user, conf_attr_val
+         del_users(users_list)
+         change_conf_attr(topology_st, DN_CONFIG, 'nsslapd-maxsimplepaged-per-conn', max_per_con_bck)
+ 
++
++def test_search_stress_abandon(create_40k_users, create_user):
++    """Verify that search with a simple paged results control
++    returns all entries it should without errors.
++
++    :id: e154b24a-83d6-11ee-90d1-482ae39447e5
++    :customerscenario: True
++    :feature: Simple paged results
++    :setup: Standalone instance, test user for binding,
++            40K  users in a second backend
++    :steps:
++        1. Bind as test user
++        2. Loops a number of times doing:
++                 - search through added users with a simple paged control
++                 - randomly abandoning the search after a few ms.
++    :expectedresults:
++        1. Bind should be successful
++        2. The loop should complete successfully.
++    """
++
++    abandon_rate = 10
++    page_size = 500
++    nbloops = 1000
++    search_flt = r'(uid=*)'
++    searchreq_attrlist = ['dn', 'sn']
++    log.info('Set user bind %s ' % create_user)
++    conn = create_user.bind(TEST_USER_PWD)
++    for idx in range(nbloops):
++        req_ctrl = SimplePagedResultsControl(True, size=page_size, cookie='')
++        # If the issue #5984 is not fixed the server crashs and the paged search fails with ldap.SERVER_DOWN exception
++        paged_search(conn, create_40k_users.suffix, [req_ctrl], search_flt, searchreq_attrlist, abandon_rate=abandon_rate)
++
++
+ if __name__ == '__main__':
+     # Run isolated
+     # -s for DEBUG mode
+diff --git a/ldap/servers/slapd/abandon.c b/ldap/servers/slapd/abandon.c
+index 26a2e7bf8..964d28836 100644
+--- a/ldap/servers/slapd/abandon.c
++++ b/ldap/servers/slapd/abandon.c
+@@ -38,6 +38,12 @@ do_abandon(Slapi_PBlock *pb)
+     Connection *pb_conn = NULL;
+     Operation *pb_op = NULL;
+     Operation *o;
++    /* Keep a copy of some data because o may vanish once conn is unlocked */
++    struct {
++        struct timespec hr_time_end;
++        int nentries;
++        int opid;
++    } o_copy; 
+ 
+     slapi_pblock_get(pb, SLAPI_OPERATION, &pb_op);
+     slapi_pblock_get(pb, SLAPI_CONNECTION, &pb_conn);
+@@ -90,8 +96,12 @@ do_abandon(Slapi_PBlock *pb)
+ 
+     pthread_mutex_lock(&(pb_conn->c_mutex));
+     for (o = pb_conn->c_ops; o != NULL; o = o->o_next) {
+-        if (o->o_msgid == id && o != pb_op)
++        if (o->o_msgid == id && o != pb_op) {
++            slapi_operation_time_elapsed(o, &o_copy.hr_time_end);
++            o_copy.nentries = o->o_results.r.r_search.nentries;
++            o_copy.opid = o->o_opid;
+             break;
++        }
+     }
+ 
+     if (o != NULL) {
+@@ -130,7 +140,8 @@ do_abandon(Slapi_PBlock *pb)
+         slapi_log_err(SLAPI_LOG_TRACE, "do_abandon", "op not found\n");
+     }
+ 
+-    if (0 == pagedresults_free_one_msgid_nolock(pb_conn, id)) {
++    pthread_mutex_unlock(&(pb_conn->c_mutex));
++    if (0 == pagedresults_free_one_msgid(pb_conn, id, pageresult_lock_get_addr(pb_conn))) {
+         slapi_log_access(LDAP_DEBUG_STATS, "conn=%" PRIu64
+                                            " op=%d ABANDON targetop=Simple Paged Results msgid=%d\n",
+                          pb_conn->c_connid, pb_op->o_opid, id);
+@@ -143,15 +154,11 @@ do_abandon(Slapi_PBlock *pb)
+                                            " targetop=SUPPRESSED-BY-PLUGIN msgid=%d\n",
+                          pb_conn->c_connid, pb_op->o_opid, id);
+     } else {
+-        struct timespec o_hr_time_end;
+-        slapi_operation_time_elapsed(o, &o_hr_time_end);
+         slapi_log_access(LDAP_DEBUG_STATS, "conn=%" PRIu64 " op=%d ABANDON"
+                                            " targetop=%d msgid=%d nentries=%d etime=%" PRId64 ".%010" PRId64 "\n",
+-                         pb_conn->c_connid, pb_op->o_opid, o->o_opid, id,
+-                         o->o_results.r.r_search.nentries, (int64_t)o_hr_time_end.tv_sec, (int64_t)o_hr_time_end.tv_nsec);
++                         pb_conn->c_connid, pb_op->o_opid, o_copy.opid, id,
++                         o_copy.nentries, (int64_t)o_copy.hr_time_end.tv_sec, (int64_t)o_copy.hr_time_end.tv_nsec);
+     }
+-
+-    pthread_mutex_unlock(&(pb_conn->c_mutex));
+     /*
+      * Wake up the persistent searches, so they
+      * can notice if they've been abandoned.
+diff --git a/ldap/servers/slapd/opshared.c b/ldap/servers/slapd/opshared.c
+index a842d4249..f77043afa 100644
+--- a/ldap/servers/slapd/opshared.c
++++ b/ldap/servers/slapd/opshared.c
+@@ -921,9 +921,7 @@ op_shared_search(Slapi_PBlock *pb, int send_result)
+                     next_be = NULL; /* to break the loop */
+                     if (operation->o_status & SLAPI_OP_STATUS_ABANDONED) {
+                         /* It turned out this search was abandoned. */
+-                        pthread_mutex_lock(pagedresults_mutex);
+-                        pagedresults_free_one_msgid_nolock(pb_conn, operation->o_msgid);
+-                        pthread_mutex_unlock(pagedresults_mutex);
++                        pagedresults_free_one_msgid(pb_conn, operation->o_msgid, pagedresults_mutex);
+                         /* paged-results-request was abandoned; making an empty cookie. */
+                         pagedresults_set_response_control(pb, 0, estimate, -1, pr_idx);
+                         send_ldap_result(pb, 0, NULL, "Simple Paged Results Search abandoned", 0, NULL);
+diff --git a/ldap/servers/slapd/pagedresults.c b/ldap/servers/slapd/pagedresults.c
+index fc15f6bec..9959c927e 100644
+--- a/ldap/servers/slapd/pagedresults.c
++++ b/ldap/servers/slapd/pagedresults.c
+@@ -34,6 +34,10 @@ pageresult_lock_cleanup()
+     slapi_ch_free((void**)&lock_hash);
+ }
+ 
++/* Beware to the lock order with c_mutex:
++ * c_mutex is sometime locked while holding pageresult_lock
++ * ==> Do not lock pageresult_lock when holing c_mutex
++ */
+ pthread_mutex_t *
+ pageresult_lock_get_addr(Connection *conn)
+ {
+@@ -350,7 +354,7 @@ pagedresults_free_one(Connection *conn, Operation *op, int index)
+  * Used for abandoning - pageresult_lock_get_addr(conn) is already locked in do_abandone.
+  */
+ int
+-pagedresults_free_one_msgid_nolock(Connection *conn, ber_int_t msgid)
++pagedresults_free_one_msgid(Connection *conn, ber_int_t msgid, pthread_mutex_t *mutex)
+ {
+     int rc = -1;
+     int i;
+@@ -361,6 +365,7 @@ pagedresults_free_one_msgid_nolock(Connection *conn, ber_int_t msgid)
+         } else {
+             slapi_log_err(SLAPI_LOG_TRACE,
+                           "pagedresults_free_one_msgid_nolock", "=> msgid=%d\n", msgid);
++            pthread_mutex_lock(mutex);
+             for (i = 0; i < conn->c_pagedresults.prl_maxlen; i++) {
+                 if (conn->c_pagedresults.prl_list[i].pr_msgid == msgid) {
+                     PagedResults *prp = conn->c_pagedresults.prl_list + i;
+@@ -375,6 +380,7 @@ pagedresults_free_one_msgid_nolock(Connection *conn, ber_int_t msgid)
+                     break;
+                 }
+             }
++            pthread_mutex_unlock(mutex);
+             slapi_log_err(SLAPI_LOG_TRACE,
+                           "pagedresults_free_one_msgid_nolock", "<= %d\n", rc);
+         }
+diff --git a/ldap/servers/slapd/proto-slap.h b/ldap/servers/slapd/proto-slap.h
+index c7389fe2e..e8adbc254 100644
+--- a/ldap/servers/slapd/proto-slap.h
++++ b/ldap/servers/slapd/proto-slap.h
+@@ -1614,7 +1614,7 @@ int pagedresults_is_timedout_nolock(Connection *conn);
+ int pagedresults_reset_timedout_nolock(Connection *conn);
+ int pagedresults_in_use_nolock(Connection *conn);
+ int pagedresults_free_one(Connection *conn, Operation *op, int index);
+-int pagedresults_free_one_msgid_nolock(Connection *conn, ber_int_t msgid);
++int pagedresults_free_one_msgid(Connection *conn, ber_int_t msgid, pthread_mutex_t *mutex);
+ int op_is_pagedresults(Operation *op);
+ int pagedresults_cleanup_all(Connection *conn, int needlock);
+ void op_set_pagedresults(Operation *op);
+diff --git a/src/lib389/lib389/__init__.py b/src/lib389/lib389/__init__.py
+index 7590ec442..6a941dbe7 100644
+--- a/src/lib389/lib389/__init__.py
++++ b/src/lib389/lib389/__init__.py
+@@ -1048,6 +1048,24 @@ class DirSrv(SimpleLDAPObject, object):
+ 
+         self.state = DIRSRV_STATE_OFFLINE
+ 
++    def dump_errorlog(self):
++        '''
++            Its logs all errors messages within the error log that occured 
++            after the last startup.
++        '''
++        if os.path.isfile(self.errlog):
++            lines = []
++            with open(self.errlog, 'r') as file:
++                for line in file:
++                    if "starting up" in line:
++                        lines = []
++                    for key in ( 'DEBUG', 'INFO', 'NOTICE', 'WARN' ):
++                        if key in line:
++                            lines.append(line)
++                            break
++            for line in lines:
++                self.log.error(line)
++
+     def start(self, timeout=120, post_open=True):
+         '''
+             It starts an instance and rebind it. Its final state after rebind
+@@ -1071,7 +1089,13 @@ class DirSrv(SimpleLDAPObject, object):
+         if self.with_systemd():
+             self.log.debug("systemd status -> True")
+             # Do systemd things here ...
+-            subprocess.check_output(["systemctl", "start", "dirsrv@%s" % self.serverid], stderr=subprocess.STDOUT)
++            try:
++                subprocess.check_output(["systemctl", "start", "dirsrv@%s" % self.serverid], stderr=subprocess.STDOUT)
++            except subprocess.CalledProcessError as e:
++                self.dump_errorlog()
++                self.log.error('Failed to start dirsrv@%s: "%s"' % (self.serverid, e.output.decode()))
++                self.log.error(e)
++                raise ValueError('Failed to start DS')
+         else:
+             self.log.debug("systemd status -> False")
+             # Start the process.
+@@ -1095,6 +1119,7 @@ class DirSrv(SimpleLDAPObject, object):
+                 self.log.debug("DEBUG: starting with %s" % cmd)
+                 output = subprocess.check_output(*cmd, env=env, stderr=subprocess.STDOUT)
+             except subprocess.CalledProcessError as e:
++                self.dump_errorlog()
+                 self.log.error('Failed to start ns-slapd: "%s"' % e.output.decode())
+                 self.log.error(e)
+                 raise ValueError('Failed to start DS')
+-- 
+2.41.0
+

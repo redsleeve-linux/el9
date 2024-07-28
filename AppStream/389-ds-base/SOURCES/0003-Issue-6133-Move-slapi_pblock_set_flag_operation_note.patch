@@ -1,0 +1,54 @@
+From 189e078f574f586f6cff6f80081eded2c22c8868 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Tue, 26 Mar 2024 11:19:10 -0400
+Subject: [PATCH 3/3] Issue 6133 - Move slapi_pblock_set_flag_operation_notes()
+ to slapi-plugin.h
+
+Description:
+
+slapi_pblock_set_flag_operation_notes() is currently only available in slapi-private.h, but with the latest changes at add "notes=M" it needs to be available to plugins.
+
+relates: https://github.com/389ds/389-ds-base/issues/6133
+
+Reviewed by: spichugi(Thanks!)
+---
+ ldap/servers/slapd/slapi-plugin.h  | 10 ++++++++++
+ ldap/servers/slapd/slapi-private.h |  1 -
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/ldap/servers/slapd/slapi-plugin.h b/ldap/servers/slapd/slapi-plugin.h
+index 12bc1f0aa..5d4af7c20 100644
+--- a/ldap/servers/slapd/slapi-plugin.h
++++ b/ldap/servers/slapd/slapi-plugin.h
+@@ -7326,6 +7326,16 @@ typedef enum _slapi_op_note_t {
+     SLAPI_OP_NOTE_MFA_AUTH = 0x10,
+ } slapi_op_note_t;
+ 
++/**
++ * Set an operation note on an operation.  This will append a notes keyword
++ * in the access log result line for this operation
++ *
++ * \param pb - The slapi_pblock structure
++ * \param opnotes
++ * \return void
++ */
++void slapi_pblock_set_operation_notes(Slapi_PBlock *pb, uint32_t opnotes);
++
+ 
+ /* Allows controls to be passed before operation object is created */
+ #define SLAPI_CONTROLS_ARG 58
+diff --git a/ldap/servers/slapd/slapi-private.h b/ldap/servers/slapd/slapi-private.h
+index 17eedc2de..ee7659ac0 100644
+--- a/ldap/servers/slapd/slapi-private.h
++++ b/ldap/servers/slapd/slapi-private.h
+@@ -1510,7 +1510,6 @@ struct slapi_entry *slapi_pblock_get_pw_entry(Slapi_PBlock *pb);
+ void slapi_pblock_set_pw_entry(Slapi_PBlock *pb, struct slapi_entry *entry);
+ 
+ uint32_t slapi_pblock_get_operation_notes(Slapi_PBlock *pb);
+-void slapi_pblock_set_operation_notes(Slapi_PBlock *pb, uint32_t opnotes);
+ void slapi_pblock_set_flag_operation_notes(Slapi_PBlock *pb, uint32_t opflag);
+ void slapi_pblock_set_result_text_if_empty(Slapi_PBlock *pb, char *text);
+ 
+-- 
+2.44.0
+

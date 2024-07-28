@@ -1,0 +1,237 @@
+From 3cd7d30628007f839436c417af6dd8a056c6a165 Mon Sep 17 00:00:00 2001
+From: Mark Reynolds <mreynolds@redhat.com>
+Date: Fri, 1 Mar 2024 11:28:17 -0500
+Subject: [PATCH 2/3] Issue 6112 - RFE - add new operation note for MFA
+ authentications
+
+Add a new operation note to indicate that a MFA plugin performed the
+BIND.  This implies that the plugin must set the note itself as there is
+no other way to detect this:
+
+    slapi_pblock_set_flag_operation_notes(pb, SLAPI_OP_NOTE_MFA_AUTH);
+
+The purpose for this is for auditing needs
+
+Fixes: https://github.com/389ds/389-ds-base/issues/6112
+
+Reviewed by: spichugi(Thanks!)
+---
+ ldap/admin/src/logconv.pl         | 37 ++++++++++++++++++-------------
+ ldap/servers/slapd/log.c          |  6 ++++-
+ ldap/servers/slapd/result.c       |  2 +-
+ ldap/servers/slapd/slapi-plugin.h |  1 +
+ 4 files changed, 28 insertions(+), 18 deletions(-)
+
+diff --git a/ldap/admin/src/logconv.pl b/ldap/admin/src/logconv.pl
+index 5ba91e99c..10bd5d2aa 100755
+--- a/ldap/admin/src/logconv.pl
++++ b/ldap/admin/src/logconv.pl
+@@ -2,11 +2,11 @@
+ #
+ # BEGIN COPYRIGHT BLOCK
+ # Copyright (C) 2001 Sun Microsystems, Inc. Used by permission.
+-# Copyright (C) 2022 Red Hat, Inc.
++# Copyright (C) 2010-2024 Red Hat, Inc.
+ # All rights reserved.
+ #
+ # License: GPL (version 3 or any later version).
+-# See LICENSE for details. 
++# See LICENSE for details.
+ # END COPYRIGHT BLOCK
+ #
+ 
+@@ -218,6 +218,7 @@ my $sslClientFailedCount = 0;
+ my $objectclassTopCount= 0;
+ my $pagedSearchCount = 0;
+ my $invalidFilterCount = 0;
++my $mfaCount = 0;
+ my $bindCount = 0;
+ my $filterCount = 0;
+ my $baseCount = 0;
+@@ -407,7 +408,7 @@ sub statusreport {
+ ##########################################
+ #                                        #
+ #         Parse Access Logs              #
+-#                                        # 
++#                                        #
+ ##########################################
+ 
+ if ($files[$#files] =~ m/access.rotationinfo/) {
+@@ -709,7 +710,7 @@ if($endTime){
+ 
+ #
+ # Get the start time in seconds
+-#  
++#
+ my $logStart = $start;
+ my $startTotal = convertTimeToNanoseconds($logStart);
+ 
+@@ -890,6 +891,7 @@ $etimeAvg = $totalEtime / $etimeCount;
+ print sprintf "Average etime (elapsed time):  %.9f\n", $etimeAvg;
+ 
+ print "\n";
++print "Multi-factor Authentications:  $mfaCount\n";
+ print "Proxied Auth Operations:       $proxiedAuthCount\n";
+ print "Persistent Searches:           $persistentSrchCount\n";
+ print "Internal Operations:           $internalOpCount\n";
+@@ -1758,7 +1760,7 @@ if ($usage =~ /j/i || $verb eq "yes"){
+ 		$recCount++;
+ 	}
+ 	if ($objectclassTopCount > ($srchCount *.25)){
+-		print "\n $recCount.  You have a high number of searches that query the entire search base.  Although this is not necessarily bad, it could be resource intensive if the search base contains many entries.\n"; 
++		print "\n $recCount.  You have a high number of searches that query the entire search base.  Although this is not necessarily bad, it could be resource intensive if the search base contains many entries.\n";
+ 		$recCount++;
+ 	}
+ 	if ($recCount == 1){
+@@ -1792,7 +1794,7 @@ sub displayUsage {
+ 
+ 	print "         -h, --help         help/usage\n";
+ 	print "         -d, --rootDN       <Directory Managers DN>  default is \"cn=directory manager\"\n";
+-	print "         -D, --data         <Location for temporary data files>  default is \"/tmp\"\n";    
++	print "         -D, --data         <Location for temporary data files>  default is \"/tmp\"\n";
+ 	print "         -s, --sizeLimit    <Number of results to return per catagory>  default is 20\n";
+ 	print "         -X, --excludeIP    <IP address to exclude from connection stats>  E.g. Load balancers\n";
+ 	print "         -v, --version      show version of tool\n";
+@@ -1800,8 +1802,8 @@ sub displayUsage {
+ 	print "             E.g. \"[28/Mar/2002:13:14:22 -0800]\"\n";
+ 	print "         -E, --endTime      <time to stop analyzing logfile>\n";
+ 	print "             E.g. \"[28/Mar/2002:13:24:62 -0800]\"\n";
+-	print "         -m, --reportFileSecs  <CSV output file - per second stats>\n"; 
+-	print "         -M, --reportFileMins  <CSV output file - per minute stats>\n";	
++	print "         -m, --reportFileSecs  <CSV output file - per second stats>\n";
++	print "         -M, --reportFileMins  <CSV output file - per minute stats>\n";
+ 	print "         -B, --bind         <ALL | ANONYMOUS | \"Actual Bind DN\">\n";
+ 	print "	        -T, --minEtime     <minimum etime to report unindexed searches>\n";
+ 	print "         -V, --verbose      <enable verbose output - includes all stats listed below>\n";
+@@ -2288,6 +2290,9 @@ sub parseLineNormal
+ 	if (m/ RESULT err=/ && m/ notes=[A-Z,]*P/){
+ 		$pagedSearchCount++;
+ 	}
++	if (m/ RESULT err=/ && m/ notes=[A-Z,]*M/){
++		$mfaCount++;
++	}
+ 	if (m/ RESULT err=/ && m/ notes=[A-Z,]*F/){
+ 		$invalidFilterCount++;
+ 		$con = "";
+@@ -2318,7 +2323,7 @@ sub parseLineNormal
+ 			if ($vlvconn[$i] eq $con && $vlvop[$i] eq $op){ $vlvNotesACount++; $isVlvNotes="1";}
+ 		}
+ 		if($isVlvNotes == 0){
+-			#  We don't want to record vlv unindexed searches for our regular "bad" 
++			#  We don't want to record vlv unindexed searches for our regular "bad"
+ 			#  unindexed search stat, as VLV unindexed searches aren't that bad
+ 			$unindexedSrchCountNotesA++;
+ 			if($reportStats){ inc_stats('notesA',$s_stats,$m_stats); }
+@@ -2345,7 +2350,7 @@ sub parseLineNormal
+ 			if ($vlvconn[$i] eq $con && $vlvop[$i] eq $op){ $vlvNotesUCount++; $isVlvNotes="1";}
+ 		}
+ 		if($isVlvNotes == 0){
+-			#  We don't want to record vlv unindexed searches for our regular "bad" 
++			#  We don't want to record vlv unindexed searches for our regular "bad"
+ 			#  unindexed search stat, as VLV unindexed searches aren't that bad
+ 			$unindexedSrchCountNotesU++;
+ 			if($reportStats){ inc_stats('notesU',$s_stats,$m_stats); }
+@@ -2586,7 +2591,7 @@ sub parseLineNormal
+ 		if ($errcode ne "0"){ $errorCount++;}
+ 		else { $successCount++;}
+ 	}
+-	if ($_ =~ /etime= *([0-9.]+)/ ) { 
++	if ($_ =~ /etime= *([0-9.]+)/ ) {
+ 		my $etime_val = $1;
+ 		$totalEtime = $totalEtime + $1;
+ 		$etimeCount++;
+@@ -2608,10 +2613,10 @@ sub parseLineNormal
+ 		if ($reportStats){ inc_stats_val('optime',$optime_val,$s_stats,$m_stats); }
+ 	}
+ 	if ($_ =~ / tag=101 / || $_ =~ / tag=111 / || $_ =~ / tag=100 / || $_ =~ / tag=115 /){
+-		if ($_ =~ / nentries= *([0-9]+)/i ){ 
++		if ($_ =~ / nentries= *([0-9]+)/i ){
+ 			my $nents = $1;
+-			if ($usage =~ /n/i || $verb eq "yes"){ 
+-				$hashes->{nentries}->{$nents}++; 
++			if ($usage =~ /n/i || $verb eq "yes"){
++				$hashes->{nentries}->{$nents}++;
+ 			}
+ 		}
+ 	}
+@@ -2621,7 +2626,7 @@ sub parseLineNormal
+ 	if (m/ EXT oid=/){
+ 		$extopCount++;
+ 		my $oid;
+-		if ($_ =~ /oid=\" *([0-9\.]+)/i ){ 
++		if ($_ =~ /oid=\" *([0-9\.]+)/i ){
+ 			$oid = $1;
+ 			if ($usage =~ /x/i || $verb eq "yes"){$hashes->{oid}->{$oid}++; }
+ 		}
+@@ -2921,7 +2926,7 @@ printClients
+ 	my $IPcount = "1";
+ 
+ 	foreach my $ip ( keys %connList ){   # Loop over all the IP addresses
+-		foreach my $bc (@bindConns){ # Loop over each bind conn number and compare it 
++		foreach my $bc (@bindConns){ # Loop over each bind conn number and compare it
+ 			if($connList{$ip} =~ / $bc /){
+ 				print("        [$IPcount]  $ip\n");
+ 				$IPcount++;
+diff --git a/ldap/servers/slapd/log.c b/ldap/servers/slapd/log.c
+index 4aa905576..2c7bd933b 100644
+--- a/ldap/servers/slapd/log.c
++++ b/ldap/servers/slapd/log.c
+@@ -3892,6 +3892,7 @@ slapi_log_security(Slapi_PBlock *pb, const char *event_type, const char *msg)
+     int isroot = 0;
+     int rc = 0;
+     uint64_t conn_id = 0;
++    uint32_t operation_notes = 0;
+     int32_t op_id = 0;
+     json_object *log_json = NULL;
+ 
+@@ -3916,6 +3917,8 @@ slapi_log_security(Slapi_PBlock *pb, const char *event_type, const char *msg)
+     client_ip = pb_conn->c_ipaddr;
+     server_ip = pb_conn->c_serveripaddr;
+     ldap_version = pb_conn->c_ldapversion;
++    operation_notes = slapi_pblock_get_operation_notes(pb);
++
+     if (saslmech) {
+         external_bind = !strcasecmp(saslmech, LDAP_SASL_EXTERNAL);
+     }
+@@ -3982,7 +3985,8 @@ slapi_log_security(Slapi_PBlock *pb, const char *event_type, const char *msg)
+         break;
+     default:
+         /* Simple auth */
+-        PR_snprintf(method_and_mech, sizeof(method_and_mech), "SIMPLE");
++        PR_snprintf(method_and_mech, sizeof(method_and_mech), "%s",
++                    (operation_notes & SLAPI_OP_NOTE_MFA_AUTH) ? "SIMPLE/MFA" : "SIMPLE");
+     }
+ 
+     /* Get the time */
+diff --git a/ldap/servers/slapd/result.c b/ldap/servers/slapd/result.c
+index 56ba6db8b..97af5a2b8 100644
+--- a/ldap/servers/slapd/result.c
++++ b/ldap/servers/slapd/result.c
+@@ -1946,11 +1946,11 @@ static struct slapi_note_map notemap[] = {
+     {SLAPI_OP_NOTE_SIMPLEPAGED, "P", "Paged Search"},
+     {SLAPI_OP_NOTE_FULL_UNINDEXED, "A", "Fully Unindexed Filter"},
+     {SLAPI_OP_NOTE_FILTER_INVALID, "F", "Filter Element Missing From Schema"},
++    {SLAPI_OP_NOTE_MFA_AUTH, "M", "Multi-factor Authentication"},
+ };
+ 
+ #define SLAPI_NOTEMAP_COUNT (sizeof(notemap) / sizeof(struct slapi_note_map))
+ 
+-
+ /*
+  * fill buf with a string representation of the bits present in notes.
+  *
+diff --git a/ldap/servers/slapd/slapi-plugin.h b/ldap/servers/slapd/slapi-plugin.h
+index 4853e143b..12bc1f0aa 100644
+--- a/ldap/servers/slapd/slapi-plugin.h
++++ b/ldap/servers/slapd/slapi-plugin.h
+@@ -7323,6 +7323,7 @@ typedef enum _slapi_op_note_t {
+     SLAPI_OP_NOTE_SIMPLEPAGED = 0x02,
+     SLAPI_OP_NOTE_FULL_UNINDEXED = 0x04,
+     SLAPI_OP_NOTE_FILTER_INVALID = 0x08,
++    SLAPI_OP_NOTE_MFA_AUTH = 0x10,
+ } slapi_op_note_t;
+ 
+ 
+-- 
+2.44.0
+
