@@ -93,13 +93,13 @@
 %endif
 
 %global go_api 1.21
-%global go_version 1.21.9
+%global go_version 1.21.11
 %global version %{go_version}
 %global pkg_release 1
 
 Name:           golang
 Version:        %{version}
-Release:        2%{?dist}
+Release:        1%{?dist}
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD and Public Domain
@@ -255,9 +255,13 @@ This is the main package for go-toolset.
 pushd ..
 tar -xf %{SOURCE1}
 popd
-patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/000-initial-setup.patch
-patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/001-initial-openssl-for-fips.patch
-patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/002-strict-fips-runtime-detection.patch
+
+patch_dir="../go-go%{version}-%{pkg_release}-openssl-fips/patches"
+# Add --no-backup-if-mismatch option to avoid creating .orig temp files
+for p in "$patch_dir"/*.patch; do
+       echo "Applying $p"
+      patch -p1 --no-backup-if-mismatch < $p
+done
 
 # Configure crypto tests
 pushd ../go-go%{version}-%{pkg_release}-openssl-fips
@@ -530,6 +534,15 @@ cd ..
 %files -n go-toolset
 
 %changelog
+* Wed Jun 12 2024 Archana Ravindar <aravinda@redhat.com> - 1.21.11-1
+- Update to Go 1.21.11 that fixes CVE-2024-24789 and CVE-2024-24790
+- Resolves: RHEL-40275
+
+* Thu May 23 2024 David Benoit <dbenoit@redhat.com> - 1.21.10-1
+- Update to Go 1.21.10
+- Resolves: RHEL-36988
+- Resolves: RHEL-35630
+
 * Mon Apr 15 2024 David Benoit <dbenoit@redhat.com> - 1.21.9-2
 - Rebuilt for z-stream
 - Related: RHEL-24312
