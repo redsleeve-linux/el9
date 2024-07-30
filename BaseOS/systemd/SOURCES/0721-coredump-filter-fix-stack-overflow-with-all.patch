@@ -1,0 +1,63 @@
+From 8eab546a3468dcb1ed714ec02c927ea2f5141645 Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Wed, 26 Apr 2023 14:18:04 +0100
+Subject: [PATCH] coredump filter: fix stack overflow with =all
+
+We translate 'all' to UNIT64_MAX, which has a lot more 'f's. Use the
+helper macro, since a decimal uint64_t will always be >> than a hex
+representation.
+
+root@image:~# systemd-run -t --property CoredumpFilter=all ls /tmp
+Running as unit: run-u13.service
+Press ^] three times within 1s to disconnect TTY.
+*** stack smashing detected ***: terminated
+[137256.320511] systemd[1]: run-u13.service: Main process exited, code=dumped, status=6/ABRT
+[137256.320850] systemd[1]: run-u13.service: Failed with result 'core-dump'.
+
+(cherry picked from commit 37232d55a7bcace37280e28b207c85f5ca9b3f6b)
+
+Related: RHEL-34061
+---
+ src/basic/macro.h          | 4 ++++
+ src/shared/coredump-util.c | 5 +++--
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/src/basic/macro.h b/src/basic/macro.h
+index 2d378454a2..6893a1ff32 100644
+--- a/src/basic/macro.h
++++ b/src/basic/macro.h
+@@ -268,6 +268,10 @@ static inline int __coverity_check_and_return__(int condition) {
+ 
+ #define sizeof_field(struct_type, member) sizeof(((struct_type *) 0)->member)
+ 
++/* Maximum buffer size needed for formatting an unsigned integer type as hex, including space for '0x'
++ * prefix and trailing NUL suffix. */
++#define HEXADECIMAL_STR_MAX(type) (2 + sizeof(type) * 2 + 1)
++
+ /* Returns the number of chars needed to format variables of the specified type as a decimal string. Adds in
+  * extra space for a negative '-' prefix for signed types. Includes space for the trailing NUL. */
+ #define DECIMAL_STR_MAX(type)                                           \
+diff --git a/src/shared/coredump-util.c b/src/shared/coredump-util.c
+index a0b648bf79..aaf3e16eff 100644
+--- a/src/shared/coredump-util.c
++++ b/src/shared/coredump-util.c
+@@ -3,6 +3,7 @@
+ #include "coredump-util.h"
+ #include "extract-word.h"
+ #include "fileio.h"
++#include "stdio-util.h"
+ #include "string-table.h"
+ 
+ static const char *const coredump_filter_table[_COREDUMP_FILTER_MAX] = {
+@@ -65,9 +66,9 @@ int coredump_filter_mask_from_string(const char *s, uint64_t *ret) {
+ }
+ 
+ int set_coredump_filter(uint64_t value) {
+-        char t[STRLEN("0xFFFFFFFF")];
++        char t[HEXADECIMAL_STR_MAX(uint64_t)];
+ 
+-        sprintf(t, "0x%"PRIx64, value);
++        xsprintf(t, "0x%"PRIx64, value);
+ 
+         return write_string_file("/proc/self/coredump_filter", t,
+                                  WRITE_STRING_FILE_VERIFY_ON_FAILURE|WRITE_STRING_FILE_DISABLE_BUFFER);

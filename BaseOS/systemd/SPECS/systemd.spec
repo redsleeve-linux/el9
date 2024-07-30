@@ -12,6 +12,10 @@
 %global system_unit_dir %{pkgdir}/system
 %global user_unit_dir %{pkgdir}/user
 
+# defining macros needed by SELinux
+%global selinuxtype targeted
+%global modulename systemd-container-coredump
+
 # Bootstrap may be needed to break intercircular dependencies with
 # cryptsetup, e.g. when re-building cryptsetup on a json-c SONAME-bump.
 %bcond_with    bootstrap
@@ -21,7 +25,7 @@
 Name: systemd
 Url: https://systemd.io
 Version: 252
-Release: 32%{?dist}
+Release: 32%{?dist}.6
 # For a breakdown of the licensing, see README
 License: LGPLv2+ and MIT and GPLv2+
 Summary: System and Service Manager
@@ -69,6 +73,8 @@ Source25: rc.local
 # see: https://issues.redhat.com/browse/RHELBU-2374
 %global rhel_nns_version 0.5
 Source26: https://gitlab.com/mschmidt2/rhel-net-naming-sysattrs/-/archive/v%{rhel_nns_version}/rhel-net-naming-sysattrs-v%{rhel_nns_version}.tar.gz
+
+Source27: %{modulename}.pp.bz2
 
 %if 0
 GIT_DIR=../../src/systemd/.git git format-patch-ab --no-signature -M -N v235..v235-stable
@@ -799,6 +805,21 @@ Patch0713: 0713-random-seed-don-t-refresh-EFI-random-seed-from-rando.patch
 Patch0714: 0714-bootctl-downgrade-graceful-messages-to-LOG_NOTICE.patch
 Patch0715: 0715-units-rename-rework-systemd-boot-system-token.servic.patch
 Patch0716: 0716-bootctl-split-out-setting-of-system-token-into-funct.patch
+Patch0717: 0717-execute-Pass-AT_FDCWD-instead-of-1.patch
+Patch0718: 0718-coredump-generate-stacktraces-also-for-processes-run.patch
+Patch0719: 0719-test-add-a-couple-of-tests-for-systemd-coredump.patch
+Patch0720: 0720-test-don-t-expand-the-subshell-expression-prematurel.patch
+Patch0721: 0721-coredump-filter-fix-stack-overflow-with-all.patch
+Patch0722: 0722-coredump-filter-add-mask-for-all-using-UINT32_MAX-no.patch
+Patch0723: 0723-test-add-coverage-for-CoredumpFilter-all.patch
+Patch0724: 0724-test-rotate-journal-before-storing-coredumps.patch
+Patch0725: 0725-test-sync-with-the-fake-binary-before-killing-it.patch
+Patch0726: 0726-test-check-coredump-handling-in-containers-namespace.patch
+Patch0727: 0727-ukify-make-the-test-happy-with-the-latest-OpenSSL.patch
+Patch0728: 0728-kernel-install-fix-uki-copy-deinstall.patch
+Patch0729: 0729-cryptsetup-do-not-assert-when-unsealing-token-withou.patch
+Patch0730: 0730-cryptsetup-check-the-existence-of-salt-by-salt_size-.patch
+Patch0731: 0731-bootspec-fix-null-dereference-read.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -867,11 +888,17 @@ BuildRequires: git-core
 %if 0%{?have_gnu_efi}
 BuildRequires: gnu-efi gnu-efi-devel
 %endif
+BuildRequires: selinux-policy-devel
 
 Requires(post): coreutils
 Requires(post): sed
 Requires(post): acl
 Requires(post): grep
+
+# selinux
+Requires(post): libselinux-utils
+Requires(post): policycoreutils
+
 # systemd-machine-id-setup requires libssl
 Requires(post): openssl-libs
 Requires(pre):  coreutils
@@ -1362,6 +1389,9 @@ install -m 0644 -D -t %{buildroot}%{_rpmconfigdir}/fileattrs/ %{SOURCE22}
 install -m 0755 -D -t %{buildroot}%{_rpmconfigdir}/ %{SOURCE23}
 install -m 0755 -D -t %{buildroot}%{_rpmconfigdir}/ %{SOURCE24}
 
+# install policy modules
+install -m 0644 -D -t %{buildroot}%{_datadir}/selinux/packages/%{selinuxtype}/ %{SOURCE27}
+
 %find_lang %{name}
 
 # Split files in build root into rpms. See split-files.py for the
@@ -1463,6 +1493,9 @@ chmod g+s /{run,var}/log/journal/{,${machine_id}} &>/dev/null || :
 
 # Apply ACL to the journal directory
 setfacl -Rnm g:wheel:rx,d:g:wheel:rx,g:adm:rx,d:g:adm:rx /var/log/journal/ &>/dev/null || :
+
+# Install our own selinux-policy module that allows systemd-coredump access to containers
+%selinux_modules_install -s %{selinuxtype} %{_datadir}/selinux/packages/%{selinuxtype}/%{modulename}.pp.bz2
 
 [ $1 -eq 1 ] || exit 0
 
@@ -1608,6 +1641,7 @@ systemd-hwdb update &>/dev/null || :
 %global _docdir_fmt %{name}
 
 %files -f %{name}.lang -f .file-list-main
+%{_datadir}/selinux/packages/%{selinuxtype}/%{modulename}.pp.*
 %doc %{_pkgdocdir}
 %exclude %{_pkgdocdir}/LICENSE.*
 %license LICENSE.GPL2 LICENSE.LGPL2.1
@@ -1627,6 +1661,7 @@ systemd-hwdb update &>/dev/null || :
 %ghost %dir %attr(0755,-,-) /etc/systemd/system/system-update.target.wants
 %ghost %dir %attr(0755,-,-) /etc/systemd/system/timers.target.wants
 %ghost %dir %attr(0755,-,-) /var/lib/rpm-state/systemd
+%ghost %verify(not md5 size mode mtime) %{_sharedstatedir}/selinux/%{selinuxtype}/active/modules/200/%{modulename}
 
 %files libs -f .file-list-libs
 %license LICENSE.LGPL2.1
@@ -1664,9 +1699,38 @@ systemd-hwdb update &>/dev/null || :
 %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
 
 %changelog
-* Sun Apr 07 2024 Release Engineering <releng@rockylinux.org> - 252-32
+* Tue Jul 23 2024 Release Engineering <releng@rockylinux.org> - 252-32
 - Set support URL to the wiki
 - Set sbat mail to security@rockylinux.org
+
+* Wed Jun 12 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-32.6
+- cryptsetup: do not assert when unsealing token without salt (RHEL-40119)
+- cryptsetup: check the existence of salt by salt_size > 0 (RHEL-40119)
+- bootspec: fix null-dereference-read (RHEL-40119)
+
+* Wed May 22 2024 Jan Macku <jamacku@redhat.com> - 252-32.5
+- spec: return selinux dependencies (RHEL-36471)
+
+* Mon May 20 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-32.4
+- kernel-install: fix uki-copy deinstall (RHEL-35994)
+
+* Wed May 15 2024 Jan Macku <jamacku@redhat.com> - 252-32.3
+- remove selinux post-requires for python (RHEL-36471)
+
+* Fri Apr 26 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-32.2
+- coredump: generate stacktraces also for processes running in containers w/o coredump forwarding (RHEL-34061)
+- test: add a couple of tests for systemd-coredump (RHEL-34061)
+- test: don't expand the subshell expression prematurely (RHEL-34061)
+- coredump filter: fix stack overflow with =all (RHEL-34061)
+- coredump filter: add mask for 'all' using UINT32_MAX, not UINT64_MAX (RHEL-34061)
+- test: add coverage for CoredumpFilter=all (RHEL-34061)
+- test: rotate journal before storing coredumps (RHEL-34061)
+- test: sync with the fake binary before killing it (RHEL-34061)
+- test: check coredump handling in containers & namespaces (RHEL-34061)
+- ukify: make the test happy with the latest OpenSSL (RHEL-34061)
+
+* Thu Apr 11 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-32.1
+- execute: Pass AT_FDCWD instead of -1 (RHEL-32259)
 
 * Mon Mar 18 2024 Jan Macku <jamacku@redhat.com> - 252-32
 - rebase rhel-net-naming-sysattrs to v0.5

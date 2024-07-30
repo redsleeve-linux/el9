@@ -1,0 +1,64 @@
+From 6c4090a8bdf54928e43c21d7443d2e6825ed6d1f Mon Sep 17 00:00:00 2001
+From: Jan Macku <jamacku@redhat.com>
+Date: Tue, 9 May 2023 13:15:06 +0200
+Subject: [PATCH] manager: don't taint the host if cgroups v1 is used
+
+In upstream of systemd, cgroups v1 are not considered as supported.
+This is not true for RHEL, don't taint the host when cgroups v1 are enabled.
+
+rhel-only
+
+Resolves: #2196479
+---
+ man/org.freedesktop.systemd1.xml | 6 ------
+ src/core/manager.c               | 3 ---
+ src/test/test-manager.c          | 5 -----
+ 3 files changed, 14 deletions(-)
+
+diff --git a/man/org.freedesktop.systemd1.xml b/man/org.freedesktop.systemd1.xml
+index 40510c43eb..13a84af747 100644
+--- a/man/org.freedesktop.systemd1.xml
++++ b/man/org.freedesktop.systemd1.xml
+@@ -1589,12 +1589,6 @@ node /org/freedesktop/systemd1 {
+           <listitem><para>Support for cgroups is unavailable.</para></listitem>
+         </varlistentry>
+ 
+-        <varlistentry>
+-          <term><literal>cgroupsv1</literal></term>
+-
+-          <listitem><para>The system is using the old cgroup hierarchy.</para></listitem>
+-        </varlistentry>
+-
+         <varlistentry>
+           <term><literal>local-hwclock</literal></term>
+ 
+diff --git a/src/core/manager.c b/src/core/manager.c
+index a59afafb58..657263eb73 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -4491,9 +4491,6 @@ char* manager_taint_string(const Manager *m) {
+         if (access("/proc/cgroups", F_OK) < 0)
+                 stage[n++] = "cgroups-missing";
+ 
+-        if (cg_all_unified() == 0)
+-                stage[n++] = "cgroupsv1";
+-
+         if (clock_is_localtime(NULL) > 0)
+                 stage[n++] = "local-hwclock";
+ 
+diff --git a/src/test/test-manager.c b/src/test/test-manager.c
+index 89f9277b28..2faf715d76 100644
+--- a/src/test/test-manager.c
++++ b/src/test/test-manager.c
+@@ -14,11 +14,6 @@ TEST(manager_taint_string) {
+          * to test for them. Let's do just one. */
+         assert_se(!strstr(a, "split-usr"));
+ 
+-        if (cg_all_unified() == 0)
+-                assert_se(strstr(a, "cgroupsv1"));
+-        else
+-                assert_se(!strstr(a, "cgroupsv1"));
+-
+         m.taint_usr = true;
+         _cleanup_free_ char *b = manager_taint_string(&m);
+         assert_se(b);

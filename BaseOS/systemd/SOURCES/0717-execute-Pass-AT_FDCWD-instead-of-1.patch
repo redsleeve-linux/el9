@@ -1,0 +1,36 @@
+From 8e8f4d63f77fb9436d1e4caa2a4670dc3cf74657 Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Tue, 13 Dec 2022 10:50:01 +0000
+Subject: [PATCH] execute: Pass AT_FDCWD instead of -1
+
+Let's enforce that callers pass AT_FDCWD as read_dfd to load_credential()
+to avoid an assert() in read_full_file_full() if read_dfd is -1.
+
+(cherry picked from commit 661e4251a5b157d1aee1df98fbd2f0c95285ebba)
+
+Resolves: RHEL-32259
+---
+ src/core/execute.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/execute.c b/src/core/execute.c
+index ea36254241..13222ddea3 100644
+--- a/src/core/execute.c
++++ b/src/core/execute.c
+@@ -2662,6 +2662,7 @@ static int load_credential(
+         assert(id);
+         assert(path);
+         assert(unit);
++        assert(read_dfd >= 0 || read_dfd == AT_FDCWD);
+         assert(write_dfd >= 0);
+         assert(left);
+ 
+@@ -2888,7 +2889,7 @@ static int acquire_credentials(
+                                         lc->path,
+                                         lc->encrypted,
+                                         unit,
+-                                        -1,
++                                        AT_FDCWD,
+                                         dfd,
+                                         uid,
+                                         ownership_ok,

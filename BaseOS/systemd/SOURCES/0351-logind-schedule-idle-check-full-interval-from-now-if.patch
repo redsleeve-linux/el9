@@ -1,0 +1,29 @@
+From 4147bdd9212ece576be2f481dff41daf58788f04 Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekleta@redhat.com>
+Date: Fri, 9 Sep 2022 13:38:58 +0200
+Subject: [PATCH] logind: schedule idle check full interval from now if we
+ couldn't figure out atime timestamp
+
+(cherry picked from commit ab7ae746c6eed3074aa7edc6ae9ecfbac157e0da)
+
+Related: #2100464
+---
+ src/login/logind-session.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/login/logind-session.c b/src/login/logind-session.c
+index a110b6f1c1..1d6aa80913 100644
+--- a/src/login/logind-session.c
++++ b/src/login/logind-session.c
+@@ -706,7 +706,10 @@ static int session_dispatch_stop_on_idle(sd_event_source *source, uint64_t t, vo
+                 return session_stop(s, /* force */ true);
+         }
+ 
+-        r = sd_event_source_set_time(source, usec_add(ts.monotonic, s->manager->stop_idle_session_usec));
++        r = sd_event_source_set_time(
++                        source,
++                        usec_add(dual_timestamp_is_set(&ts) ? ts.monotonic : now(CLOCK_MONOTONIC),
++                                 s->manager->stop_idle_session_usec));
+         if (r < 0)
+                 return log_error_errno(r, "Failed to configure stop on idle session event source: %m");
+ 
