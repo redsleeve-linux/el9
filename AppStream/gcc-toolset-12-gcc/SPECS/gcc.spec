@@ -147,7 +147,7 @@
 Summary:              GCC version 12
 Name:                 %{?scl_prefix}gcc
 Version:              %{gcc_version}
-Release:              %{gcc_release}.6%{?dist}.redsleeve
+Release:              %{gcc_release}.7%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License:              GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -350,6 +350,9 @@ Patch12:              gcc12-pr107468.patch
 Patch15:              gcc12-static-libquadmath.patch
 Patch16:              gcc12-FMA-chains.patch
 Patch17:              gcc12-pr113960.patch
+Patch18:              gcc12-vector-merge-1.patch
+Patch19:              gcc12-vector-merge-2.patch
+Patch20:              gcc12-vector-merge-3.patch
 
 Patch100:             gcc12-fortran-fdec-duplicates.patch
 Patch101:             gcc12-fortran-flogical-as-integer.patch
@@ -387,8 +390,6 @@ Patch3018:            0021-libstdc++-disable-tests.patch
 Patch3019:            0022-libstdc++-revert-behavior.patch
 Patch3020:            gcc12-testsuite-typo.patch
 
-Patch10000: gcc6-decimal-rtti-arm.patch
-
 %if 0%{?rhel} == 9
 %global nonsharedver 110
 %endif
@@ -405,9 +406,6 @@ Patch10000: gcc6-decimal-rtti-arm.patch
 %if 0%{?scl:1}
 %global _gnu %{nil}
 %else
-%global _gnu -gnueabi
-%endif
-%ifarch %{arm}
 %global _gnu -gnueabi
 %endif
 %ifarch sparcv9
@@ -736,6 +734,9 @@ so that there cannot be any synchronization problems.
 %patch15 -p0 -b .static-libquadmath~
 %patch16 -p1 -b .fma~
 %patch17 -p1 -b .pr113960~
+%patch18 -p1 -b .vector-merge-1~
+%patch19 -p1 -b .vector-merge-2~
+%patch20 -p1 -b .vector-merge-3~
 
 %if 0%{?rhel} >= 6
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -801,10 +802,6 @@ cd ..
 %patch3019 -p1 -b .dts-test-19~
 %endif
 %patch3020 -p1 -b .typo
-
-%ifarch %{arm}
-%patch10000 -p1
-%endif
 
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
@@ -1157,9 +1154,6 @@ CONFIGURE_OPTS="\
 %endif
 %endif
 	--enable-decimal-float \
-%endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
@@ -3002,8 +2996,8 @@ fi
 %endif
 
 %changelog
-* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> 12.2.1-7.6.redsleeve
-- patched for armv6
+* Thu Jul 11 2024 Marek Polacek <polacek@redhat.com> 12.2.1-7.7
+- fix wrong RTL patterns for vector merge high/low word on LE (RHEL-44850)
 
 * Wed Apr  3 2024 Marek Polacek <polacek@redhat.com> 12.2.1-7.6
 - bump NVR (RHEL-30832)
