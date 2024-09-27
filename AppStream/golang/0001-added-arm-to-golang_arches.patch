@@ -1,14 +1,74 @@
-From ca20ad9edf7c6d248c62687ede40679531ff0d89 Mon Sep 17 00:00:00 2001
+From 7de692c150a42195592ff3a488e95143542a33e6 Mon Sep 17 00:00:00 2001
 From: Jacco Ligthart <jacco@redsleeve.org>
-Date: Sat, 25 Nov 2023 21:22:21 +0100
+Date: Tue, 30 Jul 2024 23:06:00 +0200
 Subject: [PATCH] added arm to golang_arches
 
 ---
- SPECS/golang.spec | 7 +++++--
- 1 file changed, 5 insertions(+), 2 deletions(-)
+ SOURCES/go-1.21-arm-link-gold.patch | 52 +++++++++++++++++++++++++++++
+ SPECS/golang.spec                   | 10 ++++--
+ 2 files changed, 60 insertions(+), 2 deletions(-)
+ create mode 100755 SOURCES/go-1.21-arm-link-gold.patch
 
+diff --git a/SOURCES/go-1.21-arm-link-gold.patch b/SOURCES/go-1.21-arm-link-gold.patch
+new file mode 100755
+index 0000000..9c3ddee
+--- /dev/null
++++ b/SOURCES/go-1.21-arm-link-gold.patch
+@@ -0,0 +1,52 @@
++From 234576e45d8621c01c98adc870fff73ec1ed3693 Mon Sep 17 00:00:00 2001
++From: Cherry Mui <cherryyz@google.com>
++Date: Thu, 20 Jul 2023 14:13:51 -0400
++Subject: [PATCH] cmd/link: switch to gold linker on ARM in dynamic linking mode
++
++As reported in issue #61025, in shared linkage, when linking with
++GNU linker 2.35.2 it fails. I don't have the exact version of the
++GNU linker and the failure detail is unclear to me. But as we
++switch to gold linker before, we can continue to do this at least
++for Go 1.21.
++
++Fixes #61025.
++
++Change-Id: I301d9fc64e8bc82f1177c31d19b944d700cc2d7b
++---
++
++diff --git a/src/cmd/link/internal/ld/lib.go b/src/cmd/link/internal/ld/lib.go
++index 91e2d51..a624ef8 100644
++--- a/src/cmd/link/internal/ld/lib.go
+++++ b/src/cmd/link/internal/ld/lib.go
++@@ -1597,12 +1597,17 @@
++ 			altLinker = "lld"
++ 		}
++ 
++-		if ctxt.Arch.InFamily(sys.ARM64) && buildcfg.GOOS == "linux" {
+++		sharedLinkage := ctxt.BuildMode == BuildModeShared || ctxt.linkShared
+++		if buildcfg.GOOS == "linux" && (ctxt.IsARM64() || (ctxt.IsARM() && sharedLinkage)) {
++ 			// On ARM64, the GNU linker will fail with
++ 			// -znocopyreloc if it thinks a COPY relocation is
++ 			// required. Switch to gold.
++ 			// https://sourceware.org/bugzilla/show_bug.cgi?id=19962
++ 			// https://go.dev/issue/22040
+++			//
+++			// On ARM, in shared linkage, linking with GNU linker 2.35.2 fails.
+++			// Switch to gold.
+++			// https://go.dev/issue/61025
++ 			altLinker = "gold"
++ 
++ 			// If gold is not installed, gcc will silently switch
++@@ -1613,7 +1618,11 @@
++ 			cmd := exec.Command(name, args...)
++ 			if out, err := cmd.CombinedOutput(); err == nil {
++ 				if !bytes.Contains(out, []byte("GNU gold")) {
++-					log.Fatalf("ARM64 external linker must be gold (issue #15696, 22040), but is not: %s", out)
+++					if ctxt.IsARM64() {
+++						log.Fatalf("ARM64 external linker must be gold (issue #15696, 22040), but is not: %s", out)
+++					} else if ctxt.IsARM() {
+++						log.Fatalf("ARM external linker must be gold (issue #61025), but is not: %s", out)
+++					}
++ 				}
++ 			}
++ 		}
 diff --git a/SPECS/golang.spec b/SPECS/golang.spec
-index fc58d14..5d85909 100644
+index 83e7adc..fe69fcc 100644
 --- a/SPECS/golang.spec
 +++ b/SPECS/golang.spec
 @@ -29,7 +29,7 @@
@@ -22,23 +82,33 @@ index fc58d14..5d85909 100644
  # Golang build options.
 @@ -99,7 +99,7 @@
  
- Name: golang
- Version: %{version}
--Release: 1%{?dist}.0.1
-+Release: 1%{?dist}.redsleeve
- Summary: The Go Programming Language
+ Name:           golang
+ Version:        %{version}
+-Release:        1%{?dist}
++Release:        1%{?dist}.redsleeve
+ Summary:        The Go Programming Language
  # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
- License: BSD and Public Domain
-@@ -527,6 +527,9 @@ cd ..
+ License:        BSD and Public Domain
+@@ -150,6 +150,8 @@ Patch2: 	disable_static_tests_part1.patch
+ Patch3: 	disable_static_tests_part2.patch
+ Patch4:		modify_go.env.patch
+ 
++Patch1000:	go-1.21-arm-link-gold.patch
++
+ # Having documentation separate was broken
+ Obsoletes:      %{name}-docs < 1.1-4
+ 
+@@ -534,6 +536,10 @@ cd ..
  %files -n go-toolset
  
  %changelog
-+* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.20.10-1.redsleeve
++* Tue Jul 30 2024 Jacco Ligthart <jacco@redsleeve.org> - 1.21.11-1.redsleeve
 +- added arm to golang_arches
++- added an arm specific patch
 +
- * Fri Oct 13 2023 David Benoit <dbenoit@redhat.com> - 1.20.10-1
- - Update to Go 1.20.10
- - Fix CVE-2023-39325
+ * Wed Jun 12 2024 Archana Ravindar <aravinda@redhat.com> - 1.21.11-1
+ - Update to Go 1.21.11 that fixes CVE-2024-24789 and CVE-2024-24790
+ - Resolves: RHEL-40275
 -- 
 2.39.3
 

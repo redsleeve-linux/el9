@@ -9,7 +9,7 @@
 
 Name:           libnbd
 Version:        1.18.1
-Release:        3%{?dist}
+Release:        3%{?dist}.redsleeve
 Summary:        NBD client library in userspace
 
 License:        LGPL-2.0-or-later AND BSD-3-Clause
@@ -88,7 +88,7 @@ BuildRequires:  util-linux
 # nbdkit for i686.  These are only needed for the test suite so make
 # them optional.  This reduces our test exposure on 32 bit platforms,
 # although there is still Fedora/armv7 and some upstream testing.
-%ifnarch %{ix86}
+%ifnarch %{ix86} %{arm}
 BuildRequires:  qemu-img
 BuildRequires:  nbdkit
 BuildRequires:  nbdkit-data-plugin
@@ -383,6 +383,9 @@ make %{?_smp_mflags} check || {
 
 
 %changelog
+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 1.18.1-3.redsleeve
+- fixed builddeps for arm
+
 * Mon Nov 13 2023 Eric Blake <eblake@redhat.com> - 1.18.1-3
 - Backport unit test of recent libnbd API addition
   resolves: RHEL-16292

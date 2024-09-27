@@ -6,7 +6,7 @@
 
 # We are building with clang for faster/lower memory LTO builds.
 # See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
-%global toolchain clang
+%global toolchain gcc
 
 %global gts_version 13
 
@@ -62,7 +62,7 @@
 
 Name:		%pkg_name
 Version:	%{clang_version}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
-Release:	5%{?dist}
+Release:	5%{?dist}.redsleeve
 Summary:	A C language family front-end for LLVM
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
@@ -112,6 +112,8 @@ Patch7:     tsa.patch
 # RHEL specific patches
 Patch101:     0009-disable-recommonmark.patch
 Patch102:     0001-Driver-Give-devtoolset-path-precedence-over-Installe.patch
+
+Patch100:  100-armv6-add-llc-gcc-triplet-translation.diff
 
 %if %{without compat_build}
 # Patches for clang-tools-extra
@@ -361,7 +363,7 @@ rm test/CodeGen/profile-filter.c
 # Use ThinLTO to limit build time.
 %define _lto_cflags -flto=thin
 # And disable LTO on AArch64 entirely.
-%ifarch aarch64
+%ifarch aarch64 %{arm}
 %define _lto_cflags %{nil}
 %endif
 
@@ -752,6 +754,9 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
 
 %endif
 %changelog
+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 17.0.6-5.redsleeve
+- added triple translation for armv6
+
 * Tue Jan 09 2024 Timm Bäder <tbaeder@redhat.com> - 17.0.6-5
 - Remove compat libs
 

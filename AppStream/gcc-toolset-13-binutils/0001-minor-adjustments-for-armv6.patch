@@ -1,0 +1,77 @@
+From 62fdfd49e029f20ad64121d8c9a6e8ba1f9f8928 Mon Sep 17 00:00:00 2001
+From: Jacco Ligthart <jacco@redsleeve.org>
+Date: Fri, 31 May 2024 16:10:30 +0200
+Subject: [PATCH] minor adjustments for armv6
+
+---
+ SOURCES/binutils-armv6.patch | 25 +++++++++++++++++++++++++
+ SPECS/binutils.spec          |  7 ++++++-
+ 2 files changed, 31 insertions(+), 1 deletion(-)
+ create mode 100644 SOURCES/binutils-armv6.patch
+
+diff --git a/SOURCES/binutils-armv6.patch b/SOURCES/binutils-armv6.patch
+new file mode 100644
+index 0000000..abf555c
+--- /dev/null
++++ b/SOURCES/binutils-armv6.patch
+@@ -0,0 +1,25 @@
++diff -ru binutils-2.30/ld/configure.tgt binutils-2.30-rock/ld/configure.tgt
++--- binutils-2.30/ld/configure.tgt	2021-04-25 04:02:21.308705685 +0200
+++++ binutils-2.30-rock/ld/configure.tgt	2021-04-25 03:46:48.039031480 +0200
++@@ -174,8 +174,8 @@
++ 			targ_extra_libpath=$targ_extra_emuls
++ 			;;
++ arm*-*-linux-*)		targ_emul=armelf_linux
++-			targ_extra_emuls="armelf armelfb armelfb_linux"
++-			targ_extra_libpath="armelfb_linux"
+++			targ_extra_emuls="armelf armelf_linux_eabi armelfb armelfb_linux"
+++			targ_extra_libpath="armelf_linux_eabi armelfb_linux"
++ 			;;
++ arm*b-*-nacl*)		targ_emul=armelfb_nacl
++ 			targ_extra_emuls="armelf_nacl"
++diff -ru binutils-2.30/bfd/doc/Makefile.in binutils-2.30-rock/bfd/doc/Makefile.in
++--- binutils-2.30/bfd/Makefile.in	2021-04-25 04:01:40.936807315 +0200
+++++ binutils-2.30-rock/bfd/Makefile.in	2021-04-25 03:56:15.013627770 +0200
++@@ -171,6 +171,7 @@
++ CC = @CC@
++ CCDEPMODE = @CCDEPMODE@
++ CC_FOR_BUILD = @CC_FOR_BUILD@
+++CFLAGS_FOR_BUILD = -march=armv6 -mfpu=vfp -mfloat-abi=hard
++ CFLAGS = @CFLAGS@
++ COREFILE = @COREFILE@
++ COREFLAG = @COREFLAG@
+diff --git a/SPECS/binutils.spec b/SPECS/binutils.spec
+index bd815b1..0f0a284 100644
+--- a/SPECS/binutils.spec
++++ b/SPECS/binutils.spec
+@@ -9,7 +9,7 @@ BuildRequires: scl-utils-build
+ Summary: A GNU collection of binary utilities
+ Name: %{?scl_prefix}binutils
+ Version: 2.40
+-Release: 21%{?dist}
++Release: 21%{?dist}.redsleeve
+ License: GPLv3+
+ URL: https://sourceware.org/binutils
+ 
+@@ -281,6 +281,8 @@ Patch21: binutils-CVE-2023-1972.patch
+ # Lifetime: Fixed in 2.42
+ Patch22: binutils-AMD-znver5.patch
+ 
++Patch1000: binutils-armv6.patch
++
+ #----------------------------------------------------------------------------
+ 
+ Provides: bundled(libiberty)
+@@ -1313,6 +1315,9 @@ exit 0
+ 
+ #----------------------------------------------------------------------------
+ %changelog
++* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> 2.40-21.redsleeve
++- minor adjustments for armv6
++
+ * Thu Feb 22 2024 Nick Clifton  <nickc@redhat.com> - 2.40-21
+ - Run x86_64 assembler tests for znver5 architecture extension.  (RHEL-23798)
+ 
+-- 
+2.39.3
+

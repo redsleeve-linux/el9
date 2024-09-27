@@ -24,7 +24,7 @@
 # Enable static library builds by default.
 %bcond_without staticlibs
 # Build a fresh libjvm.so for use in a copy of the bootstrap JDK
-%bcond_without fresh_libjvm
+%bcond_with fresh_libjvm
 # Build with system libraries
 %bcond_with system_libs
 
@@ -723,8 +723,8 @@ BuildRequires: java-%{buildjdkver}-openjdk-devel
 BuildRequires: libffi-devel
 %endif
 # Full documentation build requirements
-BuildRequires: graphviz
-BuildRequires: pandoc
+#BuildRequires: graphviz
+#BuildRequires: pandoc
 # 2024a required as of JDK-8325150
 BuildRequires: tzdata-java >= 2024a
 # cacerts build requirement in portable mode

@@ -9,7 +9,7 @@ BuildRequires: scl-utils-build
 Summary: A GNU collection of binary utilities
 Name: %{?scl_prefix}binutils
 Version: 2.40
-Release: 21%{?dist}
+Release: 21%{?dist}.redsleeve
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -280,6 +280,8 @@ Patch21: binutils-CVE-2023-1972.patch
 # Purpose:  Add support for AMD's znver5 architecture extension.
 # Lifetime: Fixed in 2.42
 Patch22: binutils-AMD-znver5.patch
+
+Patch1000: binutils-armv6.patch
 
 #----------------------------------------------------------------------------
 
@@ -1313,6 +1315,9 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> 2.40-21.redsleeve
+- minor adjustments for armv6
+
 * Thu Feb 22 2024 Nick Clifton  <nickc@redhat.com> - 2.40-21
 - Run x86_64 assembler tests for znver5 architecture extension.  (RHEL-23798)
 

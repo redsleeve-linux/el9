@@ -2,7 +2,7 @@
 Name:    annobin
 Summary: Annotate and examine compiled binary files
 Version: 12.31
-Release: 2%{?dist}
+Release: 2%{?dist}.redsleeve
 License: GPL-3.0-or-later AND LGPL-2.0-or-later AND (GPL-2.0-or-later WITH GCC-exception-2.0) AND (LGPL-2.0-or-later WITH GCC-exception-2.0) AND GFDL-1.3-or-later 
 # Maintainer: nickc@redhat.com
 # Web Page: https://sourceware.org/annobin/
@@ -248,6 +248,11 @@ CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" CXXFLAGS="$CFLAGS" %configure ${CONFIG_ARGS}
 export CLANG_TARGET_OPTIONS="-fcf-protection"
 %endif
 
+%ifarch armv6hl
+# FIXME: There should be a better way to do this.
+export CLANG_TARGET_OPTIONS="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
+%endif
+
 %make_build
 
 %if %{with plugin_rebuild}
@@ -366,6 +371,9 @@ exit $res
 #---------------------------------------------------------------------------------
 
 %changelog
+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 12.31-2.redsleeve
+- added compiler flags for armv6
+
 * Wed Jan 17 2024 Nick Clifron  <nickc@redhat.com> - 12.31-2
 - GCC Plugin: Do not use section groups with string notes.  (RHEL-21772)
 

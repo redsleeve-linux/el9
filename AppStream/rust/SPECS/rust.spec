@@ -1,6 +1,6 @@
 Name:                 rust
 Version:              1.75.0
-Release:              1%{?dist}
+Release:              1%{?dist}.redsleeve
 Summary:              The Rust Programming Language
 License:              (Apache-2.0 OR MIT) AND (Artistic-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unicode-DFS-2016)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -8,7 +8,7 @@ URL:                  https://www.rust-lang.org
 
 # Only x86_64, i686, and aarch64 are Tier 1 platforms at this time.
 # https://doc.rust-lang.org/nightly/rustc/platform-support.html
-%global rust_arches x86_64 i686 aarch64 ppc64le s390x
+%global rust_arches x86_64 i686 aarch64 ppc64le s390x armv6hl
 ExclusiveArch:        %{rust_arches}
 
 # To bootstrap from scratch, set the channel and date from src/stage0.json
@@ -134,6 +134,9 @@ Patch100:             rustc-1.75.0-disable-libssh2.patch
   local abi = "gnu"
   if arch == "armv7hl" then
     arch = "armv7"
+    abi = "gnueabihf"
+  elseif arch == "armv6hl" then
+    arch = "arm"
     abi = "gnueabihf"
   elseif arch == "ppc64" then
     arch = "powerpc64"
@@ -701,7 +704,7 @@ fi
 
 # Find the compiler-rt library for the Rust profiler_builtins crate.
 %if 0%{?clang_major_version} >= 17
-%define profiler %{clang_resource_dir}/lib/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
+%define profiler %{clang_resource_dir}/lib/%{_arch}-redhat-linux-gnueabihf/libclang_rt.profile.a
 %else
 # The exact profiler path is version dependent..
 %define profiler %(echo %{_libdir}/clang/??/lib/libclang_rt.profile-*.a)
@@ -1039,6 +1042,9 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 
 
 %changelog
+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 1.75.0-1.redsleeve
+- added armv6 to rust_arches
+
 * Tue Apr 16 2024 Release Engineering <releng@rockylinux.org> - 1.75.0-1
 - Fix macros.rust-toolset file
 - constrain to 4 core on s390x

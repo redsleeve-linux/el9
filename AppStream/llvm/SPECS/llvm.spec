@@ -1,3 +1,7 @@
+# Workaround for
+# Cannot handle 8-byte build ID
+%define debug_package %{nil}
+
 %bcond_with snapshot_build
 
 %if %{with snapshot_build}
@@ -7,7 +11,7 @@
 
 # We are building with clang for faster/lower memory LTO builds.
 # See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
-%global toolchain clang
+%global toolchain gcc
 
 %global gts_version 13
 
@@ -23,7 +27,7 @@
 %bcond_with bundle_compat_lib
 %bcond_without check
 
-%ifarch %ix86
+%ifarch %ix86 %{arm}
 # Disable LTO on x86 in order to reduce memory consumption
 %bcond_with lto_build
 %elif %{with snapshot_build}
@@ -92,7 +96,8 @@
 %ifarch %{arm}
 # koji overrides the _gnu variable to be gnu, which is not correct for clang, so
 # we need to hard-code the correct triple here.
-%global llvm_triple armv7l-redhat-linux-gnueabihf
+#global llvm_triple armv7l-redhat-linux-gnueabihf
+%global llvm_triple armv6l-redhat-linux-gnueabihf
 %else
 %global llvm_triple %{_target_platform}
 %endif
@@ -104,7 +109,7 @@
 
 Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
-Release:	5%{?dist}
+Release:	5%{?dist}.redsleeve
 Summary:	The Low Level Virtual Machine
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
@@ -303,7 +308,7 @@ mv %{third_party_srcdir} third-party
 
 %build
 
-%ifarch %ix86
+%ifarch %ix86 %{arm}
 # Linking libLLVM.so goes out of memory even with ThinLTO and a single link job.
 %global _lto_cflags %nil
 %endif
@@ -394,7 +399,7 @@ export ASMFLAGS="%{build_cflags}"
 %if %{with lto_build}
 	-DLLVM_UNITTEST_LINK_FLAGS="-Wl,-plugin-opt=O0" \
 %endif
-	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -Wl,-z,cet-report=error"
+	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -Wl"
 
 # Build libLLVM.so first.  This ensures that when libLLVM.so is linking, there
 # are no other compile jobs running.  This will help reduce OOM errors on the
@@ -682,6 +687,9 @@ fi
 %license LICENSE.TXT
 
 %changelog
+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 17.0.6-5.redsleeve
+- changed llvm_triple for armv6
+
 * Fri Feb 02 2024 Timm Bäder <tbaeder@redhat.com> - 17.0.6-5
 - Backport a patch for RHEL-23638
 

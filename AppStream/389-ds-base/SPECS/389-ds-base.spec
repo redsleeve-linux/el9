@@ -47,7 +47,7 @@ ExcludeArch: i686
 Summary:          389 Directory Server (base)
 Name:             389-ds-base
 Version:          2.4.5
-Release:          8%{?dist}
+Release:          8%{?dist}.redsleeve
 License:          GPL-3.0-or-later AND (0BSD OR Apache-2.0 OR MIT) AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT OR Zlib) AND (Apache-2.0 OR MIT) AND (MIT OR Apache-2.0) AND Unicode-DFS-2016 AND (MIT OR Unlicense) AND Apache-2.0 AND BSD-3-Clause AND MIT AND MPL-2.0
 URL:              https://www.port389.org
 Conflicts:        selinux-policy-base < 3.9.8
@@ -288,6 +288,7 @@ Patch2:           0003-Issue-6133-Move-slapi_pblock_set_flag_operation_note.patc
 Patch3:           0004-CVE-2024-2199.patch
 Patch4:           0005-CVE-2024-3657.patch
 
+Patch1000:        389-ds-base_32bit_support.patch
 
 %description
 389 Directory Server is an LDAPv3 compliant server.  The base package includes
@@ -730,6 +731,10 @@ exit 0
 %endif
 
 %changelog
+* Sun Jul 28 2024 Jacco Ligthart <jacco@redsleeve.org> - 2.4.5-8.redsleeve
+- added a 32-bit patch from upstream
+- https://github.com/389ds/389-ds-base/pull/6089/
+
 * Fri May 31 2024 Viktor Ashirov <vashirov@redhat.com> - 2.4.5-8
 - Bump version to 2.4.5-8
 - Fix License tag

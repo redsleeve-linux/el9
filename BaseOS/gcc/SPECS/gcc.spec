@@ -128,7 +128,7 @@
 Summary:              Various compilers (C, C++, Objective-C, ...)
 Name:                 gcc
 Version:              %{gcc_version}
-Release:              %{gcc_release}%{?dist}
+Release:              %{gcc_release}%{?dist}.redsleeve
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License:              GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -1197,6 +1197,9 @@ CONFIGURE_OPTS_NATIVE="\
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
+%endif
+%ifarch armv6hl
+	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch mips mipsel
 	--with-arch=mips32r2 --with-fp-32=xx \
@@ -3588,6 +3591,9 @@ end
 %endif
 
 %changelog
+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> 11.4.1-3.redsleeve
+- added config options for armv6hl
+
 * Mon Dec 18 2023 Marek Polacek <polacek@redhat.com> 11.4.1-3
 - update from releases/gcc-11-branch (RHEL-17638)
   - PRs c++/106310, c++/106890, c++/109666, c++/109761, c++/111357,

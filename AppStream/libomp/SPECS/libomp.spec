@@ -33,7 +33,7 @@
 
 Name: libomp
 Version: %{libomp_version}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
-Release: 1%{?dist}
+Release: 1%{?dist}.redsleeve
 Summary: OpenMP runtime for clang
 
 License: Apache-2.0 WITH LLVM-exception OR NCSA
@@ -125,8 +125,8 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %files
 %license LICENSE.TXT
 %{_libdir}/libomp.so
-%{_libdir}/libompd.so
 %ifnarch %{arm}
+%{_libdir}/libompd.so
 %{_libdir}/libarcher.so
 %endif
 %ifnarch %{ix86} %{arm}
@@ -158,6 +158,9 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 
 %changelog
 %{?llvm_snapshot_changelog_entry}
+
+* Fri May 31 2024 Jacco Ligthart <jaccor@redsleeve.org> - 17.0.6-1.redsleeve
+- disabled libompd.so for arm
 
 * Mon Dec 11 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.6-1
 - Update to 17.0.6

@@ -12,19 +12,21 @@ Some packages needed some manual love and care to build, but not really a patch:
 | Package | SRPM | instruction
 |---|---|---
 | acpica-tools | acpica-tools-20210604-5.el9.src.rpm | must be build on a raspberry for a succesfull test. probably kernel version related 
-| gmp | gmp-6.2.0-10.el9.src.rpm | must be build on a raspberry for a succesfull test. probably kernel version related 
-| libkcapi | libkcapi-1.3.1-3.el9.src.rpm | must be build on a raspberry for a succesfull test. probably kernel version related 
+| gmp | gmp-6.2.0-13.el9.src.rpm | must be build on a raspberry for a succesfull test. probably kernel version related 
+| libkcapi | libkcapi-1.4.0-2.el9.src.rpm | must be build on a raspberry for a succesfull test. probably kernel version relatedd & build "--without clang_sa"
 | libxcrypt | libxcrypt-4.4.18-3.el9.src.rpm | must be build on a raspberry for a succesfull test. probably kernel version related 
-| nettle | nettle-3.8-3.el9_0.src.rpm | must be build on a raspberry for a succesfull test. probably kernel version related 
-| python | python3.9-3.9.16-1.el9.src.rpm | build with '-D "_gnu -gnueabihf"'
+| nettle | nettle-3.9.1-1.el9.src.rpm | must be build on a raspberry for a succesfull test. probably kernel version related 
+| openssl | openssl-3.0.7-27.el9.src.rpm | build with '-D "centos 1'
+| python | python3.9-3.9.18-3.el9.src.rpm | test_xml_etree_c breaks: '--nocheck'
+*** | python | python3.9-3.9.16-1.el9.src.rpm | build with '-D "_gnu -gnueabihf"'
 
 ### AppStream ###
 
 | Package | SRPM | instruction
 |---|---|---
 | automake | automake-1.16.2-6.el9.src.rpm | must be build with '--nocheck'
-| crash | crash-8.0.2-2.el9.src.rpm | build with "linux32"
-| criu | criu-3.17-4.el9.src.rpm | build with "linux32"
+| crash | crash-8.0.4-3.el9.src.rpm | build with "linux32"
+| criu | criu-3.19-1.el9.src.rpm | build with "linux32"
 | festival | festival-2.5.0-17.el9.src.rpm | build with "linux32"
 | gcc-toolset-12-annobin | gcc-toolset-12-annobin-11.08-2.el9.src.rpm | must be build with '--nocheck'
 | gnome-settings-daemon | gnome-settings-daemon-40.0.1-11.el9_2.src.rpm | must be build with '--without subman' 
@@ -33,18 +35,22 @@ Some packages needed some manual love and care to build, but not really a patch:
 | ibus | ibus-1.5.25-2.el9.rocky.0.1.src.rpm | must be build with '--nocheck'
 | ipa | ipa-4.10.1-6.el9.src.rpm | build with `-D "eln 1"`
 | isomd5sum | isomd5sum-1.2.3-14.el9.src.rpm | build with "linux32"
-| java-1.8.0-openjdk | java-1.8.0-openjdk-1.8.0.372.b07-2.el9.src.rpm | build with "linux32"
+| java-1.8.0-openjdk | java-1.8.0-openjdk-1.8.0.412.b08-2.el9.src.rpm | build with "linux32"
 | java-11-openjdk | java-11-openjdk-11.0.19.0.7-4.el9.src.rpm | build with "linux32"
 | java-17-openjdk | java-17-openjdk-17.0.7.0.7-3.el9.src.rpm | build with "linux32"
 | ksh | ksh-1.0.0~beta.1-2.el9.src.rpm | build with "linux32"
 | libomp | libomp-15.0.7-1.el9.redsleeve.src.rpm | build with "linux32"
-| nss | nss-3.79.0-18.el9_1.src.rpm | build with "linux32"
+| nss | nss-3.90.0-7.el9_4.src.rpm | build with "linux32" and '--nocheck'
 | openmpi | openmpi-4.1.1-5.el9.redsleeve.src.rpm | build with "linux32"
 | osbuild-composer | osbuild-composer-76-2.el9_2.2.rocky.0.2.src.rpm | must be build with '--nocheck'
 | pgaudit | pgaudit-1.5.0-6.el9.src.rpm | remove '(Pre)' from macros.postgresql before build
 | pg_repack | pg_repack-1.4.6-4.el9.src.rpm | remove '(Pre)' from macros.postgresql before build
 | postgres-decoderbufs | postgres-decoderbufs-1.4.0-4.Final.el9.src.rpm | remove '(Pre)' from macros.postgresql before build
 | python3.11-scipy | python3.11-scipy-1.10.0-1.el9.src.rpm | must be build with '--nocheck'
+| python3.11 | python3.11-3.11.7-1.el9.src.rpm| build with '-D "_gnu -gnueabihf"' and '--nocheck'
+| python3.11-lxml | python3.11-lxml-4.9.2-4.el9.src.rpm | build with '--nocheck'
+| python3.12 | python3.12-3.12.1-4.el9.src.rpm | build with '-D "_gnu -gnueabihf"' and '--nocheck'
+| python3.12-lxml | python3.12-lxml-4.9.3-2.el9.src.rpm | build with '--nocheck'
 | redis | redis-6.2.7-1.el9.src.rpm | build with "linux32"
 | ruby | ruby-3.0.4-160.el9_0.src.rpm | must be build with '--nocheck'
 | s-nail | s-nail-14.9.22-6.el9.src.rpm | must be build with '--nocheck'

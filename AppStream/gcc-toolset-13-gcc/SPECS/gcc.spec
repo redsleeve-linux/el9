@@ -5,13 +5,13 @@ BuildRequires: scl-utils-build
 %{?scl:%global __strip %%{_scl_root}/usr/bin/strip}
 %{?scl:%global __objdump %%{_scl_root}/usr/bin/objdump}
 %{?scl:%scl_package gcc}
-%global DATE 20231205
-%global gitrev f783814ad6a04ae5ef44595216596a2b75eda15b
-%global gcc_version 13.2.1
+%global DATE 20240611
+%global gitrev 03b1a31f9807251f378fcecb29c4669eed357eb2
+%global gcc_version 13.3.1
 %global gcc_major 13
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 6
+%global gcc_release 2
 %global nvptx_tools_gitrev aa3404ad5a496cda5d79a50bedb1344fd63e8763
 %global newlib_cygwin_gitrev 9e09d6ed83cce4777a5950412647ccc603040409
 %global mpc_version 1.0.3
@@ -146,10 +146,10 @@ BuildRequires: scl-utils-build
 %else
 %global build_annobin_plugin 0
 %endif
-Summary: GCC version 13
+Summary: GCC version %{gcc_major}
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.3%{?dist}
+Release: %{gcc_release}%{?dist}.redsleeve
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -329,7 +329,8 @@ Patch8: gcc13-no-add-needed.patch
 Patch9: gcc13-Wno-format-security.patch
 Patch10: gcc13-rh1574936.patch
 Patch11: gcc13-d-shared-libphobos.patch
-Patch12: gcc13-pr110792.patch
+Patch12: gcc13-znver5.patch
+Patch13: gcc13-pr107071.patch
 
 Patch50: isl-rh2155127.patch
 
@@ -361,7 +362,9 @@ Patch3018: 0021-libstdc++-disable-tests.patch
 Patch3019: 0022-libstdc++-revert-behavior.patch
 Patch3021: gcc13-testsuite-p10.patch
 Patch3023: gcc13-testsuite-dwarf.patch
-Patch3024: gcc13-testsuite-aarch64-add-fno-stack-protector.patch
+
+Patch10000: gcc6-decimal-rtti-arm.patch
+Patch10001: gcc13-nonshared-arm.patch
 
 %if 0%{?rhel} == 9
 %global nonsharedver 110
@@ -381,6 +384,9 @@ Patch3024: gcc13-testsuite-aarch64-add-fno-stack-protector.patch
 %else
 %global _gnu -gnueabi
 %endif
+%ifarch %{arm}
+%global _gnu -gnueabi
+%endif
 %ifarch sparcv9
 %global gcc_target_platform sparc64-%{_vendor}-%{_target_os}
 %endif
@@ -392,10 +398,11 @@ Patch3024: gcc13-testsuite-aarch64-add-fno-stack-protector.patch
 %endif
 
 %description
-The %{?scl_prefix}gcc%{!?scl:13} package contains the GNU Compiler Collection version 10.
+The %{?scl_prefix}gcc%{!?scl:13} package contains the GNU Compiler Collection
+version %{gcc_major}.
 
 %package -n libgcc
-Summary: GCC version 13 shared support library
+Summary: GCC version %{gcc_major} shared support library
 Autoreq: false
 
 %description -n libgcc
@@ -403,7 +410,7 @@ This package contains GCC shared support library which is needed
 e.g. for exception handling support.
 
 %package c++
-Summary: C++ support for GCC version 13
+Summary: C++ support for GCC version %{gcc_major}
 Requires: %{?scl_prefix}gcc%{!?scl:13} = %{version}-%{release}
 Requires: libstdc++
 Requires: %{?scl_prefix}libstdc++%{!?scl:13}-devel = %{version}-%{release}
@@ -411,8 +418,8 @@ Autoreq: true
 
 %description c++
 This package adds C++ support to the GNU Compiler Collection
-version 13.  It includes support for most of the current C++ specification
-and a lot of support for the upcoming C++ specification.
+version %{gcc_major}.  It includes support for most of the current C++
+specification and a lot of support for the upcoming C++ specification.
 
 %package -n libstdc++
 Summary: GNU Standard C++ Library
@@ -442,7 +449,7 @@ Manual, doxygen generated API information and Frequently Asked Questions
 for the GNU standard C++ library.
 
 %package gfortran
-Summary: Fortran support for GCC 13
+Summary: Fortran support for GCC %{gcc_major}
 Requires: %{?scl_prefix}gcc%{!?scl:13} = %{version}-%{release}
 %if 0%{?rhel} > 7
 Requires: libgfortran >= 8.1.1
@@ -465,18 +472,18 @@ programs with the GNU Compiler Collection.
 
 
 %package gdb-plugin
-Summary: GCC 13 plugin for GDB
+Summary: GCC %{gcc_major} plugin for GDB
 Requires: %{?scl_prefix}gcc%{!?scl:13} = %{version}-%{release}
 
 %description gdb-plugin
-This package contains GCC 13 plugin for GDB C expression evaluation.
+This package contains GCC %{gcc_major} plugin for GDB C expression evaluation.
 
 %package -n %{?scl_prefix}libgccjit
 Summary: Library for embedding GCC inside programs and libraries
 Requires: %{?scl_prefix}gcc%{!?scl:13} = %{version}-%{release}
 
 %description -n %{?scl_prefix}libgccjit
-This package contains shared library with GCC 13 JIT front-end.
+This package contains shared library with GCC %{gcc_major} JIT front-end.
 
 %package -n %{?scl_prefix}libgccjit-devel
 Summary: Support for embedding GCC inside programs and libraries
@@ -486,7 +493,7 @@ Requires: %{?scl_prefix}libgccjit = %{version}-%{release}
 #Requires: %%{?scl_prefix}libgccjit-docs = %%{version}-%%{release}
 
 %description -n %{?scl_prefix}libgccjit-devel
-This package contains header files for GCC 13 JIT front end.
+This package contains header files for GCC %{gcc_major} JIT front end.
 
 %package -n %{?scl_prefix}libgccjit-docs
 Summary: Documentation for embedding GCC inside programs and libraries
@@ -500,10 +507,10 @@ Requires(post): /sbin/install-info
 Requires(preun): /sbin/install-info
 
 %description -n %{?scl_prefix}libgccjit-docs
-This package contains documentation for GCC 13 JIT front-end.
+This package contains documentation for GCC %{gcc_major} JIT front-end.
 
 %package -n libquadmath
-Summary: GCC 13 __float128 shared support library
+Summary: GCC %{gcc_major} __float128 shared support library
 Requires(post): /sbin/install-info
 Requires(preun): /sbin/install-info
 
@@ -512,7 +519,7 @@ This package contains GCC shared support library which is needed
 for __float128 math support and for Fortran REAL*16 support.
 
 %package -n %{?scl_prefix}libquadmath-devel
-Summary: GCC 13 __float128 support
+Summary: GCC %{gcc_major} __float128 support
 Group: Development/Libraries
 %if 0%{!?scl:1}
 Requires: %{?scl_prefix}libquadmath%{_isa} = %{version}-%{release}
@@ -553,7 +560,7 @@ Requires: libmpc-devel >= 0.8.1
 
 %description plugin-devel
 This package contains header files and other support files
-for compiling GCC 13 plugins.  The GCC plugin ABI is currently
+for compiling GCC %{gcc_major} plugins.  The GCC plugin ABI is currently
 not stable, so plugins must be rebuilt any time GCC is updated.
 
 %package -n libatomic
@@ -575,10 +582,10 @@ Requires: libatomic%{_isa} >= 4.8.0
 This package contains GNU Atomic static libraries.
 
 %package -n libasan8
-Summary: The Address Sanitizer runtime library from GCC 13
+Summary: The Address Sanitizer runtime library from GCC %{gcc_major}
 
 %description -n libasan8
-This package contains the Address Sanitizer library from GCC 13
+This package contains the Address Sanitizer library from GCC %{gcc_major}
 which is used for -fsanitize=address instrumented programs.
 
 %package -n %{?scl_prefix}libasan-devel
@@ -695,7 +702,8 @@ so that there cannot be any synchronization problems.
 %patch -P10 -p0 -b .rh1574936~
 %endif
 %patch -P11 -p0 -b .d-shared-libphobos~
-%patch -P12 -p0 -b .pr110792~
+%patch -P12 -p1 -b .znver5~
+%patch -P13 -p1 -b .pr107071~
 
 %if 0%{?rhel} >= 6
 %patch -P100 -p1 -b .fortran-fdec-duplicates~
@@ -743,7 +751,11 @@ rm -f libphobos/testsuite/libphobos.gc/forkgc2.d
 %endif
 %patch -P3021 -p1 -b .dts-test-21~
 %patch -P3023 -p1 -b .dts-test-23~
-%patch -P3024 -p1 -b .dts-test-24~
+
+%ifarch %{arm}
+%patch10000 -p1
+%patch10001 -p1
+%endif
 
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
@@ -1040,6 +1052,9 @@ CONFIGURE_OPTS="\
 %endif
 	--enable-decimal-float \
 %endif
+%ifarch armv6hl
+	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
+%endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
@@ -1181,7 +1196,8 @@ CC="`$ANNOBIN_FLAGS --build-cc`" CXX="`$ANNOBIN_FLAGS --build-cxx`" \
   CFLAGS="$ANNOBIN_CFLAGS1 $ANNOBIN_CFLAGS2 $ANNOBIN_LDFLAGS" \
   CXXFLAGS="$ANNOBIN_CFLAGS1 `$ANNOBIN_FLAGS --build-includes` $ANNOBIN_CFLAGS2 $ANNOBIN_LDFLAGS" \
   ./configure --with-gcc-plugin-dir=%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin \
-	      --without-annocheck --without-tests --without-docs --disable-rpath --without-debuginfod
+	      --without-annocheck --without-tests --without-docs --disable-rpath --without-debuginfod \
+	      --without-clang-plugin --without-llvm-plugin
 make
 cd ../..
 %endif
@@ -1826,7 +1842,7 @@ ln -sf ../../../%{multilib_32_arch}-%{_vendor}-%{_target_os}%{?_gnu}/%{gcc_major
 %if 0%{?_enable_debug_packages}
 mkdir -p $RPM_BUILD_ROOT%{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/lib/debug%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}
 adirs="$FULLPATH"
-if [ $FULLLPATH -ne $FULLPATH ]; then
+if [ "$FULLLPATH" != "$FULLPATH" ]; then
   adirs="$adirs $FULLLPATH"
 fi
 for f in `find $adirs -maxdepth 1 -a \
@@ -2907,6 +2923,86 @@ fi
 %endif
 
 %changelog
+* Sat Aug 03 2024 Jacco Ligthart <jacco@redsleeve.org> 13.3.1-2.redsleeve
+- patched for armv6
+
+* Tue Jun 11 2024 Marek Polacek <polacek@redhat.com> 13.3.1-2
+- update from releases/gcc-13 branch
+  - PRs ada/114398, ada/114708, c/114493, c++/111529, c++/113598,
+	fortran/110415, fortran/114827, fortran/115150, libstdc++/114940,
+	libstdc++/115269, middle-end/108789, rtl-optimization/114902,
+	rtl-optimization/115092, target/113281, target/113719, target/115297,
+	target/115317, target/115324, tree-optimization/115192,
+	tree-optimization/115307, tree-optimization/115337
+- fix a shell condition (RHEL-40722)
+- backport a fix for modes_1.f90 (RHEL-40234)
+- fix up pointer types to may_alias structures (PR c/114493, RHEL-40244)
+
+* Thu May 30 2024 Marek Polacek <polacek@redhat.com> 13.3.1-1
+- update from releases/gcc-13 branch
+  - GCC 13.3 release
+  - PRs analyzer/104042, analyzer/108171, analyzer/109251, analyzer/109577,
+	analyzer/110014, analyzer/110112, analyzer/110700, analyzer/110882,
+	analyzer/111289, analyzer/112790, analyzer/112889, analyzer/112969,
+	analyzer/113253, analyzer/113333, analyzer/114408, analyzer/114473,
+	bootstrap/106472, bootstrap/114369, c/112571, c/114780, c++/89224,
+	c++/97990, c++/100667, c++/103825, c++/110006, c++/111284, c++/112769,
+	c++/113141, c++/113966, c++/114303, c++/114377, c++/114537,
+	c++/114561, c++/114562, c++/114572, c++/114580, c++/114634,
+	c++/114691, c++/114709, debug/112718, driver/111700, fortran/36337,
+	fortran/50410, fortran/55978, fortran/89462, fortran/93678,
+	fortran/95374, fortran/101135, fortran/102003, fortran/103707,
+	fortran/103715, fortran/103716, fortran/104352, fortran/106987,
+	fortran/106999, fortran/107426, fortran/110987, fortran/112407,
+	fortran/113799, fortran/113866, fortran/113885, fortran/113956,
+	fortran/114001, fortran/114474, fortran/114535, fortran/114739,
+	fortran/114825, fortran/115039, gcov-profile/114115,
+	gcov-profile/114715, ipa/92606, ipa/108007, ipa/111571, ipa/112616,
+	ipa/113359, ipa/113907, ipa/113964, jit/110466, libgcc/111731,
+	libquadmath/114533, libstdc++/66146, libstdc++/93672,
+	libstdc++/104606, libstdc++/107800, libstdc++/108976,
+	libstdc++/110050, libstdc++/110054, libstdc++/113841,
+	libstdc++/114147, libstdc++/114316, libstdc++/114359,
+	libstdc++/114367, libstdc++/114401, libstdc++/114750,
+	libstdc++/114803, libstdc++/114863, libstdc++/115063, lto/114655,
+	middle-end/110027, middle-end/111151, middle-end/111632,
+	middle-end/111683, middle-end/112684, middle-end/112732,
+	middle-end/113396, middle-end/113622, middle-end/114070,
+	middle-end/114348, middle-end/114552, middle-end/114599,
+	middle-end/114734, middle-end/114753, middle-end/114907,
+	rtl-optimization/54052, rtl-optimization/114415,
+	rtl-optimization/114768, rtl-optimization/114924, sanitizer/97696,
+	sanitizer/114687, sanitizer/114743, sanitizer/114956,
+	sanitizer/115172, target/88309, target/101865, target/105522,
+	target/110621, target/111234, target/111600, target/111610,
+	target/111822, target/112397, target/113095, target/113233,
+	target/113950, target/114049, target/114130, target/114160,
+	target/114172, target/114175, target/114272, target/114747,
+	target/114752, target/114794, target/114837, target/114848,
+	target/114981, testsuite/111066, testsuite/112297, testsuite/114034,
+	testsuite/114036, testsuite/114662, tree-optimization/91838,
+	tree-optimization/109925, tree-optimization/110838,
+	tree-optimization/111009, tree-optimization/111268,
+	tree-optimization/111407, tree-optimization/111736,
+	tree-optimization/111882, tree-optimization/112281,
+	tree-optimization/112303, tree-optimization/112793,
+	tree-optimization/112961, tree-optimization/112991,
+	tree-optimization/113552, tree-optimization/113630,
+	tree-optimization/113670, tree-optimization/113831,
+	tree-optimization/113910, tree-optimization/114027,
+	tree-optimization/114115, tree-optimization/114121,
+	tree-optimization/114203, tree-optimization/114231,
+	tree-optimization/114246, tree-optimization/114375,
+	tree-optimization/114396, tree-optimization/114485,
+	tree-optimization/114566, tree-optimization/114672,
+	tree-optimization/114733, tree-optimization/114736,
+	tree-optimization/114749, tree-optimization/114787,
+	tree-optimization/114799, tree-optimization/114876,
+	tree-optimization/114965, tree-optimization/115143,
+	tree-optimization/115152, tree-optimization/115154
+- add --without-clang-plugin --without-llvm-plugin to annobin configure
+  options
+
 * Tue Jan  9 2024 Marek Polacek <polacek@redhat.com> 13.2.1-6.3
 - use the system dir in --with-libstdcxx-zoneinfo (RHEL-21093)
 

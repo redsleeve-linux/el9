@@ -12,7 +12,7 @@
 
 Name:           webkit2gtk3
 Version:        2.42.5
-Release:        1%{?dist}
+Release:        1%{?dist}.redsleeve
 Summary:        GTK Web content engine library
 
 License:        LGPLv2
@@ -26,6 +26,7 @@ Source2:        webkitgtk-keys.gpg
 
 # https://bugs.webkit.org/show_bug.cgi?id=268739
 Patch:          i686-build.patch
+Patch100:       webkitgtk-arm-ANGLE-serial.patch
 
 BuildRequires:  bison
 BuildRequires:  bubblewrap
@@ -297,6 +298,9 @@ export NINJA_STATUS="[%f/%t][%e] "
 %{_datadir}/gir-1.0/JavaScriptCore-4.0.gir
 
 %changelog
+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 2.42.5-1.redsleeve
+- Add a patch to build on armv6
+
 * Mon Feb 05 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.42.5-1
 - Update to 2.42.5
   Resolves: RHEL-3960

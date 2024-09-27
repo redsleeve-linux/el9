@@ -6,7 +6,7 @@
 %{llvm_sb}
 %endif
 
-%global toolchain clang
+%global toolchain gcc
 
 # Opt out of https://fedoraproject.org/wiki/Changes/fno-omit-frame-pointer
 # https://bugzilla.redhat.com/show_bug.cgi?id=2158587
@@ -47,7 +47,7 @@
 
 Name:		%{pkg_name}
 Version:	%{lld_version}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
-Release:	1%{?dist}
+Release:	1%{?dist}.redsleeve
 Summary:	The LLVM Linker
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
@@ -62,6 +62,8 @@ Source2:	release-keys.asc
 %endif
 
 ExcludeArch:	s390x
+
+Patch1000:	1000_patch_atomic_arm.patch
 
 # Bundle libunwind header need during build for MachO support
 Patch1:		0002-PATCH-lld-Import-compact_unwind_encoding.h-from-libu.patch
@@ -220,6 +222,9 @@ fi
 
 %changelog
 %{?llvm_snapshot_changelog_entry}
+
+* Fri May 31 2024 Jacco Ligthart < jacco@redsleeve.org> - 17.0.6-1.redsleeve
+- link COFF with atomic
 
 * Mon Dec 11 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.6-1
 - Update to 17.0.6
