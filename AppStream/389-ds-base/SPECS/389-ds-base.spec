@@ -47,7 +47,7 @@ ExcludeArch: i686
 Summary:          389 Directory Server (base)
 Name:             389-ds-base
 Version:          2.4.5
-Release:          8%{?dist}.redsleeve
+Release:          9%{?dist}
 License:          GPL-3.0-or-later AND (0BSD OR Apache-2.0 OR MIT) AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT OR Zlib) AND (Apache-2.0 OR MIT) AND (MIT OR Apache-2.0) AND Unicode-DFS-2016 AND (MIT OR Unlicense) AND Apache-2.0 AND BSD-3-Clause AND MIT AND MPL-2.0
 URL:              https://www.port389.org
 Conflicts:        selinux-policy-base < 3.9.8
@@ -282,13 +282,16 @@ Source2:          %{name}-devel.README
 Source3:          https://github.com/jemalloc/%{jemalloc_name}/releases/download/%{jemalloc_ver}/%{jemalloc_name}-%{jemalloc_ver}.tar.bz2
 %endif
 Source4:          389-ds-base.sysusers
-Patch0:           0001-Issue-3527-Support-HAProxy-and-Instance-on-the-same-.patch
-Patch1:           0002-Issue-6112-RFE-add-new-operation-note-for-MFA-authen.patch
-Patch2:           0003-Issue-6133-Move-slapi_pblock_set_flag_operation_note.patch
-Patch3:           0004-CVE-2024-2199.patch
-Patch4:           0005-CVE-2024-3657.patch
+Patch01:          0001-Issue-3527-Support-HAProxy-and-Instance-on-the-same-.patch
+Patch02:          0002-Issue-6112-RFE-add-new-operation-note-for-MFA-authen.patch
+Patch03:          0003-Issue-6133-Move-slapi_pblock_set_flag_operation_note.patch
+Patch04:          0004-CVE-2024-2199.patch
+Patch05:          0005-CVE-2024-3657.patch
+Patch06:          0006-CVE-2024-5953.patch
+Patch07:          0007-CVE-2024-6237.patch
+Patch08:          0008-Issue-5772-ONE-LEVEL-search-fails-to-return-sub-suff.patch
+Patch09:          0009-Issue-6172-RFE-improve-the-performance-of-evaluation.patch
 
-Patch1000:        389-ds-base_32bit_support.patch
 
 %description
 389 Directory Server is an LDAPv3 compliant server.  The base package includes
@@ -731,9 +734,12 @@ exit 0
 %endif
 
 %changelog
-* Sun Jul 28 2024 Jacco Ligthart <jacco@redsleeve.org> - 2.4.5-8.redsleeve
-- added a 32-bit patch from upstream
-- https://github.com/389ds/389-ds-base/pull/6089/
+* Tue Jul 16 2024 James Chapman <jachapma@redhat.com> - 2.4.5-9
+- Bump version to 2.4.5-9
+- Resolves: RHEL-44323 - unauthenticated user can trigger a DoS by sending a specific extended search request
+- Resolves: RHEL-40945 - Malformed userPassword hash may cause Denial of Service
+- Resolves: RHEL-49457 - perf search result investigation for many large static groups and members 
+- Resolves: RHEL-49459 - subsuffix are not returned in one level scoped search
 
 * Fri May 31 2024 Viktor Ashirov <vashirov@redhat.com> - 2.4.5-8
 - Bump version to 2.4.5-8

@@ -1,0 +1,192 @@
+From 9501c34df01e35f483201a4bba12a93091b2b13f Mon Sep 17 00:00:00 2001
+From: progier389 <progier@redhat.com>
+Date: Thu, 13 Jun 2024 15:17:36 +0200
+Subject: [PATCH] Issue 5772 - ONE LEVEL search fails to return sub-suffixes
+ (#6219)
+
+Problem: ONE LEVEL scoped search fails to return sub-suffixes entries
+Reason: When such search is done, a one level search is done on the main suffix and base search are done on any matching sub-suffix. But main suffix is processed search (to ensure that parent entries are returned before children ones when searching subtree) and ldbm_back_search change the filter to (&(parentid=xxx)old_filter) so the filter test reject the entry on the sub-suffixes.
+Solution: Revert the backend list when doing one level search so that the sub-suffixes are processed first
+and restore the base dn for the main suffix.
+Alternative rejected: reset the filter when discivering a sub-suffix. Not so easy because filter is altered by the rewriteres.
+And systematic duplication is an useless overhead if there is no matching sub-suffixes (which is the usual case)
+
+Issue: #5772
+
+Reviewed by: @tbordaz, @droideck (Thanks!)
+
+(cherry picked from commit 407bdaa00d1da9f5ff53d66a2e012b17ad658907)
+---
+ .../suites/mapping_tree/regression_test.py    | 36 +++++++++++++++++-
+ ldap/servers/slapd/filterentry.c              | 38 ++++++++++++++++++-
+ ldap/servers/slapd/opshared.c                 | 22 ++++++++++-
+ 3 files changed, 92 insertions(+), 4 deletions(-)
+
+diff --git a/dirsrvtests/tests/suites/mapping_tree/regression_test.py b/dirsrvtests/tests/suites/mapping_tree/regression_test.py
+index f4877da2b..c3fc2c0a2 100644
+--- a/dirsrvtests/tests/suites/mapping_tree/regression_test.py
++++ b/dirsrvtests/tests/suites/mapping_tree/regression_test.py
+@@ -92,7 +92,6 @@ EXPECTED_ENTRIES = (("dc=parent", 39), ("dc=child1,dc=parent", 13), ("dc=child2,
+ @pytest.mark.skipif(not has_orphan_attribute, reason = "compatibility attribute not yet implemented in this version")
+ def test_sub_suffixes(topo, orphan_param):
+     """ check the entries found on suffix/sub-suffix
+-    used int
+ 
+     :id: 5b4421c2-d851-11ec-a760-482ae39447e5
+     :feature: mapping-tree
+@@ -122,8 +121,41 @@ def test_sub_suffixes(topo, orphan_param):
+         log.info(f'Verifying domain component entries count for search under {suffix} ...')
+         entries = topo.standalone.search_s(suffix, ldap.SCOPE_SUBTREE, "(dc=*)")
+         assert len(entries) == expected
+-        log.info('Found {expected} domain component entries as expected while searching {suffix}')
++        log.info(f'Found {expected} domain component entries as expected while searching {suffix}')
+ 
+     log.info('Test PASSED')
+ 
+ 
++def test_one_level_search_on_sub_suffixes(topo):
++    """ Perform one level scoped search accross suffix and sub-suffix
++
++    :id: 92f3139e-280e-11ef-a989-482ae39447e5
++    :feature: mapping-tree
++    :setup: Standalone instance with 3 additional backends:
++            dc=parent, dc=child1,dc=parent, dc=childr21,dc=parent
++    :steps:
++        1. Perform a ONE LEVEL search on dc=parent
++        2. Check that all expected entries have been returned
++        3. Check that only the expected entries have been returned
++    :expectedresults:
++        1. Success
++        2. each expected dn should be in the result set
++        3. Number of returned entries should be the same as the number of expected entries
++    """
++    expected_dns = ( 'dc=child1,dc=parent',
++                         'dc=child2,dc=parent',
++                         'ou=accounting,dc=parent',
++                         'ou=product development,dc=parent',
++                         'ou=product testing,dc=parent',
++                         'ou=human resources,dc=parent',
++                         'ou=payroll,dc=parent',
++                         'ou=people,dc=parent',
++                         'ou=groups,dc=parent', )
++    entries = topo.standalone.search_s("dc=parent", ldap.SCOPE_ONELEVEL, "(objectClass=*)",
++                                       attrlist=("dc","ou"), escapehatch='i am sure')
++    log.info(f'one level search on dc=parent returned the following entries: {entries}')
++    dns = [ entry.dn for entry in entries ]
++    for dn in expected_dns:
++        assert dn in dns
++    assert len(entries) == len(expected_dns)
++
+diff --git a/ldap/servers/slapd/filterentry.c b/ldap/servers/slapd/filterentry.c
+index 4de4aa66e..d2c7e3082 100644
+--- a/ldap/servers/slapd/filterentry.c
++++ b/ldap/servers/slapd/filterentry.c
+@@ -240,6 +240,36 @@ slapi_filter_test_ext(
+ }
+ 
+ 
++static const char *
++filter_type_as_string(int filter_type)
++{
++    switch (filter_type) {
++    case LDAP_FILTER_AND:
++        return "&";
++    case LDAP_FILTER_OR:
++        return "|";
++    case LDAP_FILTER_NOT:
++        return "!";
++    case LDAP_FILTER_EQUALITY:
++        return "=";
++    case LDAP_FILTER_SUBSTRINGS:
++        return "*";
++    case LDAP_FILTER_GE:
++        return ">=";
++    case LDAP_FILTER_LE:
++        return "<=";
++    case LDAP_FILTER_PRESENT:
++        return "=*";
++    case LDAP_FILTER_APPROX:
++        return "~";
++    case LDAP_FILTER_EXT:
++        return "EXT";
++    default:
++        return "?";
++    }
++}
++
++
+ int
+ test_ava_filter(
+     Slapi_PBlock *pb,
+@@ -253,7 +283,13 @@ test_ava_filter(
+ {
+     int rc;
+ 
+-    slapi_log_err(SLAPI_LOG_FILTER, "test_ava_filter", "=>\n");
++    if (slapi_is_loglevel_set(SLAPI_LOG_FILTER)) {
++        char *val = slapi_berval_get_string_copy(&ava->ava_value);
++        char buf[BUFSIZ];
++        slapi_log_err(SLAPI_LOG_FILTER, "test_ava_filter", "=> AVA: %s%s%s\n",
++                      ava->ava_type, filter_type_as_string(ftype), escape_string(val, buf));
++        slapi_ch_free_string(&val);
++    }
+ 
+     *access_check_done = 0;
+ 
+diff --git a/ldap/servers/slapd/opshared.c b/ldap/servers/slapd/opshared.c
+index f77043afa..540597f45 100644
+--- a/ldap/servers/slapd/opshared.c
++++ b/ldap/servers/slapd/opshared.c
+@@ -219,6 +219,7 @@ cache_return_target_entry(Slapi_PBlock *pb, Slapi_Backend *be, Slapi_Operation *
+         operation_set_target_entry_id(operation, 0);
+     }
+ }
++
+ /*
+  * Returns: 0    - if the operation is successful
+  *        < 0    - if operation fails.
+@@ -481,6 +482,20 @@ op_shared_search(Slapi_PBlock *pb, int send_result)
+             while (be_list[index] && be_list[index + 1]) {
+                 index++;
+             }
++            if (scope == LDAP_SCOPE_ONELEVEL) {
++                /*
++                 * ONE LEVEL searches may ends up on multiple backends
++                 *  with a ONE LEVEL search on a suffix and a BASE search on its
++                 *  subsuffixes. Because LDAP_SCOPE_ONELEVEL rewrite the filter
++                 *  the backends should be reversed so that the BASE search(es)
++                 *  are done first (with the original filter).
++                 */
++                for (int idx = 0; idx <= index/2; idx++) {
++                    be = be_list[index-idx];
++                    be_list[index-idx] = be_list[idx];
++                    be_list[idx] = be;
++                }
++            }
+             be = be_list[index];
+         } else {
+             be = NULL;
+@@ -779,7 +794,6 @@ op_shared_search(Slapi_PBlock *pb, int send_result)
+                         (slapi_sdn_get_ndn_len(basesdn) == 0)) {
+                         int tmp_scope = LDAP_SCOPE_BASE;
+                         slapi_pblock_set(pb, SLAPI_SEARCH_SCOPE, &tmp_scope);
+-
+                         if (free_sdn) {
+                             slapi_pblock_get(pb, SLAPI_SEARCH_TARGET_SDN, &sdn);
+                             slapi_sdn_free(&sdn);
+@@ -790,6 +804,12 @@ op_shared_search(Slapi_PBlock *pb, int send_result)
+                     } else if (slapi_sdn_issuffix(basesdn, be_suffix)) {
+                         int tmp_scope = LDAP_SCOPE_ONELEVEL;
+                         slapi_pblock_set(pb, SLAPI_SEARCH_SCOPE, &tmp_scope);
++                        if (free_sdn) {
++                            slapi_pblock_get(pb, SLAPI_SEARCH_TARGET_SDN, &sdn);
++                            slapi_sdn_free(&sdn);
++                            sdn = slapi_sdn_dup(basesdn);
++                            slapi_pblock_set(pb, SLAPI_SEARCH_TARGET_SDN, (void *)sdn);
++                        }
+                     } else {
+                         slapi_sdn_done(&monitorsdn);
+                         goto next_be;
+-- 
+2.45.2
+
