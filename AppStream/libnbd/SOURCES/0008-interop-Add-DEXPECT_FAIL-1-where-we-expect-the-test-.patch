@@ -1,0 +1,53 @@
+From fcb7d28e4dd2ab438c6070e7e5b1aae54cc75f28 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Mon, 24 Jun 2024 13:54:48 +0100
+Subject: [PATCH] interop: Add -DEXPECT_FAIL=1 where we expect the test to fail
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit c7a8df4f78f2c1901f5c532f262dadd6cce84750)
+(cherry picked from commit 175ee89f4a64c52cdb1412a2a72fc8c52fecaf93)
+---
+ interop/interop.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/interop/interop.c b/interop/interop.c
+index d4d6671e..469327ee 100644
+--- a/interop/interop.c
++++ b/interop/interop.c
+@@ -78,6 +78,7 @@ main (int argc, char *argv[])
+   int64_t actual_size;
+   char buf[512];
+   size_t i;
++  int r;
+ 
+   /* Check requirements or skip the test. */
+ #ifdef REQUIRES
+@@ -174,10 +175,21 @@ main (int argc, char *argv[])
+ #else
+ #define NBD_CONNECT nbd_connect_command
+ #endif
+-  if (NBD_CONNECT (nbd, args) == -1) {
++  r = NBD_CONNECT (nbd, args);
++#if EXPECT_FAIL
++  if (r != -1) {
++    fprintf (stderr, "%s: expected connection to fail but it did not\n",
++             argv[0]);
++    exit (EXIT_FAILURE);
++  }
++  exit (EXIT_SUCCESS);
++  /*NOTREACHED*/
++#else
++  if (r == -1) {
+     fprintf (stderr, "%s\n", nbd_get_error ());
+     exit (EXIT_FAILURE);
+   }
++#endif
+ 
+ #if TLS
+   if (TLS_MODE == LIBNBD_TLS_REQUIRE) {
+-- 
+2.43.0
+

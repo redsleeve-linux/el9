@@ -1,0 +1,84 @@
+From c20ac23a9a3673cca863974ec53f9129392fd447 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Mon, 24 Jun 2024 11:39:01 +0100
+Subject: [PATCH] interop: Test interop with a bad system CA
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This is expected to fail now.
+
+Reviewed-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 1c7db8f3337632f0395dac9b13cf03b100cf1a4a)
+(cherry picked from commit cb3519eeefa788b8fef466bf9394eefa9d6a6c18)
+---
+ .gitignore          |  1 +
+ interop/Makefile.am | 26 ++++++++++++++++++++++++++
+ 2 files changed, 27 insertions(+)
+
+diff --git a/.gitignore b/.gitignore
+index 0b1cf764..597043e1 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -113,6 +113,7 @@ Makefile.in
+ /interop/interop-nbdkit-tls-certs
+ /interop/interop-nbdkit-tls-certs-allow-enabled
+ /interop/interop-nbdkit-tls-certs-allow-fallback
++/interop/interop-nbdkit-tls-certs-bad-CA
+ /interop/interop-nbdkit-tls-psk
+ /interop/interop-nbdkit-tls-psk-allow-enabled
+ /interop/interop-nbdkit-tls-psk-allow-fallback
+diff --git a/interop/Makefile.am b/interop/Makefile.am
+index 4cdc55e9..bc974b99 100644
+--- a/interop/Makefile.am
++++ b/interop/Makefile.am
+@@ -281,6 +281,7 @@ check_PROGRAMS += \
+ 	interop-nbdkit-tls-certs \
+ 	interop-nbdkit-tls-certs-allow-enabled \
+ 	interop-nbdkit-tls-certs-allow-fallback \
++	interop-nbdkit-tls-certs-bad-CA \
+ 	interop-nbdkit-tls-psk \
+ 	interop-nbdkit-tls-psk-allow-enabled \
+ 	interop-nbdkit-tls-psk-allow-fallback \
+@@ -292,6 +293,7 @@ TESTS += \
+ 	interop-nbdkit-tls-certs \
+ 	interop-nbdkit-tls-certs-allow-enabled \
+ 	interop-nbdkit-tls-certs-allow-fallback \
++	interop-nbdkit-tls-certs-bad-CA \
+ 	interop-nbdkit-tls-psk \
+ 	interop-nbdkit-tls-psk-allow-enabled \
+ 	interop-nbdkit-tls-psk-allow-fallback \
+@@ -370,6 +372,30 @@ interop_nbdkit_tls_certs_allow_fallback_LDADD = \
+ 	$(GNUTLS_LIBS) \
+ 	$(NULL)
+ 
++# In this test, nbdkit offers a server certificate signed by our CA in
++# the tests/pki directory, but we deliberately tell libnbd to test
++# against the system CA (-DCERTS=NULL).  This is expected to fail the
++# connection with the error:
++# libnbd: debug: nbd1: nbd_connect_command: handle dead: nbd_connect_command: gnutls_handshake: Error in the certificate verification. (15/1)
++interop_nbdkit_tls_certs_bad_CA_SOURCES = \
++	interop.c \
++	requires.c \
++	../tests/requires.h \
++	$(NULL)
++interop_nbdkit_tls_certs_bad_CA_CPPFLAGS = \
++	$(AM_CPPFLAGS) \
++	-DREQUIRES=' requires ("test -d ../tests/pki"); ' \
++	-DSERVER=\"$(NBDKIT)\" \
++	-DSERVER_PARAMS='"--tls=require", "--tls-certificates=../tests/pki", "-s", "--exit-with-parent", "null"' \
++	-DCERTS=NULL \
++	-DTLS_MODE=LIBNBD_TLS_REQUIRE \
++	-DEXPECT_FAIL=1 \
++	$(NULL)
++interop_nbdkit_tls_certs_bad_CA_LDADD = \
++	$(top_builddir)/lib/libnbd.la \
++	$(GNUTLS_LIBS) \
++	$(NULL)
++
+ interop_nbdkit_tls_psk_SOURCES = \
+ 	interop.c \
+ 	requires.c \
+-- 
+2.43.0
+
