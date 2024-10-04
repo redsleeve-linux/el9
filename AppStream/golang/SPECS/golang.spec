@@ -29,7 +29,7 @@
 # Define GOROOT macros
 %global goroot          %{_prefix}/lib/%{name}
 %global gopath          %{_datadir}/gocode
-%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
+%global golang_arches   x86_64 aarch64 ppc64le s390x
 %global golibdir        %{_libdir}/%{name}
 
 # Golang build options.
@@ -99,7 +99,7 @@
 
 Name:           golang
 Version:        %{version}
-Release:        3%{?dist}.redsleeve
+Release:        4%{?dist}
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD and Public Domain
@@ -141,6 +141,7 @@ Requires:       diffutils
 # Proposed patch by jcajka https://golang.org/cl/86541
 Patch221:       fix_TestScript_list_std.patch
 Patch230:	update-api-openssl3.patch
+Patch231:	evp-digest-sign-final.patch
 
 Patch1939923:   skip_test_rhbz1939923.patch
 
@@ -149,8 +150,6 @@ Patch1939923:   skip_test_rhbz1939923.patch
 Patch2: 	disable_static_tests_part1.patch
 Patch3: 	disable_static_tests_part2.patch
 Patch4:		modify_go.env.patch
-
-Patch1000:	go-1.21-arm-link-gold.patch
 
 # Having documentation separate was broken
 Obsoletes:      %{name}-docs < 1.1-4
@@ -536,9 +535,9 @@ cd ..
 %files -n go-toolset
 
 %changelog
-* Fri Sep 27 2024 Jacco Ligthart <jacco@redsleeve.org> - 1.21.13-3.redsleeve
-- added arm to golang_arches
-- added an arm specific patch
+* Tue Oct 01 2024 David Benoit <dbenoit@redhat.com> - 1.21.13-4
+- Fix CVE-2024-9355
+- Resolves: RHEL-61046
 
 * Tue Sep 17 2024 David Benoit <dbenoit@redhat.com> - 1.21.13-3
 - Related: RHEL-58226

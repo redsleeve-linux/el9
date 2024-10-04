@@ -1,0 +1,92 @@
+diff --git a/src/vendor/github.com/golang-fips/openssl/openssl/goopenssl.h b/src/vendor/github.com/golang-fips/openssl/openssl/goopenssl.h
+index ac6c64f86d..5213b841dc 100644
+--- a/src/vendor/github.com/golang-fips/openssl/openssl/goopenssl.h
++++ b/src/vendor/github.com/golang-fips/openssl/openssl/goopenssl.h
+@@ -264,7 +264,7 @@ int _goboringcrypto_HMAC_Update(GO_HMAC_CTX *ctx,
+ int _goboringcrypto_HMAC_CTX_reset(GO_HMAC_CTX *ctx);
+ void _goboringcrypto_HMAC_CTX_free(GO_HMAC_CTX *ctx);
+ int _goboringcrypto_HMAC_Final(GO_HMAC_CTX *ctx,
+-			       unsigned char *md, unsigned int *len);
++			       unsigned char *md, unsigned int len);
+ 
+ #include <openssl/evp.h>
+ #include <openssl/aes.h>
+diff --git a/src/vendor/github.com/golang-fips/openssl/openssl/hmac.go b/src/vendor/github.com/golang-fips/openssl/openssl/hmac.go
+index 3af1924884..c76d6690aa 100644
+--- a/src/vendor/github.com/golang-fips/openssl/openssl/hmac.go
++++ b/src/vendor/github.com/golang-fips/openssl/openssl/hmac.go
+@@ -121,7 +121,9 @@ func (h *boringHMAC) finalize() {
+ 
+ func (h *boringHMAC) Write(p []byte) (int, error) {
+ 	if len(p) > 0 {
+-		C._goboringcrypto_HMAC_Update(h.ctx, (*C.uint8_t)(unsafe.Pointer(&p[0])), C.size_t(len(p)))
++		if C._goboringcrypto_HMAC_Update(h.ctx, (*C.uint8_t)(unsafe.Pointer(&p[0])), C.size_t(len(p))) == 0 {
++			panic("boringcrypto: HMAC_Update failed")
++		}
+ 	}
+ 	runtime.KeepAlive(h)
+ 	return len(p), nil
+@@ -136,10 +138,12 @@ func (h *boringHMAC) BlockSize() int {
+ }
+ 
+ func (h *boringHMAC) Sum(in []byte) []byte {
++	size := h.Size()
+ 	if h.sum == nil {
+-		size := h.Size()
+ 		h.sum = make([]byte, size)
+ 	}
+-	C._goboringcrypto_HMAC_Final(h.ctx, (*C.uint8_t)(unsafe.Pointer(&h.sum[0])), nil)
++	if C._goboringcrypto_HMAC_Final(h.ctx, (*C.uint8_t)(unsafe.Pointer(&h.sum[0])), C.uint(size)) == 0 {
++		panic("boringcrypto: HMAC_Final failed")
++	}
+ 	return append(in, h.sum...)
+ }
+diff --git a/src/vendor/github.com/golang-fips/openssl/openssl/openssl_port_hmac.c b/src/vendor/github.com/golang-fips/openssl/openssl/openssl_port_hmac.c
+index d26ce90c82..f7dabb25e0 100644
+--- a/src/vendor/github.com/golang-fips/openssl/openssl/openssl_port_hmac.c
++++ b/src/vendor/github.com/golang-fips/openssl/openssl/openssl_port_hmac.c
+@@ -115,10 +115,10 @@ void _goboringcrypto_HMAC_CTX_free(GO_HMAC_CTX *ctx)
+ }
+ 
+ int _goboringcrypto_HMAC_Final(GO_HMAC_CTX *ctx,
+-			       unsigned char *md, unsigned int *len)
++			       unsigned char *md, unsigned int len)
+ {
+   EVP_MD_CTX *mdctx = NULL;
+-  size_t slen;
++  size_t slen = len;
+   int ret = 0;
+ 
+   mdctx = _goboringcrypto_EVP_MD_CTX_create();
+@@ -128,9 +128,10 @@ int _goboringcrypto_HMAC_Final(GO_HMAC_CTX *ctx,
+   if (_goboringcrypto_internal_EVP_MD_CTX_copy_ex(mdctx, ctx->mdctx) != 1)
+     goto err;
+ 
+-  ret = _goboringcrypto_EVP_DigestSignFinal(mdctx, md, &slen);
+-  if (ret == 1 && len)
+-    *len = slen;
++  if (_goboringcrypto_EVP_DigestSignFinal(mdctx, md, &slen) != 1)
++    goto err;
++
++  ret = 1;
+ 
+  err:
+   _goboringcrypto_EVP_MD_CTX_free(mdctx);
+@@ -219,7 +220,7 @@ void _goboringcrypto_HMAC_CTX_free(GO_HMAC_CTX *ctx)
+ }
+ 
+ int _goboringcrypto_HMAC_Final(GO_HMAC_CTX *ctx,
+-			       unsigned char *md, unsigned int *len)
++			       unsigned char *md, unsigned int len)
+ {
+   HMAC_CTX hctx;
+   int ret;
+@@ -228,7 +229,7 @@ int _goboringcrypto_HMAC_Final(GO_HMAC_CTX *ctx,
+   if (ret != 1)
+     return ret;
+ 
+-  ret = _goboringcrypto_internal_HMAC_Final(&hctx, md, len);
++  ret = _goboringcrypto_internal_HMAC_Final(&hctx, md, &len);
+   _goboringcrypto_internal_HMAC_CTX_cleanup(&hctx);
+   return ret;
+ }
