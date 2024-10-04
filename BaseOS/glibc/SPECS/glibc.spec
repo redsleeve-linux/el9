@@ -155,7 +155,7 @@ end \
 Summary: The GNU libc libraries
 Name: glibc
 Version: %{glibcversion}
-Release: 100%{?dist}.3
+Release: 100%{?dist}.3.redsleeve
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -196,6 +196,8 @@ Source11: parse-SUPPORTED.py
 # Include in the source RPM for reference.
 Source12: ChangeLog.old
 Source13: nscd-sysusers.conf
+
+Source1000: glibc-arm-dl-tunables.list
 
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
@@ -1637,6 +1639,10 @@ that can be installed across architectures.
 %prep
 %autosetup -n %{glibcsrcdir} -p1
 
+%ifarch %{arm}
+cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
+%endif
+
 ##############################################################################
 # %%prep - Additional prep required...
 ##############################################################################
@@ -2973,6 +2979,9 @@ update_gconv_modules_cache ()
 %endif
 
 %changelog
+* Fri Sep 27 2024 Jacco Ligthart <jacco@redsleeve.org> - 2.34-100.3.redsleeve
+- add dl-tunables.list for arm
+
 * Fri Jul 12 2024 Patsy Griffin <patsy@redhat.com> - 2.34-100.3
 - elf: Avoid some free (NULL) calls in _dl_update_slotinfo
 - elf: Support recursive use of dynamic TLS in interposed malloc (RHEL-39993)
