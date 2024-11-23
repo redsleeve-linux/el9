@@ -9,7 +9,7 @@
 
 Name:           libnbd
 Version:        1.18.1
-Release:        4%{?dist}
+Release:        4%{?dist}.redsleeve
 Summary:        NBD client library in userspace
 
 License:        LGPL-2.0-or-later AND BSD-3-Clause
@@ -97,7 +97,7 @@ BuildRequires:  util-linux
 # nbdkit for i686.  These are only needed for the test suite so make
 # them optional.  This reduces our test exposure on 32 bit platforms,
 # although there is still Fedora/armv7 and some upstream testing.
-%ifnarch %{ix86}
+%ifnarch %{ix86} %{arm}
 BuildRequires:  qemu-img
 BuildRequires:  nbdkit
 BuildRequires:  nbdkit-data-plugin
@@ -392,6 +392,9 @@ make %{?_smp_mflags} check || {
 
 
 %changelog
+* Fri Sep 27 2024 Jacco Ligthart <jacco@redsleeve.org> - 1.18.1-4.redsleeve
+- fixed builddeps for arm
+
 * Tue Aug 27 2024 Richard W.M. Jones <rjones@redhat.com> - 1.18.1-4
 - Fix CVE-2024-7383 NBD server improper certificate validation
   resolves: RHEL-52730
