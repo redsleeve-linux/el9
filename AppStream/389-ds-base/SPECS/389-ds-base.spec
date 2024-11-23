@@ -47,7 +47,7 @@ ExcludeArch: i686
 Summary:          389 Directory Server (base)
 Name:             389-ds-base
 Version:          2.4.5
-Release:          9%{?dist}
+Release:          9%{?dist}.redsleeve
 License:          GPL-3.0-or-later AND (0BSD OR Apache-2.0 OR MIT) AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSL-1.0) AND (Apache-2.0 OR MIT OR Zlib) AND (Apache-2.0 OR MIT) AND (MIT OR Apache-2.0) AND Unicode-DFS-2016 AND (MIT OR Unlicense) AND Apache-2.0 AND BSD-3-Clause AND MIT AND MPL-2.0
 URL:              https://www.port389.org
 Conflicts:        selinux-policy-base < 3.9.8
@@ -292,6 +292,7 @@ Patch07:          0007-CVE-2024-6237.patch
 Patch08:          0008-Issue-5772-ONE-LEVEL-search-fails-to-return-sub-suff.patch
 Patch09:          0009-Issue-6172-RFE-improve-the-performance-of-evaluation.patch
 
+Patch1000:        389-ds-base_32bit_support.patch
 
 %description
 389 Directory Server is an LDAPv3 compliant server.  The base package includes
@@ -734,6 +735,10 @@ exit 0
 %endif
 
 %changelog
+* Fri Sep 27 2024 Jacco Ligthart <jacco@redsleeve.org> - 2.4.5-9.redsleeve
+- added a 32-bit patch from upstream
+- https://github.com/389ds/389-ds-base/pull/6089/
+
 * Tue Jul 16 2024 James Chapman <jachapma@redhat.com> - 2.4.5-9
 - Bump version to 2.4.5-9
 - Resolves: RHEL-44323 - unauthenticated user can trigger a DoS by sending a specific extended search request
