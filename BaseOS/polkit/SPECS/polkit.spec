@@ -22,7 +22,7 @@
 Summary: An authorization framework
 Name: polkit
 Version: 0.117
-Release: 11%{?dist}.redsleeve
+Release: 13%{?dist}
 License: LGPLv2+
 URL: http://www.freedesktop.org/wiki/Software/polkit
 Source0: http://www.freedesktop.org/software/polkit/releases/%{name}-%{version}.tar.gz
@@ -33,6 +33,9 @@ Patch1002: CVE-2021-3560.patch
 Patch1003: CVE-2021-4034.patch
 Patch1004: CVE-2021-4115.patch
 Patch1005: tty-restore-flags-if-changed.patch
+Patch1006: pkttyagent-coredump-after-eof.patch
+Patch1007: session-monitor-watch-sessions-only.patch
+Patch1008: pkpermission-watch-changed-ssn-only.patch
 
 %if 0%{?bundled_mozjs}
 Source2: https://ftp.mozilla.org/pub/firefox/releases/%{mozjs_version}esr/source/firefox-%{mozjs_version}esr.source.tar.xz
@@ -111,7 +114,8 @@ BuildRequires: automake
 BuildRequires: libtool
 %endif
 
-Requires: dbus, polkit-pkla-compat
+Requires: dbus
+Recommends: polkit-pkla-compat
 Requires: %{name}-libs%{?_isa} = %{version}-%{release}
 
 Requires(pre): shadow-utils
@@ -181,6 +185,9 @@ Libraries files for polkit.
 %patch1003 -p1
 %patch1004 -p1
 %patch1005 -p1
+%patch1006 -p1
+%patch1007 -p1
+%patch1008 -p1
 
 %if 0%{?bundled_mozjs}
 # Extract mozjs archive
@@ -198,7 +205,7 @@ pushd firefox-%{mozjs_version}
 %patch14 -p1
 %patch15 -p1
 
-%ifarch %{arm}
+%ifarch armv7hl
 # Include definitions for user vfp on armv7 as it causes the compilation to fail without them
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1526653
 %patch17 -p1
@@ -387,8 +394,15 @@ exit 0
 %endif
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> - 0.117-11.redsleeve
-- apply definitions_for_user_vfp also for armv6
+* Tue May 28 2024 Jan Rybar <jrybar@redhat.com> - 0.117-13
+- session-monitor: watch sessions only
+- PolkitPermission: react on really changed sessions
+- allow polkit-pkla-compat to be uninstalled if no .pkla rules
+- Resolves: RHEL-39063
+
+* Mon Mar 18 2024 Jan Rybar <jrybar@redhat.com> - 0.117-12
+- pkttyagent: EOF in passwd results in coredump
+- Resolves: RHEL-5772
 
 * Fri Dec 02 2022 Jan Rybar <jrybar@redhat.com> - 0.117-11
 - backport: restore tty only if changed

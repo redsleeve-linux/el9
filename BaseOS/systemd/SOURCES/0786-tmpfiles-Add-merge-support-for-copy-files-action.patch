@@ -1,0 +1,96 @@
+From 129f8896018377cfe9a64e2877517124b79ca87f Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Tue, 9 May 2023 13:45:16 +0200
+Subject: [PATCH] tmpfiles: Add merge support for copy files action
+
+If '+' is specified with 'C', let's merge the tree with any existing
+tree.
+
+(cherry picked from commit 1fd5ec5697680e2ec6277431bd74cabf48dbc94f)
+
+Related: RHEL-27512
+---
+ man/tmpfiles.d.xml            | 22 +++++++++++-----------
+ src/tmpfiles/tmpfiles.c       |  2 +-
+ test/units/testsuite-22.02.sh | 16 ++++++++++++++++
+ 3 files changed, 28 insertions(+), 12 deletions(-)
+
+diff --git a/man/tmpfiles.d.xml b/man/tmpfiles.d.xml
+index bd3bc33ab4..fe2a1dadab 100644
+--- a/man/tmpfiles.d.xml
++++ b/man/tmpfiles.d.xml
+@@ -58,10 +58,11 @@ c+    /dev/char-device-to-[re]create           mode user group -           major
+ b     /dev/block-device-to-create              mode user group -           major:minor
+ b+    /dev/block-device-to-[re]create          mode user group -           major:minor
+ C     /target/to/create                        -    -    -     cleanup-age /source/to/copy
++C+    /target/to/create                        -    -    -     cleanup-age /source/to/copy
+ x     /path-or-glob/to/ignore/recursively      -    -    -     cleanup-age -
+ X     /path-or-glob/to/ignore                  -    -    -     cleanup-age -
+-r     /empty/dir/to/remove                     -    -    -     -           -
+-R     /dir/to/remove/recursively               -    -    -     -           -
++r     /path-or-glob/to/remove                  -    -    -     -           -
++R     /path-or-glob/to/remove/recursively      -    -    -     -           -
+ z     /path-or-glob/to/adjust/mode             mode user group -           -
+ Z     /path-or-glob/to/adjust/mode/recursively mode user group -           -
+ t     /path-or-glob/to/set/xattrs              -    -    -     -           xattrs
+@@ -325,15 +326,14 @@ L     /tmp/foobar -    -    -     -   /dev/null</programlisting>
+ 
+         <varlistentry>
+           <term><varname>C</varname></term>
+-          <listitem><para>Recursively copy a file or directory, if the
+-          destination files or directories do not exist yet or the
+-          destination directory is empty. Note that this command will not
+-          descend into subdirectories if the destination directory already
+-          exists and is not empty. Instead, the entire copy operation is
+-          skipped. If the argument is omitted, files from the source directory
+-          <filename>/usr/share/factory/</filename> with the same name
+-          are copied. Does not follow symlinks. Contents of the directories
+-          are subject to time based cleanup if the age argument is specified.
++          <term><varname>C+</varname></term>
++          <listitem><para>Recursively copy a file or directory, if the destination files or directories do
++          not exist yet or the destination directory is empty. Note that this command will not descend into
++          subdirectories if the destination directory already exists and is not empty, unless the action is
++          suffixed with <varname>+</varname>. Instead, the entire copy operation is skipped. If the argument
++          is omitted, files from the source directory <filename>/usr/share/factory/</filename> with the same
++          name are copied. Does not follow symlinks. Contents of the directories are subject to time-based
++          cleanup if the age argument is specified.
+           </para></listitem>
+         </varlistentry>
+ 
+diff --git a/src/tmpfiles/tmpfiles.c b/src/tmpfiles/tmpfiles.c
+index 18bb75715b..ead5c49874 100644
+--- a/src/tmpfiles/tmpfiles.c
++++ b/src/tmpfiles/tmpfiles.c
+@@ -1648,7 +1648,7 @@ static int copy_files(Item *i) {
+                          dfd, bn,
+                          i->uid_set ? i->uid : UID_INVALID,
+                          i->gid_set ? i->gid : GID_INVALID,
+-                         COPY_REFLINK | COPY_MERGE_EMPTY | COPY_MAC_CREATE | COPY_HARDLINKS);
++                         COPY_REFLINK | ((i->append_or_force) ? COPY_MERGE : COPY_MERGE_EMPTY) | COPY_MAC_CREATE | COPY_HARDLINKS);
+ 
+         fd = openat(dfd, bn, O_NOFOLLOW|O_CLOEXEC|O_PATH);
+         if (fd < 0) {
+diff --git a/test/units/testsuite-22.02.sh b/test/units/testsuite-22.02.sh
+index 49c55f136b..f233be2499 100755
+--- a/test/units/testsuite-22.02.sh
++++ b/test/units/testsuite-22.02.sh
+@@ -121,3 +121,19 @@ EOF
+ 
+ test "$(stat -c %U:%G:%a /tmp/C/3/f1)" = "root:root:644"
+ test ! -e /tmp/C/4
++
++touch /tmp/C/3-origin/f{2,3,4}
++echo -n ABC > /tmp/C/3/f1
++
++systemd-tmpfiles --create - <<EOF
++C+     /tmp/C/3    0755 daemon daemon - /tmp/C/3-origin
++EOF
++
++# Test that the trees got merged, even though /tmp/C/3 already exists.
++test -e /tmp/C/3/f1
++test -e /tmp/C/3/f2
++test -e /tmp/C/3/f3
++test -e /tmp/C/3/f4
++
++# Test that /tmp/C/3/f1 did not get overwritten.
++test "$(cat /tmp/C/3/f1)" = "ABC"

@@ -1,0 +1,69 @@
+From 7302d5d45efc1b157ddbfb04c387d83a87c8384f Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Mon, 8 May 2023 23:10:07 +0800
+Subject: [PATCH] core/manager: export manager_dbus_is_running
+
+(cherry picked from commit e8863150653931ae2ffc91757623f179ce763628)
+
+Resolves: RHEL-40878
+---
+ src/core/manager.c | 8 ++++----
+ src/core/manager.h | 5 +++++
+ 2 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/src/core/manager.c b/src/core/manager.c
+index b44c7785cf..fd6e711c65 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -1680,7 +1680,7 @@ static void manager_distribute_fds(Manager *m, FDSet *fds) {
+         }
+ }
+ 
+-static bool manager_dbus_is_running(Manager *m, bool deserialized) {
++bool manager_dbus_is_running_full(Manager *m, bool deserialized) {
+         Unit *u;
+ 
+         assert(m);
+@@ -1722,7 +1722,7 @@ static void manager_setup_bus(Manager *m) {
+                 (void) bus_init_system(m);
+ 
+         /* Let's connect to the bus now, but only if the unit is supposed to be up */
+-        if (manager_dbus_is_running(m, MANAGER_IS_RELOADING(m))) {
++        if (manager_dbus_is_running_full(m, MANAGER_IS_RELOADING(m))) {
+                 (void) bus_init_api(m);
+ 
+                 if (MANAGER_IS_SYSTEM(m))
+@@ -2815,7 +2815,7 @@ static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t
+                 break;
+ 
+         case SIGUSR1:
+-                if (manager_dbus_is_running(m, false)) {
++                if (manager_dbus_is_running(m)) {
+                         log_info("Trying to reconnect to bus...");
+ 
+                         (void) bus_init_api(m);
+@@ -3930,7 +3930,7 @@ void manager_recheck_dbus(Manager *m) {
+         if (MANAGER_IS_RELOADING(m))
+                 return; /* don't check while we are reloading… */
+ 
+-        if (manager_dbus_is_running(m, false)) {
++        if (manager_dbus_is_running(m)) {
+                 (void) bus_init_api(m);
+ 
+                 if (MANAGER_IS_SYSTEM(m))
+diff --git a/src/core/manager.h b/src/core/manager.h
+index 86e7e40989..1479813de4 100644
+--- a/src/core/manager.h
++++ b/src/core/manager.h
+@@ -491,6 +491,11 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
+ 
+ int manager_startup(Manager *m, FILE *serialization, FDSet *fds, const char *root);
+ 
++bool manager_dbus_is_running_full(Manager *m, bool deserialized);
++static inline bool manager_dbus_is_running(Manager *m) {
++        return manager_dbus_is_running_full(m, false);
++}
++
+ Job *manager_get_job(Manager *m, uint32_t id);
+ Unit *manager_get_unit(Manager *m, const char *name);
+ 

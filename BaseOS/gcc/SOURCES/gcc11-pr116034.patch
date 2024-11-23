@@ -1,0 +1,65 @@
+commit 084768c865cd50a6f7ff177db2dbdbb7aadaeee0
+Author: Jakub Jelinek <jakub@redhat.com>
+Date:   Tue Jul 23 10:50:29 2024 +0200
+
+    ssa: Fix up maybe_rewrite_mem_ref_base complex type handling [PR116034]
+    
+    The folding into REALPART_EXPR is correct, used only when the mem_offset
+    is zero, but for IMAGPART_EXPR it didn't check the exact offset value (just
+    that it is not 0).
+    The following patch fixes that by using IMAGPART_EXPR only if the offset
+    is right and using BITFIELD_REF or whatever else otherwise.
+    
+    2024-07-23  Jakub Jelinek  <jakub@redhat.com>
+                Andrew Pinski  <quic_apinski@quicinc.com>
+    
+            PR tree-optimization/116034
+            * tree-ssa.c (maybe_rewrite_mem_ref_base): Only use IMAGPART_EXPR
+            if MEM_REF offset is equal to element type size.
+    
+            * gcc.dg/pr116034.c: New test.
+    
+    (cherry picked from commit b9cefd67a2a464a3c9413e6b3f28e7dc7a9ef162)
+
+diff --git a/gcc/testsuite/gcc.dg/pr116034.c b/gcc/testsuite/gcc.dg/pr116034.c
+new file mode 100644
+index 00000000000..9a31de03424
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr116034.c
+@@ -0,0 +1,22 @@
++/* PR tree-optimization/116034 */
++/* { dg-do run } */
++/* { dg-options "-O1 -fno-strict-aliasing" } */
++
++int g;
++
++static inline int
++foo (_Complex unsigned short c)
++{
++  __builtin_memmove (&g, 1 + (char *) &c, 2);
++  return g;
++}
++
++int
++main ()
++{
++  if (__SIZEOF_SHORT__ == 2
++      && __CHAR_BIT__ == 8
++      && (foo (__BYTE_ORDER__ != __ORDER_BIG_ENDIAN__ ? 0x100 : 1)
++	  != (__BYTE_ORDER__ != __ORDER_BIG_ENDIAN__ ? 1 : 0x100)))
++    __builtin_abort ();
++}
+--- a/gcc/tree-ssa.c
++++ b/gcc/tree-ssa.c
+@@ -1506,7 +1506,10 @@ maybe_rewrite_mem_ref_base (tree *tp, bitmap suitable_for_renaming)
+ 	}
+       else if (TREE_CODE (TREE_TYPE (sym)) == COMPLEX_TYPE
+ 	       && useless_type_conversion_p (TREE_TYPE (*tp),
+-					     TREE_TYPE (TREE_TYPE (sym))))
++					     TREE_TYPE (TREE_TYPE (sym)))
++	       && (integer_zerop (TREE_OPERAND (*tp, 1))
++		   || tree_int_cst_equal (TREE_OPERAND (*tp, 1),
++					  TYPE_SIZE_UNIT (TREE_TYPE (*tp)))))
+ 	{
+ 	  *tp = build1 (integer_zerop (TREE_OPERAND (*tp, 1))
+ 			? REALPART_EXPR : IMAGPART_EXPR,

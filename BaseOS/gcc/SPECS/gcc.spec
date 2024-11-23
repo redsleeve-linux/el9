@@ -1,10 +1,10 @@
-%global DATE 20231218
-%global gitrev 9e6808abff4d96f3f09474a2a744ef5f56df3e28
-%global gcc_version 11.4.1
+%global DATE 20240719
+%global gitrev a985e3068a6f8045f8a6f2d2d5ae75f5eb0a8767
+%global gcc_version 11.5.0
 %global gcc_major 11
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 3
+%global gcc_release 2
 %global nvptx_tools_gitrev 5f6f343a302d620b0868edab376c00b15741e39e
 %global newlib_cygwin_gitrev 50e2a63b04bdd018484605fbb954fd1bd5147fa0
 %global _unpackaged_files_terminate_build 0
@@ -128,7 +128,7 @@
 Summary:              Various compilers (C, C++, Objective-C, ...)
 Name:                 gcc
 Version:              %{gcc_version}
-Release:              %{gcc_release}%{?dist}.redsleeve
+Release:              %{gcc_release}%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License:              GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -292,9 +292,12 @@ Patch28:              gcc11-s390x-regarg-2.patch
 Patch29:              gcc11-s390x-regarg-3.patch
 Patch30:              gcc11-testsuite-fixes.patch
 Patch32:              gcc11-testsuite-fixes-2.patch
-Patch33:              gcc11-pr111039.patch
-Patch34:              gcc11-pr111070.patch
+Patch33:              gcc11-testsuite-fixes-3.patch
+Patch34:              gcc11-pr116034.patch
 Patch35:              gcc11-testsuite-aarch64-add-fno-stack-protector.patch
+Patch36:              gcc11-libgfortran-flush.patch
+Patch37:              gcc11-pr113960.patch
+Patch38:              gcc11-pr105157.patch
 
 Patch100:             gcc11-fortran-fdec-duplicates.patch
 Patch101:             gcc11-fortran-flogical-as-integer.patch
@@ -892,9 +895,12 @@ mark them as cross compiled.
 %patch29 -p1 -b .s390x-regarg-3~
 %patch30 -p1 -b .testsuite~
 %patch32 -p1 -b .testsuite2~
-%patch33 -p1 -b .pr111039~
-%patch34 -p1 -b .pr111070~
-%patch35 -p1 -b .testsuite3~
+%patch33 -p1 -b .testsuite3~
+%patch34 -p1 -b .pr116034~
+%patch35 -p1 -b .testsuite4~
+%patch36 -p1 -b .libgfortran-flush~
+%patch37 -p1 -b .pr113960~
+%patch38 -p1 -b .pr105157~
 
 %if 0%{?rhel} >= 9
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -1197,9 +1203,6 @@ CONFIGURE_OPTS_NATIVE="\
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
-%endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch mips mipsel
 	--with-arch=mips32r2 --with-fp-32=xx \
@@ -3591,8 +3594,58 @@ end
 %endif
 
 %changelog
-* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> 11.4.1-3.redsleeve
-- added config options for armv6hl
+* Mon Jul 22 2024 Marek Polacek <polacek@redhat.com> 11.5.0-2
+- fix TARGET_CPU_DEFAULT (PR target/105157, RHEL-50037)
+- libstdc++: Workaround kernel-headers on s390x-linux (RHEL-50054)
+- fix wrong code with memcpy from _Complex (PR tree-optimization/116034)
+
+* Fri Jul 19 2024 Marek Polacek <polacek@redhat.com> 11.5.0-1
+- update from releases/gcc-11 branch (RHEL-35635)
+  - GCC 11.5 release
+  - PRs ada/113893, ada/113979, analyzer/104042, c/113262, c/114007, c/114493,
+	c++/89224, c++/92145, c++/92407, c++/97990, c++/99710, c++/100667,
+	c++/100772, c++/101765, c++/103185, c++/104051, c++/111485,
+	c++/111529, c++/113598, c++/113674, c++/114537, c++/114561,
+	c++/114562, c++/114572, c++/114634, c++/114691, d/113125, d/113758,
+	d/114171, debug/111080, debug/112718, driver/115440, fortran/50410,
+	fortran/103715, fortran/104908, fortran/107426, fortran/114474,
+	fortran/114825, gcov-profile/114115, libfortran/110651,
+	libgomp/113192, libquadmath/114533, libstdc++/104259,
+	libstdc++/104606, libstdc++/105417, libstdc++/110054,
+	libstdc++/113250, libstdc++/114147, libstdc++/114401,
+	libstdc++/114750, libstdc++/114803, libstdc++/115269,
+	libstdc++/115454, libstdc++/115575, middle-end/90348,
+	middle-end/95351, middle-end/107385, middle-end/108789,
+	middle-end/110027, middle-end/110115, middle-end/110176,
+	middle-end/111422, middle-end/111632, middle-end/112732,
+	middle-end/113907, middle-end/113921, middle-end/114599,
+	middle-end/114734, middle-end/114753, middle-end/115527,
+	middle-end/115836, objc/101666, objc/101718, preprocessor/105608,
+	rtl-optimization/100303, rtl-optimization/108086,
+	rtl-optimization/110079, rtl-optimization/114768,
+	rtl-optimization/114902, rtl-optimization/115092, sanitizer/97696,
+	sanitizer/111736, sanitizer/114956, sanitizer/115172, target/88309,
+	target/101737, target/101865, target/105522, target/108120,
+	target/108743, target/110411, target/111610, target/111677,
+	target/112397, target/113122, target/113281, target/114049,
+	target/114098, target/114130, target/114184, target/114310,
+	target/114837, target/114846, target/115253, target/115297,
+	target/115360, target/115457, target/115475, target/115611,
+	target/115691, testsuite/113175, testsuite/114034, testsuite/114036,
+	tree-optimization/110386, tree-optimization/110422,
+	tree-optimization/111039, tree-optimization/111070,
+	tree-optimization/111331, tree-optimization/111407,
+	tree-optimization/111445, tree-optimization/111736,
+	tree-optimization/112495, tree-optimization/112505,
+	tree-optimization/112793, tree-optimization/113372,
+	tree-optimization/113552, tree-optimization/113603,
+	tree-optimization/114027, tree-optimization/114115,
+	tree-optimization/114566, tree-optimization/114876,
+	tree-optimization/115192, tree-optimization/115337,
+	tree-optimization/115843
+- fix FLUSH IOSTAT value (PR libfortran/101255, RHEL-32536)
+- fix conditions for using memcmp in
+  std::lexicographical_compare_three_way (PR libstdc++/113960)
 
 * Mon Dec 18 2023 Marek Polacek <polacek@redhat.com> 11.4.1-3
 - update from releases/gcc-11-branch (RHEL-17638)

@@ -1,0 +1,40 @@
+From 0947147008c9b2cb56b40616fccccf64a6534f07 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 17 Jan 2023 12:14:13 +0100
+Subject: [PATCH] units: don't install pcrphase-related units without gnu-efi
+
+since we don't have systemd-pcrphase built anyway, which breaks the tests:
+
+...
+I: Attempting to install /usr/lib/systemd/systemd-networkd-wait-online (based on unit file reference)
+I: Attempting to install /usr/lib/systemd/systemd-network-generator (based on unit file reference)
+I: Attempting to install /usr/lib/systemd/systemd-oomd (based on unit file reference)
+I: Attempting to install /usr/lib/systemd/systemd-pcrphase (based on unit file reference)
+W: Failed to install '/usr/lib/systemd/systemd-pcrphase'
+make: *** [Makefile:4: setup] Error 1
+make: Leaving directory '/root/systemd/test/TEST-01-BASIC'
+
+Follow-up to 04959faa632272a8fc9cdac3121b2e4af721c1b6.
+
+(cherry picked from commit 0eb635ef4bc11792cd4ef384ae252a2c7fd4122a)
+
+Related: RHEL-33384
+---
+ units/meson.build | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/units/meson.build b/units/meson.build
+index cfc96a9111..39e6a9bb65 100644
+--- a/units/meson.build
++++ b/units/meson.build
+@@ -264,8 +264,8 @@ in_units = [
+          'sysinit.target.wants/'],
+         ['systemd-pcrphase.service',             'HAVE_GNU_EFI HAVE_OPENSSL HAVE_TPM2',
+          'sysinit.target.wants/'],
+-        ['systemd-pcrfs-root.service',           ''],
+-        ['systemd-pcrfs@.service',               ''],
++        ['systemd-pcrfs-root.service',           'HAVE_GNU_EFI HAVE_OPENSSL HAVE_TPM2'],
++        ['systemd-pcrfs@.service',               'HAVE_GNU_EFI HAVE_OPENSSL HAVE_TPM2'],
+         ['systemd-growfs-root.service',          ''],
+         ['systemd-growfs@.service',              ''],
+         ['systemd-pcrmachine.service',           'HAVE_GNU_EFI HAVE_OPENSSL HAVE_TPM2',

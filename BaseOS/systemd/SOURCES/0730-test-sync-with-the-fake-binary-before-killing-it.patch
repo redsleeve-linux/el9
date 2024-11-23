@@ -1,0 +1,77 @@
+From 803900bb830163c13539a70ea56d82d27b06f52b Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 2 Jun 2023 13:24:32 +0200
+Subject: [PATCH] test: sync with the fake binary before killing it
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+On faster machines we might be too fast and kill the fake binary during
+fork() which then makes kernel report a "wrong" binary in the coredump,
+e.g.:
+
+[   31.408078] testsuite-74.sh[548]: + /tmp/make-dump /tmp/test-dump SIGTRAP
+[   31.409720] testsuite-74.sh[560]: + bin=/tmp/test-dump
+[   31.409720] testsuite-74.sh[560]: + sig=SIGTRAP
+[   31.409720] testsuite-74.sh[560]: + ulimit -c unlimited
+[   31.409720] testsuite-74.sh[560]: + pid=561
+[   31.409720] testsuite-74.sh[560]: + sleep 1
+[   31.409720] testsuite-74.sh[560]: + kill -s SIGTRAP 561
+[   31.409720] testsuite-74.sh[560]: + wait 561
+[   31.491757] systemd[1]: Created slice system-systemd\x2dcoredump.slice.
+[   31.524488] systemd[1]: Started systemd-coredump@0-563-0.service.
+[   31.616372] systemd-coredump[564]: [🡕] Process 561 (make-dump) of user 0 dumped core.
+
+                                      Stack trace of thread 561:
+                                      #0  0x00007ff86bb49af7 _Fork (libc.so.6 + 0xd4af7)
+                                      #1  0x00007ff86bb4965f __libc_fork (libc.so.6 + 0xd465f)
+                                      #2  0x000055e88011b0ad make_child (bash + 0x550ad)
+                                      #3  0x000055e8800fd05f n/a (bash + 0x3705f)
+                                      #4  0x000055e880100116 execute_command_internal (bash + 0x3a116)
+                                      #5  0x000055e8801011f2 execute_command_internal (bash + 0x3b1f2)
+                                      #6  0x000055e8801025b6 execute_command (bash + 0x3c5b6)
+                                      #7  0x000055e8800f134b reader_loop (bash + 0x2b34b)
+                                      #8  0x000055e8800e757d main (bash + 0x2157d)
+                                      #9  0x00007ff86ba98850 n/a (libc.so.6 + 0x23850)
+                                      #10 0x00007ff86ba9890a __libc_start_main (libc.so.6 + 0x2390a)
+                                      #11 0x000055e8800e83b5 _start (bash + 0x223b5)
+                                      ELF object binary architecture: AMD x86-64
+[   31.666617] testsuite-74.sh[560]: /tmp/make-dump: line 12:   561 Trace/breakpoint trap   (core dumped) "$bin" infinity
+...
+$ coredumpctl list --file system.journal
+TIME                         PID UID GID SIG     COREFILE EXE            SIZE
+Fri 2023-06-02 10:42:10 CEST 561   0   0 SIGTRAP journal  /usr/bin/bash     -
+Fri 2023-06-02 10:42:11 CEST 570   0   0 SIGABRT journal  /tmp/test-dump    -
+Fri 2023-06-02 10:42:12 CEST 582   0   0 SIGTRAP missing  /tmp/test-dump    -
+Fri 2023-06-02 10:42:13 CEST 593   0   0 SIGABRT missing  /tmp/test-dump    -
+
+(cherry picked from commit 1326d2dd059132760b40acb7a715ecc9ff08bd35)
+
+Related: RHEL-29430
+---
+ test/units/testsuite-74.coredump.sh | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/test/units/testsuite-74.coredump.sh b/test/units/testsuite-74.coredump.sh
+index d5039b70f4..d30fd73717 100755
+--- a/test/units/testsuite-74.coredump.sh
++++ b/test/units/testsuite-74.coredump.sh
+@@ -42,7 +42,17 @@ sig="${2:?}"
+ ulimit -c unlimited
+ "$bin" infinity &
+ pid=$!
+-sleep 1
++# Sync with the "fake" binary, so we kill it once it's fully forked off,
++# otherwise we might kill it during fork and kernel would then report
++# "wrong" binary name (i.e. $MAKE_DUMP_SCRIPT instead of $CORE_TEST_BIN).
++# In this case, wait until the "fake" binary (sleep in this case) enters
++# the "interruptible sleep" state, at which point it should be ready
++# to be sacrificed.
++for _ in {0..9}; do
++    read -ra self_stat <"/proc/$pid/stat"
++    [[ "${self_stat[2]}" == S ]] && break
++    sleep .5
++done
+ kill -s "$sig" "$pid"
+ # This should always fail
+ ! wait "$pid"

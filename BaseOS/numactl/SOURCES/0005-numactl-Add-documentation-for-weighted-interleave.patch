@@ -1,0 +1,80 @@
+From 4bfdcc6e6111c5bf5d4ccb46f227aea80cc57159 Mon Sep 17 00:00:00 2001
+From: Honggyu Kim <honggyu.kim@sk.com>
+Date: Fri, 19 Apr 2024 22:37:42 +0900
+Subject: [PATCH 5/8] numactl: Add documentation for weighted interleave
+
+Since --weighted-interleave/-w option was added to numactl at b67fb88,
+we should add the description to help message and man page.
+
+Signed-off-by: Honggyu Kim <honggyu.kim@sk.com>
+---
+ numactl.8 | 12 ++++++++++++
+ numactl.c |  8 +++++---
+ 2 files changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/numactl.8 b/numactl.8
+index 594ccc7..053c7b1 100644
+--- a/numactl.8
++++ b/numactl.8
+@@ -29,6 +29,8 @@ numactl \- Control NUMA policy for processes or shared memory
+ ] [
+ .B \-\-interleave nodes
+ ] [
++.B \-\-weighted\-interleave nodes
++] [
+ .B \-\-preferred node 
+ ] [
+ .B \-\-preferred-many nodes
+@@ -127,6 +129,13 @@ When memory cannot be allocated on the current interleave target fall back
+ to other nodes.
+ Multiple nodes may be specified on --interleave, --membind and --cpunodebind.
+ .TP
++.B \-\-weighted\-interleave=nodes, \-w nodes
++Set a weighted memory interleave policy. Memory will be allocated using the
++weighted ratio for each node, which can be read from
++.I /sys/kernel/mm/mempolicy/weighted_interleave/node*.
++When memory cannot be allocated on the current interleave target fall back
++to other nodes.
++.TP
+ .B \-\-membind=nodes, \-m nodes
+ Only allocate memory from nodes.  Allocation will fail when there
+ is not enough memory available on these nodes.
+@@ -298,6 +307,9 @@ Run myapplic on cpus 0-4 and 8-12 of the current cpuset.
+ numactl \-\-interleave=all bigdatabase arguments
+ Run big database with its memory interleaved on all CPUs.
+ 
++numactl \-\-weighted\-interleave=all bigdatabase arguments
++Run big database with its memory interleaved with weighted ratio on all CPUs.
++
+ numactl \-\-cpunodebind=0 \-\-membind=0,1 process
+ Run process on node 0 with memory allocated on node 0 and 1.
+ 
+diff --git a/numactl.c b/numactl.c
+index 37949de..64980f3 100755
+--- a/numactl.c
++++ b/numactl.c
+@@ -75,8 +75,9 @@ static struct option opts[] = {
+ static void usage(void)
+ {
+ 	fprintf(stderr,
+-		"usage: numactl [--all | -a] [--balancing | -b] [--interleave= | -i <nodes>]\n"
+-		"		[--preferred= | -p <node>] [--preferred-many= | -P <nodes>]\n"
++		"usage: numactl [--all | -a] [--balancing | -b]\n"
++		"               [--interleave= | -i <nodes>] [--weighted-interleave= | -w <nodes>]\n"
++		"               [--preferred= | -p <node>] [--preferred-many= | -P <nodes>]\n"
+ 		"               [--physcpubind= | -C <cpus>] [--cpunodebind= | -N <nodes>]\n"
+ 		"               [--membind= | -m <nodes>] [--localalloc | -l] command args ...\n"
+ 		"               [--localalloc | -l] command args ...\n"
+@@ -90,7 +91,8 @@ static void usage(void)
+ 		"               [--huge | -u] [--touch | -T] \n"
+ 		"               memory policy [--dump | -d] [--dump-nodes | -D]\n"
+ 		"\n"
+-		"memory policy is --interleave | -i, --preferred | -p, --membind | -m, --localalloc | -l\n"
++		"memory policy is --preferred | -p, --membind | -m, --localalloc | -l,\n"
++		"                 --interleave | -i, --weighted-interleave | -w\n"
+ 		"<nodes> is a comma delimited list of node numbers or A-B ranges or all.\n"
+ 		"Instead of a number a node can also be:\n"
+ 		"  netdev:DEV the node connected to network device DEV\n"
+-- 
+2.41.0
+

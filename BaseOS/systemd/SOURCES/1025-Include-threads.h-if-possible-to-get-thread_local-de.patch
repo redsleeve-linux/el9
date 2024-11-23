@@ -1,0 +1,343 @@
+From 07e0a7f9a4f38e163082af202db0fbc795bc369c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cristian=20Rodr=C3=ADguez?= <crodriguez@owncloud.com>
+Date: Tue, 3 Jan 2023 17:52:08 +0000
+Subject: [PATCH] Include <threads.h> if possible to get thread_local
+ definition
+
+IN C23, thread_local is a reserved keyword and we shall therefore
+do nothing to redefine it. glibc has it defined for older standard
+version with the right conditions.
+
+v2 by Yu Watanabe:
+Move the definition to missing_threads.h like the way we define e.g.
+missing syscalls or missing definitions, and include it by the users.
+
+Co-authored-by: Yu Watanabe <watanabe.yu+github@gmail.com>
+(cherry picked from commit 5545f336fd09148e8d9aa7f83ed19384deaf7a64)
+
+Related: RHEL-50651
+---
+ meson.build                              |  1 +
+ src/basic/capability-util.c              |  1 +
+ src/basic/cgroup-util.c                  |  1 +
+ src/basic/log.c                          |  1 +
+ src/basic/macro.h                        | 14 --------------
+ src/basic/memory-util.c                  |  1 +
+ src/basic/missing_threads.h              | 15 +++++++++++++++
+ src/basic/process-util.c                 |  1 +
+ src/basic/random-util.c                  |  1 +
+ src/basic/signal-util.c                  |  1 +
+ src/basic/time-util.c                    |  1 +
+ src/basic/uid-alloc-range.c              |  1 +
+ src/basic/virt.c                         |  1 +
+ src/libsystemd/sd-bus/sd-bus.c           |  1 +
+ src/libsystemd/sd-event/sd-event.c       |  1 +
+ src/libsystemd/sd-id128/sd-id128.c       |  1 +
+ src/libsystemd/sd-journal/journal-file.c |  1 +
+ src/libsystemd/sd-resolve/sd-resolve.c   |  1 +
+ src/login/logind-inhibit.c               |  1 +
+ src/network/networkd-route-util.c        |  1 +
+ src/nss-systemd/nss-systemd.c            |  1 +
+ src/shared/cgroup-setup.c                |  1 +
+ src/shared/psi-util.c                    |  1 +
+ 23 files changed, 36 insertions(+), 14 deletions(-)
+ create mode 100644 src/basic/missing_threads.h
+
+diff --git a/meson.build b/meson.build
+index 274e43ba9e..cbde702211 100644
+--- a/meson.build
++++ b/meson.build
+@@ -745,6 +745,7 @@ foreach header : ['crypt.h',
+                   'linux/memfd.h',
+                   'linux/vm_sockets.h',
+                   'sys/auxv.h',
++                  'threads.h',
+                   'valgrind/memcheck.h',
+                   'valgrind/valgrind.h',
+                   'linux/time_types.h',
+diff --git a/src/basic/capability-util.c b/src/basic/capability-util.c
+index fa74b5b9c6..df04d461ad 100644
+--- a/src/basic/capability-util.c
++++ b/src/basic/capability-util.c
+@@ -13,6 +13,7 @@
+ #include "log.h"
+ #include "macro.h"
+ #include "missing_prctl.h"
++#include "missing_threads.h"
+ #include "parse-util.h"
+ #include "user-util.h"
+ #include "util.h"
+diff --git a/src/basic/cgroup-util.c b/src/basic/cgroup-util.c
+index b03cc70e2e..5266f93606 100644
+--- a/src/basic/cgroup-util.c
++++ b/src/basic/cgroup-util.c
+@@ -23,6 +23,7 @@
+ #include "login-util.h"
+ #include "macro.h"
+ #include "missing_magic.h"
++#include "missing_threads.h"
+ #include "mkdir.h"
+ #include "parse-util.h"
+ #include "path-util.h"
+diff --git a/src/basic/log.c b/src/basic/log.c
+index 39d08b0928..2e1642dc20 100644
+--- a/src/basic/log.c
++++ b/src/basic/log.c
+@@ -23,6 +23,7 @@
+ #include "log.h"
+ #include "macro.h"
+ #include "missing_syscall.h"
++#include "missing_threads.h"
+ #include "parse-util.h"
+ #include "proc-cmdline.h"
+ #include "process-util.h"
+diff --git a/src/basic/macro.h b/src/basic/macro.h
+index 6893a1ff32..c2934f9951 100644
+--- a/src/basic/macro.h
++++ b/src/basic/macro.h
+@@ -319,20 +319,6 @@ static inline int __coverity_check_and_return__(int condition) {
+              p != (typeof(p)) POINTER_MAX;                                               \
+              p = *(++_l))
+ 
+-/* Define C11 thread_local attribute even on older gcc compiler
+- * version */
+-#ifndef thread_local
+-/*
+- * Don't break on glibc < 2.16 that doesn't define __STDC_NO_THREADS__
+- * see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53769
+- */
+-#if __STDC_VERSION__ >= 201112L && !(defined(__STDC_NO_THREADS__) || (defined(__GNU_LIBRARY__) && __GLIBC__ == 2 && __GLIBC_MINOR__ < 16))
+-#define thread_local _Thread_local
+-#else
+-#define thread_local __thread
+-#endif
+-#endif
+-
+ #define _FOREACH_ARRAY(i, array, num, m, end)                           \
+         for (typeof(array[0]) *i = (array), *end = ({                   \
+                                 typeof(num) m = (num);                  \
+diff --git a/src/basic/memory-util.c b/src/basic/memory-util.c
+index c4f54c7b4e..fcedae2d41 100644
+--- a/src/basic/memory-util.c
++++ b/src/basic/memory-util.c
+@@ -3,6 +3,7 @@
+ #include <unistd.h>
+ 
+ #include "memory-util.h"
++#include "missing_threads.h"
+ 
+ size_t page_size(void) {
+         static thread_local size_t pgsz = 0;
+diff --git a/src/basic/missing_threads.h b/src/basic/missing_threads.h
+new file mode 100644
+index 0000000000..fb3b72249b
+--- /dev/null
++++ b/src/basic/missing_threads.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++#pragma once
++
++/* If threads.h doesn't exist, then define our own thread_local to match C11's thread_local. */
++#if HAVE_THREADS_H
++#  include <threads.h>
++#elif !(defined(thread_local))
++/* Don't break on glibc < 2.16 that doesn't define __STDC_NO_THREADS__
++ * see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=53769 */
++#  if __STDC_VERSION__ >= 201112L && !(defined(__STDC_NO_THREADS__) || (defined(__GNU_LIBRARY__) && __GLIBC__ == 2 && __GLIBC_MINOR__ < 16))
++#    define thread_local _Thread_local
++#  else
++#    define thread_local __thread
++#  endif
++#endif
+diff --git a/src/basic/process-util.c b/src/basic/process-util.c
+index 0213f5913f..65367768c9 100644
+--- a/src/basic/process-util.c
++++ b/src/basic/process-util.c
+@@ -34,6 +34,7 @@
+ #include "memory-util.h"
+ #include "missing_sched.h"
+ #include "missing_syscall.h"
++#include "missing_threads.h"
+ #include "namespace-util.h"
+ #include "path-util.h"
+ #include "process-util.h"
+diff --git a/src/basic/random-util.c b/src/basic/random-util.c
+index d8734cc7d0..200a914196 100644
+--- a/src/basic/random-util.c
++++ b/src/basic/random-util.c
+@@ -24,6 +24,7 @@
+ #include "io-util.h"
+ #include "missing_random.h"
+ #include "missing_syscall.h"
++#include "missing_threads.h"
+ #include "parse-util.h"
+ #include "random-util.h"
+ #include "sha256.h"
+diff --git a/src/basic/signal-util.c b/src/basic/signal-util.c
+index b61c18b2de..fdbe7f43ac 100644
+--- a/src/basic/signal-util.c
++++ b/src/basic/signal-util.c
+@@ -5,6 +5,7 @@
+ 
+ #include "errno-util.h"
+ #include "macro.h"
++#include "missing_threads.h"
+ #include "parse-util.h"
+ #include "signal-util.h"
+ #include "stdio-util.h"
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index 71b2f67350..f5e10bba1a 100644
+--- a/src/basic/time-util.c
++++ b/src/basic/time-util.c
+@@ -17,6 +17,7 @@
+ #include "io-util.h"
+ #include "log.h"
+ #include "macro.h"
++#include "missing_threads.h"
+ #include "missing_timerfd.h"
+ #include "parse-util.h"
+ #include "path-util.h"
+diff --git a/src/basic/uid-alloc-range.c b/src/basic/uid-alloc-range.c
+index 1b6d761a66..8b3741e438 100644
+--- a/src/basic/uid-alloc-range.c
++++ b/src/basic/uid-alloc-range.c
+@@ -3,6 +3,7 @@
+ #include "chase-symlinks.h"
+ #include "fd-util.h"
+ #include "fileio.h"
++#include "missing_threads.h"
+ #include "string-util.h"
+ #include "uid-alloc-range.h"
+ #include "user-util.h"
+diff --git a/src/basic/virt.c b/src/basic/virt.c
+index 710f0372ea..2a8e696a45 100644
+--- a/src/basic/virt.c
++++ b/src/basic/virt.c
+@@ -16,6 +16,7 @@
+ #include "fd-util.h"
+ #include "fileio.h"
+ #include "macro.h"
++#include "missing_threads.h"
+ #include "process-util.h"
+ #include "stat-util.h"
+ #include "string-table.h"
+diff --git a/src/libsystemd/sd-bus/sd-bus.c b/src/libsystemd/sd-bus/sd-bus.c
+index c3a1bae295..10efe53a25 100644
+--- a/src/libsystemd/sd-bus/sd-bus.c
++++ b/src/libsystemd/sd-bus/sd-bus.c
+@@ -37,6 +37,7 @@
+ #include "macro.h"
+ #include "memory-util.h"
+ #include "missing_syscall.h"
++#include "missing_threads.h"
+ #include "parse-util.h"
+ #include "path-util.h"
+ #include "process-util.h"
+diff --git a/src/libsystemd/sd-event/sd-event.c b/src/libsystemd/sd-event/sd-event.c
+index cd73cd8bfd..165abfc314 100644
+--- a/src/libsystemd/sd-event/sd-event.c
++++ b/src/libsystemd/sd-event/sd-event.c
+@@ -19,6 +19,7 @@
+ #include "macro.h"
+ #include "memory-util.h"
+ #include "missing_syscall.h"
++#include "missing_threads.h"
+ #include "prioq.h"
+ #include "process-util.h"
+ #include "set.h"
+diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
+index ec53617fce..15177bc3c9 100644
+--- a/src/libsystemd/sd-id128/sd-id128.c
++++ b/src/libsystemd/sd-id128/sd-id128.c
+@@ -14,6 +14,7 @@
+ #include "io-util.h"
+ #include "macro.h"
+ #include "missing_syscall.h"
++#include "missing_threads.h"
+ #include "random-util.h"
+ #include "stat-util.h"
+ #include "user-util.h"
+diff --git a/src/libsystemd/sd-journal/journal-file.c b/src/libsystemd/sd-journal/journal-file.c
+index 2b66b3caed..e8c9d4dc3d 100644
+--- a/src/libsystemd/sd-journal/journal-file.c
++++ b/src/libsystemd/sd-journal/journal-file.c
+@@ -25,6 +25,7 @@
+ #include "journal-file.h"
+ #include "lookup3.h"
+ #include "memory-util.h"
++#include "missing_threads.h"
+ #include "path-util.h"
+ #include "random-util.h"
+ #include "set.h"
+diff --git a/src/libsystemd/sd-resolve/sd-resolve.c b/src/libsystemd/sd-resolve/sd-resolve.c
+index 5362ec0fa8..ba88168f02 100644
+--- a/src/libsystemd/sd-resolve/sd-resolve.c
++++ b/src/libsystemd/sd-resolve/sd-resolve.c
+@@ -22,6 +22,7 @@
+ #include "list.h"
+ #include "memory-util.h"
+ #include "missing_syscall.h"
++#include "missing_threads.h"
+ #include "process-util.h"
+ #include "resolve-private.h"
+ #include "socket-util.h"
+diff --git a/src/login/logind-inhibit.c b/src/login/logind-inhibit.c
+index 16612ddf18..26caa2b5b5 100644
+--- a/src/login/logind-inhibit.c
++++ b/src/login/logind-inhibit.c
+@@ -17,6 +17,7 @@
+ #include "io-util.h"
+ #include "logind-dbus.h"
+ #include "logind-inhibit.h"
++#include "missing_threads.h"
+ #include "mkdir-label.h"
+ #include "parse-util.h"
+ #include "path-util.h"
+diff --git a/src/network/networkd-route-util.c b/src/network/networkd-route-util.c
+index 0366382093..d461aadd65 100644
+--- a/src/network/networkd-route-util.c
++++ b/src/network/networkd-route-util.c
+@@ -3,6 +3,7 @@
+ #include <linux/rtnetlink.h>
+ 
+ #include "alloc-util.h"
++#include "missing_threads.h"
+ #include "networkd-address.h"
+ #include "networkd-link.h"
+ #include "networkd-manager.h"
+diff --git a/src/nss-systemd/nss-systemd.c b/src/nss-systemd/nss-systemd.c
+index 75d749e736..1d6e25399f 100644
+--- a/src/nss-systemd/nss-systemd.c
++++ b/src/nss-systemd/nss-systemd.c
+@@ -9,6 +9,7 @@
+ #include "fd-util.h"
+ #include "log.h"
+ #include "macro.h"
++#include "missing_threads.h"
+ #include "nss-systemd.h"
+ #include "nss-util.h"
+ #include "pthread-util.h"
+diff --git a/src/shared/cgroup-setup.c b/src/shared/cgroup-setup.c
+index 2ea83f05d3..65be851014 100644
+--- a/src/shared/cgroup-setup.c
++++ b/src/shared/cgroup-setup.c
+@@ -8,6 +8,7 @@
+ #include "fd-util.h"
+ #include "fileio.h"
+ #include "fs-util.h"
++#include "missing_threads.h"
+ #include "mkdir.h"
+ #include "parse-util.h"
+ #include "path-util.h"
+diff --git a/src/shared/psi-util.c b/src/shared/psi-util.c
+index 8bdd0d4a85..c91bbc3013 100644
+--- a/src/shared/psi-util.c
++++ b/src/shared/psi-util.c
+@@ -8,6 +8,7 @@
+ #include "extract-word.h"
+ #include "fd-util.h"
+ #include "fileio.h"
++#include "missing_threads.h"
+ #include "parse-util.h"
+ #include "psi-util.h"
+ #include "string-util.h"

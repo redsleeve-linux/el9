@@ -1,0 +1,94 @@
+From 0cd99eaa34a27209a271e00213d1ba2a54cc807f Mon Sep 17 00:00:00 2001
+From: Antonio Alvarez Feijoo <antonio.feijoo@suse.com>
+Date: Thu, 25 Apr 2024 12:14:25 +0200
+Subject: [PATCH] cryptsetup-tokens: fix pin asserts
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+If a user only presses ENTER when the PIN is requested (without actually typing
+the PIN), an assertion is reached and no other unlock method is requested.
+
+```
+sh-5.2# systemctl status systemd-cryptsetup@cr_root
+× systemd-cryptsetup@cr_root.service - Cryptography Setup for cr_root
+     Loaded: loaded (/etc/crypttab; generated)
+    Drop-In: /etc/systemd/system/systemd-cryptsetup@.service.d
+             └─pcr-signature.conf
+     Active: failed (Result: core-dump) since Thu 2024-04-25 08:44:30 UTC; 10min ago
+       Docs: man:crypttab(5)
+             man:systemd-cryptsetup-generator(8)
+             man:systemd-cryptsetup@.service(8)
+    Process: 559 ExecStartPre=/usr/bin/pcr-signature.sh (code=exited, status=0/SUCCESS)
+    Process: 604 ExecStart=/usr/bin/systemd-cryptsetup attach cr_root /dev/disk/by-uuid/a8cbd937-6975-4e61-9120-ce5c03138700 none x-initrd.attach,tpm2-device=auto (code=dumped, signal=ABRT)
+   Main PID: 604 (code=dumped, signal=ABRT)
+        CPU: 19ms
+
+Apr 25 08:44:29 localhost systemd[1]: Starting Cryptography Setup for cr_root...
+Apr 25 08:44:30 localhost systemd-cryptsetup[604]: Assertion '!pin || pin_size > 0' failed at src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c:60, function cryptsetup_token_open_pin(). Aborting.
+Apr 25 08:44:30 localhost systemd[1]: systemd-cryptsetup@cr_root.service: Main process exited, code=dumped, status=6/ABRT
+Apr 25 08:44:30 localhost systemd[1]: systemd-cryptsetup@cr_root.service: Failed with result 'core-dump'.
+Apr 25 08:44:30 localhost systemd[1]: Failed to start Cryptography Setup for cr_root.
+```
+
+In this case, `cryptsetup_token_open_pin()` receives an empty (non-NULL) `pin`
+with `pin_size` equals to 0.
+
+```
+🔐 Please enter LUKS2 token PIN:
+
+Breakpoint 3, cryptsetup_token_open_pin (cd=0x5555555744c0, token=0, pin=0x5555555b3cc0 "", pin_size=0, ret_password=0x7fffffffd380,
+    ret_password_len=0x7fffffffd378, usrptr=0x0) at ../src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c:42
+42	                void *usrptr /* plugin defined parameter passed to crypt_activate_by_token*() API */) {
+(gdb) continue
+Assertion '!pin || pin_size > 0' failed at src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c:60, function cryptsetup_token_open_pin(). Aborting.
+```
+
+(cherry picked from commit 5cef6b5393871a99ad17799197b26da9196f7035)
+
+Related: RHEL-36276
+---
+ .../cryptsetup-tokens/cryptsetup-token-systemd-fido2.c          | 2 +-
+ .../cryptsetup-tokens/cryptsetup-token-systemd-pkcs11.c         | 2 +-
+ .../cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c           | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-fido2.c b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-fido2.c
+index 3027804065..63f9688e88 100644
+--- a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-fido2.c
++++ b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-fido2.c
+@@ -34,7 +34,7 @@ _public_ int cryptsetup_token_open_pin(
+         const char *json;
+         _cleanup_(erase_and_freep) char *pin_string = NULL;
+ 
+-        assert(!pin || pin_size);
++        assert(pin || pin_size == 0);
+         assert(token >= 0);
+ 
+         /* This must not fail at this moment (internal error) */
+diff --git a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-pkcs11.c b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-pkcs11.c
+index c3e7fbd061..63dbb1943f 100644
+--- a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-pkcs11.c
++++ b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-pkcs11.c
+@@ -33,7 +33,7 @@ _public_ int cryptsetup_token_open_pin(
+         const char *json;
+         int r;
+ 
+-        assert(!pin || pin_size);
++        assert(pin || pin_size == 0);
+         assert(token >= 0);
+ 
+         /* This must not fail at this moment (internal error) */
+diff --git a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+index 94d568c17f..883ccf3a0b 100644
+--- a/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/cryptsetup-token-systemd-tpm2.c
+@@ -57,7 +57,7 @@ _public_ int cryptsetup_token_open_pin(
+         int r;
+ 
+         assert(token >= 0);
+-        assert(!pin || pin_size > 0);
++        assert(pin || pin_size == 0);
+         assert(ret_password);
+         assert(ret_password_len);
+ 

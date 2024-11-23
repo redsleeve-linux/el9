@@ -1,0 +1,82 @@
+Extra changes needed for backport:
+
+* rename field "rtld_catch" to "rtld_catch_f" to avoid conflict
+  between "struct rtld-catch" and rtld_catch macro
+
+* move rtld_catch into one of the unused padding fields to preserve
+  ABI
+
+* Validate that the padding fields used don't overlap other fields.
+
+diff -rup a/elf/dl-catch.c b/elf/dl-catch.c
+--- a/elf/dl-catch.c	2024-09-04 16:30:02.086402568 -0400
++++ b/elf/dl-catch.c	2024-09-04 16:55:01.933440181 -0400
+@@ -59,7 +59,7 @@ get_catch (void)
+     return rtld_catch_notls;
+   else
+ #endif
+-    return THREAD_GETMEM (THREAD_SELF, rtld_catch);
++    return THREAD_GETMEM (THREAD_SELF, rtld_catch_f);
+ }
+ 
+ static void
+@@ -70,7 +70,7 @@ set_catch (struct rtld_catch *catch)
+     rtld_catch_notls = catch;
+   else
+ #endif
+-    THREAD_SETMEM (THREAD_SELF, rtld_catch, catch);
++    THREAD_SETMEM (THREAD_SELF, rtld_catch_f, catch);
+ }
+ 
+ /* Lossage while resolving the program's own symbols is always fatal.  */
+diff -rup a/nptl/descr.h b/nptl/descr.h
+--- a/nptl/descr.h	2024-08-29 11:29:16.801811033 -0400
++++ b/nptl/descr.h	2024-08-29 11:48:56.547644398 -0400
+@@ -164,6 +164,12 @@ struct pthread
+     void *__padding[24];
+   };
+ 
++#ifdef __x86_64__
++#define rtld_catch_f header.__padding[7]
++#else
++#define rtld_catch_f __padding[23]
++#endif
++
+   /* This descriptor's link on the GL (dl_stack_used) or
+      GL (dl_stack_user) list.  */
+   list_t list;
+@@ -396,9 +402,6 @@ struct pthread
+      masked.)  */
+   sigset_t sigmask;
+ 
+-  /* Used by the exception handling implementation in the dynamic loader.  */
+-  struct rtld_catch *rtld_catch;
+-
+   /* Indicates whether is a C11 thread created by thrd_creat.  */
+   bool c11;
+ 
+@@ -432,6 +435,12 @@ struct pthread
+    + sizeof ((struct pthread) {}.rseq_area))
+ } __attribute ((aligned (TCB_ALIGNMENT)));
+ 
++#ifdef __x86_64__
++_Static_assert (sizeof ((*(struct pthread *)0).header) > sizeof ((*(struct pthread *)0).__padding), "rtld_catch");
++#else
++_Static_assert (sizeof ((*(struct pthread *)0).header) < sizeof ((*(struct pthread *)0).__padding), "rtld_catch");
++#endif
++
+ static inline bool
+ cancel_enabled_and_canceled (int value)
+ {
+diff -rup a/sysdeps/mach/hurd/i386/tls.h b/sysdeps/mach/hurd/i386/tls.h
+--- a/sysdeps/mach/hurd/i386/tls.h	2024-08-29 11:29:16.810811382 -0400
++++ b/sysdeps/mach/hurd/i386/tls.h	2024-08-29 11:35:45.262899113 -0400
+@@ -50,7 +50,7 @@ typedef struct
+   struct hurd_sigstate *_hurd_sigstate;
+ 
+   /* Used by the exception handling implementation in the dynamic loader.  */
+-  struct rtld_catch *rtld_catch;
++  struct rtld_catch *rtld_catch_f;
+ } tcbhead_t;
+ #endif
+ 

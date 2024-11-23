@@ -1,0 +1,72 @@
+From f1dc0bef81dbb101dcc53545accbe680a548d3eb Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 1 Aug 2023 03:25:39 +0900
+Subject: [PATCH] udev-builtin-net_id: return earlier when hotplug slot is not
+ found
+
+Then we can reduce indentation.
+No functional change, just refactoring.
+
+(cherry picked from commit 73fb4b20c1f653619286b2e9ce51c19169ccbfc6)
+
+Related: RHEL-50103
+---
+ src/udev/udev-builtin-net_id.c | 45 +++++++++++++++++-----------------
+ 1 file changed, 23 insertions(+), 22 deletions(-)
+
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index 40f7454ba0..5e76a894f7 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -487,28 +487,29 @@ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+                 rewinddir(dir);
+         }
+ 
+-        if (hotplug_slot > 0) {
+-                s = names->pci_slot;
+-                l = sizeof(names->pci_slot);
+-                if (domain > 0)
+-                        l = strpcpyf(&s, l, "P%u", domain);
+-                l = strpcpyf(&s, l, "s%"PRIu32, hotplug_slot);
+-                if (func > 0 || is_pci_multifunction(names->pcidev) > 0)
+-                        l = strpcpyf(&s, l, "f%u", func);
+-                if (naming_scheme_has(NAMING_SR_IOV_R) && info->vf_representor_id >= 0)
+-                        /* For VF representor append 'r<VF_NUM>' and not phys_port_name */
+-                        l = strpcpyf(&s, l, "r%d", info->vf_representor_id);
+-                else if (!isempty(info->phys_port_name))
+-                        l = strpcpyf(&s, l, "n%s", info->phys_port_name);
+-                else if (dev_port > 0)
+-                        l = strpcpyf(&s, l, "d%lu", dev_port);
+-                if (l == 0)
+-                        names->pci_slot[0] = '\0';
+-
+-                log_device_debug(dev, "Slot identifier: domain=%u slot=%"PRIu32" func=%u phys_port=%s dev_port=%lu %s %s",
+-                                 domain, hotplug_slot, func, strempty(info->phys_port_name), dev_port,
+-                                 special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), empty_to_na(names->pci_slot));
+-        }
++        if (hotplug_slot == 0)
++                return 0;
++
++        s = names->pci_slot;
++        l = sizeof(names->pci_slot);
++        if (domain > 0)
++                l = strpcpyf(&s, l, "P%u", domain);
++        l = strpcpyf(&s, l, "s%"PRIu32, hotplug_slot);
++        if (func > 0 || is_pci_multifunction(names->pcidev) > 0)
++                l = strpcpyf(&s, l, "f%u", func);
++        if (naming_scheme_has(NAMING_SR_IOV_R) && info->vf_representor_id >= 0)
++                /* For VF representor append 'r<VF_NUM>' and not phys_port_name */
++                l = strpcpyf(&s, l, "r%d", info->vf_representor_id);
++        else if (!isempty(info->phys_port_name))
++                l = strpcpyf(&s, l, "n%s", info->phys_port_name);
++        else if (dev_port > 0)
++                l = strpcpyf(&s, l, "d%lu", dev_port);
++        if (l == 0)
++                names->pci_slot[0] = '\0';
++
++        log_device_debug(dev, "Slot identifier: domain=%u slot=%"PRIu32" func=%u phys_port=%s dev_port=%lu %s %s",
++                         domain, hotplug_slot, func, strempty(info->phys_port_name), dev_port,
++                         special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), empty_to_na(names->pci_slot));
+ 
+         return 0;
+ }

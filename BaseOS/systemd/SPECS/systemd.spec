@@ -25,7 +25,7 @@
 Name: systemd
 Url: https://systemd.io
 Version: 252
-Release: 32%{?dist}.7.redsleeve
+Release: 46%{?dist}.2.0.1
 # For a breakdown of the licensing, see README
 License: LGPLv2+ and MIT and GPLv2+
 Summary: System and Service Manager
@@ -806,21 +806,331 @@ Patch0714: 0714-bootctl-downgrade-graceful-messages-to-LOG_NOTICE.patch
 Patch0715: 0715-units-rename-rework-systemd-boot-system-token.servic.patch
 Patch0716: 0716-bootctl-split-out-setting-of-system-token-into-funct.patch
 Patch0717: 0717-execute-Pass-AT_FDCWD-instead-of-1.patch
-Patch0718: 0718-coredump-generate-stacktraces-also-for-processes-run.patch
-Patch0719: 0719-test-add-a-couple-of-tests-for-systemd-coredump.patch
-Patch0720: 0720-test-don-t-expand-the-subshell-expression-prematurel.patch
-Patch0721: 0721-coredump-filter-fix-stack-overflow-with-all.patch
-Patch0722: 0722-coredump-filter-add-mask-for-all-using-UINT32_MAX-no.patch
-Patch0723: 0723-test-add-coverage-for-CoredumpFilter-all.patch
-Patch0724: 0724-test-rotate-journal-before-storing-coredumps.patch
-Patch0725: 0725-test-sync-with-the-fake-binary-before-killing-it.patch
-Patch0726: 0726-test-check-coredump-handling-in-containers-namespace.patch
-Patch0727: 0727-ukify-make-the-test-happy-with-the-latest-OpenSSL.patch
-Patch0728: 0728-kernel-install-fix-uki-copy-deinstall.patch
-Patch0729: 0729-cryptsetup-do-not-assert-when-unsealing-token-withou.patch
-Patch0730: 0730-cryptsetup-check-the-existence-of-salt-by-salt_size-.patch
-Patch0731: 0731-bootspec-fix-null-dereference-read.patch
-Patch0732: 0732-generator-uninline-generator_open_unit_file-and-gene.patch
+Patch0718: 0718-ci-src-git-update-list-of-supported-products.patch
+Patch0719: 0719-coredump-by-default-process-and-store-core-files-up-.patch
+Patch0720: 0720-coredump-keep-core-files-for-two-weeks.patch
+Patch0721: 0721-ukify-make-the-test-happy-with-the-latest-OpenSSL.patch
+Patch0722: 0722-test_ukify-use-raw-string-for-the-regex.patch
+Patch0723: 0723-coredump-generate-stacktraces-also-for-processes-run.patch
+Patch0724: 0724-test-add-a-couple-of-tests-for-systemd-coredump.patch
+Patch0725: 0725-test-don-t-expand-the-subshell-expression-prematurel.patch
+Patch0726: 0726-coredump-filter-fix-stack-overflow-with-all.patch
+Patch0727: 0727-coredump-filter-add-mask-for-all-using-UINT32_MAX-no.patch
+Patch0728: 0728-test-add-coverage-for-CoredumpFilter-all.patch
+Patch0729: 0729-test-rotate-journal-before-storing-coredumps.patch
+Patch0730: 0730-test-sync-with-the-fake-binary-before-killing-it.patch
+Patch0731: 0731-test-check-coredump-handling-in-containers-namespace.patch
+Patch0732: 0732-ci-update-actions-upload-artifact-to-v4.patch
+Patch0733: 0733-journal-remote-code-is-of-type-enum-MHD_RequestTermi.patch
+Patch0734: 0734-resolve-dns_server_feature_level_-_string-type-is-Dn.patch
+Patch0735: 0735-shared-install-Use-InstallChangeType-consistently.patch
+Patch0736: 0736-test-temporarily-disable-coredumps-in-testsuite-17.0.patch
+Patch0737: 0737-ci-update-manpage-deployment-workflow.patch
+Patch0738: 0738-bootspec-fix-null-dereference-read.patch
+Patch0739: 0739-units-don-t-install-pcrphase-related-units-without-g.patch
+Patch0740: 0740-kernel-install-fix-uki-copy-deinstall.patch
+Patch0741: 0741-ci-packit-explicitly-clone-c9s-branch.patch
+Patch0742: 0742-ci-src-git-add-RHEL-9.1-and-RHEL-9.1.z-to-allowed-ve.patch
+Patch0743: 0743-libsystemd-link-with-z-nodelete.patch
+Patch0744: 0744-basic-utf8-make-utf8_encoded_to_unichar-return-lengt.patch
+Patch0745: 0745-test-gunicode-add-new-test-to-show-that-unichar_iswi.patch
+Patch0746: 0746-string-util-pass-ANSI-sequences-through-unchanged.patch
+Patch0747: 0747-cryptsetup-do-not-assert-when-unsealing-token-withou.patch
+Patch0748: 0748-cryptsetup-check-the-existence-of-salt-by-salt_size-.patch
+Patch0749: 0749-core-mount-if-umount-8-fails-but-mount-disappeared-a.patch
+Patch0750: 0750-Drop-log-level-of-header-limits-log-message.patch
+Patch0751: 0751-journal-do-not-rotate-unrelated-journal-files-when-f.patch
+Patch0752: 0752-man-suffix-unit-with-an-equal-sign-since-it-expects-.patch
+Patch0753: 0753-shared-move-uid-alloc-range.-ch-from-src-shared-src-.patch
+Patch0754: 0754-journald-move-uid_for_system_journal-to-uid-alloc-ra.patch
+Patch0755: 0755-sd-journal-when-SD_JOURNAL_CURRENT_USER-is-set-and-c.patch
+Patch0756: 0756-man-document-that-journalctl-user-requires-Storage-p.patch
+Patch0757: 0757-fix-prefix-of-dmesg-pstore-files.patch
+Patch0758: 0758-backport-new-mkosi.patch
+Patch0759: 0759-test-Skip-various-tests-when-sys-is-not-mounted.patch
+Patch0760: 0760-string-util-introduce-ascii_ishex.patch
+Patch0761: 0761-sd-id128-several-cleanups.patch
+Patch0762: 0762-sd-id128-make-id128_read-or-friends-return-ENOPKG-wh.patch
+Patch0763: 0763-test-add-tests-for-uninitialized-string-handling-by-.patch
+Patch0764: 0764-man-mention-sd_id128_get_machine-or-friend-may-retur.patch
+Patch0765: 0765-sd-id128-make-sd_id128_get_boot-and-friend-return-EN.patch
+Patch0766: 0766-sd-id128-make-sd_id128_get_boot-and-friend-return-EN.patch
+Patch0767: 0767-man-mention-that-sd_id128_get_boot-and-friend-may-re.patch
+Patch0768: 0768-sd-id128-fold-do_sync-flag-into-Id128FormatFlag.patch
+Patch0769: 0769-sd-id128-make-sd_id128_get_machine-or-friends-return.patch
+Patch0770: 0770-sd-id128-allow-sd_id128_get_machine-and-friend-to-be.patch
+Patch0771: 0771-sd-id128-also-refuse-an-empty-invocation-ID.patch
+Patch0772: 0772-man-update-documents-for-sd_id128_get_invocation.patch
+Patch0773: 0773-test-id128-simplify-machine-id-check.patch
+Patch0774: 0774-test-fs-util-skip-part-of-test_chase_symlinks-if-mac.patch
+Patch0775: 0775-test-unit-name-simplify-machine-id-check.patch
+Patch0776: 0776-test-load-fragment-simplify-machine-id-check.patch
+Patch0777: 0777-journal-skip-part-of-test-journal-interleaving-if-no.patch
+Patch0778: 0778-test-skip-journal-tests-without-valid-etc-machine-id.patch
+Patch0779: 0779-test-recurse-dir-work-around-nftw-ignoring-symlinks.patch
+Patch0780: 0780-test-Skip-test-recurse-dir-on-overlayfs.patch
+Patch0781: 0781-test-specifier-Ignore-ENOPKG-from-specifier_printf.patch
+Patch0782: 0782-test-execute-Skip-when-sys-is-read-only.patch
+Patch0783: 0783-kernel-install-Make-sure-KERNEL_INSTALL_BYPASS-is-di.patch
+Patch0784: 0784-tools-make-sure-KERNEL_INSTALL_BYPASS-is-disabled-wh.patch
+Patch0785: 0785-test-execute-drop-capabilities-when-testing-with-use.patch
+Patch0786: 0786-tmpfiles-Add-merge-support-for-copy-files-action.patch
+Patch0787: 0787-generator-add-generator_open_unit_file_full-to-allow.patch
+Patch0788: 0788-network-generator-rewrite-unit-if-it-already-exists-.patch
+Patch0789: 0789-ci-drop-super-linter-s-shellcheck.patch
+Patch0790: 0790-mkosi-make-sure-we-build-use-RHEL-9-stuff.patch
+Patch0791: 0791-ci-backport-mkosi-CI-configuration-from-upstream.patch
+Patch0792: 0792-mkosi-explicitly-enroll-SecureBoot-keys.patch
+Patch0793: 0793-test-execute-also-mount-tmpfs-on-dev-shm.patch
+Patch0794: 0794-mkosi-fix-UKI-addons-test.patch
+Patch0795: 0795-Revert-mkosi-Disable-cmdline-addon-test-for-now.patch
+Patch0796: 0796-Revert-mkosi-Don-t-fail-on-systemd-vconsole-setup.se.patch
+Patch0797: 0797-mkosi-make-shellcheck-happy.patch
+Patch0798: 0798-mkosi-use-pesign-for-signing-UKI-addons.patch
+Patch0799: 0799-test-copy-out-the-necessary-test-data-before-we-star.patch
+Patch0800: 0800-ci-make-the-build-dir-accessible-when-running-w-o-pr.patch
+Patch0801: 0801-ci-explicitly-change-oom-score-adj-before-running-te.patch
+Patch0802: 0802-ratelimit-add-ratelimit_left-helper.patch
+Patch0803: 0803-manager-restrict-Dump-to-privileged-callers-or-ratel.patch
+Patch0804: 0804-ci-define-runas-function-inline.patch
+Patch0805: 0805-Drop-dev-test-in-test-mountpoint-util.patch
+Patch0806: 0806-core-manager-export-manager_dbus_is_running.patch
+Patch0807: 0807-core-refuse-dbus-activation-if-dbus-is-not-running.patch
+Patch0808: 0808-core-only-refuse-Type-dbus-service-enqueuing-if-dbus.patch
+Patch0809: 0809-Revert-core-manager-export-manager_dbus_is_running-a.patch
+Patch0810: 0810-manager-fix-reloading-in-reload-or-restart-marked.patch
+Patch0811: 0811-rpm-add-systemd_postun_with_reload-and-systemd_user_.patch
+Patch0812: 0812-rpm-add-systemd_user_daemon_reexec.patch
+Patch0813: 0813-tools-fix-the-file-name-that-meson-setup-generates.patch
+Patch0814: 0814-tools-explicitly-specify-setup-subcommand.patch
+Patch0815: 0815-fuzz-pass-Dc_args-Dcpp_args-to-fuzzer-targets.patch
+Patch0816: 0816-fuzz-don-t-panic-without-a-C-compiler.patch
+Patch0817: 0817-meson-use-ternary-op-for-brevity.patch
+Patch0818: 0818-netif-naming-scheme-disable-NAMING_BRIDGE_MULTIFUNCT.patch
+Patch0819: 0819-netif-naming-scheme-make-actually-possible-to-use-rh.patch
+Patch0820: 0820-generator-uninline-generator_open_unit_file-and-gene.patch
+Patch0821: 0821-ci-add-support-for-rhel-only-parameters.patch
+Patch0822: 0822-timedatectl-setting-set_local_rtc-to-1-will-throw-Wa.patch
+Patch0823: 0823-cryptsetup-tokens-fix-pin-asserts.patch
+Patch0824: 0824-cryptenroll-Use-CTAP2.1-credProtect-extension.patch
+Patch0825: 0825-kernel-install-check-machine-ID.patch
+Patch0826: 0826-kernel-install-ignore-errors-when-reading-etc-machin.patch
+Patch0827: 0827-hwdb-Add-Lenovo-G580.patch
+Patch0828: 0828-Fix-key-toggle-and-programmable-button-for-Positivo-.patch
+Patch0829: 0829-hwdb-Add-accel-orientation-quirk-for-the-Acer-Switch.patch
+Patch0830: 0830-hwdb-fix-Compaq-N14KP6-key-toggle-touchpad-25404.patch
+Patch0831: 0831-hwdb-remove-fuzz-and-deadzone-for-Simucube-wheel-bas.patch
+Patch0832: 0832-hwdb-Add-support-for-Elgato-Stream-Pedal-25550.patch
+Patch0833: 0833-hwdb-add-Clevo-touchpad-toggle-key-quirks.patch
+Patch0834: 0834-hwdb-add-Dell-Inspiron-N4010-touchpad-corrections.patch
+Patch0835: 0835-hwdb-add-Positivo-vaio-Pro-PW-key-toggle-touchpad-25.patch
+Patch0836: 0836-Add-mount-matrix-for-VisionBook-12Wr-Tab.patch
+Patch0837: 0837-Update-60-evdev.hwdb-25704.patch
+Patch0838: 0838-hwdb-Add-additional-Dell-models-that-require-ACCEL_L.patch
+Patch0839: 0839-hwdb-drop-trailing-space.patch
+Patch0840: 0840-hwdb-add-comments-about-matching-entries.patch
+Patch0841: 0841-hwdb-also-add-a-generic-entry-for-DualPoint-Stick.patch
+Patch0842: 0842-hwdb-Add-mount-matrix-for-CSL-Panther-Tab-HD.patch
+Patch0843: 0843-hwdb-Fix-mount-matrix-for-CSL-Panther-Tab-HD-25752.patch
+Patch0844: 0844-hwdb-Fn-F5-fix-for-MSI-Bravo-15-B5DX-25788.patch
+Patch0845: 0845-hwdb-change-definition-of-PROXIMITY_NEAR_LEVEL-for-s.patch
+Patch0846: 0846-hwdb-Add-mic-mute-control-center-and-screen-rotation.patch
+Patch0847: 0847-Prevents-airplane-mode-toggle-for-HP-Spectre-16.patch
+Patch0848: 0848-Update-60-sensor.hwdb.patch
+Patch0849: 0849-Added-Tablet-Teclast-X98-Air-3G-C5J6.patch
+Patch0850: 0850-hwdb-remove-spurious-whitespace.patch
+Patch0851: 0851-hwdb-Add-Dell-models-that-require-ACCEL_LOCATION-bas.patch
+Patch0852: 0852-Fix-Positivo-MASTER-N1110-key-toggle-touchpad.patch
+Patch0853: 0853-hwdb-Mark-Dell-platform-accel-sensor-location-to-bas.patch
+Patch0854: 0854-hwdb-Add-mount-matrix-for-Linx-1020.patch
+Patch0855: 0855-hwdb-Add-mic-mute-key-mappings-for-Dell-G16-Series.patch
+Patch0856: 0856-hwdb-Add-Chuwi-Hi10X-N4120-version-iio-matrix.patch
+Patch0857: 0857-hwdb-Add-touchpad-toggle-mapping-for-System76-Pangol.patch
+Patch0858: 0858-hwdb-Prevent-activation-of-airplane-mode-on-HP-ENVY-.patch
+Patch0859: 0859-Update-hwdb.patch
+Patch0860: 0860-hwdb-update.patch
+Patch0861: 0861-hwdb-update-autosuspend-db.patch
+Patch0862: 0862-hwdb-ieee1394-unit-function-add-MOTU-896-mk3-Hybrid.patch
+Patch0863: 0863-Add-hwdb-sensor-entry-for-Lenovo-IdeaPad-Duet-3-10IG.patch
+Patch0864: 0864-Fix-Positivo-vaio-VJPW12F11X-key-toggle-touchpad.patch
+Patch0865: 0865-hwdb-Add-HP-Envy-x360-Convertible-15-cn0xxx-to-exist.patch
+Patch0866: 0866-hwdb-add-override-for-IdeaPad5-insert-key.patch
+Patch0867: 0867-hwdb-update-database.patch
+Patch0868: 0868-hwdb-Add-HP-ENVY-x360-2-in-1.patch
+Patch0869: 0869-hwdb-update.patch
+Patch0870: 0870-hwdb-fix-swapped-buttons-for-Logitech-Lift-left.patch
+Patch0871: 0871-Revert-hwdb-fix-swapped-buttons-for-Logitech-Lift-le.patch
+Patch0872: 0872-hwdb-update-70-mouse.hwdb-26782.patch
+Patch0873: 0873-hwdb-60-keyboard.hwdb-Fix-modalias-for-Thinkpad-X200.patch
+Patch0874: 0874-Add-rebrands-of-Medion-Akoya-notebooks-tablets.patch
+Patch0875: 0875-hwdb-fix-Wifi-toggling-for-Haier-7G-Series-JWU-25293.patch
+Patch0876: 0876-hwdb-drop-boilerplate-about-match-patterns-in-two-mo.patch
+Patch0877: 0877-hwdb-Fix-incorrect-touchpad-dimensions-on-Thinkpad-L.patch
+Patch0878: 0878-hwdb-drop-redundant-entry.patch
+Patch0879: 0879-hwdb-Fixed-thumb-buttons-reversed-on-CHERRY-MW-2310-.patch
+Patch0880: 0880-hwdb-Move-MSI-touchpad-toggle-mapping-to-generic-MSI.patch
+Patch0881: 0881-update-60-sensor.hwdb-with-toshiba-tablet-27103.patch
+Patch0882: 0882-hwdb-Add-support-for-Passion-Model-P612F.patch
+Patch0883: 0883-hwdb-fix-ambiguous-glob-pattern-for-Lenovo-machines.patch
+Patch0884: 0884-hwdb-add-matrix-for-Asus-BR1100F-27197.patch
+Patch0885: 0885-hwdb-add-accelerometer-mount-matrix-for-Lenovo-Yoga-.patch
+Patch0886: 0886-hwdb-Fix-rotation-for-BMAX-Y13.patch
+Patch0887: 0887-hwdb-disable-entry-for-Logitech-USB-receiver-used-by.patch
+Patch0888: 0888-hwdb-add-hardware-rfkill-key-for-Dell-Latitude-E6-mo.patch
+Patch0889: 0889-hwdb-do-not-include-in-modalias.patch
+Patch0890: 0890-hwdb-add-landscape-IdeaPad-Miix-310-sensor-orientati.patch
+Patch0891: 0891-Fix-Positivo-CF40CM-V2-key-toggle-touchpad.patch
+Patch0892: 0892-hwdb-fix-keyboard-entry-for-IdeapadFlex5-27643.patch
+Patch0893: 0893-hwdb-fix-Positivo-CG15D-key-toggle-touchpad-and-prog.patch
+Patch0894: 0894-hwdb-add-support-for-Elgato-Stream-Deck-mini-gen-2.patch
+Patch0895: 0895-hwdb-fix-arrow-keys-on-HP-Elite-Dragonfly-G3.patch
+Patch0896: 0896-hwdb-add-support-for-Jun-Tab2-Dere-T11-to-60-sensor..patch
+Patch0897: 0897-hwdb-fix-volume-control-keys-on-Lenovo-IdeaPad-Flex-.patch
+Patch0898: 0898-hwdb-Add-override-for-headset-form-factors.patch
+Patch0899: 0899-hwdb-add-support-for-Archos-101-Cesium-Educ-to-60-se.patch
+Patch0900: 0900-hwdb-drop-trailing-white-space.patch
+Patch0901: 0901-hwdb-merge-multiple-keyboard-entries-with-same-setti.patch
+Patch0902: 0902-hwdb-make-matching-modalias-for-Archos-101-Cesium-Ed.patch
+Patch0903: 0903-hwdb-update-for-v246-rc1.patch
+Patch0904: 0904-update-hwdb-autosuspend-data-for-v254.patch
+Patch0905: 0905-hwdb-add-support-for-Archos-101-Cesium-to-60-sensor..patch
+Patch0906: 0906-Hwdb-Add-Sanwa-Direct-400-MA128-external-trackpad-28.patch
+Patch0907: 0907-hwdb-drop-POINTINGSTICK_CONST_ACCEL.patch
+Patch0908: 0908-Add-alternate-name-for-MX-Ergo-as-found-on-some-devi.patch
+Patch0909: 0909-Update-hwdb.patch
+Patch0910: 0910-hwdb-run-update-hwdb.patch
+Patch0911: 0911-hwdb-run-update-hwdb.patch
+Patch0912: 0912-hwdb-Mute-SW-rfkill-keys-on-MSI-Wind-U100.patch
+Patch0913: 0913-Update-60-sensor.hwdb-28804.patch
+Patch0914: 0914-hwdb-Added-config-for-RCA-W101SA23T1-29041.patch
+Patch0915: 0915-Update-60-input-id.hwdb-add-TEX-Shinobi-29068.patch
+Patch0916: 0916-hwdb-keyboard-D330-FnLk-toggle.patch
+Patch0917: 0917-hwdb-Add-Logitech-G502-X.patch
+Patch0918: 0918-hwdb-ieee1394-unit-function-remove-superfluous-Weiss.patch
+Patch0919: 0919-hwdb-ieee1394-unit-function-add-Weiss-Engineering-DA.patch
+Patch0920: 0920-hwdb-ieee1394-unit-function-add-Weiss-Engineering-IN.patch
+Patch0921: 0921-hwdb-ieee1394-unit-function-add-Weiss-Engieering-MAN.patch
+Patch0922: 0922-hwdb-Add-quirk-for-teclast-x3-plus-G4K3-rotation-292.patch
+Patch0923: 0923-hwdb-add-mic-mute-key-mappings-for-Acer-Predator-Tri.patch
+Patch0924: 0924-hwdb-Bush-tablet-rotation-support-29268.patch
+Patch0925: 0925-hwdb-ieee1394-unit-function-add-Miglia-Technology-Ha.patch
+Patch0926: 0926-add-support-for-hp-pavilion-gaming-15-lid-switch-293.patch
+Patch0927: 0927-Fix-Positivo-N14EP6-key-toggle-touchpad-and-programm.patch
+Patch0928: 0928-add-udev-rule-for-micmute-f20.patch
+Patch0929: 0929-hwdb-rules-mark-host-to-host-network-devices-as-only.patch
+Patch0930: 0930-Update-hwdb.patch
+Patch0931: 0931-Update-hwdb-autosuspend-rules.patch
+Patch0932: 0932-Update-hwdb.patch
+Patch0933: 0933-hwdb-Add-accelerometer-data-for-Librem11-29974.patch
+Patch0934: 0934-hwdb-PNP-ACPI-lists-on-uefi.org-are-now-in-CSV-forma.patch
+Patch0935: 0935-Update-hwdb.patch
+Patch0936: 0936-hwdb-rename-.html-.csv.patch
+Patch0937: 0937-hwdb-acpi-update.py-streamline-python-code.patch
+Patch0938: 0938-hwdb-Mark-Dell-platform-accel-sensor-location-to-bas.patch
+Patch0939: 0939-hwdb-add-Predator-PHN16-71.patch
+Patch0940: 0940-Update-60-autosuspend.hwdb-30131.patch
+Patch0941: 0941-hwdb-update.patch
+Patch0942: 0942-hwdb-ieee1394-unit-function-add-Sony-DVMC-DA1.patch
+Patch0943: 0943-hwdb-ieee1394-unit-function-arrangement-for-Sony-DVM.patch
+Patch0944: 0944-hwdb-update.patch
+Patch0945: 0945-hwdb-update.patch
+Patch0946: 0946-Adding-Trekstor-Primebook-C13-rotation-to-60-sensor..patch
+Patch0947: 0947-Add-three-Dell-platforms-to-sensor-accel-location-ba.patch
+Patch0948: 0948-Add-Bosto-BT-12HD-series-to-hwdb.patch
+Patch0949: 0949-hwdb-Add-override-for-headset-form-factor-for-the-Co.patch
+Patch0950: 0950-hwdb-add-Teclast-X98-Pro-sensor-info-30859.patch
+Patch0951: 0951-hwdb-Correct-display-rotation-on-Chuwi-Ubook-X-N4100.patch
+Patch0952: 0952-hwdb-ieee1394-unit-function-adjustment-of-entries-wi.patch
+Patch0953: 0953-60-evdev.hwdb-Add-support-for-Huion-Inspiroy-2-L-312.patch
+Patch0954: 0954-hwdb-add-resolution-setting-for-GAOMON-S620.patch
+Patch0955: 0955-hwdb-Remove-version-check-in-CH-Pro-Pedals-rule.patch
+Patch0956: 0956-hwdb-Add-support-for-MetawillBook01-to-60-sensor.hwd.patch
+Patch0957: 0957-hwdb-Add-headset-form-factor-override-for-Xbox-Wirel.patch
+Patch0958: 0958-hwdb-Add-support-for-Elgato-Stream-Deck-Plus.patch
+Patch0959: 0959-Fix-Chuwi-UBook-X-CWI535-screen-rotation-matrix.patch
+Patch0960: 0960-hwdb-Add-touchpad-toggle-mapping-for-Kvadra-LE14U-LE.patch
+Patch0961: 0961-hwdb-Add-touchpad-configuration-for-ThinkPad-E495.patch
+Patch0962: 0962-Fix-Positivo-N14NPE-N-and-N15NPE-N-key-toggle-touchp.patch
+Patch0963: 0963-Update-USB-ids-of-hwdb.patch
+Patch0964: 0964-Added-resolution-for-Huion-Kamvas-Pro-19.patch
+Patch0965: 0965-hwdb-Add-mapping-for-ACPI-quickstart-keys-on-Toshiba.patch
+Patch0966: 0966-hwdb-fix-Asus-T300FA-rotation-matrix-31973.patch
+Patch0967: 0967-Fixed-resolution-for-pen-and-touchpad.patch
+Patch0968: 0968-hwdb-fix-missing-colon-32108.patch
+Patch0969: 0969-hwdb-update-for-v256.patch
+Patch0970: 0970-autosuspend-update-for-v256.patch
+Patch0971: 0971-Update-hwdb.patch
+Patch0972: 0972-Update-autosuspend-hwdb.patch
+Patch0973: 0973-Update-hwdb.patch
+Patch0974: 0974-hwdb-Add-a-common-Logitech-M185-M225-mouse-variant.patch
+Patch0975: 0975-hwdb-Add-mapping-for-Samsung-GalaxyBook-550X-32616.patch
+Patch0976: 0976-hwdb-Add-mapping-for-Xiaomi-Mipad-2-bottom-bezel-cap.patch
+Patch0977: 0977-hwdb-ieee1394-unit-function-add-Tascam-IF-FW-DM-mkII.patch
+Patch0978: 0978-hwdb-Add-a-Logitech-MX-Master-3S-connected-via-Bolt-.patch
+Patch0979: 0979-Fix-Positivo-N14EPE-and-N15EPE-key-toggle-touchpad-a.patch
+Patch0980: 0980-hwdb-update-Dere-N12-Juno-Tablet-3-accelerometer-327.patch
+Patch0981: 0981-hwdb-updated-Librem-11-accelerometer-32772.patch
+Patch0982: 0982-hwdb-ID_INPUT_XYZ-allows-an-empty-string.patch
+Patch0983: 0983-hwdb-ASRock-LED-Controller-classified-incorrectly-as.patch
+Patch0984: 0984-Update-hwdb.patch
+Patch0985: 0985-hwdb.d-60-keyboard.hwdb-enable-Clevo-quirk-for-model.patch
+Patch0986: 0986-hwdb-Enable-JP-IK-LEAP-W502-s-touchpad-toggle-key.patch
+Patch0987: 0987-Update-hwdb.patch
+Patch0988: 0988-Update-autosuspend-hwdb.patch
+Patch0989: 0989-hwdb-Lenovo-IdeaPad-Z500-Touchpad-Toggle-33039.patch
+Patch0990: 0990-hwdb-add-a-vmbus-id-for-HyperV-Video-device.patch
+Patch0991: 0991-hwdb-Add-Logitech-MX-Master-3S-Bluetooth-ID.patch
+Patch0992: 0992-hwdb-Lenovo-16G6IRL-volume-keys-and-friends-33107.patch
+Patch0993: 0993-hwdb-added-hwdb-rules-for-micmute-and-power-button-o.patch
+Patch0994: 0994-Fix-key-toggle-touchpad-and-programmable-buttom-for-.patch
+Patch0995: 0995-Update-hwdb.patch
+Patch0996: 0996-hwdb-add-keyboard-mappings-for-the-Ayaneo-Kun-face-b.patch
+Patch0997: 0997-Update-hwdb.patch
+Patch0998: 0998-hwdb-add-support-for-AIPTEK-Media-Tablet-Ultimate-33.patch
+Patch0999: 0999-hwdb-add-scancodes-for-AYANEO-devices-33378.patch
+Patch1000: 1000-Add-OrangePi-NEO-Scancodes.patch
+Patch1001: 1001-hwdb-Fix-Logitech-G915-TKL-Bluetooth-appearing-as-a-.patch
+Patch1002: 1002-hwdb-fix-keyboard-of-RedmiBook-Pro-15-2022-33465.patch
+Patch1003: 1003-Added-mised-EVDEV_ABS_35-EVDEV_ABS_36-for-GAOMON-s62.patch
+Patch1004: 1004-hwdb-Add-some-HP-IR-cameras.patch
+Patch1005: 1005-hwdb-add-more-AV-controllers.patch
+Patch1006: 1006-Fix-key-toggle-touchpad-button-for-multilaser-ul154-.patch
+Patch1007: 1007-hwdb-Added-StarLabs-StarLite-position-sensor-mapping.patch
+Patch1008: 1008-70-mouse.hwdb-Added-Glorious-Model-O-DPI.patch
+Patch1009: 1009-Update-60-sensor.hwdb.patch
+Patch1010: 1010-Add-MSI-Claw-AT-Keyboard-Scancodes.patch
+Patch1011: 1011-Add-or-fix-mount-matrix-for-multiple-handhelds.-3358.patch
+Patch1012: 1012-Revert-hwdb-Added-StarLabs-StarLite-position-sensor-.patch
+Patch1013: 1013-hwdb-fix-accelerometer-mount-matrix-for-Aquarius-Cmp.patch
+Patch1014: 1014-hwdb-add-backslash-and-touchpad-toggle-mapping-for-A.patch
+Patch1015: 1015-hwdb-Add-mic-mute-key-mapping-for-Dell-Pro-Rugged-se.patch
+Patch1016: 1016-hwdb-fix-MXC6655-accelerometer-mount-matrix-for-Aqua.patch
+Patch1017: 1017-add-udev-rules-for-trezor-hw-wallet-devices.patch
+Patch1018: 1018-hwdb-add-axis-range-corrections-for-the-Lenovo-Think.patch
+Patch1019: 1019-hwdb-fix-auto-rotate-on-Asus-Q551LB-33921.patch
+Patch1020: 1020-udev-add-hwdb-execution-for-hidraw-subsystem-devices.patch
+Patch1021: 1021-udev-builtin-net_id-skip-non-directory-entry-earlier.patch
+Patch1022: 1022-udev-builtin-net_id-return-earlier-when-hotplug-slot.patch
+Patch1023: 1023-udev-builtin-net_id-split-out-pci_get_hotplug_slot-a.patch
+Patch1024: 1024-udev-builtin-net_id-use-firmware_node-sun-for-ID_NET.patch
+Patch1025: 1025-Include-threads.h-if-possible-to-get-thread_local-de.patch
+Patch1026: 1026-add-APIs-for-detecting-confidential-virtualization.patch
+Patch1027: 1027-detect-virt-add-cvm-option.patch
+Patch1028: 1028-detect-virt-add-list-cvm-option.patch
+Patch1029: 1029-unit-add-cvm-option-for-ConditionSecurity.patch
+Patch1030: 1030-dbus-add-ConfidentialVirtualization-property-to-mana.patch
+Patch1031: 1031-core-log-detected-confidential-virtualization-type.patch
+Patch1032: 1032-core-set-SYSTEMD_CONFIDENTIAL_VIRTUALIZATION-env-for.patch
+Patch1033: 1033-udev-add-conf-virt-constant-for-confidential-virtual.patch
+Patch1034: 1034-confidential-virt-split-caching-of-CVM-detection-int.patch
+Patch1035: 1035-confidential-virt-add-detection-for-s390x-target.patch
+Patch1036: 1036-man-systemd-detect-virt-list-known-CVM-technologies.patch
+Patch1037: 1037-Revert-udev-builtin-net_id-use-firmware_node-sun-for.patch
+Patch1038: 1038-fundamental-share-constants-for-confidential-virt-de.patch
+Patch1039: 1039-efi-add-helper-API-for-detecting-confidential-virtua.patch
+Patch1040: 1040-efi-don-t-pull-kernel-cmdline-from-SMBIOS-in-a-confi.patch
+Patch1041: 1041-Fix-detection-of-TDX-confidential-VM-on-Azure-platfo.patch
+Patch1042: 1042-ukify-Skip-test-on-architectures-without-UEFI.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -878,7 +1188,7 @@ BuildRequires: libseccomp-devel
 BuildRequires: meson >= 0.43
 BuildRequires: gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires: valgrind-devel
+BuildRequires: valgrind-devel
 BuildRequires: pkgconfig(bash-completion)
 BuildRequires: pkgconfig(tss2-esys)
 BuildRequires: pkgconfig(tss2-rc)
@@ -890,6 +1200,7 @@ BuildRequires: git-core
 BuildRequires: gnu-efi gnu-efi-devel
 %endif
 BuildRequires: selinux-policy-devel
+BuildRequires: libfido2-devel
 
 Requires(post): coreutils
 Requires(post): sed
@@ -899,6 +1210,7 @@ Requires(post): grep
 # selinux
 Requires(post): libselinux-utils
 Requires(post): policycoreutils
+Requires(post): selinux-policy
 
 # systemd-machine-id-setup requires libssl
 Requires(post): openssl-libs
@@ -1045,6 +1357,15 @@ machines and in virtual machines, but not in containers.
 Summary: Tool to build Unified Kernel Images
 Requires: %{name} = %{version}-%{release}
 
+Requires: (systemd-boot if %{shrink:(
+        filesystem(x86-32) or
+        filesystem(x86-64) or
+        filesystem(aarch64) or
+        filesystem(riscv64)
+)})
+%if 0%{?fedora}
+Requires: python3dist(zstd)
+%endif
 Requires: python3dist(cryptography)
 Requires: python3dist(pefile)
 
@@ -1167,7 +1488,7 @@ rhel-net-naming-sysattrs package provides hwdb and udev rule needed for stable
 network naming scheme across RHEL releases.
 
 %prep
-%autosetup -n %{?commit:%{name}%{?stable:-stable}-%{commit}}%{!?commit:%{name}%{?stable:-stable}-%{version_no_tilde}} -S git_am -p1
+%autosetup -S git
 %setup -T -D -a 26
 
 %build
@@ -1219,7 +1540,7 @@ CONFIGURE_OPTS=(
         -Dlibidn2=true
         -Dlibiptc=false
         -Dlibcurl=true
-        -Dlibfido2=false
+        -Dlibfido2=true
         -Defi=true
         -Dgnu-efi=%[%{?have_gnu_efi}?"true":"false"]
         -Dtpm=true
@@ -1518,6 +1839,13 @@ fi
 
 %systemd_postun_with_restart systemd-timedated.service systemd-hostnamed.service systemd-journald.service systemd-localed.service
 
+%posttrans
+if [ $1 -eq 1 ]; then
+    # Initial installation
+    # HACK: apparently there are RPM dependency loops which prevent us from using semodule in %%post so insert policy module again
+    %selinux_modules_install -s %{selinuxtype} %{_datadir}/selinux/packages/%{selinuxtype}/%{modulename}.pp.bz2
+fi
+
 %post libs
 %{?ldconfig}
 
@@ -1700,44 +2028,372 @@ systemd-hwdb update &>/dev/null || :
 %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
 
 %changelog
-* Fri Sep 27 2024 Jacco Ligthart <jacco@redsleeve.org> - 252-32.7.redsleeve
-- removed valgrind
-
-* Tue Sep 03 2024 Release Engineering <releng@rockylinux.org> - 252-32
+* Sat Nov 16 2024 Release Engineering <releng@rockylinux.org> - 252-46.0.1
 - Set support URL to the wiki
 - Set sbat mail to security@rockylinux.org
 
-* Thu Jul 18 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-32.7
-- generator: "uninline" generator_open_unit_file and generator_add_symlink (RHEL-49495)
+* Tue Sep 10 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-46.2
+- add %%posttrans scriptlet to make sure our SELinux policy module is actually installed (RHEL-46339)
 
-* Wed Jun 12 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-32.6
-- cryptsetup: do not assert when unsealing token without salt (RHEL-40119)
-- cryptsetup: check the existence of salt by salt_size > 0 (RHEL-40119)
-- bootspec: fix null-dereference-read (RHEL-40119)
+* Tue Sep 03 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-46.1
+- version bump (RHEL-56019)
 
-* Wed May 22 2024 Jan Macku <jamacku@redhat.com> - 252-32.5
-- spec: return selinux dependencies (RHEL-36471)
+* Fri Aug 30 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-46
+- ukify: Skip test on architectures without UEFI (RHEL-56019)
 
-* Mon May 20 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-32.4
-- kernel-install: fix uki-copy deinstall (RHEL-35994)
+* Sat Aug 24 2024 systemd team <systemd-maint@redhat.com> - 252-45
+- build ukify without noarch
 
-* Wed May 15 2024 Jan Macku <jamacku@redhat.com> - 252-32.3
-- remove selinux post-requires for python (RHEL-36471)
+* Thu Aug 22 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-44
+- Revert "udev-builtin-net_id: use firmware_node/sun for ID_NET_NAME_SLOT" (RHEL-50103)
+- fundamental: share constants for confidential virt detection (RHEL-50651)
+- efi: add helper API for detecting confidential virtualization (RHEL-50651)
+- efi: don't pull kernel cmdline from SMBIOS in a confidential VM (RHEL-50651)
+- Fix detection of TDX confidential VM on Azure platform (RHEL-50651)
 
-* Fri Apr 26 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-32.2
-- coredump: generate stacktraces also for processes running in containers w/o coredump forwarding (RHEL-34061)
-- test: add a couple of tests for systemd-coredump (RHEL-34061)
-- test: don't expand the subshell expression prematurely (RHEL-34061)
-- coredump filter: fix stack overflow with =all (RHEL-34061)
-- coredump filter: add mask for 'all' using UINT32_MAX, not UINT64_MAX (RHEL-34061)
-- test: add coverage for CoredumpFilter=all (RHEL-34061)
-- test: rotate journal before storing coredumps (RHEL-34061)
-- test: sync with the fake binary before killing it (RHEL-34061)
-- test: check coredump handling in containers & namespaces (RHEL-34061)
-- ukify: make the test happy with the latest OpenSSL (RHEL-34061)
+* Thu Aug 22 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-43
+- udev-builtin-net_id: skip non-directory entry earlier (RHEL-50103)
+- udev-builtin-net_id: return earlier when hotplug slot is not found (RHEL-50103)
+- udev-builtin-net_id: split-out pci_get_hotplug_slot() and pci_get_hotplug_slot_from_address() (RHEL-50103)
+- udev-builtin-net_id: use firmware_node/sun for ID_NET_NAME_SLOT (RHEL-50103)
+- Include <threads.h> if possible to get thread_local definition (RHEL-50651)
+- add APIs for detecting confidential virtualization (RHEL-50651)
+- detect-virt: add --cvm option (RHEL-50651)
+- detect-virt: add --list-cvm option (RHEL-50651)
+- unit: add "cvm" option for ConditionSecurity (RHEL-50651)
+- dbus: add 'ConfidentialVirtualization' property to manager object (RHEL-50651)
+- core: log detected confidential virtualization type (RHEL-50651)
+- core: set SYSTEMD_CONFIDENTIAL_VIRTUALIZATION env for generators (RHEL-50651)
+- udev: add 'conf-virt' constant for confidential virtualization tech (RHEL-50651)
+- confidential-virt: split caching of CVM detection into separate method (RHEL-50651)
+- confidential-virt: add detection for s390x target (RHEL-50651)
+- man/systemd-detect-virt: list known CVM technologies (RHEL-50651)
 
-* Thu Apr 11 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-32.1
-- execute: Pass AT_FDCWD instead of -1 (RHEL-32259)
+* Mon Aug 19 2024 systemd team <systemd-maint@redhat.com>
+- fix applying patches
+
+* Thu Aug 15 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-41
+- timedatectl: setting set_local_rtc to 1 will throw Warning as well, use log_warning() (#33489) (RHEL-45020)
+- cryptsetup-tokens: fix pin asserts (RHEL-36276)
+- cryptenroll: Use CTAP2.1 credProtect extension (RHEL-36276)
+- kernel-install: check machine ID (RHEL-50672)
+- kernel-install: ignore errors when reading /etc/machine-id (RHEL-50672)
+- hwdb: Add Lenovo G580 (RHEL-5950)
+- Fix key toggle and programmable button for Positivo N14ZP (RHEL-5950)
+- hwdb: Add accel orientation quirk for the Acer Switch V 10 SW5-017 2-in-1 (RHEL-5950)
+- hwdb: fix Compaq N14KP6 key toggle touchpad (#25404) (RHEL-5950)
+- hwdb: remove fuzz and deadzone for Simucube wheel bases. (RHEL-5950)
+- hwdb: Add support for Elgato Stream Pedal (#25550) (RHEL-5950)
+- hwdb: add Clevo touchpad toggle key quirks (RHEL-5950)
+- hwdb: add Dell Inspiron N4010 touchpad corrections (RHEL-5950)
+- hwdb: add Positivo-vaio Pro PW key toggle touchpad (#25669) (RHEL-5950)
+- Add mount matrix for VisionBook 12Wr Tab (RHEL-5950)
+- Update 60-evdev.hwdb (#25704) (RHEL-5950)
+- hwdb: Add additional Dell models that require ACCEL_LOCATION=base (#25724) (RHEL-5950)
+- hwdb: drop trailing space (RHEL-5950)
+- hwdb: add comments about matching entries (RHEL-5950)
+- hwdb: also add a generic entry for DualPoint Stick (RHEL-5950)
+- hwdb: Add mount matrix for CSL Panther Tab HD (RHEL-5950)
+- hwdb: Fix mount matrix for CSL Panther Tab HD (#25752) (RHEL-5950)
+- hwdb: Fn+F5 fix for MSI Bravo 15-B5DX (#25788) (RHEL-5950)
+- hwdb: change definition of PROXIMITY_NEAR_LEVEL for sensors (RHEL-5950)
+- hwdb: Add mic-mute, control-center and screen-rotation mappings for MSI laptops (RHEL-5950)
+- Prevents airplane mode toggle for HP Spectre 16 (RHEL-5950)
+- Update 60-sensor.hwdb (RHEL-5950)
+- Added Tablet Teclast X98 Air 3G (C5J6) (RHEL-5950)
+- hwdb: remove spurious whitespace (RHEL-5950)
+- hwdb: Add Dell models that require ACCEL_LOCATION=base (RHEL-5950)
+- Fix Positivo MASTER-N1110 key toggle touchpad (RHEL-5950)
+- hwdb: Mark Dell platform accel sensor location to base (RHEL-5950)
+- hwdb: Add mount matrix for Linx 1020 (RHEL-5950)
+- hwdb: Add mic mute key mappings for Dell G16 Series (RHEL-5950)
+- hwdb: Add Chuwi Hi10X (N4120 version) iio matrix (RHEL-5950)
+- hwdb: Add touchpad toggle mapping for System76 Pangolin 12 (RHEL-5950)
+- hwdb: Prevent activation of airplane mode on HP ENVY x360 (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- hwdb: update (RHEL-5950)
+- hwdb: update autosuspend db (RHEL-5950)
+- hwdb: ieee1394-unit-function: add MOTU 896 mk3 Hybrid (RHEL-5950)
+- Add hwdb sensor entry for Lenovo IdeaPad Duet 3 10IGL5 (82AT). (RHEL-5950)
+- Fix Positivo-vaio VJPW12F11X key toggle touchpad (RHEL-5950)
+- hwdb: Add HP Envy x360 Convertible 15-cn0xxx to existing entry (RHEL-5950)
+- hwdb: add override for IdeaPad5 insert key (RHEL-5950)
+- hwdb: update database (RHEL-5950)
+- hwdb: Add HP ENVY x360 2-in-1 (RHEL-5950)
+- hwdb: update (RHEL-5950)
+- hwdb: fix swapped buttons for Logitech Lift left (RHEL-5950)
+- Revert "hwdb: fix swapped buttons for Logitech Lift left" (RHEL-5950)
+- hwdb: update 70-mouse.hwdb (#26782) (RHEL-5950)
+- hwdb: 60-keyboard.hwdb: Fix modalias for Thinkpad X200 Tablet (#26795) (RHEL-5950)
+- Add rebrands of Medion Akoya notebooks/tablets (RHEL-5950)
+- hwdb: fix Wifi toggling for Haier 7G-Series/JWU (#25293) (#26878) (RHEL-5950)
+- hwdb: drop boilerplate about match patterns in two more cases (RHEL-5950)
+- hwdb: Fix incorrect touchpad dimensions on Thinkpad L14 Gen1 (#26937) (RHEL-5950)
+- hwdb: drop redundant entry (RHEL-5950)
+- hwdb: Fixed thumb buttons reversed on CHERRY MW 2310 (#26992) (RHEL-5950)
+- hwdb: Move MSI touchpad-toggle mapping to generic MSI section (RHEL-5950)
+- update 60-sensor.hwdb with toshiba tablet (#27103) (RHEL-5950)
+- hwdb: Add support for "Passion Model P612F" (RHEL-5950)
+- hwdb: fix ambiguous glob pattern for Lenovo machines (RHEL-5950)
+- hwdb: add matrix for Asus BR1100F (#27197) (RHEL-5950)
+- hwdb: add accelerometer mount matrix for Lenovo Yoga Tablet 2 851F/L (RHEL-5950)
+- hwdb: Fix rotation for BMAX Y13 (RHEL-5950)
+- hwdb: disable entry for Logitech USB receiver used by G502 X (RHEL-5950)
+- hwdb: add hardware rfkill key for Dell Latitude E6* models (#27462) (RHEL-5950)
+- hwdb: do not include '#' in modalias (RHEL-5950)
+- hwdb: add landscape IdeaPad Miix 310 sensor orientation (#27555) (RHEL-5950)
+- Fix Positivo CF40CM-V2 key toggle touchpad (RHEL-5950)
+- hwdb: fix keyboard entry for IdeapadFlex5 (#27643) (RHEL-5950)
+- hwdb: fix Positivo CG15D key toggle touchpad and programmable keys (#27689) (RHEL-5950)
+- hwdb: add support for Elgato Stream Deck mini (gen 2) (RHEL-5950)
+- hwdb: fix arrow keys on HP Elite Dragonfly G3 (RHEL-5950)
+- hwdb: add support for Jun Tab2/Dere T11 to 60-sensor.hwdb (#28092) (RHEL-5950)
+- hwdb: fix volume control keys on Lenovo IdeaPad Flex 5 (14ARE05) (RHEL-5950)
+- hwdb: Add override for headset form-factors (RHEL-5950)
+- hwdb : add support for Archos 101 Cesium Educ to 60-sensor.hwdb (RHEL-5950)
+- hwdb: drop trailing white space (RHEL-5950)
+- hwdb: merge multiple keyboard entries with same setting (RHEL-5950)
+- hwdb: make matching modalias for Archos 101 Cesium Educ more strict (RHEL-5950)
+- hwdb update for v246-rc1 (RHEL-5950)
+- update hwdb autosuspend data for v254 (RHEL-5950)
+- hwdb: add support for Archos 101 Cesium to 60-sensor.hwdb (#28270) (RHEL-5950)
+- Hwdb: Add Sanwa Direct 400-MA128 external trackpad (#28272) (RHEL-5950)
+- hwdb: drop POINTINGSTICK_CONST_ACCEL (RHEL-5950)
+- Add alternate name for MX Ergo as found on some devices (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- hwdb: run update-hwdb (RHEL-5950)
+- hwdb: run update-hwdb (RHEL-5950)
+- hwdb: Mute SW rfkill keys on MSI Wind U100 (RHEL-5950)
+- Update 60-sensor.hwdb (#28804) (RHEL-5950)
+- hwdb: Added config for RCA W101SA23T1 (#29041) (RHEL-5950)
+- Update 60-input-id.hwdb: add TEX Shinobi (#29068) (RHEL-5950)
+- hwdb: keyboard: D330 FnLk toggle (RHEL-5950)
+- hwdb: Add Logitech G502 X (RHEL-5950)
+- hwdb: ieee1394-unit-function: remove superfluous Weiss Engineering DAC1 entry (RHEL-5950)
+- hwdb: ieee1394-unit-function: add Weiss Engineering DAC202 (Maya edition) (RHEL-5950)
+- hwdb: ieee1394-unit-function: add Weiss Engineering INT203 entry with older firmware (RHEL-5950)
+- hwdb: ieee1394-unit-function: add Weiss Engieering MAN301 (RHEL-5950)
+- hwdb: Add quirk for teclast x3 plus (G4K3) rotation (#29202) (RHEL-5950)
+- hwdb: add mic mute key mappings for Acer Predator Triton 300 SE (RHEL-5950)
+- hwdb: Bush tablet rotation support (#29268) (RHEL-5950)
+- hwdb: ieee1394-unit-function: add Miglia Technology Harmony Audio (HA02) (RHEL-5950)
+- add support for hp pavilion gaming 15 lid switch (#29304) (RHEL-5950)
+- Fix Positivo N14EP6 key toggle touchpad and programmable keys (#29448) (RHEL-5950)
+- add udev rule for micmute (f20) (RHEL-5950)
+- hwdb,rules: mark host-to-host network devices as only requiring link local addressing (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- Update hwdb autosuspend rules (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- hwdb: Add accelerometer data for Librem11 (#29974) (RHEL-5950)
+- hwdb: PNP/ACPI lists on uefi.org are now in CSV format (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- hwdb: rename .html=>.csv (RHEL-5950)
+- hwdb/acpi-update.py: streamline python code (RHEL-5950)
+- hwdb: Mark Dell platform accel sensor location to base (RHEL-5950)
+- hwdb: add Predator PHN16-71 (RHEL-5950)
+- Update 60-autosuspend.hwdb (#30131) (RHEL-5950)
+- hwdb: update (RHEL-5950)
+- hwdb: ieee1394-unit-function: add Sony DVMC-DA1 (RHEL-5950)
+- hwdb: ieee1394-unit-function: arrangement for Sony DVMC-DA1 (RHEL-5950)
+- hwdb: update (RHEL-5950)
+- hwdb: update (RHEL-5950)
+- Adding Trekstor Primebook C13 rotation to 60-sensor.hwdb (#30415) (RHEL-5950)
+- Add three Dell platforms to sensor accel location base (RHEL-5950)
+- Add Bosto BT-12HD series to hwdb (RHEL-5950)
+- hwdb: Add override for headset form-factor for the Corsair Void Elite (RHEL-5950)
+- hwdb: add Teclast X98 Pro sensor info (#30859) (RHEL-5950)
+- hwdb: Correct display rotation on Chuwi Ubook X N4100 (#24248) (RHEL-5950)
+- hwdb: ieee1394-unit-function: adjustment of entries with device attributes available in Linux v6.8 (RHEL-5950)
+- 60-evdev.hwdb: Add support for Huion Inspiroy 2 L (#31241) (RHEL-5950)
+- hwdb: add resolution setting for GAOMON S620 (RHEL-5950)
+- hwdb: Remove version check in CH Pro Pedals rule (RHEL-5950)
+- hwdb: Add support for MetawillBook01 to 60-sensor.hwdb Add accel orientation quirk for the METAPHYUNI MetawillBook01 2-in-1 laptop (RHEL-5950)
+- hwdb: Add headset form-factor override for Xbox Wireless Dongle (RHEL-5950)
+- hwdb: Add support for Elgato Stream Deck Plus (RHEL-5950)
+- Fix: Chuwi UBook X (CWI535) screen rotation matrix (RHEL-5950)
+- hwdb: Add touchpad toggle mapping for Kvadra LE14U/LE15U (RHEL-5950)
+- hwdb: Add touchpad configuration for ThinkPad E495 (RHEL-5950)
+- Fix Positivo N14NPE-N and N15NPE-N key toggle touchpad and search key (RHEL-5950)
+- Update USB ids of hwdb (RHEL-5950)
+- Added resolution for Huion Kamvas Pro 19 (RHEL-5950)
+- hwdb: Add mapping for ACPI quickstart keys on Toshiba Z830 (RHEL-5950)
+- hwdb: fix Asus T300FA rotation matrix (#31973) (RHEL-5950)
+- Fixed resolution for pen and touchpad (RHEL-5950)
+- hwdb: fix missing colon (#32108) (RHEL-5950)
+- hwdb: update for v256 (RHEL-5950)
+- autosuspend: update for v256 (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- Update autosuspend hwdb (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- hwdb: Add a common Logitech M185/M225 mouse variant (RHEL-5950)
+- hwdb: Add mapping for Samsung GalaxyBook - 550X (#32616) (RHEL-5950)
+- hwdb: Add mapping for Xiaomi Mipad 2 bottom bezel capacitive buttons (RHEL-5950)
+- hwdb: ieee1394-unit-function: add Tascam IF-FW/DM mkII (RHEL-5950)
+- hwdb: Add a Logitech MX Master 3S (connected via Bolt Receiver) (RHEL-5950)
+- Fix Positivo N14EPE and N15EPE key toggle touchpad and search key (RHEL-5950)
+- hwdb: update Dere N12 / Juno Tablet 3 accelerometer (#32765) (RHEL-5950)
+- hwdb: updated Librem 11 accelerometer (#32772) (RHEL-5950)
+- hwdb: ID_INPUT_XYZ allows an empty string (RHEL-5950)
+- hwdb: ASRock LED Controller classified incorrectly as joystick due to buttons and axis (#32775) (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- hwdb.d/60-keyboard.hwdb: enable Clevo quirk for model V5x0TU (RHEL-5950)
+- hwdb: Enable JP-IK LEAP W502's touchpad toggle key (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- Update autosuspend hwdb (RHEL-5950)
+- hwdb: Lenovo IdeaPad Z500 Touchpad Toggle (#33039) (RHEL-5950)
+- hwdb: add a vmbus id for HyperV Video device (RHEL-5950)
+- hwdb: Add Logitech MX Master 3S Bluetooth ID (RHEL-5950)
+- hwdb: Lenovo 16G6IRL volume keys and friends (#33107) (RHEL-5950)
+- hwdb: added hwdb rules for micmute and power button on Acer Nitro AN 515-58 (#32867) (RHEL-5950)
+- Fix key toggle touchpad and programmable buttom for Positivo N14AP7 (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- hwdb: add keyboard mappings for the Ayaneo Kun face buttons (RHEL-5950)
+- Update hwdb (RHEL-5950)
+- hwdb: add support for AIPTEK Media Tablet Ultimate (#33371) (RHEL-5950)
+- hwdb: add scancodes for AYANEO devices (#33378) (RHEL-5950)
+- Add OrangePi NEO Scancodes (RHEL-5950)
+- hwdb: Fix Logitech G915 TKL (Bluetooth) appearing as a mouse (RHEL-5950)
+- hwdb: fix keyboard of RedmiBook Pro 15 2022 (#33465) (RHEL-5950)
+- Added mised EVDEV_ABS_35 & EVDEV_ABS_36 for GAOMON s620 (RHEL-5950)
+- hwdb: Add some HP IR cameras (RHEL-5950)
+- hwdb: add more AV controllers (RHEL-5950)
+- Fix key toggle touchpad button for multilaser ul154 (#33630) (RHEL-5950)
+- hwdb: Added StarLabs StarLite position sensor mapping (RHEL-5950)
+- 70-mouse.hwdb: Added Glorious Model O DPI (RHEL-5950)
+- Update 60-sensor.hwdb (RHEL-5950)
+- Add MSI Claw AT Keyboard Scancodes. (RHEL-5950)
+- Add or fix mount matrix for multiple handhelds. (#33586) (RHEL-5950)
+- Revert "hwdb: Added StarLabs StarLite position sensor mapping" (RHEL-5950)
+- hwdb: fix accelerometer mount matrix for Aquarius Cmp NS483 (RHEL-5950)
+- hwdb: add backslash and touchpad toggle mapping for Aquarius Cmp NS483 (RHEL-5950)
+- hwdb: Add mic mute key mapping for Dell Pro Rugged series (RHEL-5950)
+- hwdb: fix MXC6655 accelerometer mount matrix for Aquarius Cmp NS483 (RHEL-5950)
+- add udev rules for trezor hw wallet devices (RHEL-5950)
+- hwdb: add axis range corrections for the Lenovo Thinkpad E16 (RHEL-5950)
+- hwdb: fix auto rotate on Asus Q551LB (#33921) (RHEL-5950)
+- udev: add hwdb execution for hidraw subsystem devices (RHEL-5950)
+
+* Wed Aug 07 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-40
+- add Requires(post) on selinux-policy (RHEL-46339)
+
+* Wed Jul 17 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-39
+- enable FIDO2 support (RHEL-36276)
+- netif-naming-scheme: disable NAMING_BRIDGE_MULTIFUNCTION_SLOT (RHEL-44630)
+- netif-naming-scheme: make actually possible to use rhel-9.5 scheme (RHEL-44630)
+- generator: "uninline" generator_open_unit_file and generator_add_symlink (RHEL-33436)
+- ci: add support for rhel-only parameters (RHEL-30372)
+
+* Wed Jun 19 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-38
+- tools: fix the file name that "meson setup" generates (RHEL-30372)
+- tools: explicitly specify "setup" subcommand (RHEL-30372)
+- fuzz: pass -Dc_args=/-Dcpp_args= to fuzzer targets (RHEL-30372)
+- fuzz: don't panic without a C++ compiler (RHEL-30372)
+- meson: use ternary op for brevity (RHEL-30372)
+
+* Thu Jun 13 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-37
+- ci(src-git): add RHEL-9.1 and RHEL-9.1.z to allowed versions (RHEL-30372)
+- libsystemd: link with '-z nodelete' (RHEL-6589)
+- basic/utf8: make utf8_encoded_to_unichar() return length of the codepoint (RHEL-31219)
+- test-gunicode: add new test to show that unichar_iswide() is borked (RHEL-31219)
+- string-util: pass ANSI sequences through unchanged (RHEL-31219)
+- cryptsetup: do not assert when unsealing token without salt (RHEL-38864)
+- cryptsetup: check the existence of salt by salt_size > 0 (RHEL-38864)
+- core/mount: if umount(8) fails but mount disappeared, assume success (RHEL-13159)
+- Drop log level of header limits log message (RHEL-33890)
+- journal: do not rotate unrelated journal files when full or corrupted (RHEL-33890)
+- man: suffix --unit with an equal sign, since it expects an argument (RHEL-31070)
+- shared: move uid-alloc-range.[ch] from src/shared/ → src/basic/ (RHEL-31070)
+- journald: move uid_for_system_journal() to uid-alloc-range.h (RHEL-31070)
+- sd-journal: when SD_JOURNAL_CURRENT_USER is set, and called from system UID, imply SD_JOURNAL_SYSTEM (RHEL-31070)
+- man: document that journalctl --user requires Storage=persistent (RHEL-31070)
+- fix: prefix of dmesg pstore files (RHEL-20322)
+- backport new mkosi (RHEL-27512)
+- test: Skip various tests when /sys is not mounted (RHEL-27512)
+- string-util: introduce ascii_ishex() (RHEL-27512)
+- sd-id128: several cleanups (RHEL-27512)
+- sd-id128: make id128_read() or friends return -ENOPKG when the file contents is "uninitialized" (RHEL-27512)
+- test: add tests for "uninitialized" string handling by id128_read_fd() (RHEL-27512)
+- man: mention sd_id128_get_machine() or friend may return -ENOPKG (RHEL-27512)
+- sd-id128: make sd_id128_get_boot() and friend return -ENOMEDIUM (RHEL-27512)
+- sd-id128: make sd_id128_get_boot() and friend return -ENOSYS when /proc/ is not mounted (RHEL-27512)
+- man: mention that sd_id128_get_boot() and friend may return -ENOSYS (RHEL-27512)
+- sd-id128: fold do_sync flag into Id128FormatFlag (RHEL-27512)
+- sd-id128: make sd_id128_get_machine() or friends return -EUCLEAN when an ID is in an invalid format (RHEL-27512)
+- sd-id128: allow sd_id128_get_machine() and friend to be called with NULL (RHEL-27512)
+- sd-id128: also refuse an empty invocation ID (RHEL-27512)
+- man: update documents for sd_id128_get_invocation() (RHEL-27512)
+- test-id128: simplify machine-id check (RHEL-27512)
+- test-fs-util: skip part of test_chase_symlinks if machine-id is not initialized (RHEL-27512)
+- test-unit-name: simplify machine-id check (RHEL-27512)
+- test-load-fragment: simplify machine-id check (RHEL-27512)
+- journal: skip part of test-journal-interleaving if no machine-id exists (RHEL-27512)
+- test: skip journal tests without valid /etc/machine-id (RHEL-27512)
+- test-recurse-dir: work around nftw() ignoring symlinks() (RHEL-27512)
+- test: Skip test-recurse-dir on overlayfs (RHEL-27512)
+- test-specifier: Ignore -ENOPKG from specifier_printf() (RHEL-27512)
+- test-execute: Skip when /sys is read-only (RHEL-27512)
+- kernel-install: Make sure KERNEL_INSTALL_BYPASS is disabled in tests (RHEL-27512)
+- tools: make sure $KERNEL_INSTALL_BYPASS is disabled when checking help (RHEL-27512)
+- test-execute: drop capabilities when testing with user manager (RHEL-27512)
+- tmpfiles: Add merge support for copy files action (RHEL-27512)
+- generator: add generator_open_unit_file_full to allow creating temporary units (RHEL-27512)
+- network-generator: rewrite unit if it already exists and its content changed (RHEL-27512)
+- ci: drop super-linter's shellcheck (RHEL-27512)
+- mkosi: make sure we build & use RHEL 9 stuff (RHEL-27512)
+- ci: backport mkosi CI configuration from upstream (RHEL-27512)
+- mkosi: explicitly enroll SecureBoot keys (RHEL-27512)
+- test-execute: also mount tmpfs on /dev/shm (RHEL-27512)
+- mkosi: fix UKI addons test (RHEL-27512)
+- Revert "mkosi: Disable cmdline addon test for now" (RHEL-27512)
+- Revert "mkosi: Don't fail on systemd-vconsole-setup.service failure for now" (RHEL-27512)
+- mkosi: make shellcheck happy (RHEL-27512)
+- mkosi: use pesign for signing UKI addons (RHEL-27512)
+- test: copy out the necessary test data before we start overmounting stuff (RHEL-27512)
+- ci: make the build dir accessible when running w/o privileges (RHEL-27512)
+- ci: explicitly change oom-{score}-adj before running tests (RHEL-27512)
+- ratelimit: add ratelimit_left helper (RHEL-35703)
+- manager: restrict Dump*() to privileged callers or ratelimit (RHEL-35703)
+- ci: define `runas` function inline (RHEL-35703)
+- Drop /dev test in test-mountpoint-util (RHEL-30372)
+- core/manager: export manager_dbus_is_running (RHEL-40878)
+- core: refuse dbus activation if dbus is not running (RHEL-40878)
+- core: only refuse Type=dbus service enqueuing if dbus has stop job (RHEL-40878)
+- Revert "core/manager: export manager_dbus_is_running" and partially "core: refuse dbus activation if dbus is not running" (RHEL-40878)
+- manager: fix reloading in reload-or-restart --marked (RHEL-40878)
+- rpm: add `systemd_postun_with_reload` and `systemd_user_postun_with_reload` (RHEL-40878)
+- rpm: add `systemd_user_daemon_reexec` (RHEL-40878)
+
+* Wed May 22 2024 Jan Macku <jamacku@redhat.com> - 252-35
+- spec: return selinux dependencies (RHEL-35732)
+
+* Mon May 20 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-34
+- ci: update actions/upload-artifact to v4 (RHEL-30372)
+- journal-remote: code is of type enum MHD_RequestTerminationCode (RHEL-30372)
+- resolve: dns_server_feature_level_*_string type is DnsServerFeatureLevel (RHEL-30372)
+- shared|install: Use InstallChangeType consistently (RHEL-30372)
+- test: temporarily disable coredumps in testsuite-17.03.sh (RHEL-30372)
+- ci: update manpage deployment workflow (RHEL-30372)
+- bootspec: fix null-dereference-read (RHEL-36284)
+- units: don't install pcrphase-related units without gnu-efi (RHEL-33384)
+- kernel-install: fix uki-copy deinstall (RHEL-36505)
+- ci(packit): explicitly clone `c9s` branch (RHEL-30372)
+
+* Fri Apr 26 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-33
+- execute: Pass AT_FDCWD instead of -1 (RHEL-31783)
+- ci(src-git): update list of supported products (RHEL-30372)
+- coredump: by default process and store core files up to 1GiB (RHEL-15501)
+- coredump: keep core files for two weeks (RHEL-15501)
+- ukify: make the test happy with the latest OpenSSL (RHEL-30372)
+- test_ukify: use raw string for the regex (RHEL-30372)
+- coredump: generate stacktraces also for processes running in containers w/o coredump forwarding (RHEL-29430)
+- test: add a couple of tests for systemd-coredump (RHEL-29430)
+- test: don't expand the subshell expression prematurely (RHEL-29430)
+- coredump filter: fix stack overflow with =all (RHEL-29430)
+- coredump filter: add mask for 'all' using UINT32_MAX, not UINT64_MAX (RHEL-29430)
+- test: add coverage for CoredumpFilter=all (RHEL-29430)
+- test: rotate journal before storing coredumps (RHEL-29430)
+- test: sync with the fake binary before killing it (RHEL-29430)
+- test: check coredump handling in containers & namespaces (RHEL-29430)
 
 * Mon Mar 18 2024 Jan Macku <jamacku@redhat.com> - 252-32
 - rebase rhel-net-naming-sysattrs to v0.5

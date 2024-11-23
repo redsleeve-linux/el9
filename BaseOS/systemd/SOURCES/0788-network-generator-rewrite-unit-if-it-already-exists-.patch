@@ -1,0 +1,142 @@
+From 8d7665b3e327deb0868b97a159acfdb266a6a5e9 Mon Sep 17 00:00:00 2001
+From: Antonio Alvarez Feijoo <antonio.feijoo@suse.com>
+Date: Mon, 10 Apr 2023 15:18:53 +0200
+Subject: [PATCH] network-generator: rewrite unit if it already exists and its
+ content changed
+
+When the `systemd-network-generator` is included in the initrd and runs from
+there first, the next times it runs after switching to real root it
+thinks there is a duplicate entry on the kernel command line.
+
+This patch rewrites the unit file if the content has changed, instead of
+displaying an error message.
+
+(cherry picked from commit f3e4d04298bb73b836dd7ca90f7c7b09de1e776b)
+
+Related: RHEL-27512
+---
+ src/network/generator/main.c | 55 ++++++++++++++++++++++++++++--------
+ 1 file changed, 43 insertions(+), 12 deletions(-)
+
+diff --git a/src/network/generator/main.c b/src/network/generator/main.c
+index a36fe98c86..2574bc1136 100644
+--- a/src/network/generator/main.c
++++ b/src/network/generator/main.c
+@@ -3,6 +3,7 @@
+ #include <getopt.h>
+ 
+ #include "fd-util.h"
++#include "fs-util.h"
+ #include "generator.h"
+ #include "macro.h"
+ #include "main-func.h"
+@@ -16,67 +17,97 @@
+ static const char *arg_root = NULL;
+ 
+ static int network_save(Network *network, const char *dest_dir) {
+-        _cleanup_free_ char *filename = NULL;
++        _cleanup_free_ char *filename = NULL, *p = NULL;
++        _cleanup_(unlink_and_freep) char *temp_path = NULL;
+         _cleanup_fclose_ FILE *f = NULL;
+         int r;
+ 
+         assert(network);
+ 
++        r = generator_open_unit_file_full(dest_dir, NULL, NULL, &f, &temp_path);
++        if (r < 0)
++                return r;
++
++        network_dump(network, f);
++
+         r = asprintf(&filename, "%s-%s.network",
+                      isempty(network->ifname) ? "91" : "90",
+                      isempty(network->ifname) ? "default" : network->ifname);
+         if (r < 0)
+                 return log_oom();
+ 
+-        r = generator_open_unit_file(dest_dir, "kernel command line", filename, &f);
++        p = path_join(dest_dir, filename);
++        if (!p)
++                return log_oom();
++
++        r = conservative_rename(temp_path, p);
+         if (r < 0)
+                 return r;
+ 
+-        network_dump(network, f);
+-
++        temp_path = mfree(temp_path);
+         return 0;
+ }
+ 
+ static int netdev_save(NetDev *netdev, const char *dest_dir) {
+-        _cleanup_free_ char *filename = NULL;
++        _cleanup_free_ char *filename = NULL, *p = NULL;
++        _cleanup_(unlink_and_freep) char *temp_path = NULL;
+         _cleanup_fclose_ FILE *f = NULL;
+         int r;
+ 
+         assert(netdev);
+ 
++        r = generator_open_unit_file_full(dest_dir, NULL, NULL, &f, &temp_path);
++        if (r < 0)
++                return r;
++
++        netdev_dump(netdev, f);
++
+         r = asprintf(&filename, "90-%s.netdev",
+                      netdev->ifname);
+         if (r < 0)
+                 return log_oom();
+ 
+-        r = generator_open_unit_file(dest_dir, "kernel command line", filename, &f);
++        p = path_join(dest_dir, filename);
++        if (!p)
++                return log_oom();
++
++        r = conservative_rename(temp_path, p);
+         if (r < 0)
+                 return r;
+ 
+-        netdev_dump(netdev, f);
+-
++        temp_path = mfree(temp_path);
+         return 0;
+ }
+ 
+ static int link_save(Link *link, const char *dest_dir) {
+-        _cleanup_free_ char *filename = NULL;
++        _cleanup_free_ char *filename = NULL, *p = NULL;
++        _cleanup_(unlink_and_freep) char *temp_path = NULL;
+         _cleanup_fclose_ FILE *f = NULL;
+         int r;
+ 
+         assert(link);
+ 
++        r = generator_open_unit_file_full(dest_dir, NULL, NULL, &f, &temp_path);
++        if (r < 0)
++                return r;
++
++        link_dump(link, f);
++
+         filename = strjoin(!isempty(link->ifname) ? "90" :
+                            !hw_addr_is_null(&link->mac) ? "91" : "92",
+                            "-", link->filename, ".link");
+         if (!filename)
+                 return log_oom();
+ 
+-        r = generator_open_unit_file(dest_dir, "kernel command line", filename, &f);
++        p = path_join(dest_dir, filename);
++        if (!p)
++                return log_oom();
++
++        r = conservative_rename(temp_path, p);
+         if (r < 0)
+                 return r;
+ 
+-        link_dump(link, f);
+-
++        temp_path = mfree(temp_path);
+         return 0;
+ }
+ 

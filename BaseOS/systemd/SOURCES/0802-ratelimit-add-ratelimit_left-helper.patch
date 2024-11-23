@@ -1,0 +1,49 @@
+From 90c92458355a64d96f3167bcb510f690446bd76a Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Fri, 28 Apr 2023 13:10:23 +0100
+Subject: [PATCH] ratelimit: add ratelimit_left helper
+
+(cherry picked from commit 53d6987f9e46927bbc9ad683c091c070ebe06658)
+
+Resolves: RHEL-35703
+---
+ src/basic/ratelimit.c | 17 +++++++++++++++++
+ src/basic/ratelimit.h |  3 +++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/src/basic/ratelimit.c b/src/basic/ratelimit.c
+index c16c8f7103..134ed7c2d8 100644
+--- a/src/basic/ratelimit.c
++++ b/src/basic/ratelimit.c
+@@ -43,3 +43,20 @@ unsigned ratelimit_num_dropped(RateLimit *r) {
+ 
+         return r->num > r->burst ? r->num - r->burst : 0;
+ }
++
++usec_t ratelimit_end(const RateLimit *rl) {
++        assert(rl);
++        if (rl->begin == 0)
++                return 0;
++
++        return usec_add(rl->begin, rl->interval);
++}
++
++usec_t ratelimit_left(const RateLimit *rl) {
++        assert(rl);
++
++        if (rl->begin == 0)
++                return 0;
++
++        return usec_sub_unsigned(ratelimit_end(rl), now(CLOCK_MONOTONIC));
++}
+diff --git a/src/basic/ratelimit.h b/src/basic/ratelimit.h
+index 2236189851..bb7160a895 100644
+--- a/src/basic/ratelimit.h
++++ b/src/basic/ratelimit.h
+@@ -23,3 +23,6 @@ static inline bool ratelimit_configured(RateLimit *rl) {
+ bool ratelimit_below(RateLimit *r);
+ 
+ unsigned ratelimit_num_dropped(RateLimit *r);
++
++usec_t ratelimit_end(const RateLimit *rl);
++usec_t ratelimit_left(const RateLimit *rl);

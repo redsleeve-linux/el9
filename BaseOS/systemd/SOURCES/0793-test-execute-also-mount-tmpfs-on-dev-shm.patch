@@ -1,0 +1,37 @@
+From ad27f1973d24a051ddfc80efcd00446eddf4380d Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 17 Feb 2023 10:21:58 +0900
+Subject: [PATCH] test-execute: also mount tmpfs on /dev/shm
+
+Otherwise, if /dev/shm has a directory that cannot be accessible by
+unprivileged user, then we cannot pick a dynamic user, and test service
+may fail with unexpected error code:
+---
+Failed to enter shared memory directory /dev/shm/systemd-watch-bind-BqAGlN: Permission denied
+exec-dynamicuser-supplementarygroups.service: Failed to update dynamic user credentials: Device or resource busy
+exec-dynamicuser-supplementarygroups.service: Failed at step USER spawning /bin/sh: Device or resource busy
+src/test/test-execute.c:885:test_exec_dynamicuser: exec-dynamicuser-supplementarygroups.service: can_unshare=no: exit status 217, expected 216
+---
+
+Follow-up for 4e032f654b94c2544ccf937209303766dfa66c24.
+
+(cherry picked from commit d51e31ac4197d971a468ff41f15593bb6fdb29f3)
+
+Related: RHEL-27512
+---
+ src/test/test-execute.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index 665ae8a833..f37da945b6 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -1262,7 +1262,7 @@ static int prepare_ns(const char *process_name) {
+                 assert_se(mkdir_p(PRIVATE_UNIT_DIR, 0755) >= 0);
+ 
+                 /* Mount tmpfs on the following directories to make not StateDirectory= or friends disturb the host. */
+-                FOREACH_STRING(p, "/root", "/tmp", "/var/tmp", "/var/lib", PRIVATE_UNIT_DIR)
++                FOREACH_STRING(p, "/dev/shm", "/root", "/tmp", "/var/tmp", "/var/lib", PRIVATE_UNIT_DIR)
+                         assert_se(mount_nofollow_verbose(LOG_DEBUG, "tmpfs", p, "tmpfs", MS_NOSUID|MS_NODEV, NULL) >= 0);
+ 
+                 /* Copy unit files to make them accessible even when unprivileged. */

@@ -1,0 +1,39 @@
+From 5bc5e4eccfccb2935ededa6976d3346b1b6fbdaf Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 6 Mar 2024 15:04:22 +0100
+Subject: [PATCH] ci: make the build dir accessible when running w/o privileges
+
+Otherwise the unprivileged part of test-execute gets silently skipped:
+
+/* test_run_tests_unprivileged */
+Successfully forked off '(test-execute-unprivileged)' as PID 20998.
+...
+pin_callout_binary: build dir binary: /home/runner/work/systemd/systemd/build/systemd-executor
+pin_callout_binary: open(/home/runner/work/systemd/systemd/build/systemd-executor)=-13
+Failed to pin executor binary: No such file or directory
+(test-execute-unprivileged): manager_new, skipping tests: No such file or directory
+(test-execute-unprivileged) succeeded.
+
+(cherry picked from commit c538fecc617d7a5fe0048b1df49f69dead92353f)
+
+Related: RHEL-27512
+---
+ .github/workflows/unit_tests.sh | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/.github/workflows/unit_tests.sh b/.github/workflows/unit_tests.sh
+index 9a9fbb36ab..cb8ea332aa 100755
+--- a/.github/workflows/unit_tests.sh
++++ b/.github/workflows/unit_tests.sh
+@@ -52,6 +52,11 @@ for phase in "${PHASES[@]}"; do
+             apt-get -y build-dep systemd
+             apt-get -y install "${ADDITIONAL_DEPS[@]}"
+             pip3 install -r .github/workflows/requirements.txt --require-hashes
++
++            # Make sure the build dir is accessible even when drop privileges, otherwise the unprivileged
++            # part of test-execute gets skipped, since it can't run systemd-executor
++            chmod o+x /home/runner
++            capsh --drop=all -- -c "stat $PWD/meson.build"
+             ;;
+         RUN|RUN_GCC|RUN_CLANG|RUN_CLANG_RELEASE)
+             if [[ "$phase" =~ ^RUN_CLANG ]]; then

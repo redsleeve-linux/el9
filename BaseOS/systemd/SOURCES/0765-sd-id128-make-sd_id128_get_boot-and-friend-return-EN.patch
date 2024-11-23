@@ -1,0 +1,27 @@
+From 5e97c9d10934b54dfb93a4d236dd3a9c92840f26 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 8 Dec 2022 15:48:25 +0900
+Subject: [PATCH] sd-id128: make sd_id128_get_boot() and friend return
+ -ENOMEDIUM
+
+(cherry picked from commit 9be90c401e16cf04a9cea0b19fdefa7d0a47f056)
+
+Related: RHEL-27512
+---
+ src/libsystemd/sd-id128/sd-id128.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
+index 5e9ec2b5f6..bff8074f19 100644
+--- a/src/libsystemd/sd-id128/sd-id128.c
++++ b/src/libsystemd/sd-id128/sd-id128.c
+@@ -149,6 +149,9 @@ _public_ int sd_id128_get_boot(sd_id128_t *ret) {
+                 r = id128_read("/proc/sys/kernel/random/boot_id", ID128_FORMAT_UUID, &saved_boot_id);
+                 if (r < 0)
+                         return r;
++
++                if (sd_id128_is_null(saved_boot_id))
++                        return -ENOMEDIUM;
+         }
+ 
+         *ret = saved_boot_id;

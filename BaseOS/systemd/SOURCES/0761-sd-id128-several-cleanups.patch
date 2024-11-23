@@ -1,0 +1,207 @@
+From 961b82ca7bd6a14fb564a63ae37c6c2af0d87d89 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 8 Dec 2022 14:20:03 +0900
+Subject: [PATCH] sd-id128: several cleanups
+
+- use SD_ID128_STRING_MAX or friend,
+- use sizeof(sd_id128_t),
+- use newly introduced ascii_ishex().
+
+(cherry picked from commit 28bf2de201e890193b57accbf736c7d3d82d813a)
+
+Related: RHEL-27512
+---
+ src/libsystemd/sd-id128/id128-util.c | 58 ++++++++++------------------
+ src/libsystemd/sd-id128/sd-id128.c   | 21 +++++-----
+ 2 files changed, 33 insertions(+), 46 deletions(-)
+
+diff --git a/src/libsystemd/sd-id128/id128-util.c b/src/libsystemd/sd-id128/id128-util.c
+index cef340f3bc..2ec77bb9f3 100644
+--- a/src/libsystemd/sd-id128/id128-util.c
++++ b/src/libsystemd/sd-id128/id128-util.c
+@@ -13,50 +13,35 @@
+ #include "sync-util.h"
+ 
+ bool id128_is_valid(const char *s) {
+-        size_t i, l;
++        size_t l;
+ 
+         assert(s);
+ 
+         l = strlen(s);
+-        if (l == 32) {
+ 
++        if (l == SD_ID128_STRING_MAX - 1)
+                 /* Plain formatted 128bit hex string */
++                return in_charset(s, HEXDIGITS);
+ 
+-                for (i = 0; i < l; i++) {
+-                        char c = s[i];
+-
+-                        if (!ascii_isdigit(c) &&
+-                            !(c >= 'a' && c <= 'f') &&
+-                            !(c >= 'A' && c <= 'F'))
+-                                return false;
+-                }
+-
+-        } else if (l == 36) {
+-
++        if (l == SD_ID128_UUID_STRING_MAX - 1) {
+                 /* Formatted UUID */
+-
+-                for (i = 0; i < l; i++) {
++                for (size_t i = 0; i < l; i++) {
+                         char c = s[i];
+ 
+                         if (IN_SET(i, 8, 13, 18, 23)) {
+                                 if (c != '-')
+                                         return false;
+-                        } else {
+-                                if (!ascii_isdigit(c) &&
+-                                    !(c >= 'a' && c <= 'f') &&
+-                                    !(c >= 'A' && c <= 'F'))
+-                                        return false;
+-                        }
++                        } else if (!ascii_ishex(c))
++                                return false;
+                 }
++                return true;
++        }
+ 
+-        } else
+-                return false;
+-
+-        return true;
++        return false;
+ }
+ 
+ int id128_read_fd(int fd, Id128Format f, sd_id128_t *ret) {
+-        char buffer[36 + 2];
++        char buffer[SD_ID128_UUID_STRING_MAX + 1]; /* +1 is for trailing newline */
+         ssize_t l;
+ 
+         assert(fd >= 0);
+@@ -80,28 +65,28 @@ int id128_read_fd(int fd, Id128Format f, sd_id128_t *ret) {
+                 /* Treat an "uninitialized" id file like an empty one */
+                 return f == ID128_PLAIN_OR_UNINIT && strneq(buffer, "uninitialized\n", l) ? -ENOMEDIUM : -EINVAL;
+ 
+-        case 33: /* plain UUID with trailing newline */
+-                if (buffer[32] != '\n')
++        case SD_ID128_STRING_MAX: /* plain UUID with trailing newline */
++                if (buffer[SD_ID128_STRING_MAX-1] != '\n')
+                         return -EINVAL;
+ 
+                 _fallthrough_;
+-        case 32: /* plain UUID without trailing newline */
++        case SD_ID128_STRING_MAX-1: /* plain UUID without trailing newline */
+                 if (f == ID128_UUID)
+                         return -EINVAL;
+ 
+-                buffer[32] = 0;
++                buffer[SD_ID128_STRING_MAX-1] = 0;
+                 break;
+ 
+-        case 37: /* RFC UUID with trailing newline */
+-                if (buffer[36] != '\n')
++        case SD_ID128_UUID_STRING_MAX: /* RFC UUID with trailing newline */
++                if (buffer[SD_ID128_UUID_STRING_MAX-1] != '\n')
+                         return -EINVAL;
+ 
+                 _fallthrough_;
+-        case 36: /* RFC UUID without trailing newline */
++        case SD_ID128_UUID_STRING_MAX-1: /* RFC UUID without trailing newline */
+                 if (IN_SET(f, ID128_PLAIN, ID128_PLAIN_OR_UNINIT))
+                         return -EINVAL;
+ 
+-                buffer[36] = 0;
++                buffer[SD_ID128_UUID_STRING_MAX-1] = 0;
+                 break;
+ 
+         default:
+@@ -122,7 +107,7 @@ int id128_read(const char *p, Id128Format f, sd_id128_t *ret) {
+ }
+ 
+ int id128_write_fd(int fd, Id128Format f, sd_id128_t id, bool do_sync) {
+-        char buffer[36 + 2];
++        char buffer[SD_ID128_UUID_STRING_MAX + 1]; /* +1 is for trailing newline */
+         size_t sz;
+         int r;
+ 
+@@ -131,14 +116,13 @@ int id128_write_fd(int fd, Id128Format f, sd_id128_t id, bool do_sync) {
+ 
+         if (f != ID128_UUID) {
+                 assert_se(sd_id128_to_string(id, buffer));
+-                buffer[SD_ID128_STRING_MAX - 1] = '\n';
+                 sz = SD_ID128_STRING_MAX;
+         } else {
+                 assert_se(sd_id128_to_uuid_string(id, buffer));
+-                buffer[SD_ID128_UUID_STRING_MAX - 1] = '\n';
+                 sz = SD_ID128_UUID_STRING_MAX;
+         }
+ 
++        buffer[sz - 1] = '\n';
+         r = loop_write(fd, buffer, sz, false);
+         if (r < 0)
+                 return r;
+diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
+index 709c8ffb57..07a13be2b2 100644
+--- a/src/libsystemd/sd-id128/sd-id128.c
++++ b/src/libsystemd/sd-id128/sd-id128.c
+@@ -19,14 +19,17 @@
+ #include "util.h"
+ 
+ _public_ char *sd_id128_to_string(sd_id128_t id, char s[_SD_ARRAY_STATIC SD_ID128_STRING_MAX]) {
++        size_t k = 0;
++
+         assert_return(s, NULL);
+ 
+-        for (size_t n = 0; n < 16; n++) {
+-                s[n*2] = hexchar(id.bytes[n] >> 4);
+-                s[n*2+1] = hexchar(id.bytes[n] & 0xF);
++        for (size_t n = 0; n < sizeof(sd_id128_t); n++) {
++                s[k++] = hexchar(id.bytes[n] >> 4);
++                s[k++] = hexchar(id.bytes[n] & 0xF);
+         }
+ 
+-        s[SD_ID128_STRING_MAX-1] = 0;
++        assert(k == SD_ID128_STRING_MAX - 1);
++        s[k] = 0;
+ 
+         return s;
+ }
+@@ -38,7 +41,7 @@ _public_ char *sd_id128_to_uuid_string(sd_id128_t id, char s[_SD_ARRAY_STATIC SD
+ 
+         /* Similar to sd_id128_to_string() but formats the result as UUID instead of plain hex chars */
+ 
+-        for (size_t n = 0; n < 16; n++) {
++        for (size_t n = 0; n < sizeof(sd_id128_t); n++) {
+ 
+                 if (IN_SET(n, 4, 6, 8, 10))
+                         s[k++] = '-';
+@@ -53,14 +56,14 @@ _public_ char *sd_id128_to_uuid_string(sd_id128_t id, char s[_SD_ARRAY_STATIC SD
+         return s;
+ }
+ 
+-_public_ int sd_id128_from_string(const char s[], sd_id128_t *ret) {
+-        unsigned n, i;
++_public_ int sd_id128_from_string(const char *s, sd_id128_t *ret) {
++        size_t n, i;
+         sd_id128_t t;
+         bool is_guid = false;
+ 
+         assert_return(s, -EINVAL);
+ 
+-        for (n = 0, i = 0; n < 16;) {
++        for (n = 0, i = 0; n < sizeof(sd_id128_t);) {
+                 int a, b;
+ 
+                 if (s[i] == '-') {
+@@ -90,7 +93,7 @@ _public_ int sd_id128_from_string(const char s[], sd_id128_t *ret) {
+                 t.bytes[n++] = (a << 4) | b;
+         }
+ 
+-        if (i != (is_guid ? 36 : 32))
++        if (i != (is_guid ? SD_ID128_UUID_STRING_MAX : SD_ID128_STRING_MAX) - 1)
+                 return -EINVAL;
+ 
+         if (s[i] != 0)

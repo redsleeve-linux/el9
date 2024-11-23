@@ -1,0 +1,61 @@
+From aebccdd0e7e1ff20de879ff8c30c3bced47b12bb Mon Sep 17 00:00:00 2001
+From: "Derek J. Clark" <derekjohn.clark@gmail.com>
+Date: Mon, 17 Jun 2024 17:19:30 -0700
+Subject: [PATCH] hwdb: add scancodes for AYANEO devices (#33378)
+
+AYANEO has multiple models that all use the same AT Translated Set
+2 Keyboard device with 3-4 buttons available. Starting with the
+AYANEO 2 there was a change to the IMU programming they were using
+that caused the scancodes to no longer present the correct values
+in Linux. This change adds a blanket scancode mapping to present
+the correct keycodes as designed by the OEM.
+
+In some cases a kernel bug will cause the AT Translated Set 2
+Keyboard to present as an AT Raw Set 2 keyboard. I have also
+adjusted the scancodes for this scenario as well so they are
+in line with expected behavior. Currently only the Kun is still
+experiencing this bug.
+
+Example userspace tool refs:
+https://github.com/ShadowBlip/InputPlumber/blob/main/rootfs/usr/lib/udev/hwdb.d/59-inputplumber.hwdb
+https://github.com/ShadowBlip/HandyGCCS/blob/main/usr/lib/udev/hwdb.d/59-handygccs-ayaneo.hwdb
+https://github.com/hhd-dev/hhd/tree/master/usr/lib/udev/hwdb.d
+
+(cherry picked from commit 25dcd9a348a8360a4c842be5f0b1f153bde926c1)
+
+Related: RHEL-5950
+---
+ hwdb.d/60-keyboard.hwdb | 20 ++++++++++++++++----
+ 1 file changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/hwdb.d/60-keyboard.hwdb b/hwdb.d/60-keyboard.hwdb
+index f1ea0f58b1..d271f17005 100644
+--- a/hwdb.d/60-keyboard.hwdb
++++ b/hwdb.d/60-keyboard.hwdb
+@@ -290,10 +290,22 @@ evdev:name:gpio-keys:phys:gpio-keys/input0:ev:100003:dmi:*:svnASUSTeKCOMPUTERINC
+ # All four of these buttons generate a multi-scancode sequence
+ # consisting of Left_Meta, Right_Ctrl and another scancode.
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnAYANEO:pnKUN:pvr*
+- KEYBOARD_KEY_18=f13                              # LC (next to the left shoulder button)
+- KEYBOARD_KEY_20=f14                              # RC (next to the right shoulder button)
+- KEYBOARD_KEY_30=f15                              # Start (upper-right corner of screen)
+- KEYBOARD_KEY_28=f16                              # Ayaneo (lower-right corner of screen)
++ KEYBOARD_KEY_18=f15                              # LC (next to the left shoulder button)
++ KEYBOARD_KEY_20=f16                              # RC (next to the right shoulder button)
++ KEYBOARD_KEY_28=f17                              # Ayaneo (lower-right corner of screen)
++ KEYBOARD_KEY_30=f18                              # Touchpad Mode (top-right corner of screen)
++
++# Most AYANEO devices expose an AT Translated Set 2 Keyboard
++# for either three or four additional buttons not available
++# on the Xbox360 controller. These buttons all generate a
++# multi-scancode sequence. The specific preceding codes
++# depend on the model, but the final scancode is always the
++# same.
++evdev:name:AT Translated Set 2 keyboard:dmi:*:svnAYANEO:*
++ KEYBOARD_KEY_66=f15                            # LC (All models)
++ KEYBOARD_KEY_67=f16                            # RC (All models)
++ KEYBOARD_KEY_68=f17                            # Ayaneo (All models)
++ KEYBOARD_KEY_69=f18                            # Touchpad Mode (Kun only)
+ 
+ ###########################################################
+ # BenQ

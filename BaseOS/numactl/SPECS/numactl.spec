@@ -1,17 +1,17 @@
 Name:		numactl
 Summary:	Library for tuning for Non Uniform Memory Access machines
-Version:	2.0.16
-Release:	3%{dist}.redsleeve
+Version:	2.0.18
+Release:	2%{dist}
 # libnuma is LGPLv2 and GPLv2
 # numactl binaries are GPLv2 only
-License:	GPLv2
+License:	LGPL-2.1-only and GPL-2.0-only
 URL:		https://github.com/numactl/numactl
 Source0:	%{url}/releases/download/v%{version}/%{name}-%{version}.tar.gz
 
 BuildRequires: make
 BuildRequires:	libtool automake autoconf
 
-ExcludeArch: s390
+ExcludeArch: s390 %{arm}
 
 #START INSERT
 #
@@ -37,7 +37,16 @@ ExcludeArch: s390
 #
 # Patches 601 onward are generic patches
 #
-Patch601: 0001-fix-typo-in-memhog.8.patch
+#Patch601: 0001-fix-typo-in-memhog.8.patch
+Patch601: 0001-Fix-fallback-for-set_mempolicy_home_node-syscall.patch
+Patch602: 0002-Add-w-and-weighted-interleave-for-weighted-interleav.patch
+Patch603: 0003-numademo-Fix-the-using-of-the-uninitialized-value.patch
+Patch604: 0004-numactl-Fix-RESOURCE_LEAK-in-show.patch
+Patch605: 0005-numactl-Add-documentation-for-weighted-interleave.patch
+Patch606: 0006-Don-t-fail-build-when-set_mempolicy_home_node-syscal.patch
+Patch607: 0007-numastat-eliminate-hard-coded-tables.patch
+Patch608: 0008-Update-numactl.c.patch
+
 
 
 %description
@@ -47,7 +56,7 @@ other programs with a specific NUMA policy.
 %package libs
 Summary: libnuma libraries
 # There is a tiny bit of GPLv2 code in libnuma.c
-License: LGPLv2 and GPLv2
+License: LGPL-2.1-only and GPL-2.0-only
 
 %description libs
 numactl-libs provides libnuma, a library to do allocations with
@@ -56,7 +65,7 @@ NUMA policy in applications.
 %package devel
 Summary: Development package for building Applications that use numa
 Requires: %{name}-libs = %{version}-%{release}
-License: LGPLv2 and GPLv2
+License: LGPL-2.1-only and GPL-2.0-only
 
 %description devel
 Provides development headers for numa library calls
@@ -64,8 +73,6 @@ Provides development headers for numa library calls
 %prep
 %autosetup
 
-#patch
-#%patch601 -p1
 
 %build
 %configure --prefix=/usr --libdir=%{_libdir}
@@ -108,8 +115,8 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man3/*.3*
 
 %changelog
-* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org>  2.0.16-2.redsleeve
-- remove %{arm} from excludearchs
+* Tue Jul 30 2024 Pingfan Liu <piliu@redhat.com> - 2.0.18-1
+- rebase to v2.0.18
 
 * Thu Sep 14 2023 Pingfan Liu <piliu@redhat.com> - 2.0.16-2
 - fix typo in memhog.8

@@ -1,0 +1,111 @@
+From 80b1fd81ec483b57444572f957e38b5fea5b3db6 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 27 Feb 2024 16:10:37 +0100
+Subject: [PATCH] test: skip journal tests without valid /etc/machine-id
+
+The journal stuff in RHEL 9 can't handle existing but uninitialized
+/etc/machine-id and backporting all the necessary changes would mean
+pulling in another 50+ commits (I stopped after 50, so it's probably
+much more). And to make matters worse, upstream renamed
+chase_symlinks*() stuff to chase_*(), which makes the backports even
+more painful (and risky).
+
+Related PRs:
+  - https://github.com/systemd/systemd/pull/25734/commits
+  - https://github.com/systemd/systemd/pull/27137/commits
+  - https://github.com/systemd/systemd/pull/27122/commits
+
+RHEL-only
+
+Related: RHEL-27512
+---
+ src/journal/test-journal-flush.c        | 14 +++++++++++++-
+ src/journal/test-journal-interleaving.c |  2 +-
+ src/journal/test-journal-stream.c       |  2 +-
+ src/journal/test-journal-verify.c       |  4 ++++
+ src/journal/test-journal.c              |  2 +-
+ 5 files changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/src/journal/test-journal-flush.c b/src/journal/test-journal-flush.c
+index 2a5f7fad5e..4b52544e7f 100644
+--- a/src/journal/test-journal-flush.c
++++ b/src/journal/test-journal-flush.c
+@@ -16,6 +16,8 @@
+ #include "string-util.h"
+ #include "tests.h"
+ 
++static bool arg_keep = false;
++
+ static void test_journal_flush_one(int argc, char *argv[]) {
+         _cleanup_(mmap_cache_unrefp) MMapCache *m = NULL;
+         _cleanup_free_ char *fn = NULL;
+@@ -117,4 +119,14 @@ TEST(journal_flush_compact) {
+         test_journal_flush_one(saved_argc, saved_argv);
+ }
+ 
+-DEFINE_TEST_MAIN(LOG_INFO);
++static int intro(void) {
++        arg_keep = saved_argc > 1;
++
++        /* managed_journal_file_open requires a valid machine id */
++        if (sd_id128_get_machine(NULL) < 0)
++                return log_tests_skipped("/etc/machine-id not found");
++
++        return EXIT_SUCCESS;
++}
++
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_DEBUG, intro);
+diff --git a/src/journal/test-journal-interleaving.c b/src/journal/test-journal-interleaving.c
+index e05eae034b..56b2489277 100644
+--- a/src/journal/test-journal-interleaving.c
++++ b/src/journal/test-journal-interleaving.c
+@@ -306,7 +306,7 @@ TEST(sequence_numbers) {
+ 
+ static int intro(void) {
+         /* managed_journal_file_open requires a valid machine id */
+-        if (access("/etc/machine-id", F_OK) != 0)
++        if (sd_id128_get_machine(NULL) < 0)
+                 return log_tests_skipped("/etc/machine-id not found");
+ 
+         arg_keep = saved_argc > 1;
+diff --git a/src/journal/test-journal-stream.c b/src/journal/test-journal-stream.c
+index ac5b7f0005..fe4bc40eaa 100644
+--- a/src/journal/test-journal-stream.c
++++ b/src/journal/test-journal-stream.c
+@@ -179,7 +179,7 @@ static void run_test(void) {
+ int main(int argc, char *argv[]) {
+ 
+         /* managed_journal_file_open requires a valid machine id */
+-        if (access("/etc/machine-id", F_OK) != 0)
++        if (sd_id128_get_machine(NULL) < 0)
+                 return log_tests_skipped("/etc/machine-id not found");
+ 
+         test_setup_logging(LOG_DEBUG);
+diff --git a/src/journal/test-journal-verify.c b/src/journal/test-journal-verify.c
+index e36ea8cae1..55be7f451b 100644
+--- a/src/journal/test-journal-verify.c
++++ b/src/journal/test-journal-verify.c
+@@ -143,6 +143,10 @@ static int run_test(int argc, char *argv[]) {
+ }
+ 
+ int main(int argc, char *argv[]) {
++        /* managed_journal_file_open requires a valid machine id */
++        if (sd_id128_get_machine(NULL) < 0)
++                return log_tests_skipped("/etc/machine-id not found");
++
+         assert_se(setenv("SYSTEMD_JOURNAL_COMPACT", "0", 1) >= 0);
+         run_test(argc, argv);
+ 
+diff --git a/src/journal/test-journal.c b/src/journal/test-journal.c
+index 889673cae7..99beb671c5 100644
+--- a/src/journal/test-journal.c
++++ b/src/journal/test-journal.c
+@@ -271,7 +271,7 @@ static int intro(void) {
+         arg_keep = saved_argc > 1;
+ 
+         /* managed_journal_file_open requires a valid machine id */
+-        if (access("/etc/machine-id", F_OK) != 0)
++        if (sd_id128_get_machine(NULL) < 0)
+                 return log_tests_skipped("/etc/machine-id not found");
+ 
+         return EXIT_SUCCESS;

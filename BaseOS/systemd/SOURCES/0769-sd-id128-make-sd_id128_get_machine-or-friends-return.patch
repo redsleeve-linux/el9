@@ -1,0 +1,229 @@
+From db28b72d475c4e9bbd14286c9ca9366e339dfa28 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 14 Dec 2022 14:31:09 +0900
+Subject: [PATCH] sd-id128: make sd_id128_get_machine() or friends return
+ -EUCLEAN when an ID is in an invalid format
+
+EINVAL suggests that the caller passes an invalid argument. EIO is
+for "input/output error", i.e. the error you'd get if the disk or
+file system is borked, and this error code could be returned by the
+underlying read/write functions.
+
+Let's make the functions return an unambiguous error code.
+
+(cherry picked from commit e8a6625422db9d5598b6d640a9f4eec68921ce3d)
+
+Related: RHEL-27512
+---
+ man/sd_id128_get_machine.xml         |  2 +-
+ src/libsystemd/sd-id128/id128-util.c | 16 +++++++++-------
+ src/libsystemd/sd-id128/sd-id128.c   | 18 ++++++++++--------
+ src/test/test-id128.c                | 12 ++++++------
+ 4 files changed, 26 insertions(+), 22 deletions(-)
+
+diff --git a/man/sd_id128_get_machine.xml b/man/sd_id128_get_machine.xml
+index dbc6d4885d..4f6926fd7d 100644
+--- a/man/sd_id128_get_machine.xml
++++ b/man/sd_id128_get_machine.xml
+@@ -166,7 +166,7 @@
+         </varlistentry>
+ 
+         <varlistentry>
+-          <term><constant>-EIO</constant></term>
++          <term><constant>-EUCLEAN</constant></term>
+ 
+           <listitem><para>Returned by any of the functions described here when the configured value has
+           invalid format.</para></listitem>
+diff --git a/src/libsystemd/sd-id128/id128-util.c b/src/libsystemd/sd-id128/id128-util.c
+index faacc55960..364df6a9c8 100644
+--- a/src/libsystemd/sd-id128/id128-util.c
++++ b/src/libsystemd/sd-id128/id128-util.c
+@@ -43,6 +43,7 @@ bool id128_is_valid(const char *s) {
+ int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret) {
+         char buffer[SD_ID128_UUID_STRING_MAX + 1]; /* +1 is for trailing newline */
+         ssize_t l;
++        int r;
+ 
+         assert(fd >= 0);
+ 
+@@ -54,7 +55,7 @@ int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret) {
+          * This returns the following:
+          *     -ENOMEDIUM: an empty string,
+          *     -ENOPKG:    "uninitialized" or "uninitialized\n",
+-         *     -EINVAL:    other invalid strings. */
++         *     -EUCLEAN:   other invalid strings. */
+ 
+         l = loop_read(fd, buffer, sizeof(buffer), false); /* we expect a short read of either 32/33 or 36/37 chars */
+         if (l < 0)
+@@ -70,33 +71,34 @@ int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret) {
+ 
+         case SD_ID128_STRING_MAX: /* plain UUID with trailing newline */
+                 if (buffer[SD_ID128_STRING_MAX-1] != '\n')
+-                        return -EINVAL;
++                        return -EUCLEAN;
+ 
+                 _fallthrough_;
+         case SD_ID128_STRING_MAX-1: /* plain UUID without trailing newline */
+                 if (!FLAGS_SET(f, ID128_FORMAT_PLAIN))
+-                        return -EINVAL;
++                        return -EUCLEAN;
+ 
+                 buffer[SD_ID128_STRING_MAX-1] = 0;
+                 break;
+ 
+         case SD_ID128_UUID_STRING_MAX: /* RFC UUID with trailing newline */
+                 if (buffer[SD_ID128_UUID_STRING_MAX-1] != '\n')
+-                        return -EINVAL;
++                        return -EUCLEAN;
+ 
+                 _fallthrough_;
+         case SD_ID128_UUID_STRING_MAX-1: /* RFC UUID without trailing newline */
+                 if (!FLAGS_SET(f, ID128_FORMAT_UUID))
+-                        return -EINVAL;
++                        return -EUCLEAN;
+ 
+                 buffer[SD_ID128_UUID_STRING_MAX-1] = 0;
+                 break;
+ 
+         default:
+-                return -EINVAL;
++                return -EUCLEAN;
+         }
+ 
+-        return sd_id128_from_string(buffer, ret);
++        r = sd_id128_from_string(buffer, ret);
++        return r == -EINVAL ? -EUCLEAN : r;
+ }
+ 
+ int id128_read(const char *p, Id128FormatFlag f, sd_id128_t *ret) {
+diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
+index b3f4728988..b2f0438edf 100644
+--- a/src/libsystemd/sd-id128/sd-id128.c
++++ b/src/libsystemd/sd-id128/sd-id128.c
+@@ -207,22 +207,22 @@ static int get_invocation_from_keyring(sd_id128_t *ret) {
+         /* Chop off the final description string */
+         d = strrchr(description, ';');
+         if (!d)
+-                return -EIO;
++                return -EUCLEAN;
+         *d = 0;
+ 
+         /* Look for the permissions */
+         p = strrchr(description, ';');
+         if (!p)
+-                return -EIO;
++                return -EUCLEAN;
+ 
+         errno = 0;
+         perms = strtoul(p + 1, &e, 16);
+         if (errno > 0)
+                 return -errno;
+         if (e == p + 1) /* Read at least one character */
+-                return -EIO;
++                return -EUCLEAN;
+         if (e != d) /* Must reached the end */
+-                return -EIO;
++                return -EUCLEAN;
+ 
+         if ((perms & ~MAX_PERMS) != 0)
+                 return -EPERM;
+@@ -232,7 +232,7 @@ static int get_invocation_from_keyring(sd_id128_t *ret) {
+         /* Look for the group ID */
+         g = strrchr(description, ';');
+         if (!g)
+-                return -EIO;
++                return -EUCLEAN;
+         r = parse_gid(g + 1, &gid);
+         if (r < 0)
+                 return r;
+@@ -243,7 +243,7 @@ static int get_invocation_from_keyring(sd_id128_t *ret) {
+         /* Look for the user ID */
+         u = strrchr(description, ';');
+         if (!u)
+-                return -EIO;
++                return -EUCLEAN;
+         r = parse_uid(u + 1, &uid);
+         if (r < 0)
+                 return r;
+@@ -254,13 +254,14 @@ static int get_invocation_from_keyring(sd_id128_t *ret) {
+         if (c < 0)
+                 return -errno;
+         if (c != sizeof(sd_id128_t))
+-                return -EIO;
++                return -EUCLEAN;
+ 
+         return 0;
+ }
+ 
+ static int get_invocation_from_environment(sd_id128_t *ret) {
+         const char *e;
++        int r;
+ 
+         assert(ret);
+ 
+@@ -268,7 +269,8 @@ static int get_invocation_from_environment(sd_id128_t *ret) {
+         if (!e)
+                 return -ENXIO;
+ 
+-        return sd_id128_from_string(e, ret);
++        r = sd_id128_from_string(e, ret);
++        return r == -EINVAL ? -EUCLEAN : r;
+ }
+ 
+ _public_ int sd_id128_get_invocation(sd_id128_t *ret) {
+diff --git a/src/test/test-id128.c b/src/test/test-id128.c
+index 6de0cec426..b7a9b03403 100644
+--- a/src/test/test-id128.c
++++ b/src/test/test-id128.c
+@@ -89,7 +89,7 @@ TEST(id128) {
+         assert_se(id128_write_fd(fd, ID128_FORMAT_UUID, id) >= 0);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) == -EINVAL);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) == -EUCLEAN);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+         assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) >= 0);
+@@ -107,7 +107,7 @@ TEST(id128) {
+         assert_se(id128_write_fd(fd, ID128_FORMAT_PLAIN, id) >= 0);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) == -EINVAL);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) == -EUCLEAN);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+         assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) >= 0);
+@@ -125,7 +125,7 @@ TEST(id128) {
+         assert_se(write(fd, sd_id128_to_string(id, t), 32) == 32);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) == -EINVAL);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) == -EUCLEAN);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+         assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) >= 0);
+@@ -139,7 +139,7 @@ TEST(id128) {
+         assert_se(write(fd, sd_id128_to_uuid_string(id, q), 36) == 36);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) == -EINVAL);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) == -EUCLEAN);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+         assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) >= 0);
+@@ -162,13 +162,13 @@ TEST(id128) {
+         assert_se(ftruncate(fd, 0) >= 0);
+         assert_se(write(fd, "uninitialized\nfoo", STRLEN("uninitialized\nfoo")) == STRLEN("uninitialized\nfoo"));
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_FORMAT_ANY, NULL) == -EINVAL);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_ANY, NULL) == -EUCLEAN);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+         assert_se(ftruncate(fd, 0) >= 0);
+         assert_se(write(fd, "uninit", STRLEN("uninit")) == STRLEN("uninit"));
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_FORMAT_ANY, NULL) == -EINVAL);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_ANY, NULL) == -EUCLEAN);
+ 
+         if (sd_booted() > 0 && access("/etc/machine-id", F_OK) >= 0) {
+                 assert_se(sd_id128_get_machine_app_specific(SD_ID128_MAKE(f0,3d,aa,eb,1c,33,4b,43,a7,32,17,29,44,bf,77,2e), &id) >= 0);

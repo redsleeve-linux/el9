@@ -1,0 +1,67 @@
+From 0fc377b76f10eb283d4de76b8fe7c083b95f70b7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Fri, 23 Jun 2023 17:24:11 -0600
+Subject: [PATCH] test-gunicode: add new test to show that unichar_iswide() is
+ borked
+
+I discovered this while looking at the tests with wide characters in the next
+patch. It's something to fix, but not directly relevant to the issue of
+skipping ANSI in ellipsization. We will generate output that is wider than
+expected in some cases, but wide characters are used very rarely so this isn't
+such a big problem.
+
+(cherry picked from commit d9c72e54190db2a0845d1558b5beb734e9f629ff)
+
+Related: RHEL-31219
+---
+ src/test/meson.build     |  2 ++
+ src/test/test-gunicode.c | 27 +++++++++++++++++++++++++++
+ 2 files changed, 29 insertions(+)
+ create mode 100644 src/test/test-gunicode.c
+
+diff --git a/src/test/meson.build b/src/test/meson.build
+index 5430e72ab5..1d61dc343f 100644
+--- a/src/test/meson.build
++++ b/src/test/meson.build
+@@ -469,6 +469,8 @@ tests += [
+ 
+         [files('test-gpt.c')],
+ 
++        [files('test-gunicode.c')],
++
+         [files('test-log.c')],
+ 
+         [files('test-ipcrm.c'),
+diff --git a/src/test/test-gunicode.c b/src/test/test-gunicode.c
+new file mode 100644
+index 0000000000..1836cdc04a
+--- /dev/null
++++ b/src/test/test-gunicode.c
+@@ -0,0 +1,27 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++
++#include "gunicode.h"
++#include "tests.h"
++#include "utf8.h"
++
++TEST(unichar_iswide) {
++        char32_t c;
++        int r;
++
++        /* FIXME: the cats are wide, but we get this wrong */
++        for (const char *narrow = "abX_…ąęµ!" "😼😿🙀😸😻"; *narrow; narrow += r) {
++                r = utf8_encoded_to_unichar(narrow, &c);
++                bool w = unichar_iswide(c);
++                assert_se(r > 0);
++                assert_se(!w);
++        }
++
++        for (const char *wide = "🐱／￥"; *wide; wide += r) {
++                r = utf8_encoded_to_unichar(wide, &c);
++                bool w = unichar_iswide(c);
++                assert_se(r > 0);
++                assert_se(w);
++        }
++}
++
++DEFINE_TEST_MAIN(LOG_INFO);

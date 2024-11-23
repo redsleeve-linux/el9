@@ -1,0 +1,468 @@
+From 0cb518ec9b1860e553cf539304310a573494743a Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 8 Dec 2022 14:30:31 +0900
+Subject: [PATCH] sd-id128: make id128_read() or friends return -ENOPKG when
+ the file contents is "uninitialized"
+
+Then, this drops ID128_PLAIN_OR_UNINIT. Also, this renames
+Id128Format -> Id128FormatFlag, and make it bitfield.
+
+Fixes #25634.
+
+(cherry picked from commit 057bf780e9d45480fbacdd3b060dbe37b37f9693)
+
+Related: RHEL-27512
+---
+ src/boot/bootctl.c                           |  2 +-
+ src/libsystemd/sd-id128/id128-util.c         | 35 +++++++++++---------
+ src/libsystemd/sd-id128/id128-util.h         | 27 ++++++---------
+ src/libsystemd/sd-id128/sd-id128.c           |  4 +--
+ src/libsystemd/sd-journal/journal-file.c     |  2 +-
+ src/machine-id-setup/machine-id-setup-main.c |  2 +-
+ src/nspawn/nspawn.c                          |  6 ++--
+ src/partition/repart.c                       |  4 +--
+ src/shared/discover-image.c                  |  2 +-
+ src/shared/machine-id-setup.c                | 12 +++----
+ src/shared/specifier.c                       |  2 +-
+ src/test/test-condition.c                    |  2 +-
+ src/test/test-fs-util.c                      |  2 +-
+ src/test/test-id128.c                        | 26 +++++++--------
+ 14 files changed, 63 insertions(+), 65 deletions(-)
+
+diff --git a/src/boot/bootctl.c b/src/boot/bootctl.c
+index 00e8eda992..dc4dc0d391 100644
+--- a/src/boot/bootctl.c
++++ b/src/boot/bootctl.c
+@@ -182,7 +182,7 @@ static int load_etc_machine_id(void) {
+         int r;
+ 
+         r = sd_id128_get_machine(&arg_machine_id);
+-        if (IN_SET(r, -ENOENT, -ENOMEDIUM)) /* Not set or empty */
++        if (IN_SET(r, -ENOENT, -ENOMEDIUM, -ENOPKG)) /* Not set or empty */
+                 return 0;
+         if (r < 0)
+                 return log_error_errno(r, "Failed to get machine-id: %m");
+diff --git a/src/libsystemd/sd-id128/id128-util.c b/src/libsystemd/sd-id128/id128-util.c
+index 2ec77bb9f3..9b0ad48e6b 100644
+--- a/src/libsystemd/sd-id128/id128-util.c
++++ b/src/libsystemd/sd-id128/id128-util.c
+@@ -40,17 +40,21 @@ bool id128_is_valid(const char *s) {
+         return false;
+ }
+ 
+-int id128_read_fd(int fd, Id128Format f, sd_id128_t *ret) {
++int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret) {
+         char buffer[SD_ID128_UUID_STRING_MAX + 1]; /* +1 is for trailing newline */
+         ssize_t l;
+ 
+         assert(fd >= 0);
+-        assert(f < _ID128_FORMAT_MAX);
+ 
+         /* Reads an 128bit ID from a file, which may either be in plain format (32 hex digits), or in UUID format, both
+          * optionally followed by a newline and nothing else. ID files should really be newline terminated, but if they
+          * aren't that's OK too, following the rule of "Be conservative in what you send, be liberal in what you
+-         * accept". */
++         * accept".
++         *
++         * This returns the following:
++         *     -ENOMEDIUM: an empty string,
++         *     -ENOPKG:    "uninitialized" or "uninitialized\n",
++         *     -EINVAL:    other invalid strings. */
+ 
+         l = loop_read(fd, buffer, sizeof(buffer), false); /* we expect a short read of either 32/33 or 36/37 chars */
+         if (l < 0)
+@@ -60,10 +64,9 @@ int id128_read_fd(int fd, Id128Format f, sd_id128_t *ret) {
+ 
+         switch (l) {
+ 
+-        case 13:
+-        case 14:
+-                /* Treat an "uninitialized" id file like an empty one */
+-                return f == ID128_PLAIN_OR_UNINIT && strneq(buffer, "uninitialized\n", l) ? -ENOMEDIUM : -EINVAL;
++        case STRLEN("uninitialized"):
++        case STRLEN("uninitialized\n"):
++                return strneq(buffer, "uninitialized\n", l) ? -ENOPKG : -EINVAL;
+ 
+         case SD_ID128_STRING_MAX: /* plain UUID with trailing newline */
+                 if (buffer[SD_ID128_STRING_MAX-1] != '\n')
+@@ -71,7 +74,7 @@ int id128_read_fd(int fd, Id128Format f, sd_id128_t *ret) {
+ 
+                 _fallthrough_;
+         case SD_ID128_STRING_MAX-1: /* plain UUID without trailing newline */
+-                if (f == ID128_UUID)
++                if (!FLAGS_SET(f, ID128_FORMAT_PLAIN))
+                         return -EINVAL;
+ 
+                 buffer[SD_ID128_STRING_MAX-1] = 0;
+@@ -83,7 +86,7 @@ int id128_read_fd(int fd, Id128Format f, sd_id128_t *ret) {
+ 
+                 _fallthrough_;
+         case SD_ID128_UUID_STRING_MAX-1: /* RFC UUID without trailing newline */
+-                if (IN_SET(f, ID128_PLAIN, ID128_PLAIN_OR_UNINIT))
++                if (!FLAGS_SET(f, ID128_FORMAT_UUID))
+                         return -EINVAL;
+ 
+                 buffer[SD_ID128_UUID_STRING_MAX-1] = 0;
+@@ -96,7 +99,7 @@ int id128_read_fd(int fd, Id128Format f, sd_id128_t *ret) {
+         return sd_id128_from_string(buffer, ret);
+ }
+ 
+-int id128_read(const char *p, Id128Format f, sd_id128_t *ret) {
++int id128_read(const char *p, Id128FormatFlag f, sd_id128_t *ret) {
+         _cleanup_close_ int fd = -1;
+ 
+         fd = open(p, O_RDONLY|O_CLOEXEC|O_NOCTTY);
+@@ -106,15 +109,15 @@ int id128_read(const char *p, Id128Format f, sd_id128_t *ret) {
+         return id128_read_fd(fd, f, ret);
+ }
+ 
+-int id128_write_fd(int fd, Id128Format f, sd_id128_t id, bool do_sync) {
++int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id, bool do_sync) {
+         char buffer[SD_ID128_UUID_STRING_MAX + 1]; /* +1 is for trailing newline */
+         size_t sz;
+         int r;
+ 
+         assert(fd >= 0);
+-        assert(f < _ID128_FORMAT_MAX);
++        assert(IN_SET((f & ID128_FORMAT_ANY), ID128_FORMAT_PLAIN, ID128_FORMAT_UUID));
+ 
+-        if (f != ID128_UUID) {
++        if (FLAGS_SET(f, ID128_FORMAT_PLAIN)) {
+                 assert_se(sd_id128_to_string(id, buffer));
+                 sz = SD_ID128_STRING_MAX;
+         } else {
+@@ -136,7 +139,7 @@ int id128_write_fd(int fd, Id128Format f, sd_id128_t id, bool do_sync) {
+         return 0;
+ }
+ 
+-int id128_write(const char *p, Id128Format f, sd_id128_t id, bool do_sync) {
++int id128_write(const char *p, Id128FormatFlag f, sd_id128_t id, bool do_sync) {
+         _cleanup_close_ int fd = -1;
+ 
+         fd = open(p, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY|O_TRUNC, 0444);
+@@ -179,9 +182,9 @@ int id128_get_product(sd_id128_t *ret) {
+         /* Reads the systems product UUID from DMI or devicetree (where it is located on POWER). This is
+          * particularly relevant in VM environments, where VM managers typically place a VM uuid there. */
+ 
+-        r = id128_read("/sys/class/dmi/id/product_uuid", ID128_UUID, &uuid);
++        r = id128_read("/sys/class/dmi/id/product_uuid", ID128_FORMAT_UUID, &uuid);
+         if (r == -ENOENT)
+-                r = id128_read("/proc/device-tree/vm,uuid", ID128_UUID, &uuid);
++                r = id128_read("/proc/device-tree/vm,uuid", ID128_FORMAT_UUID, &uuid);
+         if (r < 0)
+                 return r;
+ 
+diff --git a/src/libsystemd/sd-id128/id128-util.h b/src/libsystemd/sd-id128/id128-util.h
+index 9d8fe93641..d031c680f1 100644
+--- a/src/libsystemd/sd-id128/id128-util.h
++++ b/src/libsystemd/sd-id128/id128-util.h
+@@ -10,22 +10,17 @@
+ 
+ bool id128_is_valid(const char *s) _pure_;
+ 
+-typedef enum Id128Format {
+-        ID128_ANY,
+-        ID128_PLAIN,  /* formatted as 32 hex chars as-is */
+-        ID128_PLAIN_OR_UNINIT,  /* formatted as 32 hex chars as-is; allow special "uninitialized"
+-                                 * value when reading from file (id128_read() and id128_read_fd()).
+-                                 *
+-                                 * This format should be used when reading a machine-id file. */
+-        ID128_UUID,   /* formatted as 36 character uuid string */
+-        _ID128_FORMAT_MAX,
+-} Id128Format;
+-
+-int id128_read_fd(int fd, Id128Format f, sd_id128_t *ret);
+-int id128_read(const char *p, Id128Format f, sd_id128_t *ret);
+-
+-int id128_write_fd(int fd, Id128Format f, sd_id128_t id, bool do_sync);
+-int id128_write(const char *p, Id128Format f, sd_id128_t id, bool do_sync);
++typedef enum Id128FormatFlag {
++        ID128_FORMAT_PLAIN = 1 << 0,  /* formatted as 32 hex chars as-is */
++        ID128_FORMAT_UUID  = 1 << 1,  /* formatted as 36 character uuid string */
++        ID128_FORMAT_ANY   = ID128_FORMAT_PLAIN | ID128_FORMAT_UUID,
++} Id128FormatFlag;
++
++int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret);
++int id128_read(const char *p, Id128FormatFlag f, sd_id128_t *ret);
++
++int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id, bool do_sync);
++int id128_write(const char *p, Id128FormatFlag f, sd_id128_t id, bool do_sync);
+ 
+ void id128_hash_func(const sd_id128_t *p, struct siphash *state);
+ int id128_compare_func(const sd_id128_t *a, const sd_id128_t *b) _pure_;
+diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
+index 07a13be2b2..5e9ec2b5f6 100644
+--- a/src/libsystemd/sd-id128/sd-id128.c
++++ b/src/libsystemd/sd-id128/sd-id128.c
+@@ -127,7 +127,7 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
+         assert_return(ret, -EINVAL);
+ 
+         if (sd_id128_is_null(saved_machine_id)) {
+-                r = id128_read("/etc/machine-id", ID128_PLAIN, &saved_machine_id);
++                r = id128_read("/etc/machine-id", ID128_FORMAT_PLAIN, &saved_machine_id);
+                 if (r < 0)
+                         return r;
+ 
+@@ -146,7 +146,7 @@ _public_ int sd_id128_get_boot(sd_id128_t *ret) {
+         assert_return(ret, -EINVAL);
+ 
+         if (sd_id128_is_null(saved_boot_id)) {
+-                r = id128_read("/proc/sys/kernel/random/boot_id", ID128_UUID, &saved_boot_id);
++                r = id128_read("/proc/sys/kernel/random/boot_id", ID128_FORMAT_UUID, &saved_boot_id);
+                 if (r < 0)
+                         return r;
+         }
+diff --git a/src/libsystemd/sd-journal/journal-file.c b/src/libsystemd/sd-journal/journal-file.c
+index 3c1385ddb0..2b66b3caed 100644
+--- a/src/libsystemd/sd-journal/journal-file.c
++++ b/src/libsystemd/sd-journal/journal-file.c
+@@ -421,7 +421,7 @@ static int journal_file_refresh_header(JournalFile *f) {
+         assert(f->header);
+ 
+         r = sd_id128_get_machine(&f->header->machine_id);
+-        if (IN_SET(r, -ENOENT, -ENOMEDIUM))
++        if (IN_SET(r, -ENOENT, -ENOMEDIUM, -ENOPKG))
+                 /* We don't have a machine-id, let's continue without */
+                 zero(f->header->machine_id);
+         else if (r < 0)
+diff --git a/src/machine-id-setup/machine-id-setup-main.c b/src/machine-id-setup/machine-id-setup-main.c
+index 8a3b1efb4c..b595b2ab37 100644
+--- a/src/machine-id-setup/machine-id-setup-main.c
++++ b/src/machine-id-setup/machine-id-setup-main.c
+@@ -164,7 +164,7 @@ static int run(int argc, char *argv[]) {
+                         return r;
+ 
+                 etc_machine_id = prefix_roota(arg_root, "/etc/machine-id");
+-                r = id128_read(etc_machine_id, ID128_PLAIN, &id);
++                r = id128_read(etc_machine_id, ID128_FORMAT_PLAIN, &id);
+                 if (r < 0)
+                         return log_error_errno(r, "Failed to read machine ID back: %m");
+         } else {
+diff --git a/src/nspawn/nspawn.c b/src/nspawn/nspawn.c
+index df7b37ec4e..085f817dd3 100644
+--- a/src/nspawn/nspawn.c
++++ b/src/nspawn/nspawn.c
+@@ -2195,7 +2195,7 @@ static int setup_boot_id(void) {
+         if (r < 0)
+                 return log_error_errno(r, "Failed to generate random boot id: %m");
+ 
+-        r = id128_write(path, ID128_UUID, rnd, false);
++        r = id128_write(path, ID128_FORMAT_UUID, rnd, false);
+         if (r < 0)
+                 return log_error_errno(r, "Failed to write boot id: %m");
+ 
+@@ -2821,9 +2821,9 @@ static int setup_machine_id(const char *directory) {
+ 
+         etc_machine_id = prefix_roota(directory, "/etc/machine-id");
+ 
+-        r = id128_read(etc_machine_id, ID128_PLAIN_OR_UNINIT, &id);
++        r = id128_read(etc_machine_id, ID128_FORMAT_PLAIN, &id);
+         if (r < 0) {
+-                if (!IN_SET(r, -ENOENT, -ENOMEDIUM)) /* If the file is missing or empty, we don't mind */
++                if (!IN_SET(r, -ENOENT, -ENOMEDIUM, -ENOPKG)) /* If the file is missing, empty, or uninitialized, we don't mind */
+                         return log_error_errno(r, "Failed to read machine ID from container image: %m");
+ 
+                 if (sd_id128_is_null(arg_uuid)) {
+diff --git a/src/partition/repart.c b/src/partition/repart.c
+index 2b3b384743..553d92e730 100644
+--- a/src/partition/repart.c
++++ b/src/partition/repart.c
+@@ -4515,8 +4515,8 @@ static int context_read_seed(Context *context, const char *root) {
+                 else if (fd < 0)
+                         return log_error_errno(fd, "Failed to determine machine ID of image: %m");
+                 else {
+-                        r = id128_read_fd(fd, ID128_PLAIN_OR_UNINIT, &context->seed);
+-                        if (r == -ENOMEDIUM)
++                        r = id128_read_fd(fd, ID128_FORMAT_PLAIN, &context->seed);
++                        if (IN_SET(r, -ENOMEDIUM, -ENOPKG))
+                                 log_info("No machine ID set, using randomized partition UUIDs.");
+                         else if (r < 0)
+                                 return log_error_errno(r, "Failed to parse machine ID of image: %m");
+diff --git a/src/shared/discover-image.c b/src/shared/discover-image.c
+index 0488e215fd..75a42efe88 100644
+--- a/src/shared/discover-image.c
++++ b/src/shared/discover-image.c
+@@ -1153,7 +1153,7 @@ int image_read_metadata(Image *i) {
+                         if (fd < 0)
+                                 log_debug_errno(errno, "Failed to open %s: %m", path);
+                         else {
+-                                r = id128_read_fd(fd, ID128_PLAIN, &machine_id);
++                                r = id128_read_fd(fd, ID128_FORMAT_PLAIN, &machine_id);
+                                 if (r < 0)
+                                         log_debug_errno(r, "Image %s contains invalid machine ID.", i->name);
+                         }
+diff --git a/src/shared/machine-id-setup.c b/src/shared/machine-id-setup.c
+index df4ac419cb..787c0765d0 100644
+--- a/src/shared/machine-id-setup.c
++++ b/src/shared/machine-id-setup.c
+@@ -38,7 +38,7 @@ static int generate_machine_id(const char *root, sd_id128_t *ret) {
+         dbus_machine_id = prefix_roota(root, "/var/lib/dbus/machine-id");
+         fd = open(dbus_machine_id, O_RDONLY|O_CLOEXEC|O_NOCTTY|O_NOFOLLOW);
+         if (fd >= 0) {
+-                if (id128_read_fd(fd, ID128_PLAIN, ret) >= 0) {
++                if (id128_read_fd(fd, ID128_FORMAT_PLAIN, ret) >= 0) {
+                         log_info("Initializing machine ID from D-Bus machine ID.");
+                         return 0;
+                 }
+@@ -123,7 +123,7 @@ int machine_id_setup(const char *root, bool force_transient, sd_id128_t machine_
+         if (sd_id128_is_null(machine_id)) {
+ 
+                 /* Try to read any existing machine ID */
+-                if (id128_read_fd(fd, ID128_PLAIN, ret) >= 0)
++                if (id128_read_fd(fd, ID128_FORMAT_PLAIN, ret) >= 0)
+                         return 0;
+ 
+                 /* Hmm, so, the id currently stored is not useful, then let's generate one */
+@@ -152,7 +152,7 @@ int machine_id_setup(const char *root, bool force_transient, sd_id128_t machine_
+                         if (r < 0)
+                                 return log_error_errno(r, "Failed to sync %s: %m", etc_machine_id);
+                 } else {
+-                        r = id128_write_fd(fd, ID128_PLAIN, machine_id, true);
++                        r = id128_write_fd(fd, ID128_FORMAT_PLAIN, machine_id, true);
+                         if (r < 0)
+                                 return log_error_errno(r, "Failed to write %s: %m", etc_machine_id);
+                         else
+@@ -168,7 +168,7 @@ int machine_id_setup(const char *root, bool force_transient, sd_id128_t machine_
+         run_machine_id = prefix_roota(root, "/run/machine-id");
+ 
+         RUN_WITH_UMASK(0022)
+-                r = id128_write(run_machine_id, ID128_PLAIN, machine_id, false);
++                r = id128_write(run_machine_id, ID128_FORMAT_PLAIN, machine_id, false);
+         if (r < 0) {
+                 (void) unlink(run_machine_id);
+                 return log_error_errno(r, "Cannot write %s: %m", run_machine_id);
+@@ -240,7 +240,7 @@ int machine_id_commit(const char *root) {
+                                        "%s is not on a temporary file system.",
+                                        etc_machine_id);
+ 
+-        r = id128_read_fd(fd, ID128_PLAIN, &id);
++        r = id128_read_fd(fd, ID128_FORMAT_PLAIN, &id);
+         if (r < 0)
+                 return log_error_errno(r, "We didn't find a valid machine ID in %s: %m", etc_machine_id);
+ 
+@@ -261,7 +261,7 @@ int machine_id_commit(const char *root) {
+                 return r;
+ 
+         /* Update a persistent version of etc_machine_id */
+-        r = id128_write(etc_machine_id, ID128_PLAIN, id, true);
++        r = id128_write(etc_machine_id, ID128_FORMAT_PLAIN, id, true);
+         if (r < 0)
+                 return log_error_errno(r, "Cannot write %s. This is mandatory to get a persistent machine ID: %m", etc_machine_id);
+ 
+diff --git a/src/shared/specifier.c b/src/shared/specifier.c
+index d54ab9f5a9..cd651768bd 100644
+--- a/src/shared/specifier.c
++++ b/src/shared/specifier.c
+@@ -195,7 +195,7 @@ int specifier_machine_id(char specifier, const void *data, const char *root, con
+                         /* Translate error for missing os-release file to EUNATCH. */
+                         return fd == -ENOENT ? -EUNATCH : fd;
+ 
+-                r = id128_read_fd(fd, ID128_PLAIN, &id);
++                r = id128_read_fd(fd, ID128_FORMAT_PLAIN, &id);
+         } else
+                 r = sd_id128_get_machine(&id);
+         if (r < 0)
+diff --git a/src/test/test-condition.c b/src/test/test-condition.c
+index 57e7d35119..b16e8047c6 100644
+--- a/src/test/test-condition.c
++++ b/src/test/test-condition.c
+@@ -250,7 +250,7 @@ TEST(condition_test_host) {
+         int r;
+ 
+         r = sd_id128_get_machine(&id);
+-        if (IN_SET(r, -ENOENT, -ENOMEDIUM))
++        if (IN_SET(r, -ENOENT, -ENOMEDIUM, -ENOPKG))
+                 return (void) log_tests_skipped("/etc/machine-id missing");
+         assert_se(r >= 0);
+ 
+diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
+index 16f04d6889..0b1f11ebdf 100644
+--- a/src/test/test-fs-util.c
++++ b/src/test/test-fs-util.c
+@@ -302,7 +302,7 @@ TEST(chase_symlinks) {
+                 assert_se(fd >= 0);
+                 safe_close(pfd);
+ 
+-                assert_se(id128_read_fd(fd, ID128_PLAIN, &a) >= 0);
++                assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &a) >= 0);
+                 assert_se(sd_id128_get_machine(&b) >= 0);
+                 assert_se(sd_id128_equal(a, b));
+         }
+diff --git a/src/test/test-id128.c b/src/test/test-id128.c
+index 4b71c5c00b..4175ac7b60 100644
+--- a/src/test/test-id128.c
++++ b/src/test/test-id128.c
+@@ -86,17 +86,17 @@ TEST(id128) {
+ 
+         /* First, write as UUID */
+         assert_se(sd_id128_randomize(&id) >= 0);
+-        assert_se(id128_write_fd(fd, ID128_UUID, id, false) >= 0);
++        assert_se(id128_write_fd(fd, ID128_FORMAT_UUID, id, false) >= 0);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_PLAIN, &id2) == -EINVAL);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) == -EINVAL);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_UUID, &id2) >= 0);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) >= 0);
+         assert_se(sd_id128_equal(id, id2));
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_ANY, &id2) >= 0);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_ANY, &id2) >= 0);
+         assert_se(sd_id128_equal(id, id2));
+ 
+         /* Second, write as plain */
+@@ -104,17 +104,17 @@ TEST(id128) {
+         assert_se(ftruncate(fd, 0) >= 0);
+ 
+         assert_se(sd_id128_randomize(&id) >= 0);
+-        assert_se(id128_write_fd(fd, ID128_PLAIN, id, false) >= 0);
++        assert_se(id128_write_fd(fd, ID128_FORMAT_PLAIN, id, false) >= 0);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_UUID, &id2) == -EINVAL);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) == -EINVAL);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_PLAIN, &id2) >= 0);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) >= 0);
+         assert_se(sd_id128_equal(id, id2));
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_ANY, &id2) >= 0);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_ANY, &id2) >= 0);
+         assert_se(sd_id128_equal(id, id2));
+ 
+         /* Third, write plain without trailing newline */
+@@ -125,13 +125,13 @@ TEST(id128) {
+         assert_se(write(fd, sd_id128_to_string(id, t), 32) == 32);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_UUID, &id2) == -EINVAL);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) == -EINVAL);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_PLAIN, &id2) >= 0);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) >= 0);
+         assert_se(sd_id128_equal(id, id2));
+ 
+-        /* Third, write UUID without trailing newline */
++        /* Fourth, write UUID without trailing newline */
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+         assert_se(ftruncate(fd, 0) >= 0);
+ 
+@@ -139,10 +139,10 @@ TEST(id128) {
+         assert_se(write(fd, sd_id128_to_uuid_string(id, q), 36) == 36);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_PLAIN, &id2) == -EINVAL);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) == -EINVAL);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+-        assert_se(id128_read_fd(fd, ID128_UUID, &id2) >= 0);
++        assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) >= 0);
+         assert_se(sd_id128_equal(id, id2));
+ 
+         if (sd_booted() > 0 && access("/etc/machine-id", F_OK) >= 0) {

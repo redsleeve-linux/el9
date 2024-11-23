@@ -1,0 +1,106 @@
+From 8fd8b29eda64dd09ea01f1b87cc4c65950fb5e3a Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 5 Mar 2024 11:49:30 +0100
+Subject: [PATCH] mkosi: fix UKI addons test
+
+The test hasn't been working for a while, since there's no /efi or /boot
+in $DESTDIR.
+
+(cherry picked from commit 374fa8e8533e4834337a22613c7bada205dc1853)
+
+Related: RHEL-27512
+---
+ mkosi.images/base/mkosi.build.chroot                 | 12 ------------
+ mkosi.images/system/mkosi.conf.d/10-arch.conf        |  1 +
+ .../system/mkosi.conf.d/10-debian-ubuntu.conf        |  1 +
+ mkosi.images/system/mkosi.conf.d/10-fedora.conf      |  1 +
+ mkosi.images/system/mkosi.conf.d/10-opensuse.conf    |  1 +
+ mkosi.images/system/mkosi.postinst.chroot            | 11 ++++++++++-
+ 6 files changed, 14 insertions(+), 13 deletions(-)
+
+diff --git a/mkosi.images/base/mkosi.build.chroot b/mkosi.images/base/mkosi.build.chroot
+index 3427d0e241..c46d667a90 100755
+--- a/mkosi.images/base/mkosi.build.chroot
++++ b/mkosi.images/base/mkosi.build.chroot
+@@ -177,15 +177,3 @@ if [ "$WITH_TESTS" = 1 ]; then
+ fi
+ 
+ ( set -x; meson install -C "$BUILDDIR" --quiet --no-rebuild --only-changed )
+-
+-# Ensure that side-loaded PE addons are loaded if signed, and ignored if not
+-if [ -d "${DESTDIR}/boot/loader" ]; then
+-    addons_dir="${DESTDIR}/boot/loader/addons"
+-elif [ -d "${DESTDIR}/efi/loader" ]; then
+-    addons_dir="${DESTDIR}/efi/loader/addons"
+-fi
+-if [ -n "${addons_dir}" ]; then
+-    mkdir -p "${addons_dir}"
+-    ukify --secureboot-private-key mkosi.secure-boot.key --secureboot-certificate mkosi.secure-boot.crt --cmdline this_should_be_here -o "${addons_dir}/good.addon.efi"
+-    ukify --cmdline this_should_not_be_here -o "${addons_dir}/bad.addon.efi"
+-fi
+diff --git a/mkosi.images/system/mkosi.conf.d/10-arch.conf b/mkosi.images/system/mkosi.conf.d/10-arch.conf
+index e1a511c979..a3d008d10f 100644
+--- a/mkosi.images/system/mkosi.conf.d/10-arch.conf
++++ b/mkosi.images/system/mkosi.conf.d/10-arch.conf
+@@ -23,5 +23,6 @@ Packages=
+         python-pytest
+         python3
+         quota-tools
++        sbsigntools
+         shadow
+         vim
+diff --git a/mkosi.images/system/mkosi.conf.d/10-debian-ubuntu.conf b/mkosi.images/system/mkosi.conf.d/10-debian-ubuntu.conf
+index 348bdb2992..d6e3f20222 100644
+--- a/mkosi.images/system/mkosi.conf.d/10-debian-ubuntu.conf
++++ b/mkosi.images/system/mkosi.conf.d/10-debian-ubuntu.conf
+@@ -19,6 +19,7 @@ Packages=
+         netcat-openbsd
+         openssh-server
+         openssh-client
++        sbsigntool
+         passwd
+         policykit-1
+         procps
+diff --git a/mkosi.images/system/mkosi.conf.d/10-fedora.conf b/mkosi.images/system/mkosi.conf.d/10-fedora.conf
+index 5863f03b19..7554ad2dc3 100644
+--- a/mkosi.images/system/mkosi.conf.d/10-fedora.conf
++++ b/mkosi.images/system/mkosi.conf.d/10-fedora.conf
+@@ -9,3 +9,4 @@ Packages=
+         compsize
+         f2fs-tools
+         glibc-langpack-en
++        sbsigntools
+diff --git a/mkosi.images/system/mkosi.conf.d/10-opensuse.conf b/mkosi.images/system/mkosi.conf.d/10-opensuse.conf
+index 71434b4560..ffcb664224 100644
+--- a/mkosi.images/system/mkosi.conf.d/10-opensuse.conf
++++ b/mkosi.images/system/mkosi.conf.d/10-opensuse.conf
+@@ -20,5 +20,6 @@ Packages=
+         python3-psutil
+         python3-pytest
+         quota
++        sbsigntools
+         shadow
+         vim
+diff --git a/mkosi.images/system/mkosi.postinst.chroot b/mkosi.images/system/mkosi.postinst.chroot
+index 692242da38..330fa3b73e 100755
+--- a/mkosi.images/system/mkosi.postinst.chroot
++++ b/mkosi.images/system/mkosi.postinst.chroot
+@@ -1,4 +1,4 @@
+-#!/bin/sh
++#!/bin/bash
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ set -e
+ 
+@@ -100,3 +100,12 @@ mkdir -p /usr/lib/tmpfiles.d
+ cat >/usr/lib/tmpfiles.d/testuser.conf <<EOF
+ q	/home/testuser	0700	4711	4711
+ EOF
++
++# sbsign is not available on CentOS Stream
++if command -v sbsign &>/dev/null; then
++    # Ensure that side-loaded PE addons are loaded if signed, and ignored if not
++    addons_dir=/efi/loader/addons
++    mkdir -p "$addons_dir"
++    ukify build --secureboot-private-key mkosi.key --secureboot-certificate mkosi.crt --cmdline this_should_be_here -o "$addons_dir/good.addon.efi"
++    ukify build --cmdline this_should_not_be_here -o "$addons_dir/bad.addon.efi"
++fi

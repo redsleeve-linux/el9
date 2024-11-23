@@ -1,0 +1,34 @@
+From 44d5561daff4ffa94e394e18c41001244bc170dc Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Mon, 12 Dec 2022 22:03:52 +0900
+Subject: [PATCH] sd-id128: make sd_id128_get_boot() and friend return -ENOSYS
+ when /proc/ is not mounted
+
+(cherry picked from commit e2720340e9fdf3aee2e8998dc72798de50be3630)
+
+Related: RHEL-27512
+---
+ src/libsystemd/sd-id128/sd-id128.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
+index bff8074f19..b3f4728988 100644
+--- a/src/libsystemd/sd-id128/sd-id128.c
++++ b/src/libsystemd/sd-id128/sd-id128.c
+@@ -15,6 +15,7 @@
+ #include "macro.h"
+ #include "missing_syscall.h"
+ #include "random-util.h"
++#include "stat-util.h"
+ #include "user-util.h"
+ #include "util.h"
+ 
+@@ -147,6 +148,8 @@ _public_ int sd_id128_get_boot(sd_id128_t *ret) {
+ 
+         if (sd_id128_is_null(saved_boot_id)) {
+                 r = id128_read("/proc/sys/kernel/random/boot_id", ID128_FORMAT_UUID, &saved_boot_id);
++                if (r == -ENOENT && proc_mounted() == 0)
++                        return -ENOSYS;
+                 if (r < 0)
+                         return r;
+ 

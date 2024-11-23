@@ -1,0 +1,75 @@
+diff -rup binutils.orig/bfd/elf.c binutils-2.35.2/bfd/elf.c
+--- binutils.orig/bfd/elf.c	2024-06-20 16:18:11.685058701 +0100
++++ binutils-2.35.2/bfd/elf.c	2024-06-20 16:19:59.040433524 +0100
+@@ -1090,6 +1090,7 @@ _bfd_elf_make_section_from_shdr (bfd *ab
+       if (name [0] == '.')
+ 	{
+ 	  if (strncmp (name, ".debug", 6) == 0
++	      || strncmp (name, ".gnu.debuglto_.debug_", 21) == 0
+ 	      || strncmp (name, ".gnu.linkonce.wi.", 17) == 0
+ 	      || strncmp (name, ".zdebug", 7) == 0)
+ 	    flags |= SEC_DEBUGGING | SEC_ELF_OCTETS;
+diff -rup binutils.orig/ld/ldlang.c binutils-2.35.2/ld/ldlang.c
+--- binutils.orig/ld/ldlang.c	2024-06-20 16:18:11.518058118 +0100
++++ binutils-2.35.2/ld/ldlang.c	2024-06-20 16:21:50.407756115 +0100
+@@ -7471,7 +7471,7 @@ lang_gc_sections (void)
+   lang_gc_sections_1 (statement_list.head);
+ 
+   /* SEC_EXCLUDE is ignored when doing a relocatable link, except in
+-     the special case of debug info.  (See bfd/stabs.c)
++     the special case of .stabstr debug info.  (See bfd/stabs.c)
+      Twiddle the flag here, to simplify later linker code.  */
+   if (bfd_link_relocatable (&link_info))
+     {
+@@ -7483,7 +7483,8 @@ lang_gc_sections (void)
+ 	    continue;
+ #endif
+ 	  for (sec = f->the_bfd->sections; sec != NULL; sec = sec->next)
+-	    if ((sec->flags & SEC_DEBUGGING) == 0)
++	    if ((sec->flags & SEC_DEBUGGING) == 0
++		|| strcmp (sec->name, ".stabstr") != 0)
+ 	      sec->flags &= ~SEC_EXCLUDE;
+ 	}
+     }
+diff -rupN binutils.orig/ld/testsuite/ld-elf/pr27590.s binutils-2.35.2/ld/testsuite/ld-elf/pr27590.s
+--- binutils.orig/ld/testsuite/ld-elf/pr27590.s	1970-01-01 01:00:00.000000000 +0100
++++ binutils-2.35.2/ld/testsuite/ld-elf/pr27590.s	2024-06-20 16:51:39.108295959 +0100
+@@ -0,0 +1,6 @@
++       .section        .gnu.debuglto_.debug_macro,"",%progbits
++.Ldebug_macro0:
++       .dc.a   .Ldebug_macro2
++       .section        .gnu.debuglto_.debug_macro,"G",%progbits,wm4,comdat
++.Ldebug_macro2:
++       .long   0x4
+diff -rupN binutils.orig/ld/testsuite/ld-elf/pr27590a.d binutils-2.35.2/ld/testsuite/ld-elf/pr27590a.d
+--- binutils.orig/ld/testsuite/ld-elf/pr27590a.d	1970-01-01 01:00:00.000000000 +0100
++++ binutils-2.35.2/ld/testsuite/ld-elf/pr27590a.d	2024-06-20 16:51:39.111295967 +0100
+@@ -0,0 +1,12 @@
++#source: pr27590.s
++#ld: -r tmpdir/pr27590.o
++#readelf: -rW
++#xfail: [is_generic]
++
++Relocation section '\.rel.*\.gnu\.debuglto_\.debug_macro' at offset 0x[0-9a-z]+ contains 2 entries:
++[ \t]+Offset[ \t]+Info[ \t]+Type[ \t]+Sym.*
++[0-9a-f]+[ \t]+[0-9a-f]+[ \t]+R_.*[ \t]+[0]+[ \t]+(\.gnu\.debuglto_\.debug_macro|\.Ldebug_macro2).*
++#?.*R_MIPS_NONE.*
++#?.*R_MIPS_NONE.*
++[0-9a-f]+[ \t]+[0-9a-f]+[ \t]+R_.*[ \t]+[0]+[ \t]+(\.gnu\.debuglto_\.debug_macro|\.Ldebug_macro2).*
++#pass
+diff -rupN binutils.orig/ld/testsuite/ld-elf/pr27590b.d binutils-2.35.2/ld/testsuite/ld-elf/pr27590b.d
+--- binutils.orig/ld/testsuite/ld-elf/pr27590b.d	1970-01-01 01:00:00.000000000 +0100
++++ binutils-2.35.2/ld/testsuite/ld-elf/pr27590b.d	2024-06-20 16:51:39.111295967 +0100
+@@ -0,0 +1,12 @@
++#source: pr27590.s
++#ld: -r tmpdir/pr27590.o --reduce-memory-overheads
++#readelf: -rW
++#xfail: [is_generic]
++
++Relocation section '\.rel.*\.gnu\.debuglto_\.debug_macro' at offset 0x[0-9a-z]+ contains 2 entries:
++[ \t]+Offset[ \t]+Info[ \t]+Type[ \t]+Sym.*
++[0-9a-f]+[ \t]+[0-9a-f]+[ \t]+R_.*[ \t]+[0]+[ \t]+(\.gnu\.debuglto_\.debug_macro|\.Ldebug_macro2).*
++#?.*R_MIPS_NONE.*
++#?.*R_MIPS_NONE.*
++[0-9a-f]+[ \t]+[0-9a-f]+[ \t]+R_.*[ \t]+[0]+[ \t]+(\.gnu\.debuglto_\.debug_macro|\.Ldebug_macro2).*
++#pass

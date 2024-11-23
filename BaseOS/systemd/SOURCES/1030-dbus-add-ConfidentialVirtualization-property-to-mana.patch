@@ -1,0 +1,105 @@
+From 9ebd1d71a61e4e036e65452c1c04516ea58d74b7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Mon, 3 Jul 2023 09:53:43 +0100
+Subject: [PATCH] dbus: add 'ConfidentialVirtualization' property to manager
+ object
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This property reports whether the system is running inside a confidential
+virtual machine.
+
+Related: https://github.com/systemd/systemd/issues/27604
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 1257274ad8eb0790bc3b56ba68b114c5e1e24713)
+
+Related: RHEL-50651
+---
+ man/org.freedesktop.systemd1.xml | 10 ++++++++++
+ src/core/dbus-manager.c          | 23 +++++++++++++++++++++++
+ 2 files changed, 33 insertions(+)
+
+diff --git a/man/org.freedesktop.systemd1.xml b/man/org.freedesktop.systemd1.xml
+index 7ee649f6a7..78781b6ed3 100644
+--- a/man/org.freedesktop.systemd1.xml
++++ b/man/org.freedesktop.systemd1.xml
+@@ -293,6 +293,8 @@ node /org/freedesktop/systemd1 {
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+       readonly s Virtualization = '...';
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
++      readonly s ConfidentialVirtualization = '...';
++      @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+       readonly s Architecture = '...';
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("const")
+       readonly s Tainted = '...';
+@@ -974,6 +976,8 @@ node /org/freedesktop/systemd1 {
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="Virtualization"/>
+ 
++    <variablelist class="dbus-property" generated="True" extra-ref="ConfidentialVirtualization"/>
++
+     <variablelist class="dbus-property" generated="True" extra-ref="Architecture"/>
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="Tainted"/>
+@@ -1695,6 +1699,12 @@ node /org/freedesktop/systemd1 {
+       Note that only the "innermost" virtualization technology is exported here. This detects both
+       full-machine virtualizations (VMs) and shared-kernel virtualization (containers).</para>
+ 
++      <para><varname>ConfidentialVirtualization</varname> contains a short ID string describing the confidential
++      virtualization technology the system runs in. On bare-metal hardware this is the empty string. Otherwise,
++      it contains an identifier such as <literal>sev</literal>, <literal>sev-es</literal>, <literal>sev-snp</literal>,
++      <literal>tdx</literal> and so on. For a full list of IDs see
++      <citerefentry><refentrytitle>systemd-detect-virt</refentrytitle><manvolnum>1</manvolnum></citerefentry></para>.
++
+       <para><varname>Architecture</varname> contains a short ID string describing the architecture the
+       systemd instance is running on. This follows the same vocabulary as
+       <varname>ConditionArchitectures=</varname>.</para>
+diff --git a/src/core/dbus-manager.c b/src/core/dbus-manager.c
+index 44b1027588..386b319c86 100644
+--- a/src/core/dbus-manager.c
++++ b/src/core/dbus-manager.c
+@@ -12,6 +12,7 @@
+ #include "bus-get-properties.h"
+ #include "bus-log-control-api.h"
+ #include "chase-symlinks.h"
++#include "confidential-virt.h"
+ #include "data-fd-util.h"
+ #include "dbus-cgroup.h"
+ #include "dbus-execute.h"
+@@ -91,6 +92,27 @@ static int property_get_virtualization(
+                         v == VIRTUALIZATION_NONE ? NULL : virtualization_to_string(v));
+ }
+ 
++static int property_get_confidential_virtualization(
++                sd_bus *bus,
++                const char *path,
++                const char *interface,
++                const char *property,
++                sd_bus_message *reply,
++                void *userdata,
++                sd_bus_error *error) {
++
++        ConfidentialVirtualization v;
++
++        assert(bus);
++        assert(reply);
++
++        v = detect_confidential_virtualization();
++
++        return sd_bus_message_append(
++                        reply, "s",
++                        v <= 0 ? NULL : confidential_virtualization_to_string(v));
++}
++
+ static int property_get_tainted(
+                 sd_bus *bus,
+                 const char *path,
+@@ -2785,6 +2807,7 @@ const sd_bus_vtable bus_manager_vtable[] = {
+         SD_BUS_PROPERTY("Version", "s", property_get_version, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+         SD_BUS_PROPERTY("Features", "s", property_get_features, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+         SD_BUS_PROPERTY("Virtualization", "s", property_get_virtualization, 0, SD_BUS_VTABLE_PROPERTY_CONST),
++        SD_BUS_PROPERTY("ConfidentialVirtualization", "s", property_get_confidential_virtualization, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+         SD_BUS_PROPERTY("Architecture", "s", property_get_architecture, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+         SD_BUS_PROPERTY("Tainted", "s", property_get_tainted, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+         BUS_PROPERTY_DUAL_TIMESTAMP("FirmwareTimestamp", offsetof(Manager, timestamps[MANAGER_TIMESTAMP_FIRMWARE]), SD_BUS_VTABLE_PROPERTY_CONST),

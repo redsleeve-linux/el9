@@ -1,0 +1,58 @@
+From 23d58876e6301dd33f0f039a2cacb95a340dc2ea Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Fri, 7 Jul 2023 16:30:20 +0100
+Subject: [PATCH] efi: don't pull kernel cmdline from SMBIOS in a confidential
+ VM
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In a confidential VM, the SMBIOS data is not trusted, as it is under the
+control of the host OS/admin and not covered by attestation of the machine.
+
+Fixes: https://github.com/systemd/systemd/issues/27604
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 4b1153cfcc397df5a095f2ec7e587787e8ba47ee)
+
+Related: RHEL-50651
+---
+ src/boot/efi/stub.c | 26 +++++++++++++++-----------
+ 1 file changed, 15 insertions(+), 11 deletions(-)
+
+diff --git a/src/boot/efi/stub.c b/src/boot/efi/stub.c
+index 2c7c56de3e..93843f015a 100644
+--- a/src/boot/efi/stub.c
++++ b/src/boot/efi/stub.c
+@@ -494,17 +494,21 @@ static EFI_STATUS real_main(EFI_HANDLE image) {
+                 log_error_status(err, "Error loading UKI-specific addons, ignoring: %m");
+         parameters_measured = parameters_measured < 0 ? m : (parameters_measured && m);
+ 
+-        const char *extra = smbios_find_oem_string("io.systemd.stub.kernel-cmdline-extra");
+-        if (extra) {
+-                _cleanup_free_ char16_t *tmp = TAKE_PTR(cmdline), *extra16 = xstr8_to_16(extra);
+-                cmdline = xasprintf("%ls %ls", tmp, extra16);
+-
+-                /* SMBIOS strings are measured in PCR1, but we also want to measure them in our specific
+-                 * PCR12, as firmware-owned PCRs are very difficult to use as they'll contain unpredictable
+-                 * measurements that are not under control of the machine owner. */
+-                m = false;
+-                (void) tpm_log_load_options(extra16, &m);
+-                parameters_measured = parameters_measured < 0 ? m : (parameters_measured && m);
++        /* SMBIOS OEM Strings data is controlled by the host admin and not covered
++         * by the VM attestation, so MUST NOT be trusted when in a confidential VM */
++        if (!is_confidential_vm()) {
++                const char *extra = smbios_find_oem_string("io.systemd.stub.kernel-cmdline-extra");
++                if (extra) {
++                        _cleanup_free_ char16_t *tmp = TAKE_PTR(cmdline), *extra16 = xstr8_to_16(extra);
++                        cmdline = xasprintf("%ls %ls", tmp, extra16);
++
++                        /* SMBIOS strings are measured in PCR1, but we also want to measure them in our specific
++                         * PCR12, as firmware-owned PCRs are very difficult to use as they'll contain unpredictable
++                         * measurements that are not under control of the machine owner. */
++                        m = false;
++                        (void) tpm_log_load_options(extra16, &m);
++                        parameters_measured = parameters_measured < 0 ? m : (parameters_measured && m);
++                }
+         }
+ 
+         export_variables(loaded_image);

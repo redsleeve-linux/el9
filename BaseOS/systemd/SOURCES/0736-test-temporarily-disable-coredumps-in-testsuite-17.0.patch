@@ -1,0 +1,78 @@
+From 54c44b19c1018400c38da8f8be597536d14e7afa Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Thu, 18 Apr 2024 22:39:31 +0200
+Subject: [PATCH] test: temporarily disable coredumps in testsuite-17.03.sh
+
+Since f387005b54 we started generating coredumps by default (up to
+certain size). This change has one unintentional effect on our test
+suite - if a sanitized binary (udevd worker here) crashes and ASan is
+instructed to allow core dumping (via disable_coredump=0 and
+use_madv_dontdump=1), we try to dump a relatively big core file (~80
+MiB), and since the test suite configures systemd-coredumpd to dump the
+cores into the journal, we try to append it to the journal message about
+the crash. However, journal complains that the message with the coredump
+is too big so the crash report is not written, and we end up with
+coredumpctl not showing the crash, which the test in this case uses to
+monitor if the udevd worker's job timed out:
+
+[   17.873463] systemd-udevd[1617]: null: Worker [1625] processing SEQNUM=3588 is taking a long time
+[   17.876823] systemd-udevd[1625]: null: Spawned process '/bin/sleep 60' [1626] is taking longer than 3s to complete
+...
+[   24.223459] systemd-udevd[1617]: null: Worker [1625] processing SEQNUM=3588 killed
+[   24.265141] systemd[1]: Created slice system-systemd\x2dcoredump.slice.
+[   24.284960] systemd[1]: Started systemd-coredump@0-1707-0.service.
+[   27.545120] systemd-journald[1225]: Failed to write entry to /var/log/journal/6da99a97048e4f08abd4ddabcf92bbdd/system.journal (51 items, 89252196 bytes) despite vacuuming, ignoring: Argument list too long
+[   27.551759] systemd-coredump[1709]: ==1709==LeakSanitizer has encountered a fatal error.
+[   27.551759] systemd-coredump[1709]: ==1709==HINT: For debugging, try setting environment variable LSAN_OPTIONS=verbosity=1:log_threads=1
+[   27.551759] systemd-coredump[1709]: ==1709==HINT: LeakSanitizer does not work under ptrace (strace, gdb, etc)
+
+The upstream version of this test doesn't suffer from this because it
+was recently-ish rewritten to not check for the crash event
+(5592608bdcb, but we're missing some udevd prerequisites for that to
+work in RHEL9), and we also started instructing ASan to allow coredumps
+after that change, so the issue was never encountered there in the first
+place.
+
+Since we don't really care about the actual coredump in this case, let's
+just temporarily override the core rlimit to 0 for the udevd process.
+
+Related: RHEL-30372
+rhel-only
+---
+ test/units/testsuite-17.03.sh | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/test/units/testsuite-17.03.sh b/test/units/testsuite-17.03.sh
+index 318afdcb5a..8fa58e2f08 100755
+--- a/test/units/testsuite-17.03.sh
++++ b/test/units/testsuite-17.03.sh
+@@ -17,9 +17,16 @@ event_timeout=10
+ timeout_signal=SIGABRT
+ EOF
+ 
++    mkdir -p /run/systemd/system/systemd-udevd.service.d/
++    cat >/run/systemd/system/systemd-udevd.service.d/99-disable-coredumps.conf <<EOF
++[Service]
++LimitCORE=0
++EOF
++    systemctl daemon-reload
+     systemctl restart systemd-udevd.service
+ }
+ 
++# shellcheck disable=SC2317
+ teardown() {
+     set +e
+ 
+@@ -27,10 +34,11 @@ teardown() {
+         kill "$KILL_PID"
+     fi
+ 
+-    rm -rf "$TMPDIR"
++    rm -rf "$TMPDIR" /run/systemd/system/systemd-udevd.service.d
+ 
+     mv -f /etc/udev/udev.conf.bckp /etc/udev/udev.conf
+     rm -f "$test_rule"
++    systemctl daemon-reload
+     systemctl restart systemd-udevd.service
+ }
+ 

@@ -1,0 +1,42 @@
+From d2fcb75822d85a1516bca2fc2e87e1d94d7691c3 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 27 Feb 2024 16:59:23 +0100
+Subject: [PATCH] tools: make sure $KERNEL_INSTALL_BYPASS is disabled when
+ checking help
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Upstream mkosi sets $KERNEL_INSTALL_BYPASS to 1 by default [0] which
+then trip over check-help tests, as the message about
+$KERNEL_INSTALL_BYPASS is not printed out to stderr. Upstream systemd
+doesn't have this issue, since kernel-install there was rewritten in C,
+so the code base is completely different.
+
+ 1068/1073 systemd:dist-check / check-help-kernel-install                       FAIL             0.02s   exit status 4
+>>> MALLOC_PERTURB_=212 /work/src/tools/check-help.sh /work/build/kernel-install
+――――――――――――――――――――――――――――――――――――― ✀  ―――――――――――――――――――――――――――――――――――――
+kernel-install with an unknown parameter does not print to stderr
+――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――
+
+[0] https://github.com/systemd/mkosi/commit/deaaa831d4379ef400ffdc5f71bc0eabed072044
+
+RHEL-only
+
+Related: RHEL-27512
+---
+ tools/check-help.sh | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/tools/check-help.sh b/tools/check-help.sh
+index f97429364e..2f062a7515 100755
+--- a/tools/check-help.sh
++++ b/tools/check-help.sh
+@@ -9,6 +9,7 @@ set -o pipefail
+ 
+ BINARY="${1:?}"
+ export SYSTEMD_LOG_LEVEL=info
++export KERNEL_INSTALL_BYPASS="no"
+ 
+ if [[ ! -x "$BINARY" ]]; then
+     echo "$BINARY is not an executable"

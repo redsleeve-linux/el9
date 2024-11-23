@@ -1,0 +1,86 @@
+From cd2c39dd38fe4127a185e86798639c076dee58af Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Fri, 10 Nov 2023 16:38:01 +0100
+Subject: [PATCH] fuzz: pass -Dc_args=/-Dcpp_args= to fuzzer targets
+
+Prompted by #29972, because right now it's practically impossible to pass
+-fno-sanitize=function to the fuzzer targets without some extensive
+sed'ing.
+
+This splits both c_args and cpp_args to separate arguments for
+tools/meson-build.sh, because the other way would be to use `eval`, so
+the space-separated but quoted strings passed to these options are not
+split where they shouldn't, and I'd rather avoid using `eval` if
+possible.
+
+Also, this switches the positional arguments we pass to `meson setup`,
+as they were in incorrect order (docs say it should be buildir followed
+by sourcedir); meson is apparently clever enough to figure this out and
+switch the arguments around if necessary, so it didn't complain.
+
+(cherry picked from commit 17ee59c9c922553a8cb4d54cb8ae415706c4feff)
+
+Related: RHEL-30372
+---
+ test/fuzz/meson.build |  5 +++--
+ tools/meson-build.sh  | 29 ++++++++++++++---------------
+ 2 files changed, 17 insertions(+), 17 deletions(-)
+
+diff --git a/test/fuzz/meson.build b/test/fuzz/meson.build
+index f7f0a6111c..813c2cfb8b 100644
+--- a/test/fuzz/meson.build
++++ b/test/fuzz/meson.build
+@@ -38,10 +38,11 @@ sanitize_address_undefined = custom_target(
+                    project_source_root,
+                    '@OUTPUT@',
+                    'fuzzers',
+-                   '-Dfuzz-tests=true -Db_lundef=false -Db_sanitize=address,undefined --optimization=@0@ @1@ -Dc_args=@2@ -Dcpp_args=@2@ -Dskip-deps=@3@'.format(
++                   ' '.join(get_option('c_args') + '-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION'),
++                   ' '.join(get_option('cpp_args') + '-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION'),
++                   '-Dfuzz-tests=true -Db_lundef=false -Db_sanitize=address,undefined --optimization=@0@ @1@ -Dskip-deps=@2@'.format(
+                            get_option('optimization'),
+                            get_option('werror') ? '--werror' : '',
+-                           '-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION',
+                            get_option('skip-deps')
+                    ),
+                    ' '.join(cc.cmd_array()),
+diff --git a/tools/meson-build.sh b/tools/meson-build.sh
+index 2ef60cfa8e..311b778f0a 100755
+--- a/tools/meson-build.sh
++++ b/tools/meson-build.sh
+@@ -2,21 +2,20 @@
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ set -eux
+ 
+-src="$1"
+-dst="$2"
+-target="$3"
+-options="$4"
+-CC="$5"
+-CXX="$6"
++sourcedir="${1:?}"
++builddir="${2:?}"
++target="${3:?}"
++c_args="${4:?}"
++cpp_args="${5:?}"
++options="${6:?}"
++CC="${7:?}"
++CXX="${8:?}"
+ 
+-# shellcheck disable=SC2086
+-[ -f "$dst/build.ninja" ] || CC="$CC" CXX="$CXX" meson setup "$src" "$dst" $options
+-
+-# Locate ninja binary, on CentOS 7 it is called ninja-build, so
+-# use that name if available.
+-ninja="ninja"
+-if command -v ninja-build >/dev/null ; then
+-    ninja="ninja-build"
++if [ ! -f "$builddir/build.ninja" ]; then
++    # shellcheck disable=SC2086
++    CC="$CC" CXX="$CXX" meson setup -Dc_args="$c_args" -Dcpp_args="$cpp_args" "$builddir" "$sourcedir" $options
+ fi
+ 
+-"$ninja" -C "$dst" "$target"
++# Locate ninja binary, on CentOS 7 it is called ninja-build, so use that name if available.
++command -v ninja-build >/dev/null && ninja="ninja-build" || ninja="ninja"
++"$ninja" -C "$builddir" "$target"

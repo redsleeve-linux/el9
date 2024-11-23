@@ -1,0 +1,107 @@
+commit 6f5dcea85a31845ec6f4b6886734b0f02e013718
+Author: Jonathan Wakely <jwakely@redhat.com>
+Date:   Tue Feb 27 17:50:34 2024 +0000
+
+    libstdc++: Fix conditions for using memcmp in std::lexicographical_compare_three_way [PR113960]
+    
+    The change in r11-2981-g2f983fa69005b6 meant that
+    std::lexicographical_compare_three_way started to use memcmp for
+    unsigned integers on big endian targets, but for that to be valid we
+    need the two value types to have the same size and we need to use that
+    size to compute the length passed to memcmp.
+    
+    I already defined a __is_memcmp_ordered_with trait that does the right
+    checks, std::lexicographical_compare_three_way just needs to use it.
+    
+    libstdc++-v3/ChangeLog:
+    
+            PR libstdc++/113960
+            * include/bits/stl_algobase.h (__is_byte_iter): Replace with ...
+            (__memcmp_ordered_with): New concept.
+            (lexicographical_compare_three_way): Use __memcmp_ordered_with
+            instead of __is_byte_iter. Use correct length for memcmp.
+            * testsuite/25_algorithms/lexicographical_compare_three_way/113960.cc:
+            New test.
+    
+    (cherry picked from commit f5cdda8acb06c20335855ed353ab9a441c12128a)
+
+diff --git a/libstdc++-v3/include/bits/stl_algobase.h b/libstdc++-v3/include/bits/stl_algobase.h
+index 7664301a208..6e648e48ad0 100644
+--- a/libstdc++-v3/include/bits/stl_algobase.h
++++ b/libstdc++-v3/include/bits/stl_algobase.h
+@@ -1780,11 +1780,14 @@ _GLIBCXX_BEGIN_NAMESPACE_ALGO
+     }
+ 
+ #if __cpp_lib_three_way_comparison
+-  // Iter points to a contiguous range of unsigned narrow character type
+-  // or std::byte, suitable for comparison by memcmp.
+-  template<typename _Iter>
+-    concept __is_byte_iter = contiguous_iterator<_Iter>
+-      && __is_memcmp_ordered<iter_value_t<_Iter>>::__value;
++  // Both iterators refer to contiguous ranges of unsigned narrow characters,
++  // or std::byte, or big-endian unsigned integers, suitable for comparison
++  // using memcmp.
++  template<typename _Iter1, typename _Iter2>
++    concept __memcmp_ordered_with
++      = (__is_memcmp_ordered_with<iter_value_t<_Iter1>,
++				  iter_value_t<_Iter2>>::__value)
++	  && contiguous_iterator<_Iter1> && contiguous_iterator<_Iter2>;
+ 
+   // Return a struct with two members, initialized to the smaller of x and y
+   // (or x if they compare equal) and the result of the comparison x <=> y.
+@@ -1834,20 +1837,20 @@ _GLIBCXX_BEGIN_NAMESPACE_ALGO
+       if (!std::is_constant_evaluated())
+ 	if constexpr (same_as<_Comp, __detail::_Synth3way>
+ 		      || same_as<_Comp, compare_three_way>)
+-	  if constexpr (__is_byte_iter<_InputIter1>)
+-	    if constexpr (__is_byte_iter<_InputIter2>)
+-	      {
+-		const auto [__len, __lencmp] = _GLIBCXX_STD_A::
+-		  __min_cmp(__last1 - __first1, __last2 - __first2);
+-		if (__len)
+-		  {
+-		    const auto __c
+-		      = __builtin_memcmp(&*__first1, &*__first2, __len) <=> 0;
+-		    if (__c != 0)
+-		      return __c;
+-		  }
+-		return __lencmp;
+-	      }
++	  if constexpr (__memcmp_ordered_with<_InputIter1, _InputIter2>)
++	    {
++	      const auto [__len, __lencmp] = _GLIBCXX_STD_A::
++		__min_cmp(__last1 - __first1, __last2 - __first2);
++	      if (__len)
++		{
++		  const auto __blen = __len * sizeof(*__first1);
++		  const auto __c
++		    = __builtin_memcmp(&*__first1, &*__first2, __blen) <=> 0;
++		  if (__c != 0)
++		    return __c;
++		}
++	      return __lencmp;
++	    }
+ #endif // is_constant_evaluated
+       while (__first1 != __last1)
+ 	{
+diff --git a/libstdc++-v3/testsuite/25_algorithms/lexicographical_compare_three_way/113960.cc b/libstdc++-v3/testsuite/25_algorithms/lexicographical_compare_three_way/113960.cc
+new file mode 100644
+index 00000000000..d51ae1a3d50
+--- /dev/null
++++ b/libstdc++-v3/testsuite/25_algorithms/lexicographical_compare_three_way/113960.cc
+@@ -0,0 +1,15 @@
++// { dg-do run { target c++20 } }
++
++// PR libstdc++/113960
++// std::map with std::vector as input overwrites itself with c++20, on s390x
++
++#include <algorithm>
++#include <testsuite_hooks.h>
++
++int main()
++{
++  unsigned short a1[] { 1, 2, 3 };
++  unsigned short a2[] { 1, 2, 4 };
++  // Incorrect memcmp comparison for big endian targets.
++  VERIFY( std::lexicographical_compare_three_way(a1, a1+3, a2, a2+3) < 0 );
++}

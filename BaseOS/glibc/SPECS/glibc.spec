@@ -84,6 +84,8 @@
 %undefine _annotated_build
 %endif
 
+%define man_pages_version 6.04-1.el9
+
 ##############################################################################
 # Any architecture/kernel combination that supports running 32-bit and 64-bit
 # code in userspace is considered a biarch arch.
@@ -155,7 +157,7 @@ end \
 Summary: The GNU libc libraries
 Name: glibc
 Version: %{glibcversion}
-Release: 100%{?dist}.4.redsleeve
+Release: 125%{?dist}.1
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -196,8 +198,6 @@ Source11: parse-SUPPORTED.py
 # Include in the source RPM for reference.
 Source12: ChangeLog.old
 Source13: nscd-sysusers.conf
-
-Source1000: glibc-arm-dl-tunables.list
 
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
@@ -810,16 +810,67 @@ Patch571: glibc-RHEL-16643-5.patch
 Patch572: glibc-RHEL-16643-6.patch
 Patch573: glibc-RHEL-19444.patch
 Patch574: glibc-RHEL-21556.patch
-Patch575: glibc-RHEL-32480.patch
-Patch576: glibc-RHEL-34318-1.patch
-Patch577: glibc-RHEL-34318-2.patch
-Patch578: glibc-RHEL-34318-3.patch
-Patch579: glibc-RHEL-34318-4.patch
-Patch580: glibc-RHEL-39993-1.patch
-Patch581: glibc-RHEL-39993-2.patch
-Patch582: glibc-RHEL-46763-1.patch
-Patch583: glibc-RHEL-46763-2.patch
-Patch584: glibc-RHEL-46763-3.patch
+Patch575: glibc-RHEL-23472.patch
+Patch576: glibc-RHEL-20172-1.patch
+Patch577: glibc-RHEL-20172-2.patch
+Patch578: glibc-RHEL-21884.patch
+Patch579: glibc-RHEL-25531-1.patch
+Patch580: glibc-RHEL-25531-2.patch
+Patch581: glibc-RHEL-25531-3.patch
+Patch582: glibc-RHEL-25531-4.patch
+Patch583: glibc-RHEL-25046.patch
+Patch584: glibc-RHEL-32681-1.patch
+Patch585: glibc-RHEL-32681-2.patch
+Patch586: glibc-RHEL-39006.patch
+Patch587: glibc-RHEL-22165-1.patch
+Patch588: glibc-RHEL-22165-2.patch
+Patch589: glibc-RHEL-22165-3.patch
+Patch590: glibc-RHEL-22165-4.patch
+Patch591: glibc-RHEL-22165-5.patch
+Patch592: glibc-RHEL-31805.patch
+Patch593: glibc-RHEL-25063.patch
+Patch594: glibc-RHEL-34265.patch
+Patch595: glibc-RHEL-34268-1.patch
+Patch596: glibc-RHEL-34268-2.patch
+Patch597: glibc-RHEL-34272-1.patch
+Patch598: glibc-RHEL-34272-2.patch
+Patch599: glibc-RHEL-39000-1.patch
+Patch600: glibc-RHEL-39000-2.patch
+Patch601: glibc-RHEL-39000-3.patch
+Patch602: glibc-RHEL-39992-1.patch
+Patch603: glibc-RHEL-39992-2.patch
+Patch604: glibc-RHEL-30823.patch
+Patch605: glibc-RHEL-25257-1.patch
+Patch606: glibc-RHEL-25257-2.patch
+Patch607: glibc-RHEL-46741-1.patch
+Patch608: glibc-RHEL-46741-2.patch
+Patch609: glibc-RHEL-50101-1.patch
+Patch610: glibc-RHEL-50101-2.patch
+Patch611: glibc-RHEL-50101-3.patch
+Patch612: glibc-RHEL-54007.patch
+Patch613: glibc-RHEL-46723-1.patch
+Patch614: glibc-RHEL-46723-2.patch
+Patch615: glibc-RHEL-36148-1.patch
+Patch616: glibc-RHEL-36148-2.patch
+Patch617: glibc-RHEL-36148-3.patch
+Patch618: glibc-RHEL-49489-1.patch
+Patch619: glibc-RHEL-49489-2.patch
+Patch620: glibc-RHEL-54447-1.patch
+Patch621: glibc-RHEL-54447-2.patch
+Patch622: glibc-RHEL-54447-3.patch
+Patch623: glibc-RHEL-54447-4.patch
+Patch624: glibc-RHEL-54447-5.patch
+Patch625: glibc-RHEL-54447-6.patch
+Patch626: glibc-RHEL-54447-7.patch
+Patch627: glibc-RHEL-54447-8.patch
+Patch628: glibc-RHEL-54447-9.patch
+Patch629: glibc-RHEL-54447-10.patch
+Patch630: glibc-RHEL-46979-1.patch
+Patch631: glibc-RHEL-46979-2.patch
+Patch632: glibc-RHEL-46979-3.patch
+Patch633: glibc-RHEL-46979-4.patch
+Patch634: glibc-RHEL-49489-3.patch
+Patch635: glibc-RHEL-49489-4.patch
 
 ##############################################################################
 # Continued list of core "glibc" package information:
@@ -1642,10 +1693,6 @@ that can be installed across architectures.
 %prep
 %autosetup -n %{glibcsrcdir} -p1
 
-%ifarch %{arm}
-cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
-%endif
-
 ##############################################################################
 # %%prep - Additional prep required...
 ##############################################################################
@@ -1832,6 +1879,7 @@ build()
 %ifarch aarch64
 		--enable-memory-tagging \
 %endif
+		--with-man-pages=%{man_pages_version} \
 		--disable-crypt ||
 		{ cat config.log; false; }
 
@@ -2982,25 +3030,92 @@ update_gconv_modules_cache ()
 %endif
 
 %changelog
-* Fri Oct 04 2024 Jacco Ligthart <jacco@redsleeve.org> - 2.34-100.4.redsleeve
-- add dl-tunables.list for arm
+* Fri Sep 27 2024 Florian Weimer <fweimer@redhat.com> - 2.34-125.1
+- Remove some unused ppc64le string functions (RHEL-49489)
 
-* Tue Aug 27 2024 Patsy Griffin <patsy@redhat.com> - 2.34-100.4
+* Thu Sep  5 2024 DJ Delorie <dj@redhat.com> - 2.34-125
+- elf: Rework exception handling in the dynamic loader (RHEL-46979)
+
+* Thu Sep  5 2024 Siddhesh Poyarekar <siddhesh@redhat.com> - 2.34-124
+- Fix ungetc leak and invalid read (RHEL-54447)
+
+* Tue Sep 03 2024 Patsy Griffin <patsy@redhat.com> - 2.34-123
+- s390x: Fix segfault in wcsncmp
+- Enhanced test coverage for strncmp, wcsncmp (RHEL-49489)
+
+* Wed Aug 28 2024 Patsy Griffin <patsy@redhat.com> - 2.34-122
 - elf: Clarify and invert second argument of _dl_allocate_tls_init
-- elf: Avoid re-initializing already allocated TLS in dlopen (RHEL-46763)
+- elf: Avoid re-initializing already allocated TLS in dlopen (RHEL-36148)
 
-* Fri Jul 12 2024 Patsy Griffin <patsy@redhat.com> - 2.34-100.3
+* Thu Aug 15 2024 Florian Weimer <fweimer@redhat.com> - 2.34-121
+- Document dprintf, vdprintf in the manual (RHEL-46723)
+
+* Tue Aug 13 2024 Frédéric Bérat <fberat@redhat.com> - 2.34-120
+- getdelim: ensure error indicator is set on error (RHEL-54007)
+
+* Tue Aug 06 2024 Arjun Shankar <arjun@redhat.com> - 2.34-119
+- Add new tests for aligned_alloc (RHEL-50101)
+
+* Tue Aug 06 2024 Arjun Shankar <arjun@redhat.com> - 2.34-118
+- manual: Improve documentation of putc, putwc, getc, and getwc (RHEL-46741)
+
+* Wed Jul 17 2024 DJ Delorie <dj@redhat.com> - 2.34-117
+- manual: add syscalls (RHEL-25257)
+
+* Fri Jul 12 2024 DJ Delorie <dj@redhat.com> - 2.34-116
+- Update mmap() flags and errors lists (RHEL-30823)
+
+* Wed Jul 03 2024 Patsy Griffin <patsy@redhat.com> - 2.34-115
 - elf: Avoid some free (NULL) calls in _dl_update_slotinfo
-- elf: Support recursive use of dynamic TLS in interposed malloc (RHEL-39993)
+- elf: Support recursive use of dynamic TLS in interposed malloc (RHEL-39992)
 
-* Mon Apr 29 2024 Florian Weimer <fweimer@redhat.com> - 2.34-100.2
-- CVE-2024-33599: nscd: buffer overflow in netgroup cache (RHEL-34318)
-- CVE-2024-33600: nscd: null pointer dereferences in netgroup cache
-- CVE-2024-33601: nscd: crash on out-of-memory condition
-- CVE-2024-33602: nscd: memory corruption with NSS netgroup modules
+* Wed Jun 26 2024 Patsy Griffin <patsy@redhat.com> - 2.34-114
+- Update syscall list for Linux 6.9. (RHEL-39000)
 
-* Tue Apr 16 2024 Florian Weimer <fweimer@redhat.com> - 2.34-100.1
-- CVE-2024-2961: Out of bounds write in iconv conversion to ISO-2022-CN-EXT (RHEL-32480)
+* Thu Jun 13 2024 Patsy Griffin <patsy@redhat.com> - 2.34-113
+- CVE-2024-33601 glibc: netgroup cache may terminate daemon on
+  memory allocation failure (RHEL-34272)
+- CVE-2024-33602 glibc: netgroup cache assumes NSS callback 
+  uses in-buffer strings (RHEL-34274) 
+
+* Tue Jun 11 2024 Patsy Griffin <patsy@redhat.com> - 2.34-112
+- CVE-2024-33600: nscd: Avoid null pointer crashes after notfound
+  response (RHEL-34268)
+
+* Mon Jun 10 2024 Patsy Griffin <patsy@redhat.com> - 2.34-111
+- CVE-2024-33599: nscd: buffer overflow in netgroup cache (RHEL-34265)
+
+* Mon Jun 10 2024 Arjun Shankar <arjun@redhat.com> - 2.34-110
+- Add new test for malloc mmap fall-back path upon sbrk failure (RHEL-25063)
+
+* Thu Jun 06 2024 Patsy Griffin <patsy@redhat.com> - 2.34-109
+- CVE-2024-2961: Out of bounds write in iconv conversion to
+  ISO-2022-CN-EXT (RHEL-31805)
+
+* Thu Jun 06 2024 Patsy Griffin <patsy@redhat.com> - 2.34-108
+- aarch64: enhance ld.so --list-diagnostics on aarch64 similar
+  to x86_64 (RHEL-22165)
+
+* Tue May 28 2024 <dj@redhat.com> - 2.34-107
+- Add MMAP_ABOVE4G from Linux 6.6 to sys/mman.h (RHEL-39006)
+
+* Sun May 19 2024 Patsy Griffin <patsy@redhat.com> - 2.34-106
+- Improve test coverage for connect() (RHEL-32681)
+
+* Wed Apr  3 2024 DJ Delorie <dj@redhat.com> - 2.34-105
+- x86-64: Save APX registers in ld.so trampoline (RHEL-25046)
+
+* Tue Mar 26 2024 DJ Delorie <dj@redhat.com> - 2.34-104
+- x86: Fix Zen3/Zen4 ERMS selection (RHEL-25531)
+
+* Tue Mar 12 2024 Arjun Shankar <arjun@redhat.com> - 2.34-103
+- malloc: Do not use MAP_NORESERVE to allocate heap segments (RHEL-21884)
+
+* Fri Mar  8 2024 DJ Delorie <dj@redhat.com> - 2.34-102
+- Add glibc.cpu.prefer_map_32bit_exec tunable (RHEL-20172)
+
+* Tue Feb 27 2024 Patsy Griffin <patsy@redhat.com> - 2.34-101
+- Switch back to assembly syscall wrapper for prctl (RHEL-23472)
 
 * Wed Jan 24 2024 Patsy Griffin <patsy@redhat.com> - 2.34-100
 - manual: fix order of arguments of memalign and aligned_alloc (RHEL-21556)

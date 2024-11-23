@@ -1,0 +1,152 @@
+From ae92c09f0ddfea2ff6042e152eec9af86013da38 Mon Sep 17 00:00:00 2001
+From: Lukas Nykryn <lnykryn@redhat.com>
+Date: Thu, 22 Aug 2024 14:24:42 +0200
+Subject: [PATCH] Revert "udev-builtin-net_id: use firmware_node/sun for
+ ID_NET_NAME_SLOT"
+
+This reverts commit 7af151ca282d506a8e409a68b656f6d1cd2f13fb.
+
+It seems that virtio devices always have "0" in
+the firmware_node/sun. And because of that, udev will
+always name the device ens0, which leads to collisions.
+So let's disable it for now.
+
+rhel-only: policy
+
+Reverts: RHEL-50103
+---
+ man/systemd.net-naming-scheme.xml |  5 +--
+ src/shared/netif-naming-scheme.h  |  3 +-
+ src/udev/udev-builtin-net_id.c    | 66 ++++---------------------------
+ 3 files changed, 10 insertions(+), 64 deletions(-)
+
+diff --git a/man/systemd.net-naming-scheme.xml b/man/systemd.net-naming-scheme.xml
+index c9a7e1e493..83293e5636 100644
+--- a/man/systemd.net-naming-scheme.xml
++++ b/man/systemd.net-naming-scheme.xml
+@@ -510,10 +510,9 @@
+           to distinguish between devices. However, name conflict can occur if these devices are not
+           children of the same PCI bridge, e.g. there are multiple PCI bridges in the same slot.
+           </para>
+-
+-          <para>PCI slot number is now read from <constant>firmware_node/sun</constant> sysfs file.</para>
+           </listitem>
+         </varlistentry>
++
+       </variablelist>
+ 
+     <para>By default <constant>rhel-9.0</constant> is used.</para>
+@@ -667,7 +666,7 @@ ID_NET_NAME_ONBOARD_LABEL=Ethernet Port 1
+     </example>
+ 
+     <example>
+-      <title>PCI Ethernet card in slot with firmware index number</title>
++      <title>PCI Ethernet card in hotplug slot with firmware index number</title>
+ 
+       <programlisting># /sys/devices/pci0000:00/0000:00:1c.3/0000:05:00.0/net/ens1
+ ID_NET_NAME_MAC=enx000000000466
+diff --git a/src/shared/netif-naming-scheme.h b/src/shared/netif-naming-scheme.h
+index b1ac2e4320..5bc071f8db 100644
+--- a/src/shared/netif-naming-scheme.h
++++ b/src/shared/netif-naming-scheme.h
+@@ -42,7 +42,6 @@ typedef enum NamingSchemeFlags {
+                                                      * This is disabled since rhel-9.5, as it seems not to work at least for some setups. See upstream issue #28929. */
+         NAMING_DEVICETREE_ALIASES        = 1 << 15, /* Generate names from devicetree aliases */
+         NAMING_SR_IOV_R                  = 1 << 17, /* Use "r" suffix for SR-IOV VF representors */
+-        NAMING_FIRMWARE_NODE_SUN         = 1 << 18, /* Use firmware_node/sun to get PCI slot number */
+ 
+         /* And now the masks that combine the features above */
+         NAMING_V238 = 0,
+@@ -74,7 +73,7 @@ typedef enum NamingSchemeFlags {
+         NAMING_RHEL_9_2 = NAMING_RHEL_9_0,
+         NAMING_RHEL_9_3 = NAMING_RHEL_9_0 | NAMING_SR_IOV_R,
+         NAMING_RHEL_9_4 = NAMING_RHEL_9_3,
+-        NAMING_RHEL_9_5 = (NAMING_RHEL_9_4 & ~NAMING_BRIDGE_MULTIFUNCTION_SLOT) | NAMING_FIRMWARE_NODE_SUN,
++        NAMING_RHEL_9_5 = NAMING_RHEL_9_4 & ~NAMING_BRIDGE_MULTIFUNCTION_SLOT,
+ 
+         EXTRA_NET_NAMING_SCHEMES
+ 
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index 291fb4ba36..16c9971876 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -442,51 +442,6 @@ static int pci_get_hotplug_slot(sd_device *dev, uint32_t *ret) {
+         return -ENOENT;
+ }
+ 
+-static int get_device_firmware_node_sun(sd_device *dev, uint32_t *ret) {
+-        const char *attr;
+-        int r;
+-
+-        assert(dev);
+-        assert(ret);
+-
+-        r = device_get_sysattr_value_filtered(dev, "firmware_node/sun", &attr);
+-        if (r < 0)
+-                return log_device_debug_errno(dev, r, "Failed to read firmware_node/sun, ignoring: %m");
+-
+-        r = safe_atou32(attr, ret);
+-        if (r < 0)
+-                return log_device_warning_errno(dev, r, "Failed to parse firmware_node/sun '%s', ignoring: %m", attr);
+-
+-        return 0;
+-}
+-
+-static int pci_get_slot_from_firmware_node_sun(sd_device *dev, uint32_t *ret) {
+-        int r;
+-        sd_device *slot_dev;
+-
+-        assert(dev);
+-        assert(ret);
+-
+-        /* Try getting the ACPI _SUN for the device */
+-        if (get_device_firmware_node_sun(dev, ret) >= 0)
+-                return 0;
+-
+-        r = sd_device_get_parent_with_subsystem_devtype(dev, "pci", NULL, &slot_dev);
+-        if (r < 0)
+-                return log_device_debug_errno(dev, r, "Failed to find pci parent, ignoring: %m");
+-
+-        if (is_pci_bridge(slot_dev) && is_pci_multifunction(dev) <= 0)
+-                return log_device_debug_errno(dev, SYNTHETIC_ERRNO(ESTALE),
+-                                              "Not using slot information because the parent pcieport "
+-                                              "is a bridge and the PCI device is not multifunction.");
+-
+-        /* Try getting the ACPI _SUN from the parent pcieport */
+-        if (get_device_firmware_node_sun(slot_dev, ret) >= 0)
+-                return 0;
+-
+-        return -ENOENT;
+-}
+-
+ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+         const char *sysname, *attr;
+         unsigned domain, bus, slot, func;
+@@ -562,20 +517,13 @@ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+                          domain, bus, slot, func, strempty(info->phys_port_name), dev_port,
+                          special_glyph(SPECIAL_GLYPH_ARROW_RIGHT), empty_to_na(names->pci_path));
+ 
+-        if (naming_scheme_has(NAMING_FIRMWARE_NODE_SUN))
+-                r = pci_get_slot_from_firmware_node_sun(names->pcidev, &hotplug_slot);
+-        else
+-                r = -1;
+-        /* If we don't find a slot using firmware_node/sun, fallback to hotplug_slot */
+-        if (r < 0) {
+-                r = pci_get_hotplug_slot(names->pcidev, &hotplug_slot);
+-                if (r < 0)
+-                        return r;
+-                if (r > 0)
+-                        /* If the hotplug slot is found through the function ID, then drop the domain from the name.
+-                        * See comments in parse_hotplug_slot_from_function_id(). */
+-                        domain = 0;
+-        }
++        r = pci_get_hotplug_slot(names->pcidev, &hotplug_slot);
++        if (r < 0)
++                return r;
++        if (r > 0)
++                /* If the hotplug slot is found through the function ID, then drop the domain from the name.
++                 * See comments in parse_hotplug_slot_from_function_id(). */
++                domain = 0;
+ 
+         s = names->pci_slot;
+         l = sizeof(names->pci_slot);

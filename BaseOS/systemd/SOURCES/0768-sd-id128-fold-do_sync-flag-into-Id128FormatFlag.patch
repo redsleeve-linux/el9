@@ -1,0 +1,143 @@
+From 77085bae51bcfaaa0ef356bca93e9aa883a43a89 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 9 Dec 2022 05:37:12 +0900
+Subject: [PATCH] sd-id128: fold do_sync flag into Id128FormatFlag
+
+(cherry picked from commit b40c8ebdc86b61df03207865b5a75cd37900ea4c)
+
+Related: RHEL-27512
+---
+ src/libsystemd/sd-id128/id128-util.c | 8 ++++----
+ src/libsystemd/sd-id128/id128-util.h | 6 ++++--
+ src/nspawn/nspawn.c                  | 2 +-
+ src/shared/machine-id-setup.c        | 6 +++---
+ src/test/test-id128.c                | 4 ++--
+ 5 files changed, 14 insertions(+), 12 deletions(-)
+
+diff --git a/src/libsystemd/sd-id128/id128-util.c b/src/libsystemd/sd-id128/id128-util.c
+index 9b0ad48e6b..faacc55960 100644
+--- a/src/libsystemd/sd-id128/id128-util.c
++++ b/src/libsystemd/sd-id128/id128-util.c
+@@ -109,7 +109,7 @@ int id128_read(const char *p, Id128FormatFlag f, sd_id128_t *ret) {
+         return id128_read_fd(fd, f, ret);
+ }
+ 
+-int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id, bool do_sync) {
++int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id) {
+         char buffer[SD_ID128_UUID_STRING_MAX + 1]; /* +1 is for trailing newline */
+         size_t sz;
+         int r;
+@@ -130,7 +130,7 @@ int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id, bool do_sync) {
+         if (r < 0)
+                 return r;
+ 
+-        if (do_sync) {
++        if (FLAGS_SET(f, ID128_SYNC_ON_WRITE)) {
+                 r = fsync_full(fd);
+                 if (r < 0)
+                         return r;
+@@ -139,14 +139,14 @@ int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id, bool do_sync) {
+         return 0;
+ }
+ 
+-int id128_write(const char *p, Id128FormatFlag f, sd_id128_t id, bool do_sync) {
++int id128_write(const char *p, Id128FormatFlag f, sd_id128_t id) {
+         _cleanup_close_ int fd = -1;
+ 
+         fd = open(p, O_WRONLY|O_CREAT|O_CLOEXEC|O_NOCTTY|O_TRUNC, 0444);
+         if (fd < 0)
+                 return -errno;
+ 
+-        return id128_write_fd(fd, f, id, do_sync);
++        return id128_write_fd(fd, f, id);
+ }
+ 
+ void id128_hash_func(const sd_id128_t *p, struct siphash *state) {
+diff --git a/src/libsystemd/sd-id128/id128-util.h b/src/libsystemd/sd-id128/id128-util.h
+index d031c680f1..887f443d69 100644
+--- a/src/libsystemd/sd-id128/id128-util.h
++++ b/src/libsystemd/sd-id128/id128-util.h
+@@ -14,13 +14,15 @@ typedef enum Id128FormatFlag {
+         ID128_FORMAT_PLAIN = 1 << 0,  /* formatted as 32 hex chars as-is */
+         ID128_FORMAT_UUID  = 1 << 1,  /* formatted as 36 character uuid string */
+         ID128_FORMAT_ANY   = ID128_FORMAT_PLAIN | ID128_FORMAT_UUID,
++
++        ID128_SYNC_ON_WRITE = 1 << 2, /* Sync the file after write. Used only when writing an ID. */
+ } Id128FormatFlag;
+ 
+ int id128_read_fd(int fd, Id128FormatFlag f, sd_id128_t *ret);
+ int id128_read(const char *p, Id128FormatFlag f, sd_id128_t *ret);
+ 
+-int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id, bool do_sync);
+-int id128_write(const char *p, Id128FormatFlag f, sd_id128_t id, bool do_sync);
++int id128_write_fd(int fd, Id128FormatFlag f, sd_id128_t id);
++int id128_write(const char *p, Id128FormatFlag f, sd_id128_t id);
+ 
+ void id128_hash_func(const sd_id128_t *p, struct siphash *state);
+ int id128_compare_func(const sd_id128_t *a, const sd_id128_t *b) _pure_;
+diff --git a/src/nspawn/nspawn.c b/src/nspawn/nspawn.c
+index 085f817dd3..db45968cd3 100644
+--- a/src/nspawn/nspawn.c
++++ b/src/nspawn/nspawn.c
+@@ -2195,7 +2195,7 @@ static int setup_boot_id(void) {
+         if (r < 0)
+                 return log_error_errno(r, "Failed to generate random boot id: %m");
+ 
+-        r = id128_write(path, ID128_FORMAT_UUID, rnd, false);
++        r = id128_write(path, ID128_FORMAT_UUID, rnd);
+         if (r < 0)
+                 return log_error_errno(r, "Failed to write boot id: %m");
+ 
+diff --git a/src/shared/machine-id-setup.c b/src/shared/machine-id-setup.c
+index 787c0765d0..f82a292ea3 100644
+--- a/src/shared/machine-id-setup.c
++++ b/src/shared/machine-id-setup.c
+@@ -152,7 +152,7 @@ int machine_id_setup(const char *root, bool force_transient, sd_id128_t machine_
+                         if (r < 0)
+                                 return log_error_errno(r, "Failed to sync %s: %m", etc_machine_id);
+                 } else {
+-                        r = id128_write_fd(fd, ID128_FORMAT_PLAIN, machine_id, true);
++                        r = id128_write_fd(fd, ID128_FORMAT_PLAIN | ID128_SYNC_ON_WRITE, machine_id);
+                         if (r < 0)
+                                 return log_error_errno(r, "Failed to write %s: %m", etc_machine_id);
+                         else
+@@ -168,7 +168,7 @@ int machine_id_setup(const char *root, bool force_transient, sd_id128_t machine_
+         run_machine_id = prefix_roota(root, "/run/machine-id");
+ 
+         RUN_WITH_UMASK(0022)
+-                r = id128_write(run_machine_id, ID128_FORMAT_PLAIN, machine_id, false);
++                r = id128_write(run_machine_id, ID128_FORMAT_PLAIN, machine_id);
+         if (r < 0) {
+                 (void) unlink(run_machine_id);
+                 return log_error_errno(r, "Cannot write %s: %m", run_machine_id);
+@@ -261,7 +261,7 @@ int machine_id_commit(const char *root) {
+                 return r;
+ 
+         /* Update a persistent version of etc_machine_id */
+-        r = id128_write(etc_machine_id, ID128_FORMAT_PLAIN, id, true);
++        r = id128_write(etc_machine_id, ID128_FORMAT_PLAIN | ID128_SYNC_ON_WRITE, id);
+         if (r < 0)
+                 return log_error_errno(r, "Cannot write %s. This is mandatory to get a persistent machine ID: %m", etc_machine_id);
+ 
+diff --git a/src/test/test-id128.c b/src/test/test-id128.c
+index dccf3b7fb9..6de0cec426 100644
+--- a/src/test/test-id128.c
++++ b/src/test/test-id128.c
+@@ -86,7 +86,7 @@ TEST(id128) {
+ 
+         /* First, write as UUID */
+         assert_se(sd_id128_randomize(&id) >= 0);
+-        assert_se(id128_write_fd(fd, ID128_FORMAT_UUID, id, false) >= 0);
++        assert_se(id128_write_fd(fd, ID128_FORMAT_UUID, id) >= 0);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+         assert_se(id128_read_fd(fd, ID128_FORMAT_PLAIN, &id2) == -EINVAL);
+@@ -104,7 +104,7 @@ TEST(id128) {
+         assert_se(ftruncate(fd, 0) >= 0);
+ 
+         assert_se(sd_id128_randomize(&id) >= 0);
+-        assert_se(id128_write_fd(fd, ID128_FORMAT_PLAIN, id, false) >= 0);
++        assert_se(id128_write_fd(fd, ID128_FORMAT_PLAIN, id) >= 0);
+ 
+         assert_se(lseek(fd, 0, SEEK_SET) == 0);
+         assert_se(id128_read_fd(fd, ID128_FORMAT_UUID, &id2) == -EINVAL);

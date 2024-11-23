@@ -1,0 +1,31 @@
+From 82231e1834a5936216c666e3488bccb8b82de258 Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Mon, 24 Apr 2023 20:55:15 +0200
+Subject: [PATCH] Drop log level of header limits log message
+
+Especially when using in-memory logging, these are too noisy so
+let's drop them back to debug level.
+
+(cherry picked from commit afc47ee2af456d12670df862457dcc7f6b864d79)
+
+Related: RHEL-33890
+---
+ src/journal/journald-server.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
+index cbcf1e9d9e..56f2ea8583 100644
+--- a/src/journal/journald-server.c
++++ b/src/journal/journald-server.c
+@@ -848,8 +848,9 @@ static void write_to_journal(Server *s, uid_t uid, struct iovec *iovec, size_t n
+                 if (!f)
+                         return;
+ 
+-                if (journal_file_rotate_suggested(f->file, s->max_file_usec, LOG_INFO)) {
+-                        log_info("%s: Journal header limits reached or header out-of-date, rotating.", f->file->path);
++                if (journal_file_rotate_suggested(f->file, s->max_file_usec, LOG_DEBUG)) {
++                        log_debug("%s: Journal header limits reached or header out-of-date, rotating.",
++                                  f->file->path);
+                         rotate = true;
+                 }
+         }

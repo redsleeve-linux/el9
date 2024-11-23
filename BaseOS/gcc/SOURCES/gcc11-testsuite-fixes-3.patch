@@ -1,0 +1,150 @@
+commit f1b1d515aa5836844cdb45e8bb2b941784f78fd2
+Author: Jakub Jelinek <jakub@redhat.com>
+Date:   Mon Apr 22 18:00:06 2024 +0200
+
+    libstdc++: Workaround kernel-headers on s390x-linux
+    
+    We see
+    FAIL: 17_intro/headers/c++1998/all_attributes.cc   (test for excess errors)
+    FAIL: 17_intro/headers/c++2011/all_attributes.cc   (test for excess errors)
+    FAIL: 17_intro/headers/c++2014/all_attributes.cc   (test for excess errors)
+    FAIL: 17_intro/headers/c++2017/all_attributes.cc   (test for excess errors)
+    FAIL: 17_intro/headers/c++2020/all_attributes.cc   (test for excess errors)
+    FAIL: 17_intro/names.cc  -std=gnu++17 (test for excess errors)
+    on s390x-linux.
+    The first 5 are due to kernel-headers not using uglified attribute names,
+    where <asm/types.h> contains
+    __attribute__((packed, aligned(4)))
+    I've filed a downstream bugreport for this in
+    https://bugzilla.redhat.com/show_bug.cgi?id=2276084
+    (not really sure where to report kernel-headers issues upstream), while the
+    last one is due to <sys/ucontext.h> from glibc containing:
+      #ifdef __USE_MISC
+      # define __ctx(fld) fld
+      #else
+      # define __ctx(fld) __ ## fld
+      #endif
+      ...
+      typedef union
+        {
+          double  __ctx(d);
+          float   __ctx(f);
+        } fpreg_t;
+    and g++ predefining -D_GNU_SOURCE which implies define __USE_MISC.
+    
+    The following patch adds a workaround for this on the libstdc++ testsuite
+    side.
+    
+    2024-04-22  Jakub Jelinek  <jakub@redhat.com>
+    
+            * testsuite/17_intro/names.cc (d, f): Undefine on s390*-linux*.
+            * testsuite/17_intro/headers/c++1998/all_attributes.cc (packed): Don't
+            define on s390.
+            * testsuite/17_intro/headers/c++2011/all_attributes.cc (packed):
+            Likewise.
+            * testsuite/17_intro/headers/c++2014/all_attributes.cc (packed):
+            Likewise.
+            * testsuite/17_intro/headers/c++2017/all_attributes.cc (packed):
+            Likewise.
+            * testsuite/17_intro/headers/c++2020/all_attributes.cc (packed):
+            Likewise.
+    
+    (cherry picked from commit cf5f7791056b3ed993bc8024be767a86157514a9)
+
+diff --git a/libstdc++-v3/testsuite/17_intro/headers/c++1998/all_attributes.cc b/libstdc++-v3/testsuite/17_intro/headers/c++1998/all_attributes.cc
+index 74268b6a482..658063bd0a4 100644
+--- a/libstdc++-v3/testsuite/17_intro/headers/c++1998/all_attributes.cc
++++ b/libstdc++-v3/testsuite/17_intro/headers/c++1998/all_attributes.cc
+@@ -29,7 +29,11 @@
+ # define noreturn 1
+ # define visibility 1
+ #endif
++#ifndef __s390__
++// kernel-headers <asm/types.h> uses __attribute__((packed,aligned(4))) on
++// S390.
+ #define packed 1
++#endif
+ #define pure 1
+ // glibc's sysdeps/unix/sysv/linux/arm/sys/ucontext.h uses this on ARM.
+ #ifndef __arm__
+diff --git a/libstdc++-v3/testsuite/17_intro/headers/c++2011/all_attributes.cc b/libstdc++-v3/testsuite/17_intro/headers/c++2011/all_attributes.cc
+index 5d0c5fe8177..f1bcc1fbbc8 100644
+--- a/libstdc++-v3/testsuite/17_intro/headers/c++2011/all_attributes.cc
++++ b/libstdc++-v3/testsuite/17_intro/headers/c++2011/all_attributes.cc
+@@ -29,7 +29,11 @@
+ # define visibility 1
+ #endif
+ #define no_unique_address 1
++#ifndef __s390__
++// kernel-headers <asm/types.h> uses __attribute__((packed,aligned(4))) on
++// S390.
+ #define packed 1
++#endif
+ #define pure 1
+ // glibc's sysdeps/unix/sysv/linux/arm/sys/ucontext.h uses this on ARM.
+ #ifndef __arm__
+diff --git a/libstdc++-v3/testsuite/17_intro/headers/c++2014/all_attributes.cc b/libstdc++-v3/testsuite/17_intro/headers/c++2014/all_attributes.cc
+index 3cac2190ec7..48e7ef64afb 100644
+--- a/libstdc++-v3/testsuite/17_intro/headers/c++2014/all_attributes.cc
++++ b/libstdc++-v3/testsuite/17_intro/headers/c++2014/all_attributes.cc
+@@ -29,7 +29,11 @@
+ # define visibility 1
+ #endif
+ #define no_unique_address 1
++#ifndef __s390__
++// kernel-headers <asm/types.h> uses __attribute__((packed,aligned(4))) on
++// S390.
+ #define packed 1
++#endif
+ #define pure 1
+ // glibc's sysdeps/unix/sysv/linux/arm/sys/ucontext.h uses this on ARM.
+ #ifndef __arm__
+diff --git a/libstdc++-v3/testsuite/17_intro/headers/c++2017/all_attributes.cc b/libstdc++-v3/testsuite/17_intro/headers/c++2017/all_attributes.cc
+index f607532aa90..03e4e23c686 100644
+--- a/libstdc++-v3/testsuite/17_intro/headers/c++2017/all_attributes.cc
++++ b/libstdc++-v3/testsuite/17_intro/headers/c++2017/all_attributes.cc
+@@ -28,7 +28,11 @@
+ # define visibility 1
+ #endif
+ #define no_unique_address 1
++#ifndef __s390__
++// kernel-headers <asm/types.h> uses __attribute__((packed,aligned(4))) on
++// S390.
+ #define packed 1
++#endif
+ #define pure 1
+ // glibc's sysdeps/unix/sysv/linux/arm/sys/ucontext.h uses this on ARM.
+ #ifndef __arm__
+diff --git a/libstdc++-v3/testsuite/17_intro/headers/c++2020/all_attributes.cc b/libstdc++-v3/testsuite/17_intro/headers/c++2020/all_attributes.cc
+index 5732633c7e4..7375dc88bb1 100644
+--- a/libstdc++-v3/testsuite/17_intro/headers/c++2020/all_attributes.cc
++++ b/libstdc++-v3/testsuite/17_intro/headers/c++2020/all_attributes.cc
+@@ -27,7 +27,11 @@
+ # define cold 1
+ # define visibility 1
+ #endif
++#ifndef __s390__
++// kernel-headers <asm/types.h> uses __attribute__((packed,aligned(4))) on
++// S390.
+ #define packed 1
++#endif
+ #define pure 1
+ // glibc's sysdeps/unix/sysv/linux/arm/sys/ucontext.h uses this on ARM.
+ #ifndef __arm__
+diff --git a/libstdc++-v3/testsuite/17_intro/names.cc b/libstdc++-v3/testsuite/17_intro/names.cc
+index eb4d064177c..864bc20f146 100644
+--- a/libstdc++-v3/testsuite/17_intro/names.cc
++++ b/libstdc++-v3/testsuite/17_intro/names.cc
+@@ -267,6 +267,12 @@
+ #undef u
+ #endif
+ 
++#if defined (__linux__) && defined (__s390__)
++// <sys/ucontext.h> defines fpreg_t::d and fpreg_t::f
++#undef d
++#undef f
++#endif
++
+ #if defined (__linux__) && defined (__sparc__)
+ #undef y
+ #endif

@@ -1,0 +1,80 @@
+From 727b779b866e11834d1d0414d677b29702cadbfa Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Mon, 3 Jul 2023 10:21:07 +0100
+Subject: [PATCH] core: set SYSTEMD_CONFIDENTIAL_VIRTUALIZATION env for
+ generators
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This reports the confidential virtualization type that was detected
+
+Related: https://github.com/systemd/systemd/issues/27604
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 0895124572c5a035d45f08cfbcdc0cdd61cead4c)
+
+Related: RHEL-50651
+---
+ man/systemd.generator.xml | 12 ++++++++++++
+ src/core/manager.c        | 11 +++++++++++
+ 2 files changed, 23 insertions(+)
+
+diff --git a/man/systemd.generator.xml b/man/systemd.generator.xml
+index 19ec586fa0..b3f19296f9 100644
+--- a/man/systemd.generator.xml
++++ b/man/systemd.generator.xml
+@@ -185,6 +185,18 @@
+         <varname>ConditionArchitecture=</varname> in
+         <citerefentry><refentrytitle>systemd.unit</refentrytitle><manvolnum>5</manvolnum></citerefentry>.</para></listitem>
+       </varlistentry>
++
++      <varlistentry>
++        <term><varname>$SYSTEMD_CONFIDENTIAL_VIRTUALIZATION</varname></term>
++
++        <listitem><para>If the service manager is run in a confidential virtualized environment,
++        <varname>$SYSTEMD_CONFIDENTIAL_VIRTUALIZATION</varname> is set to a string that identifies
++        the confidential virtualization hardware technology. If no confidential virtualization is
++        detected this variable will not be set. This data is identical to what
++        <citerefentry><refentrytitle>systemd-detect-virt</refentrytitle><manvolnum>1</manvolnum></citerefentry>
++        detects and reports, and uses the same vocabulary of confidential virtualization
++        technology identifiers.</para></listitem>
++      </varlistentry>
+     </variablelist>
+   </refsect1>
+ 
+diff --git a/src/core/manager.c b/src/core/manager.c
+index b44c7785cf..daeaa641d7 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -30,6 +30,7 @@
+ #include "bus-util.h"
+ #include "clean-ipc.h"
+ #include "clock-util.h"
++#include "confidential-virt.h"
+ #include "core-varlink.h"
+ #include "creds-util.h"
+ #include "dbus-job.h"
+@@ -3706,6 +3707,7 @@ static int manager_run_environment_generators(Manager *m) {
+ static int build_generator_environment(Manager *m, char ***ret) {
+         _cleanup_strv_free_ char **nl = NULL;
+         Virtualization v;
++        ConfidentialVirtualization cv;
+         int r;
+ 
+         assert(m);
+@@ -3754,6 +3756,15 @@ static int build_generator_environment(Manager *m, char ***ret) {
+                         return r;
+         }
+ 
++        cv = detect_confidential_virtualization();
++        if (cv < 0)
++                log_debug_errno(cv, "Failed to detect confidential virtualization, ignoring: %m");
++        else if (cv > 0) {
++                r = strv_env_assign(&nl, "SYSTEMD_CONFIDENTIAL_VIRTUALIZATION", confidential_virtualization_to_string(cv));
++                if (r < 0)
++                        return r;
++        }
++
+         r = strv_env_assign(&nl, "SYSTEMD_ARCHITECTURE", architecture_to_string(uname_architecture()));
+         if (r < 0)
+                 return r;

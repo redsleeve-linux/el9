@@ -1,0 +1,76 @@
+From 59055cd4f4ce89150dfe6bdadf3a3ced78009b15 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Fri, 2 Aug 2024 16:26:00 +0100
+Subject: [PATCH] confidential-virt: split caching of CVM detection into
+ separate method
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+We have different impls of detect_confidential_virtualization per
+architecture. The detection is cached in the x86_64 impl, and as we
+add support for more targets, we want to use caching for all. It thus
+makes sense to split caching out into an architecture independent
+method.
+
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 1c4bd7adcc281af2a2dd40867f64f2ac54a43c7a)
+
+Related: RHEL-50651
+---
+ src/basic/confidential-virt.c | 25 ++++++++++++++-----------
+ 1 file changed, 14 insertions(+), 11 deletions(-)
+
+diff --git a/src/basic/confidential-virt.c b/src/basic/confidential-virt.c
+index 3d4e9eac33..5c96b449b1 100644
+--- a/src/basic/confidential-virt.c
++++ b/src/basic/confidential-virt.c
+@@ -254,34 +254,37 @@ static bool detect_hypervisor(void) {
+         return is_hv;
+ }
+ 
+-ConfidentialVirtualization detect_confidential_virtualization(void) {
+-        static thread_local ConfidentialVirtualization cached_found = _CONFIDENTIAL_VIRTUALIZATION_INVALID;
++static ConfidentialVirtualization detect_confidential_virtualization_impl(void) {
+         char sig[13] = {};
+-        ConfidentialVirtualization cv = CONFIDENTIAL_VIRTUALIZATION_NONE;
+-
+-        if (cached_found >= 0)
+-                return cached_found;
+ 
+         /* Skip everything on bare metal */
+         if (detect_hypervisor()) {
+                 cpuid_leaf(0, sig, true);
+ 
+                 if (memcmp(sig, CPUID_SIG_AMD, sizeof(sig)) == 0)
+-                        cv = detect_sev();
++                        return detect_sev();
+                 else if (memcmp(sig, CPUID_SIG_INTEL, sizeof(sig)) == 0)
+-                        cv = detect_tdx();
++                        return detect_tdx();
+         }
+ 
+-        cached_found = cv;
+-        return cv;
++        return CONFIDENTIAL_VIRTUALIZATION_NONE;
+ }
+ #else /* ! x86_64 */
+-ConfidentialVirtualization detect_confidential_virtualization(void) {
++static ConfidentialVirtualization detect_confidential_virtualization_impl(void) {
+         log_debug("No confidential virtualization detection on this architecture");
+         return CONFIDENTIAL_VIRTUALIZATION_NONE;
+ }
+ #endif /* ! x86_64 */
+ 
++ConfidentialVirtualization detect_confidential_virtualization(void) {
++        static thread_local ConfidentialVirtualization cached_found = _CONFIDENTIAL_VIRTUALIZATION_INVALID;
++
++        if (cached_found == _CONFIDENTIAL_VIRTUALIZATION_INVALID)
++                cached_found = detect_confidential_virtualization_impl();
++
++        return cached_found;
++}
++
+ static const char *const confidential_virtualization_table[_CONFIDENTIAL_VIRTUALIZATION_MAX] = {
+         [CONFIDENTIAL_VIRTUALIZATION_NONE]    = "none",
+         [CONFIDENTIAL_VIRTUALIZATION_SEV]     = "sev",

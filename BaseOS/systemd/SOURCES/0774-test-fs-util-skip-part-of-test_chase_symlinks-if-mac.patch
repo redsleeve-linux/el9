@@ -1,0 +1,30 @@
+From 70754f42db910937021c74f85adba277c7db88a9 Mon Sep 17 00:00:00 2001
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Mon, 12 Dec 2022 14:37:52 -0500
+Subject: [PATCH] test-fs-util: skip part of test_chase_symlinks if machine-id
+ is not initialized
+
+The part of test_chase_symlink in test-fs-util that calls
+sd_id128_get_machine will fail if /etc/machine-id is empty, so skip this
+block if the machine-id is not initialized.
+
+(cherry picked from commit 079fcdd04f57bfb1e333fea853e050c99eb16e02)
+
+Related: RHEL-27512
+---
+ src/test/test-fs-util.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/test/test-fs-util.c b/src/test/test-fs-util.c
+index 0b1f11ebdf..ff248c1a9c 100644
+--- a/src/test/test-fs-util.c
++++ b/src/test/test-fs-util.c
+@@ -292,7 +292,7 @@ TEST(chase_symlinks) {
+         assert_se(symlink("/usr/../etc/./machine-id", p) >= 0);
+ 
+         r = chase_symlinks(p, NULL, 0, NULL, &pfd);
+-        if (r != -ENOENT) {
++        if (r != -ENOENT && sd_id128_get_machine(NULL) >= 0) {
+                 _cleanup_close_ int fd = -1;
+                 sd_id128_t a, b;
+ 

@@ -1,0 +1,59 @@
+From 586b33b02ddc3375181fc37a14b7eb94d3eba796 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Mon, 3 Jul 2023 10:24:30 +0100
+Subject: [PATCH] udev: add 'conf-virt' constant for confidential
+ virtualization tech
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Related: https://github.com/systemd/systemd/issues/27604
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 6e2e83b48734e86992cbbdb329c48cc066cf7c96)
+
+Related: RHEL-50651
+---
+ man/udev.xml          | 8 ++++++++
+ src/udev/udev-rules.c | 3 +++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/man/udev.xml b/man/udev.xml
+index 5b096c7ef2..a96400e29d 100644
+--- a/man/udev.xml
++++ b/man/udev.xml
+@@ -279,6 +279,14 @@
+                     for possible values.</para>
+                   </listitem>
+                 </varlistentry>
++                <varlistentry>
++                  <term><literal>cvm</literal></term>
++                  <listitem>
++                    <para>System's confidential virtualization technology. See
++                    <citerefentry><refentrytitle>systemd-detect-virt</refentrytitle><manvolnum>1</manvolnum></citerefentry>
++                    for possible values.</para>
++                  </listitem>
++                </varlistentry>
+               </variablelist>
+               <para>Unknown keys will never match.</para>
+             </listitem>
+diff --git a/src/udev/udev-rules.c b/src/udev/udev-rules.c
+index 9336ce1cd3..3fcbf818d7 100644
+--- a/src/udev/udev-rules.c
++++ b/src/udev/udev-rules.c
+@@ -6,6 +6,7 @@
+ #include "architecture.h"
+ #include "conf-files.h"
+ #include "conf-parser.h"
++#include "confidential-virt.h"
+ #include "def.h"
+ #include "device-private.h"
+ #include "device-util.h"
+@@ -1681,6 +1682,8 @@ static int udev_rule_apply_token_to_event(
+                         val = architecture_to_string(uname_architecture());
+                 else if (streq(k, "virt"))
+                         val = virtualization_to_string(detect_virtualization());
++                else if (streq(k, "cvm"))
++                        val = confidential_virtualization_to_string(detect_confidential_virtualization());
+                 else
+                         assert_not_reached();
+                 return token_match_string(token, val);

@@ -1,0 +1,335 @@
+From 7b2bb541eba2795e0db1bfedd4b1fa64a6e28a55 Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Tue, 19 Dec 2023 16:03:06 +0100
+Subject: [PATCH] test: Skip various tests when /sys is not mounted
+
+When running tests in a container, /sys might not be mounted, so
+let's make sure we skip tests that depend on /sys in this case.
+
+(cherry picked from commit a412a1b92ab234a57c646f6779471772b2c355ec)
+
+Related: RHEL-27512
+---
+ src/libsystemd/sd-bus/test-bus-creds.c            |  2 +-
+ src/libsystemd/sd-device/test-sd-device-monitor.c |  4 ++++
+ src/libsystemd/sd-device/test-sd-device-thread.c  |  3 +++
+ src/libsystemd/sd-device/test-sd-device.c         | 10 +++++++++-
+ src/libsystemd/sd-login/test-login.c              |  4 ++++
+ src/libudev/test-udev-device-thread.c             |  7 ++++++-
+ src/shared/tests.c                                |  3 ++-
+ src/test/meson.build                              |  4 ++--
+ src/test/test-cgroup-util.c                       |  4 ++--
+ src/test/test-cgroup.c                            |  4 ++--
+ src/test/test-condition.c                         |  8 ++++----
+ src/test/test-mountpoint-util.c                   |  8 ++++----
+ src/test/test-udev-util.c                         |  4 ++++
+ src/test/test-watch-pid.c                         |  2 +-
+ src/udev/test-udev-event.c                        |  4 ++++
+ 15 files changed, 52 insertions(+), 19 deletions(-)
+
+diff --git a/src/libsystemd/sd-bus/test-bus-creds.c b/src/libsystemd/sd-bus/test-bus-creds.c
+index 13801becc9..d18ce88a25 100644
+--- a/src/libsystemd/sd-bus/test-bus-creds.c
++++ b/src/libsystemd/sd-bus/test-bus-creds.c
+@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
+ 
+         test_setup_logging(LOG_DEBUG);
+ 
+-        if (cg_unified() == -ENOMEDIUM)
++        if (IN_SET(cg_unified(), -ENOMEDIUM, -ENOENT))
+                 return log_tests_skipped("/sys/fs/cgroup/ not available");
+ 
+         r = sd_bus_creds_new_from_pid(&creds, 0, _SD_BUS_CREDS_ALL);
+diff --git a/src/libsystemd/sd-device/test-sd-device-monitor.c b/src/libsystemd/sd-device/test-sd-device-monitor.c
+index 9e64ba01c6..a9a002b5ae 100644
+--- a/src/libsystemd/sd-device/test-sd-device-monitor.c
++++ b/src/libsystemd/sd-device/test-sd-device-monitor.c
+@@ -10,6 +10,7 @@
+ #include "device-private.h"
+ #include "device-util.h"
+ #include "macro.h"
++#include "mountpoint-util.h"
+ #include "path-util.h"
+ #include "stat-util.h"
+ #include "string-util.h"
+@@ -302,6 +303,9 @@ int main(int argc, char *argv[]) {
+         if (getuid() != 0)
+                 return log_tests_skipped("not root");
+ 
++        if (path_is_mount_point("/sys", NULL, 0) <= 0)
++                return log_tests_skipped("/sys is not mounted");
++
+         if (path_is_read_only_fs("/sys") > 0)
+                 return log_tests_skipped("Running in container");
+ 
+diff --git a/src/libsystemd/sd-device/test-sd-device-thread.c b/src/libsystemd/sd-device/test-sd-device-thread.c
+index 644f3c2aee..bf3cd5ce25 100644
+--- a/src/libsystemd/sd-device/test-sd-device-thread.c
++++ b/src/libsystemd/sd-device/test-sd-device-thread.c
+@@ -8,6 +8,7 @@
+ #include "sd-device.h"
+ 
+ #include "device-util.h"
++#include "tests.h"
+ 
+ #define handle_error_errno(error, msg)                          \
+         ({                                                      \
+@@ -31,6 +32,8 @@ int main(int argc, char *argv[]) {
+         int r;
+ 
+         r = sd_device_new_from_syspath(&loopback, "/sys/class/net/lo");
++        if (r == -ENODEV)
++                return log_tests_skipped("Loopback device not found");
+         if (r < 0)
+                 return handle_error_errno(r, "Failed to create loopback device object");
+ 
+diff --git a/src/libsystemd/sd-device/test-sd-device.c b/src/libsystemd/sd-device/test-sd-device.c
+index a1bcf18059..237681eab8 100644
+--- a/src/libsystemd/sd-device/test-sd-device.c
++++ b/src/libsystemd/sd-device/test-sd-device.c
+@@ -11,6 +11,7 @@
+ #include "errno-util.h"
+ #include "fd-util.h"
+ #include "hashmap.h"
++#include "mountpoint-util.h"
+ #include "nulstr-util.h"
+ #include "path-util.h"
+ #include "rm-rf.h"
+@@ -656,4 +657,11 @@ TEST(devname_from_devnum) {
+         }
+ }
+ 
+-DEFINE_TEST_MAIN(LOG_INFO);
++static int intro(void) {
++        if (path_is_mount_point("/sys", NULL, 0) <= 0)
++                return log_tests_skipped("/sys is not mounted");
++
++        return EXIT_SUCCESS;
++}
++
++DEFINE_TEST_MAIN_WITH_INTRO(LOG_INFO, intro);
+diff --git a/src/libsystemd/sd-login/test-login.c b/src/libsystemd/sd-login/test-login.c
+index f7cef6e304..84fcfab4a0 100644
+--- a/src/libsystemd/sd-login/test-login.c
++++ b/src/libsystemd/sd-login/test-login.c
+@@ -9,6 +9,7 @@
+ #include "fd-util.h"
+ #include "format-util.h"
+ #include "log.h"
++#include "mountpoint-util.h"
+ #include "string-util.h"
+ #include "strv.h"
+ #include "tests.h"
+@@ -295,6 +296,9 @@ TEST(monitor) {
+ }
+ 
+ static int intro(void) {
++        if (IN_SET(cg_unified(), -ENOENT, -ENOMEDIUM))
++                return log_tests_skipped("cgroupfs is not mounted");
++
+         log_info("/* Information printed is from the live system */");
+         return EXIT_SUCCESS;
+ }
+diff --git a/src/libudev/test-udev-device-thread.c b/src/libudev/test-udev-device-thread.c
+index c082fdca46..fdf0818863 100644
+--- a/src/libudev/test-udev-device-thread.c
++++ b/src/libudev/test-udev-device-thread.c
+@@ -6,6 +6,7 @@
+ #include <stdlib.h>
+ 
+ #include "libudev.h"
++#include "tests.h"
+ 
+ #define handle_error_errno(error, msg)                          \
+         ({                                                      \
+@@ -29,8 +30,12 @@ int main(int argc, char *argv[]) {
+         int r;
+ 
+         loopback = udev_device_new_from_syspath(NULL, "/sys/class/net/lo");
+-        if (!loopback)
++        if (!loopback) {
++                if (errno == ENODEV)
++                        return log_tests_skipped_errno(errno, "Loopback device not found");
++
+                 return handle_error_errno(errno, "Failed to create loopback device object");
++        }
+ 
+         entry = udev_device_get_properties_list_entry(loopback);
+         udev_list_entry_foreach(e, entry)
+diff --git a/src/shared/tests.c b/src/shared/tests.c
+index a65080cbf4..a4deb7b0d5 100644
+--- a/src/shared/tests.c
++++ b/src/shared/tests.c
+@@ -28,6 +28,7 @@
+ #include "fd-util.h"
+ #include "fs-util.h"
+ #include "log.h"
++#include "mountpoint-util.h"
+ #include "namespace-util.h"
+ #include "path-util.h"
+ #include "process-util.h"
+@@ -285,7 +286,7 @@ static int enter_cgroup(char **ret_cgroup, bool enter_subroot) {
+                 log_warning_errno(r, "Couldn't allocate a scope unit for this test, proceeding without.");
+ 
+         r = cg_pid_get_path(NULL, 0, &cgroup_root);
+-        if (r == -ENOMEDIUM)
++        if (IN_SET(r, -ENOMEDIUM, -ENOENT))
+                 return log_warning_errno(r, "cg_pid_get_path(NULL, 0, ...) failed: %m");
+         assert(r >= 0);
+ 
+diff --git a/src/test/meson.build b/src/test/meson.build
+index 1d61dc343f..5547271ee7 100644
+--- a/src/test/meson.build
++++ b/src/test/meson.build
+@@ -701,11 +701,11 @@ tests += [
+           libsystemd_static]],
+ 
+         [files('../libsystemd/sd-device/test-sd-device-thread.c'),
+-         [libsystemd],
++         [libbasic, libshared_static, libsystemd_static],
+          [threads]],
+ 
+         [files('../libudev/test-udev-device-thread.c'),
+-         [libudev],
++         [libbasic, libshared_static, libsystemd_static, libudev],
+          [threads]],
+ ]
+ 
+diff --git a/src/test/test-cgroup-util.c b/src/test/test-cgroup-util.c
+index 7113b07a95..c6439e2fbb 100644
+--- a/src/test/test-cgroup-util.c
++++ b/src/test/test-cgroup-util.c
+@@ -334,7 +334,7 @@ TEST(cg_tests) {
+         int all, hybrid, systemd, r;
+ 
+         r = cg_unified();
+-        if (r == -ENOMEDIUM) {
++        if (IN_SET(r, -ENOENT, -ENOMEDIUM)) {
+                 log_tests_skipped("cgroup not mounted");
+                 return;
+         }
+@@ -367,7 +367,7 @@ TEST(cg_get_keyed_attribute) {
+         int i, r;
+ 
+         r = cg_get_keyed_attribute("cpu", "/init.scope", "no_such_file", STRV_MAKE("no_such_attr"), &val);
+-        if (r == -ENOMEDIUM || ERRNO_IS_PRIVILEGE(r)) {
++        if (IN_SET(r, -ENOMEDIUM, -ENOENT) || ERRNO_IS_PRIVILEGE(r)) {
+                 log_info_errno(r, "Skipping most of %s, /sys/fs/cgroup not accessible: %m", __func__);
+                 return;
+         }
+diff --git a/src/test/test-cgroup.c b/src/test/test-cgroup.c
+index 7341e5b022..a3d286a669 100644
+--- a/src/test/test-cgroup.c
++++ b/src/test/test-cgroup.c
+@@ -44,8 +44,8 @@ TEST(cg_create) {
+         int r;
+ 
+         r = cg_unified_cached(false);
+-        if (r == -ENOMEDIUM) {
+-                log_tests_skipped("cgroup not mounted");
++        if (IN_SET(r, -ENOMEDIUM, -ENOENT)) {
++                log_tests_skipped("cgroupfs is not mounted");
+                 return;
+         }
+         assert_se(r >= 0);
+diff --git a/src/test/test-condition.c b/src/test/test-condition.c
+index 4cd23d8e21..57e7d35119 100644
+--- a/src/test/test-condition.c
++++ b/src/test/test-condition.c
+@@ -138,8 +138,8 @@ TEST(condition_test_control_group_hierarchy) {
+         int r;
+ 
+         r = cg_unified();
+-        if (r == -ENOMEDIUM) {
+-                log_tests_skipped("cgroup not mounted");
++        if (IN_SET(r, -ENOMEDIUM, -ENOENT)) {
++                log_tests_skipped("cgroupfs is not mounted");
+                 return;
+         }
+         assert_se(r >= 0);
+@@ -162,8 +162,8 @@ TEST(condition_test_control_group_controller) {
+         int r;
+ 
+         r = cg_unified();
+-        if (r == -ENOMEDIUM) {
+-                log_tests_skipped("cgroup not mounted");
++        if (IN_SET(r, -ENOMEDIUM, -ENOENT)) {
++                log_tests_skipped("cgroupfs is not mounted");
+                 return;
+         }
+         assert_se(r >= 0);
+diff --git a/src/test/test-mountpoint-util.c b/src/test/test-mountpoint-util.c
+index 391e1c97ba..8555c5a7db 100644
+--- a/src/test/test-mountpoint-util.c
++++ b/src/test/test-mountpoint-util.c
+@@ -138,10 +138,10 @@ TEST(path_is_mount_point) {
+         assert_se(path_is_mount_point("/proc/1/", NULL, AT_SYMLINK_FOLLOW) == 0);
+         assert_se(path_is_mount_point("/proc/1/", NULL, 0) == 0);
+ 
+-        assert_se(path_is_mount_point("/sys", NULL, AT_SYMLINK_FOLLOW) > 0);
+-        assert_se(path_is_mount_point("/sys", NULL, 0) > 0);
+-        assert_se(path_is_mount_point("/sys/", NULL, AT_SYMLINK_FOLLOW) > 0);
+-        assert_se(path_is_mount_point("/sys/", NULL, 0) > 0);
++        assert_se(path_is_mount_point("/dev", NULL, AT_SYMLINK_FOLLOW) > 0);
++        assert_se(path_is_mount_point("/dev", NULL, 0) > 0);
++        assert_se(path_is_mount_point("/dev/", NULL, AT_SYMLINK_FOLLOW) > 0);
++        assert_se(path_is_mount_point("/dev/", NULL, 0) > 0);
+ 
+         /* we'll create a hierarchy of different kinds of dir/file/link
+          * layouts:
+diff --git a/src/test/test-udev-util.c b/src/test/test-udev-util.c
+index 1db2dad4ff..ee089939fd 100644
+--- a/src/test/test-udev-util.c
++++ b/src/test/test-udev-util.c
+@@ -4,6 +4,7 @@
+ #include <string.h>
+ 
+ #include "macro.h"
++#include "mountpoint-util.h"
+ #include "string-util.h"
+ #include "tests.h"
+ #include "udev-util.h"
+@@ -137,6 +138,9 @@ static void test_udev_resolve_subsys_kernel_one(const char *str, bool read_value
+ }
+ 
+ TEST(udev_resolve_subsys_kernel) {
++        if (path_is_mount_point("/sys", NULL, 0) <= 0)
++                return (void) log_tests_skipped("/sys is not mounted");
++
+         test_udev_resolve_subsys_kernel_one("hoge", false, -EINVAL, NULL);
+         test_udev_resolve_subsys_kernel_one("[hoge", false, -EINVAL, NULL);
+         test_udev_resolve_subsys_kernel_one("[hoge/foo", false, -EINVAL, NULL);
+diff --git a/src/test/test-watch-pid.c b/src/test/test-watch-pid.c
+index 8c355c1d5f..34291fb539 100644
+--- a/src/test/test-watch-pid.c
++++ b/src/test/test-watch-pid.c
+@@ -17,7 +17,7 @@ int main(int argc, char *argv[]) {
+         if (getuid() != 0)
+                 return log_tests_skipped("not root");
+         r = enter_cgroup_subroot(NULL);
+-        if (r == -ENOMEDIUM)
++        if (r < 0)
+                 return log_tests_skipped("cgroupfs not available");
+ 
+         _cleanup_free_ char *unit_dir = NULL;
+diff --git a/src/udev/test-udev-event.c b/src/udev/test-udev-event.c
+index b6b2c91b2e..92cab2f354 100644
+--- a/src/udev/test-udev-event.c
++++ b/src/udev/test-udev-event.c
+@@ -1,5 +1,6 @@
+ /* SPDX-License-Identifier: LGPL-2.1-or-later */
+ 
++#include "mountpoint-util.h"
+ #include "path-util.h"
+ #include "signal-util.h"
+ #include "strv.h"
+@@ -80,6 +81,9 @@ static void test2(void) {
+ int main(int argc, char *argv[]) {
+         _cleanup_free_ char *self = NULL;
+ 
++        if (path_is_mount_point("/sys", NULL, 0) <= 0)
++                return log_tests_skipped("/sys is not mounted");
++
+         if (argc > 1) {
+                 if (streq(argv[1], "test1"))
+                         test1();

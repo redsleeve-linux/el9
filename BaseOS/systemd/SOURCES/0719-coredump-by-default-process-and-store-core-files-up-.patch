@@ -1,0 +1,46 @@
+From f387005b548bee7695c663167f9bd54e45636f6b Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekleta@redhat.com>
+Date: Fri, 5 Apr 2024 15:56:58 +0200
+Subject: [PATCH] coredump: by default process and store core files up to 1GiB
+
+This is a major departure from our previous policy of soft core file
+limit set to 0, i.e. core file processing and storage by
+systemd-coredump was disabled. However, that policy made very difficult
+for people to debug sporadic crashes with no known reproducer.
+
+RHEL-only
+
+Resolves: RHEL-15501
+---
+ src/core/system.conf.in    | 2 +-
+ src/coredump/coredump.conf | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/core/system.conf.in b/src/core/system.conf.in
+index 624746e512..5d1f6d24f0 100644
+--- a/src/core/system.conf.in
++++ b/src/core/system.conf.in
+@@ -61,7 +61,7 @@
+ #DefaultLimitFSIZE=
+ #DefaultLimitDATA=
+ #DefaultLimitSTACK=
+-DefaultLimitCORE=0:infinity
++#DefaultLimitCORE=
+ #DefaultLimitRSS=
+ #DefaultLimitNOFILE=1024:{{HIGH_RLIMIT_NOFILE}}
+ #DefaultLimitAS=
+diff --git a/src/coredump/coredump.conf b/src/coredump/coredump.conf
+index 1f75d48d33..b934c2afb7 100644
+--- a/src/coredump/coredump.conf
++++ b/src/coredump/coredump.conf
+@@ -17,8 +17,8 @@
+ [Coredump]
+ #Storage=external
+ #Compress=yes
+-#ProcessSizeMax=2G
+-#ExternalSizeMax=2G
++ProcessSizeMax=1G
++ExternalSizeMax=1G
+ #JournalSizeMax=767M
+ #MaxUse=
+ #KeepFree=

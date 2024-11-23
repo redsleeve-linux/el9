@@ -1,0 +1,44 @@
+From 4ab2df57c79a923fba74b2cf48fd56c6a0756413 Mon Sep 17 00:00:00 2001
+From: Gerd Hoffmann <kraxel@redhat.com>
+Date: Mon, 18 Mar 2024 17:04:22 +0100
+Subject: [PATCH] kernel-install: fix uki-copy deinstall
+
+For "kernel-install remove ..." only the kernel version is passed, not
+the kernel image.  So auto-detecting KERNEL_INSTALL_IMAGE_TYPE and
+setting KERNEL_INSTALL_LAYOUT does not work for uninstall.
+
+The 90-uki-copy.install plugin must consider this and *not* exit early
+for the "remove" command, otherwise $BOOT_ROOT will be filled with stale
+kernel images.
+
+Signed-off-by: Gerd Hoffmann <kraxel@redhat.com>
+
+(cherry picked from commit 3037616d8ed68f3263746e3c6399d4a05242068b)
+
+Resolves: RHEL-36505
+---
+ src/kernel-install/90-uki-copy.install | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/kernel-install/90-uki-copy.install b/src/kernel-install/90-uki-copy.install
+index c66c09719c..d443c4b401 100755
+--- a/src/kernel-install/90-uki-copy.install
++++ b/src/kernel-install/90-uki-copy.install
+@@ -26,8 +26,6 @@ KERNEL_VERSION="${2:?}"
+ ENTRY_DIR_ABS="$3"
+ KERNEL_IMAGE="$4"
+ 
+-[ "$KERNEL_INSTALL_LAYOUT" = "uki" ] || exit 0
+-
+ ENTRY_TOKEN="$KERNEL_INSTALL_ENTRY_TOKEN"
+ BOOT_ROOT="$KERNEL_INSTALL_BOOT_ROOT"
+ 
+@@ -48,6 +46,8 @@ case "$COMMAND" in
+         ;;
+ esac
+ 
++[ "$KERNEL_INSTALL_LAYOUT" = "uki" ] || exit 0
++
+ if ! [ -d "$UKI_DIR" ]; then
+     [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && echo "creating $UKI_DIR"
+     mkdir -p "$UKI_DIR"

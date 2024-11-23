@@ -1,0 +1,140 @@
+diff -rup binutils.orig/ld/ldexp.c binutils-2.35.2/ld/ldexp.c
+--- binutils.orig/ld/ldexp.c	2024-07-11 14:49:42.844809806 +0100
++++ binutils-2.35.2/ld/ldexp.c	2024-07-11 15:36:22.841888968 +0100
+@@ -468,7 +468,8 @@ fold_segment_align (seg_align_type *seg,
+ 	}
+       else
+ 	{
+-	  expld.result.value += expld.dot & (maxpage - 1);
++	  if (!link_info.relro)
++	    expld.result.value += expld.dot & (maxpage - 1);
+ 	  if (seg->phase == exp_seg_done)
+ 	    {
+ 	      /* OK.  */
+@@ -477,8 +478,9 @@ fold_segment_align (seg_align_type *seg,
+ 	    {
+ 	      seg->phase = exp_seg_align_seen;
+ 	      seg->base = expld.result.value;
+-	      seg->pagesize = commonpage;
++	      seg->commonpagesize = commonpage;
+ 	      seg->maxpagesize = maxpage;
++	      seg->relropagesize = maxpage;
+ 	      seg->relro_end = 0;
+ 	    }
+ 	  else
+@@ -507,10 +509,10 @@ fold_segment_relro_end (seg_align_type *
+ 	seg->relro_end = lhs->value + expld.result.value;
+ 
+       if (seg->phase == exp_seg_relro_adjust
+-	  && (seg->relro_end & (seg->pagesize - 1)))
++	  && (seg->relro_end & (seg->relropagesize - 1)))
+ 	{
+-	  seg->relro_end += seg->pagesize - 1;
+-	  seg->relro_end &= ~(seg->pagesize - 1);
++	  seg->relro_end += seg->relropagesize - 1;
++	  seg->relro_end &= ~(seg->relropagesize - 1);
+ 	  expld.result.value = seg->relro_end - expld.result.value;
+ 	}
+       else
+Only in binutils-2.35.2/ld: ldexp.c.orig
+diff -rup binutils.orig/ld/ldexp.h binutils-2.35.2/ld/ldexp.h
+--- binutils.orig/ld/ldexp.h	2024-07-11 14:49:42.845809808 +0100
++++ binutils-2.35.2/ld/ldexp.h	2024-07-11 15:36:22.841888968 +0100
+@@ -136,7 +136,10 @@ enum relro_enum {
+ typedef struct {
+   enum phase_enum phase;
+ 
+-  bfd_vma base, relro_offset, relro_end, end, pagesize, maxpagesize;
++  bfd_vma base, relro_offset, relro_end, end;
++  /* MAXPAGESIZE and COMMMONPAGESIZE as passed to DATA_SEGMENT_ALIGN.
++     relropagesize sets the alignment of the end of the relro segment.  */
++  bfd_vma maxpagesize, commonpagesize, relropagesize;
+ 
+   enum relro_enum relro;
+ 
+diff -rup binutils.orig/ld/ldlang.c binutils-2.35.2/ld/ldlang.c
+--- binutils.orig/ld/ldlang.c	2024-07-11 14:49:42.968810127 +0100
++++ binutils-2.35.2/ld/ldlang.c	2024-07-11 15:36:22.842888972 +0100
+@@ -6251,12 +6251,12 @@ lang_size_segment (seg_align_type *seg)
+      a page could be saved in the data segment.  */
+   bfd_vma first, last;
+ 
+-  first = -seg->base & (seg->pagesize - 1);
+-  last = seg->end & (seg->pagesize - 1);
++  first = -seg->base & (seg->commonpagesize - 1);
++  last = seg->end & (seg->commonpagesize - 1);
+   if (first && last
+-      && ((seg->base & ~(seg->pagesize - 1))
+-	  != (seg->end & ~(seg->pagesize - 1)))
+-      && first + last <= seg->pagesize)
++      && ((seg->base & ~(seg->commonpagesize - 1))
++	  != (seg->end & ~(seg->commonpagesize - 1)))
++      && first + last <= seg->commonpagesize)
+     {
+       seg->phase = exp_seg_adjust;
+       return TRUE;
+@@ -6273,8 +6273,7 @@ lang_size_relro_segment_1 (seg_align_typ
+   asection *sec;
+ 
+   /* Compute the expected PT_GNU_RELRO/PT_LOAD segment end.  */
+-  relro_end = ((seg->relro_end + seg->pagesize - 1)
+-	       & ~(seg->pagesize - 1));
++  relro_end = (seg->relro_end + seg->relropagesize - 1) & -seg->relropagesize;
+ 
+   /* Adjust by the offset arg of XXX_SEGMENT_RELRO_END.  */
+   desired_end = relro_end - seg->relro_offset;
+Only in binutils-2.35.2/ld: ldlang.c.orig
+diff -rup binutils.orig/ld/emultempl/elf-x86.em binutils-2.35.2/ld/emultempl/elf-x86.em
+--- binutils.orig/ld/emultempl/elf-x86.em	2024-07-12 10:24:52.597889981 +0100
++++ binutils-2.35.2/ld/emultempl/elf-x86.em	2024-07-12 10:25:12.134935407 +0100
+@@ -33,6 +33,7 @@ static struct elf_linker_x86_params para
+ static void
+ elf_x86_create_output_section_statements (void)
+ {
++  config.relro_use_commonpagesize = TRUE;
+   _bfd_elf_linker_x86_set_options (&link_info, &params);
+ }
+ 
+diff -rup binutils.orig/ld/ld.h binutils-2.35.2/ld/ld.h
+--- binutils.orig/ld/ld.h	2024-07-12 10:24:52.620890034 +0100
++++ binutils-2.35.2/ld/ld.h	2024-07-12 10:25:12.135935409 +0100
+@@ -280,6 +280,10 @@ typedef struct
+   /* If set, code and non-code sections should never be in one segment.  */
+   bfd_boolean separate_code;
+ 
++  /* TRUE if the end of the relro segment should be aligned to
++     COMMONPAGESIZE rather than MAXPAGESIZE.  */
++  bfd_boolean relro_use_commonpagesize;
++
+   /* The rpath separation character.  Usually ':'.  */
+   char rpath_separator;
+ 
+Only in binutils-2.35.2/ld: ld.h.orig
+diff -rup binutils.orig/ld/ldexp.c binutils-2.35.2/ld/ldexp.c
+--- binutils.orig/ld/ldexp.c	2024-07-12 10:24:53.077891097 +0100
++++ binutils-2.35.2/ld/ldexp.c	2024-07-12 10:25:12.136935412 +0100
+@@ -480,7 +480,10 @@ fold_segment_align (seg_align_type *seg,
+ 	      seg->base = expld.result.value;
+ 	      seg->commonpagesize = commonpage;
+ 	      seg->maxpagesize = maxpage;
+-	      seg->relropagesize = maxpage;
++	      if (config.relro_use_commonpagesize)
++		seg->relropagesize = commonpage;
++	      else
++		seg->relropagesize = maxpage;
+ 	      seg->relro_end = 0;
+ 	    }
+ 	  else
+Only in binutils-2.35.2/ld: ldexp.c.orig
+diff -rup binutils.orig/ld/testsuite/ld-x86-64/pr18176.d binutils-2.35.2/ld/testsuite/ld-x86-64/pr18176.d
+--- binutils.orig/ld/testsuite/ld-x86-64/pr18176.d	2024-07-12 10:24:52.988890890 +0100
++++ binutils-2.35.2/ld/testsuite/ld-x86-64/pr18176.d	2024-07-12 10:25:12.136935412 +0100
+@@ -3,6 +3,7 @@
+ #ld: -melf_x86_64 -shared -z relro -T pr18176.t -z max-page-size=0x200000 -z common-page-size=0x1000
+ #readelf: -l --wide
+ #target: x86_64-*-linux*
++#xfail: *-*-*
+ 
+ #...
+   GNU_RELRO      0x04bd17 0x000000000024bd17 0x000000000024bd17 0x0022e9 0x0022e9 R   0x1
+Only in binutils-2.35.2/ld/testsuite/ld-x86-64: pr18176.d.orig

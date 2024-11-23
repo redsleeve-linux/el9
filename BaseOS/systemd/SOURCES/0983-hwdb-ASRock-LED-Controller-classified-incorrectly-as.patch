@@ -1,0 +1,44 @@
+From b472cc243a64575e1af6a0795226ff90d9cb5a89 Mon Sep 17 00:00:00 2001
+From: KayJay7 <31775749+KayJay7@users.noreply.github.com>
+Date: Mon, 13 May 2024 15:49:07 +0200
+Subject: [PATCH] hwdb: ASRock LED Controller classified incorrectly as
+ joystick due to buttons and axis (#32775)
+
+The function `builtin-input_id` incorrectly identifies the ASRock LED Controller
+as an input device due to the presence of buttons and axis. To fix this we add
+a new rule in `hwdb.d/60-input-id.hwdb`.
+The properties have been set to empty instead of `0` because some programs
+might check if the value is set at all instead of checking its value, as discussed
+in #32773.
+
+The device has no real keys. The devices is controlled by i2c interface and some
+settings in UEFI, and it provides an header to connect LED strips and similar devices.
+I suppose it's possible that ASRock intended to connect devices with buttons for
+controlling LEDs to it, but: (i) the controller itself does not have key, (ii) to my
+knowledge no such device exists. So I think we can unset that property as well.
+On a sidenote, unsetting those properties does not affect the i2c interface,
+OpenRGB still interacts normally with the device.
+
+Fixes #32773.
+
+(cherry picked from commit 1642b7b3acd1fb233505066db31e26e6745149af)
+
+Related: RHEL-5950
+---
+ hwdb.d/60-input-id.hwdb | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/hwdb.d/60-input-id.hwdb b/hwdb.d/60-input-id.hwdb
+index eff160cd31..b9d1ce0fc0 100644
+--- a/hwdb.d/60-input-id.hwdb
++++ b/hwdb.d/60-input-id.hwdb
+@@ -79,3 +79,9 @@ id-input:modalias:input:b0003v068Ep00F2*
+ # TEX Shinobi Trackpoint
+ id-input:modalias:input:b0003v04D9p0407e0111-e0,1,2,4*
+  ID_INPUT_POINTINGSTICK=1
++
++# ASRock LED Controller
++id-input:modalias:input:b0003v26CEp01A2*
++ ID_INPUT_JOYSTICK=
++ ID_INPUT_KEY=
++ ID_INPUT=

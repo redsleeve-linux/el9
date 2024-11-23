@@ -1,0 +1,66 @@
+From c499486907937a823a8a3fe003b4d8bcf232fec6 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 7 Jun 2023 15:16:50 +0200
+Subject: [PATCH] journald: move uid_for_system_journal() to uid-alloc-range.h
+
+Let's move this helper call from journald specific code to src/basic/,
+so that we can use it from sd-journal.
+
+While we are at it, slightly extend it to also cover container uids,
+which are also routed to the system journal now.
+
+This places the call in uid-alloc-range.[ch] which contains similar
+functions that match UID ranges for specific purposes.
+
+(cherry picked from commit 115d5145a257c1a27330acf9f063b5f4d910ca4d)
+
+Related: RHEL-31070
+---
+ src/basic/uid-alloc-range.c   | 7 +++++++
+ src/basic/uid-alloc-range.h   | 2 ++
+ src/journal/journald-server.c | 7 -------
+ 3 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/src/basic/uid-alloc-range.c b/src/basic/uid-alloc-range.c
+index dcecdbe343..1b6d761a66 100644
+--- a/src/basic/uid-alloc-range.c
++++ b/src/basic/uid-alloc-range.c
+@@ -121,3 +121,10 @@ bool gid_is_system(gid_t gid) {
+ 
+         return gid <= defs->system_gid_max;
+ }
++
++bool uid_for_system_journal(uid_t uid) {
++
++        /* Returns true if the specified UID shall get its data stored in the system journal. */
++
++        return uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY || uid_is_container(uid);
++}
+diff --git a/src/basic/uid-alloc-range.h b/src/basic/uid-alloc-range.h
+index d3bf077045..5badde148a 100644
+--- a/src/basic/uid-alloc-range.h
++++ b/src/basic/uid-alloc-range.h
+@@ -32,3 +32,5 @@ typedef struct UGIDAllocationRange {
+ 
+ int read_login_defs(UGIDAllocationRange *ret_defs, const char *path, const char *root);
+ const UGIDAllocationRange *acquire_ugid_allocation_range(void);
++
++bool uid_for_system_journal(uid_t uid);
+diff --git a/src/journal/journald-server.c b/src/journal/journald-server.c
+index 0ff6a43e5b..6fa182a566 100644
+--- a/src/journal/journald-server.c
++++ b/src/journal/journald-server.c
+@@ -234,13 +234,6 @@ void server_space_usage_message(Server *s, JournalStorage *storage) {
+                               NULL);
+ }
+ 
+-static bool uid_for_system_journal(uid_t uid) {
+-
+-        /* Returns true if the specified UID shall get its data stored in the system journal. */
+-
+-        return uid_is_system(uid) || uid_is_dynamic(uid) || uid == UID_NOBODY;
+-}
+-
+ static void server_add_acls(ManagedJournalFile *f, uid_t uid) {
+         assert(f);
+ 

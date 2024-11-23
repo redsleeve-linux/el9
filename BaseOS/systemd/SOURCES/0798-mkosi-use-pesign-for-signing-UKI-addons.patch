@@ -1,0 +1,67 @@
+From de81c5b27d15ffc61a2c586f8b9a6a7943c061c7 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 5 Mar 2024 20:22:19 +0100
+Subject: [PATCH] mkosi: use pesign for signing UKI addons
+
+In C9S/RHEL9 we don't ship sbsign, so we have to use pesign instead.
+Unfortunately, ukify doesn't support singing with pesign, so we have to
+do that manually.
+
+Related: RHEL-27512
+RHEL-only
+---
+ .../system/mkosi.conf.d/10-centos/mkosi.conf        |  3 +++
+ .../usr/lib/systemd/mkosi-check-and-shutdown.sh     |  2 +-
+ mkosi.images/system/mkosi.postinst.chroot           | 13 ++++++++++---
+ 3 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/mkosi.images/system/mkosi.conf.d/10-centos/mkosi.conf b/mkosi.images/system/mkosi.conf.d/10-centos/mkosi.conf
+index 146e03a895..c79ced5130 100644
+--- a/mkosi.images/system/mkosi.conf.d/10-centos/mkosi.conf
++++ b/mkosi.images/system/mkosi.conf.d/10-centos/mkosi.conf
+@@ -6,3 +6,6 @@ Distribution=centos
+ [Content]
+ Packages=
+         kernel-modules # For squashfs support
++        nss-tools
++        openssl
++        pesign
+diff --git a/mkosi.images/system/mkosi.extra/usr/lib/systemd/mkosi-check-and-shutdown.sh b/mkosi.images/system/mkosi.extra/usr/lib/systemd/mkosi-check-and-shutdown.sh
+index 4011ab930b..f32128ead2 100755
+--- a/mkosi.images/system/mkosi.extra/usr/lib/systemd/mkosi-check-and-shutdown.sh
++++ b/mkosi.images/system/mkosi.extra/usr/lib/systemd/mkosi-check-and-shutdown.sh
+@@ -10,7 +10,7 @@ if ! systemd-detect-virt --container; then
+     cmp /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c <(printf '\6\0\0\0\1')
+     cmp /sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c <(printf '\6\0\0\0\0')
+ 
+-    if command -v sbsign &>/dev/null; then
++    if command -v pesign &>/dev/null; then
+         cat /proc/cmdline
+         grep -q this_should_be_here /proc/cmdline
+         (! grep -q this_should_not_be_here /proc/cmdline)
+diff --git a/mkosi.images/system/mkosi.postinst.chroot b/mkosi.images/system/mkosi.postinst.chroot
+index 330fa3b73e..8d2c3d6a37 100755
+--- a/mkosi.images/system/mkosi.postinst.chroot
++++ b/mkosi.images/system/mkosi.postinst.chroot
+@@ -101,11 +101,18 @@ cat >/usr/lib/tmpfiles.d/testuser.conf <<EOF
+ q	/home/testuser	0700	4711	4711
+ EOF
+ 
+-# sbsign is not available on CentOS Stream
+-if command -v sbsign &>/dev/null; then
++# RHEL 9 only: we don't ship sbsigntools in RHEL 9 so we have to use pesign
++# instead. Unfortunately, ATTOW ukify doesn't support signing with pesign, so we
++# have to do it manually :(
++if command -v pesign &>/dev/null; then
+     # Ensure that side-loaded PE addons are loaded if signed, and ignored if not
+     addons_dir=/efi/loader/addons
+     mkdir -p "$addons_dir"
+-    ukify build --secureboot-private-key mkosi.key --secureboot-certificate mkosi.crt --cmdline this_should_be_here -o "$addons_dir/good.addon.efi"
++    ukify build --cmdline this_should_be_here -o "good.addon.efi"
+     ukify build --cmdline this_should_not_be_here -o "$addons_dir/bad.addon.efi"
++
++    openssl pkcs12 -name "mkosi" -passin "pass:" -passout "pass:" -export -out mkosi.p12 -inkey mkosi.key -in mkosi.crt
++    pk12util -W "" -i mkosi.p12 -d /etc/pki/pesign
++    pesign -v -s -c "mkosi" -i "good.addon.efi" -o "$addons_dir/good.addon.efi"
++    pesign -S -i"$addons_dir/good.addon.efi"
+ fi

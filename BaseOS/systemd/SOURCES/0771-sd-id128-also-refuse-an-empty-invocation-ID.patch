@@ -1,0 +1,41 @@
+From e9054375028335ef1e2946b80d9765f8e69cbb9c Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 14 Dec 2022 13:40:42 +0900
+Subject: [PATCH] sd-id128: also refuse an empty invocation ID
+
+(cherry picked from commit 75fa1f25c08a4b5dc2180893718473be9e4f6bab)
+
+Related: RHEL-27512
+---
+ man/sd_id128_get_machine.xml       | 3 ++-
+ src/libsystemd/sd-id128/sd-id128.c | 3 +++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/man/sd_id128_get_machine.xml b/man/sd_id128_get_machine.xml
+index 4f6926fd7d..075caffb2b 100644
+--- a/man/sd_id128_get_machine.xml
++++ b/man/sd_id128_get_machine.xml
+@@ -139,7 +139,8 @@
+ 
+           <listitem><para>Returned by <function>sd_id128_get_machine()</function> and
+           <function>sd_id128_get_machine_app_specific()</function> when <filename>/etc/machine-id</filename>
+-          is empty or all zeros.</para></listitem>
++          is empty or all zeros. Also returned by <function>sd_id128_get_invocation()</function> when the
++          invocation ID is all zeros.</para></listitem>
+         </varlistentry>
+ 
+         <varlistentry>
+diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
+index dee0df2396..ec53617fce 100644
+--- a/src/libsystemd/sd-id128/sd-id128.c
++++ b/src/libsystemd/sd-id128/sd-id128.c
+@@ -285,6 +285,9 @@ _public_ int sd_id128_get_invocation(sd_id128_t *ret) {
+                         r = get_invocation_from_keyring(&saved_invocation_id);
+                 if (r < 0)
+                         return r;
++
++                if (sd_id128_is_null(saved_invocation_id))
++                        return -ENOMEDIUM;
+         }
+ 
+         if (ret)

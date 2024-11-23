@@ -1,0 +1,84 @@
+From 6e61224e554decd747d6537a4d6839cff6b19909 Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Wed, 10 May 2023 13:54:15 +0800
+Subject: [PATCH] core: only refuse Type=dbus service enqueuing if dbus has
+ stop job
+
+Follow-up for #27579
+
+In #27579 we refused all StartUnit requests for Type=dbus units
+if dbus is not running, which means if dbus is manually stopped,
+user can't use systemctl to start Type=dbus units again, which
+is incorrect.
+
+The only culprit that leads to the cancellation of the whole
+transaction mentioned in #26799 is job type conflict on dbus.
+So let's relax the restriction and only refuse job enqueuing
+if dbus has a stop job.
+
+To summarize, the case we want to avoid is:
+
+1. dbus has a stop job installed
+2. StartUnit/ActivationRequest is received
+3. Type=dbus service gets started, which has Requires=dbus.socket
+4. dbus is pulled in again, resulting in job type conflict
+
+What we can support is:
+
+1. dbus is already stopped
+2. StartUnit is received (possibly through systemctl, i.e. on private bus)
+3. Type=dbus service gets started, which will wait for dbus to start
+4. dbus is started again, thus the job for Type=dbus service
+
+Replaces #27590
+Fixes #27588
+
+(cherry picked from commit bee6e755bb8e53a7a436e221b015ce0232ed87c0)
+
+Resolves: RHEL-40878
+---
+ src/core/dbus-unit.c | 31 ++++++++++++++++++++++++-------
+ 1 file changed, 24 insertions(+), 7 deletions(-)
+
+diff --git a/src/core/dbus-unit.c b/src/core/dbus-unit.c
+index 685d45fc23..49eacc977c 100644
+--- a/src/core/dbus-unit.c
++++ b/src/core/dbus-unit.c
+@@ -1844,13 +1844,30 @@ int bus_unit_queue_job(
+             (type == JOB_STOP && u->refuse_manual_stop) ||
+             (IN_SET(type, JOB_RESTART, JOB_TRY_RESTART) && (u->refuse_manual_start || u->refuse_manual_stop)) ||
+             (type == JOB_RELOAD_OR_START && job_type_collapse(type, u) == JOB_START && u->refuse_manual_start))
+-                return sd_bus_error_setf(error, BUS_ERROR_ONLY_BY_DEPENDENCY, "Operation refused, unit %s may be requested by dependency only (it is configured to refuse manual start/stop).", u->id);
+-
+-        /* dbus-broker issues StartUnit for activation requests, so let's apply the same check
+-         * used in signal_activation_request(). */
+-        if (type == JOB_START && u->type == UNIT_SERVICE &&
+-            SERVICE(u)->type == SERVICE_DBUS && !manager_dbus_is_running(u->manager))
+-                return sd_bus_error_set(error, BUS_ERROR_SHUTTING_DOWN, "Refusing activation, D-Bus is not running.");
++                return sd_bus_error_setf(error,
++                                         BUS_ERROR_ONLY_BY_DEPENDENCY,
++                                         "Operation refused, unit %s may be requested by dependency only (it is configured to refuse manual start/stop).",
++                                         u->id);
++
++        /* dbus-broker issues StartUnit for activation requests, and Type=dbus services automatically
++         * gain dependency on dbus.socket. Therefore, if dbus has a pending stop job, the new start
++         * job that pulls in dbus again would cause job type conflict. Let's avoid that by rejecting
++         * job enqueuing early.
++         *
++         * Note that unlike signal_activation_request(), we can't use unit_inactive_or_pending()
++         * here. StartUnit is a more generic interface, and thus users are allowed to use e.g. systemctl
++         * to start Type=dbus services even when dbus is inactive. */
++        if (type == JOB_START && u->type == UNIT_SERVICE && SERVICE(u)->type == SERVICE_DBUS)
++                FOREACH_STRING(dbus_unit, SPECIAL_DBUS_SOCKET, SPECIAL_DBUS_SERVICE) {
++                        Unit *dbus;
++
++                        dbus = manager_get_unit(u->manager, dbus_unit);
++                        if (dbus && unit_stop_pending(dbus))
++                                return sd_bus_error_setf(error,
++                                                         BUS_ERROR_SHUTTING_DOWN,
++                                                         "Operation for unit %s refused, D-Bus is shutting down.",
++                                                         u->id);
++                }
+ 
+         r = sd_bus_message_new_method_return(message, &reply);
+         if (r < 0)

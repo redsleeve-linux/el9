@@ -1,0 +1,75 @@
+From 528e1178026b3f567139c994ce89992379618d2e Mon Sep 17 00:00:00 2001
+From: Nick Rosbrook <nick.rosbrook@canonical.com>
+Date: Wed, 14 Dec 2022 10:07:40 -0500
+Subject: [PATCH] journal: skip part of test-journal-interleaving if no
+ machine-id exists
+
+When executed on a systemd with an empty /etc/machine-id,
+test-journal-interleaving fails in test_sequence_numbers_one() when
+re-opening the existing "two.journal". This is because opening the
+existing journal file with managed_journal_file_open() causes
+journal_file_verify_header() to be called. This function tries to
+compare the current machine-id to the machine-id in the journal file
+header, but does not handle the case where the machine-id is empty or
+non-existent.
+
+Check if we have an initialized machine-id before executing this portion
+of the test.
+
+(cherry picked from commit 3a9ca230363e6d1063a789492005d744723f5eed)
+
+Related: RHEL-27512
+---
+ src/journal/test-journal-interleaving.c | 27 +++++++++++++++----------
+ 1 file changed, 16 insertions(+), 11 deletions(-)
+
+diff --git a/src/journal/test-journal-interleaving.c b/src/journal/test-journal-interleaving.c
+index fb38cc7e82..e05eae034b 100644
+--- a/src/journal/test-journal-interleaving.c
++++ b/src/journal/test-journal-interleaving.c
+@@ -3,6 +3,7 @@
+ #include <fcntl.h>
+ #include <unistd.h>
+ 
++#include "sd-id128.h"
+ #include "sd-journal.h"
+ 
+ #include "alloc-util.h"
+@@ -263,22 +264,26 @@ static void test_sequence_numbers_one(void) {
+ 
+         test_close(one);
+ 
+-        /* restart server */
+-        seqnum = 0;
++        /* If the machine-id is not initialized, the header file verification
++         * (which happens when re-opening a journal file) will fail. */
++        if (sd_id128_get_machine(NULL) >= 0) {
++                /* restart server */
++                seqnum = 0;
+ 
+-        assert_se(managed_journal_file_open(-1, "two.journal", O_RDWR, JOURNAL_COMPRESS, 0,
+-                                            UINT64_MAX, NULL, m, NULL, NULL, &two) == 0);
++                assert_se(managed_journal_file_open(-1, "two.journal", O_RDWR, JOURNAL_COMPRESS, 0,
++                                                    UINT64_MAX, NULL, m, NULL, NULL, &two) == 0);
+ 
+-        assert_se(sd_id128_equal(two->file->header->seqnum_id, seqnum_id));
++                assert_se(sd_id128_equal(two->file->header->seqnum_id, seqnum_id));
+ 
+-        append_number(two, 7, &seqnum);
+-        printf("seqnum=%"PRIu64"\n", seqnum);
+-        assert_se(seqnum == 5);
++                append_number(two, 7, &seqnum);
++                printf("seqnum=%"PRIu64"\n", seqnum);
++                assert_se(seqnum == 5);
+ 
+-        /* So..., here we have the same seqnum in two files with the
+-         * same seqnum_id. */
++                /* So..., here we have the same seqnum in two files with the
++                 * same seqnum_id. */
+ 
+-        test_close(two);
++                test_close(two);
++        }
+ 
+         log_info("Done...");
+ 

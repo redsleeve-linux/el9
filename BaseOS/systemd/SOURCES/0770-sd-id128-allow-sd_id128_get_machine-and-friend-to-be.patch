@@ -1,0 +1,90 @@
+From 4af87f4d0643fa243aa1fd8e5c52cc5d4fbdd187 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 14 Dec 2022 13:34:15 +0900
+Subject: [PATCH] sd-id128: allow sd_id128_get_machine() and friend to be
+ called with NULL
+
+It may be useful to check if the machine ID or friends is set or not.
+
+(cherry picked from commit 786b652c8989834f9218ec82b2d824d5b753fad3)
+
+Related: RHEL-27512
+---
+ src/libsystemd/sd-id128/sd-id128.c | 28 ++++++++++------------------
+ 1 file changed, 10 insertions(+), 18 deletions(-)
+
+diff --git a/src/libsystemd/sd-id128/sd-id128.c b/src/libsystemd/sd-id128/sd-id128.c
+index b2f0438edf..dee0df2396 100644
+--- a/src/libsystemd/sd-id128/sd-id128.c
++++ b/src/libsystemd/sd-id128/sd-id128.c
+@@ -125,8 +125,6 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
+         static thread_local sd_id128_t saved_machine_id = {};
+         int r;
+ 
+-        assert_return(ret, -EINVAL);
+-
+         if (sd_id128_is_null(saved_machine_id)) {
+                 r = id128_read("/etc/machine-id", ID128_FORMAT_PLAIN, &saved_machine_id);
+                 if (r < 0)
+@@ -136,7 +134,8 @@ _public_ int sd_id128_get_machine(sd_id128_t *ret) {
+                         return -ENOMEDIUM;
+         }
+ 
+-        *ret = saved_machine_id;
++        if (ret)
++                *ret = saved_machine_id;
+         return 0;
+ }
+ 
+@@ -144,8 +143,6 @@ _public_ int sd_id128_get_boot(sd_id128_t *ret) {
+         static thread_local sd_id128_t saved_boot_id = {};
+         int r;
+ 
+-        assert_return(ret, -EINVAL);
+-
+         if (sd_id128_is_null(saved_boot_id)) {
+                 r = id128_read("/proc/sys/kernel/random/boot_id", ID128_FORMAT_UUID, &saved_boot_id);
+                 if (r == -ENOENT && proc_mounted() == 0)
+@@ -157,7 +154,8 @@ _public_ int sd_id128_get_boot(sd_id128_t *ret) {
+                         return -ENOMEDIUM;
+         }
+ 
+-        *ret = saved_boot_id;
++        if (ret)
++                *ret = saved_boot_id;
+         return 0;
+ }
+ 
+@@ -277,26 +275,20 @@ _public_ int sd_id128_get_invocation(sd_id128_t *ret) {
+         static thread_local sd_id128_t saved_invocation_id = {};
+         int r;
+ 
+-        assert_return(ret, -EINVAL);
+-
+         if (sd_id128_is_null(saved_invocation_id)) {
+                 /* We first check the environment. The environment variable is primarily relevant for user
+                  * services, and sufficiently safe as long as no privilege boundary is involved. */
+                 r = get_invocation_from_environment(&saved_invocation_id);
+-                if (r >= 0) {
+-                        *ret = saved_invocation_id;
+-                        return 0;
+-                } else if (r != -ENXIO)
+-                        return r;
+-
+-                /* The kernel keyring is relevant for system services (as for user services we don't store
+-                 * the invocation ID in the keyring, as there'd be no trust benefit in that). */
+-                r = get_invocation_from_keyring(&saved_invocation_id);
++                if (r == -ENXIO)
++                        /* The kernel keyring is relevant for system services (as for user services we don't
++                         * store the invocation ID in the keyring, as there'd be no trust benefit in that). */
++                        r = get_invocation_from_keyring(&saved_invocation_id);
+                 if (r < 0)
+                         return r;
+         }
+ 
+-        *ret = saved_invocation_id;
++        if (ret)
++                *ret = saved_invocation_id;
+         return 0;
+ }
+ 

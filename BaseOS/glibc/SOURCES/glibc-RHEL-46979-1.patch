@@ -1,0 +1,83 @@
+From a65ff76c9a1811dd2396ab45563f645579c0e687 Mon Sep 17 00:00:00 2001
+From: Florian Weimer <fweimer@redhat.com>
+Date: Thu, 27 Oct 2022 11:36:44 +0200
+Subject: ld.so: Export tls_init_tp_called as __rtld_tls_init_tp_called
+
+This allows the rest of dynamic loader to check whether the TCB
+has been set up (and THREAD_GETMEM and THREAD_SETMEM will work).
+
+Reviewed-by: Siddhesh Poyarekar <siddhesh@gotplt.org>
+
+Conflicts:
+	Regenerated for context changes.
+
+diff -rup a/elf/rtld.c b/elf/rtld.c
+--- a/elf/rtld.c	2024-08-22 17:57:02.000830481 -0400
++++ b/elf/rtld.c	2024-08-22 17:59:30.666562835 -0400
+@@ -740,7 +740,7 @@ match_version (const char *string, struc
+   return 0;
+ }
+ 
+-static bool tls_init_tp_called;
++bool __rtld_tls_init_tp_called;
+ 
+ static void *
+ init_tls (size_t naudit)
+@@ -812,7 +812,7 @@ cannot allocate TLS data structures for
+   if (__glibc_unlikely (lossage != NULL))
+     _dl_fatal_printf ("cannot set up thread-local storage: %s\n", lossage);
+   __tls_init_tp ();
+-  tls_init_tp_called = true;
++  __rtld_tls_init_tp_called = true;
+ 
+   return tcbp;
+ }
+@@ -2057,7 +2057,7 @@ dl_main (const ElfW(Phdr) *phdr,
+      an old kernel that can't perform TLS_INIT_TP, even if no TLS is ever
+      used.  Trying to do it lazily is too hairy to try when there could be
+      multiple threads (from a non-TLS-using libpthread).  */
+-  bool was_tls_init_tp_called = tls_init_tp_called;
++  bool was_tls_init_tp_called = __rtld_tls_init_tp_called;
+   if (tcbp == NULL)
+     tcbp = init_tls (0);
+ 
+@@ -2411,7 +2411,7 @@ dl_main (const ElfW(Phdr) *phdr,
+ 	    _dl_protect_relro (l);
+ 
+ 	  /* Add object to slot information data if necessasy.  */
+-	  if (l->l_tls_blocksize != 0 && tls_init_tp_called)
++	  if (l->l_tls_blocksize != 0 && __rtld_tls_init_tp_called)
+ 	    _dl_add_to_slotinfo (l, true);
+ 	}
+     }
+@@ -2462,7 +2462,7 @@ dl_main (const ElfW(Phdr) *phdr,
+ 				 consider_profiling);
+ 
+ 	  /* Add object to slot information data if necessasy.  */
+-	  if (l->l_tls_blocksize != 0 && tls_init_tp_called)
++	  if (l->l_tls_blocksize != 0 && __rtld_tls_init_tp_called)
+ 	    _dl_add_to_slotinfo (l, true);
+ 	}
+       rtld_timer_stop (&relocate_time, start);
+@@ -2488,7 +2488,7 @@ dl_main (const ElfW(Phdr) *phdr,
+   _dl_allocate_tls_init (tcbp, true);
+ 
+   /* And finally install it for the main thread.  */
+-  if (! tls_init_tp_called)
++  if (! __rtld_tls_init_tp_called)
+     {
+       const char *lossage = TLS_INIT_TP (tcbp);
+       if (__glibc_unlikely (lossage != NULL))
+diff -rup a/sysdeps/generic/ldsodefs.h b/sysdeps/generic/ldsodefs.h
+--- a/sysdeps/generic/ldsodefs.h	2024-08-22 17:57:02.011830906 -0400
++++ b/sysdeps/generic/ldsodefs.h	2024-08-22 17:58:10.900487160 -0400
+@@ -1262,6 +1262,9 @@ extern void *_dl_allocate_tls_storage (v
+ extern void *_dl_allocate_tls_init (void *result, bool main_thread);
+ rtld_hidden_proto (_dl_allocate_tls_init)
+ 
++/* True if the TCB has been set up.  */
++extern bool __rtld_tls_init_tp_called attribute_hidden;
++
+ /* Deallocate memory allocated with _dl_allocate_tls.  */
+ extern void _dl_deallocate_tls (void *tcb, bool dealloc_tcb);
+ rtld_hidden_proto (_dl_deallocate_tls)

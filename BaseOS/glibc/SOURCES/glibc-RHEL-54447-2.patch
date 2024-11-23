@@ -1,0 +1,195 @@
+commit 388c9d7294e5ee3b741aef2e8af63eb1f76ace86
+Author: Maciej W. Rozycki <macro@redhat.com>
+Date:   Fri Jul 26 13:21:34 2024 +0100
+
+    support: Add FAIL test failure helper
+    
+    Add a FAIL test failure helper analogous to FAIL_RET, that does not
+    cause the current function to return, providing a standardized way to
+    report a test failure with a message supplied while permitting the
+    caller to continue executing, for further reporting, cleaning up, etc.
+    
+    Update existing test cases that provide a conflicting definition of FAIL
+    by removing the local FAIL definition and then as follows:
+    
+    - tst-fortify-syslog: provide a meaningful message in addition to the
+      file name already added by <support/check.h>; 'support_record_failure'
+      is already called by 'support_print_failure_impl' invoked by the new
+      FAIL test failure helper.
+    
+    - tst-ctype: no update to FAIL calls required, with the name of the file
+      and the line number within of the failure site additionally included
+      by the new FAIL test failure helper, and error counting plus count
+      reporting upon test program termination also already provided by
+      'support_record_failure' and 'support_report_failure' respectively,
+      called by 'support_print_failure_impl' and 'adjust_exit_status' also
+      respectively.  However in a number of places 'printf' is called and
+      the error count adjusted by hand, so update these places to make use
+      of FAIL instead.  And last but not least adjust the final summary just
+      to report completion, with any error count following as reported by
+      the test driver.
+    
+    - test-tgmath2: no update to FAIL calls required, with the name of the
+      file of the failure site additionally included by the new FAIL test
+      failure helper.  Also there is no need to track the return status by
+      hand as any call to FAIL will eventually cause the test case to return
+      an unsuccesful exit status regardless of the return status from the
+      test function, via a call to 'adjust_exit_status' made by the test
+      driver.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+    (cherry picked from commit 1b97a9f23bf605ca608162089c94187573fb2a9e)
+    (cherry picked from commit 28f358bc4209ab0425170cdccf65bb1fe861148f)
+
+diff --git a/localedata/tst-ctype.c b/localedata/tst-ctype.c
+index 1e4fa132bb4e17c6..f8645e31db8a1691 100644
+--- a/localedata/tst-ctype.c
++++ b/localedata/tst-ctype.c
+@@ -22,6 +22,8 @@
+ #include <stdio.h>
+ #include <string.h>
+ 
++#include <support/check.h>
++
+ 
+ static const char lower[] = "abcdefghijklmnopqrstuvwxyz";
+ static const char upper[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+@@ -54,19 +56,11 @@ static struct classes
+ #define nclasses (sizeof (classes) / sizeof (classes[0]))
+ 
+ 
+-#define FAIL(str, args...) \
+-  {									      \
+-    printf ("      " str "\n", ##args);					      \
+-    ++errors;								      \
+-  }
+-
+-
+ static int
+ do_test (void)
+ {
+   const char *cp;
+   const char *cp2;
+-  int errors = 0;
+   char *inpline = NULL;
+   size_t inplinelen = 0;
+   char *resline = NULL;
+@@ -395,11 +389,8 @@ punct = %04x  alnum = %04x\n",
+ 	    {
+ 	      if (((__ctype_b[(unsigned int) *inp] & classes[n].mask) != 0)
+ 		  != (*resp != '0'))
+-		{
+-		  printf ("    is%s('%c' = '\\x%02x') %s true\n", inpline,
+-			  *inp, *inp, *resp == '1' ? "not" : "is");
+-		  ++errors;
+-		}
++		FAIL ("    is%s('%c' = '\\x%02x') %s true\n", inpline,
++		      *inp, *inp, *resp == '1' ? "not" : "is");
+ 	      ++inp;
+ 	      ++resp;
+ 	    }
+@@ -409,11 +400,8 @@ punct = %04x  alnum = %04x\n",
+ 	  while (*inp != '\0')
+ 	    {
+ 	      if (tolower (*inp) != *resp)
+-		{
+-		  printf ("    tolower('%c' = '\\x%02x') != '%c'\n",
+-			  *inp, *inp, *resp);
+-		  ++errors;
+-		}
++		FAIL ("    tolower('%c' = '\\x%02x') != '%c'\n",
++		      *inp, *inp, *resp);
+ 	      ++inp;
+ 	      ++resp;
+ 	    }
+@@ -423,11 +411,8 @@ punct = %04x  alnum = %04x\n",
+ 	  while (*inp != '\0')
+ 	    {
+ 	      if (toupper (*inp) != *resp)
+-		{
+-		  printf ("    toupper('%c' = '\\x%02x') != '%c'\n",
+-			  *inp, *inp, *resp);
+-		  ++errors;
+-		}
++		FAIL ("    toupper('%c' = '\\x%02x') != '%c'\n",
++		      *inp, *inp, *resp);
+ 	      ++inp;
+ 	      ++resp;
+ 	    }
+@@ -437,14 +422,7 @@ punct = %04x  alnum = %04x\n",
+     }
+ 
+ 
+-  if (errors != 0)
+-    {
+-      printf ("  %d error%s for `%s' locale\n\n\n", errors,
+-	      errors == 1 ? "" : "s", setlocale (LC_ALL, NULL));
+-      return 1;
+-    }
+-
+-  printf ("  No errors for `%s' locale\n\n\n", setlocale (LC_ALL, NULL));
++  printf ("Completed testing for `%s' locale\n\n\n", setlocale (LC_ALL, NULL));
+   return 0;
+ }
+ 
+diff --git a/math/test-tgmath2.c b/math/test-tgmath2.c
+index b8fb00c566439ab0..e3b7a3a3615e083a 100644
+--- a/math/test-tgmath2.c
++++ b/math/test-tgmath2.c
+@@ -25,6 +25,8 @@
+ #include <string.h>
+ #include <tgmath.h>
+ 
++#include <support/check.h>
++
+ //#define DEBUG
+ 
+ typedef complex float cfloat;
+@@ -88,13 +90,6 @@ enum
+ int count;
+ int counts[Tlast][C_last];
+ 
+-#define FAIL(str) \
+-  do								\
+-    {								\
+-      printf ("%s failure on line %d\n", (str), __LINE__);	\
+-      result = 1;						\
+-    }								\
+-  while (0)
+ #define TEST_TYPE_ONLY(expr, rettype) \
+   do								\
+     {								\
+@@ -134,8 +129,6 @@ int counts[Tlast][C_last];
+ int
+ test_cos (const int Vint4, const long long int Vllong4)
+ {
+-  int result = 0;
+-
+   TEST (cos (vfloat1), float, cos);
+   TEST (cos (vdouble1), double, cos);
+   TEST (cos (vldouble1), ldouble, cos);
+@@ -153,7 +146,7 @@ test_cos (const int Vint4, const long long int Vllong4)
+   TEST (cos (Vcdouble1), cdouble, cos);
+   TEST (cos (Vcldouble1), cldouble, cos);
+ 
+-  return result;
++  return 0;
+ }
+ 
+ int
+diff --git a/support/check.h b/support/check.h
+index 9b1844352f32513a..8e045dd9c0c36b4c 100644
+--- a/support/check.h
++++ b/support/check.h
+@@ -24,6 +24,11 @@
+ 
+ __BEGIN_DECLS
+ 
++/* Record a test failure, print the failure message to standard output
++   and pass the result of 1 through.  */
++#define FAIL(...) \
++  support_print_failure_impl (__FILE__, __LINE__, __VA_ARGS__)
++
+ /* Record a test failure, print the failure message to standard output
+    and return 1.  */
+ #define FAIL_RET(...) \

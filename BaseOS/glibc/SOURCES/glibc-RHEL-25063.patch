@@ -1,0 +1,109 @@
+commit 127fc56152347d73cb7c1c283e60e1cb1f15e9f9
+Author: sayan paul <saypaul@redhat.com>
+Date:   Wed May 29 15:31:04 2024 +0530
+
+    malloc: New test to check malloc alternate path using memory obstruction
+    
+    The test aims to ensure that malloc uses the alternate path to
+    allocate memory when sbrk() or brk() fails.To achieve this,
+    the test first creates an obstruction at current program break,
+    tests that obstruction with a failing sbrk(), then checks if malloc
+    is still returning a valid ptr thus inferring that malloc() used
+    mmap() instead of brk() or sbrk() to allocate the memory.
+    Reviewed-by: Arjun Shankar <arjun@redhat.com>
+    Reviewed-by: Zack Weinberg <zack@owlfolio.org>
+
+Conflicts:
+	malloc/Makefile
+	  (usual tests conflict)
+
+diff --git a/malloc/Makefile b/malloc/Makefile
+index 9b70831d383cb522..cb4e027d28b179f0 100644
+--- a/malloc/Makefile
++++ b/malloc/Makefile
+@@ -43,6 +43,7 @@ tests := mallocbug tst-malloc tst-valloc tst-calloc tst-obstack \
+ 	 tst-tcfree1 tst-tcfree2 tst-tcfree3 \
+ 	 tst-safe-linking \
+ 	 tst-mallocalign1 \
++	 tst-malloc-alternate-path \
+ 
+ tests-static := \
+ 	 tst-interpose-static-nothread \
+diff --git a/malloc/tst-malloc-alternate-path.c b/malloc/tst-malloc-alternate-path.c
+new file mode 100644
+index 0000000000000000..43ae916815d6ff47
+--- /dev/null
++++ b/malloc/tst-malloc-alternate-path.c
+@@ -0,0 +1,72 @@
++/* Test that malloc uses mmap when sbrk or brk fails.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* This test sets up an obstruction to ensure that brk/sbrk fails to
++   grow the heap, then verifies that malloc uses mmap for allocations
++   instead.  */
++
++#include <unistd.h>
++#include <sys/mman.h>
++#include <stdlib.h>
++#include <libc-pointer-arith.h>
++#include <support/check.h>
++#include <stddef.h>
++#include <stdalign.h>
++
++#define LARGE_SIZE (10 * (1 << 20)) // 10 MB
++static long page_size;
++
++static int
++do_test (void)
++{
++  /* Get current program break.  */
++  void *current_brk = sbrk (0);
++
++  page_size = sysconf (_SC_PAGESIZE);
++
++  /* Round up to the next page boundary.  */
++  void *next_page_boundary = PTR_ALIGN_UP (current_brk, page_size);
++
++  /* Place a mapping using mmap at the next page boundary.  */
++  void *obstruction_addr
++  = mmap (next_page_boundary, page_size, PROT_READ,
++    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
++
++  /* Check if memory obstruction is set up correctly.  */
++  TEST_VERIFY_EXIT (obstruction_addr == next_page_boundary);
++
++  /* Try to extend the heap beyond the obstruction using sbrk */
++  int *ptr = sbrk (page_size);
++  TEST_VERIFY_EXIT (ptr == (void *) -1);
++
++  /* Attempt multiple small allocations using malloc.  */
++  for (size_t i = 0; i < page_size / alignof (max_align_t); i++)
++    {
++      TEST_VERIFY (malloc (alignof (max_align_t)));
++    }
++
++  /* Attempt to allocate a large block of memory using malloc.  */
++  TEST_VERIFY_EXIT (malloc (LARGE_SIZE) != NULL);
++
++  /* Check if malloc changed current program break.  */
++  TEST_VERIFY_EXIT (current_brk == sbrk (0));
++
++  return 0;
++}
++
++#include <support/test-driver.c>

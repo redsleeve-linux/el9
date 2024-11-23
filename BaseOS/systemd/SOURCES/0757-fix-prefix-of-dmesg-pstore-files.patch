@@ -1,0 +1,35 @@
+From ee2dd3cada129b39a2da5287f31e6d9e18a82764 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?=D0=94=D0=B0=D0=BC=D1=98=D0=B0=D0=BD=20=D0=93=D0=B5=D0=BE?=
+ =?UTF-8?q?=D1=80=D0=B3=D0=B8=D0=B5=D0=B2=D1=81=D0=BA=D0=B8?=
+ <gdamjan@gmail.com>
+Date: Fri, 1 Dec 2023 11:46:36 +0100
+Subject: [PATCH] fix: prefix of dmesg pstore files
+
+A change in the kernel[1] renamed the prefix of the pstore files from
+`dmesg-efi-` to `dmesg-efi_pstore-`.
+
+[1]
+https://git.kernel.org/linus/893c5f1de620
+
+(cherry picked from commit ef87c84e812cbdca4ef160fb0536d1f1bc6a2400)
+
+Resolves: RHEL-20322
+---
+ src/pstore/pstore.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/pstore/pstore.c b/src/pstore/pstore.c
+index 7fff6cee62..76657da536 100644
+--- a/src/pstore/pstore.c
++++ b/src/pstore/pstore.c
+@@ -233,7 +233,9 @@ static int process_dmesg_files(PStoreList *list) {
+                 if (!startswith(pe->dirent.d_name, "dmesg-"))
+                         continue;
+ 
+-                if ((p = startswith(pe->dirent.d_name, "dmesg-efi-"))) {
++                /* The linux kernel changed the prefix from dmesg-efi- to dmesg-efi_pstore-
++                 * so now we have to handle both cases. */
++                if ((p = STARTSWITH_SET(pe->dirent.d_name, "dmesg-efi-", "dmesg-efi_pstore-"))) {
+                         /* For the EFI backend, the 3 least significant digits of record id encodes a
+                          * "count" number, the next 2 least significant digits for the dmesg part
+                          * (chunk) number, and the remaining digits as the timestamp.  See

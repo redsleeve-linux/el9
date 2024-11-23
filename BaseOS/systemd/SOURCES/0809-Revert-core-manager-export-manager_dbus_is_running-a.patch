@@ -1,0 +1,93 @@
+From 07ec0810cf4dc638c138735eccda78e37ff42be7 Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Thu, 11 May 2023 18:55:43 +0800
+Subject: [PATCH] Revert "core/manager: export manager_dbus_is_running" and
+ partially "core: refuse dbus activation if dbus is not running"
+
+This reverts commit e8863150653931ae2ffc91757623f179ce763628
+and partially 53964fd26b4a01191609ffc064aa8ccccd28e377.
+
+Specifically, changes to signal_activation_request()
+is not desired.
+
+(cherry picked from commit 2b680534c9667341551b39f4cc9735cd6e8c014e)
+
+Resolves: RHEL-40878
+---
+ src/core/dbus.c    | 5 +++--
+ src/core/manager.c | 8 ++++----
+ src/core/manager.h | 5 -----
+ 3 files changed, 7 insertions(+), 11 deletions(-)
+
+diff --git a/src/core/dbus.c b/src/core/dbus.c
+index b4564f79a2..1431e079c2 100644
+--- a/src/core/dbus.c
++++ b/src/core/dbus.c
+@@ -160,8 +160,9 @@ static int signal_activation_request(sd_bus_message *message, void *userdata, sd
+                 return 0;
+         }
+ 
+-        if (!manager_dbus_is_running(m)) {
+-                r = sd_bus_error_set(&error, BUS_ERROR_SHUTTING_DOWN, "Refusing activation, D-Bus is not running.");
++        if (manager_unit_inactive_or_pending(m, SPECIAL_DBUS_SOCKET) ||
++            manager_unit_inactive_or_pending(m, SPECIAL_DBUS_SERVICE)) {
++                r = sd_bus_error_set(&error, BUS_ERROR_SHUTTING_DOWN, "Refusing activation, D-Bus is shutting down.");
+                 goto failed;
+         }
+ 
+diff --git a/src/core/manager.c b/src/core/manager.c
+index fd6e711c65..b44c7785cf 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -1680,7 +1680,7 @@ static void manager_distribute_fds(Manager *m, FDSet *fds) {
+         }
+ }
+ 
+-bool manager_dbus_is_running_full(Manager *m, bool deserialized) {
++static bool manager_dbus_is_running(Manager *m, bool deserialized) {
+         Unit *u;
+ 
+         assert(m);
+@@ -1722,7 +1722,7 @@ static void manager_setup_bus(Manager *m) {
+                 (void) bus_init_system(m);
+ 
+         /* Let's connect to the bus now, but only if the unit is supposed to be up */
+-        if (manager_dbus_is_running_full(m, MANAGER_IS_RELOADING(m))) {
++        if (manager_dbus_is_running(m, MANAGER_IS_RELOADING(m))) {
+                 (void) bus_init_api(m);
+ 
+                 if (MANAGER_IS_SYSTEM(m))
+@@ -2815,7 +2815,7 @@ static int manager_dispatch_signal_fd(sd_event_source *source, int fd, uint32_t
+                 break;
+ 
+         case SIGUSR1:
+-                if (manager_dbus_is_running(m)) {
++                if (manager_dbus_is_running(m, false)) {
+                         log_info("Trying to reconnect to bus...");
+ 
+                         (void) bus_init_api(m);
+@@ -3930,7 +3930,7 @@ void manager_recheck_dbus(Manager *m) {
+         if (MANAGER_IS_RELOADING(m))
+                 return; /* don't check while we are reloading… */
+ 
+-        if (manager_dbus_is_running(m)) {
++        if (manager_dbus_is_running(m, false)) {
+                 (void) bus_init_api(m);
+ 
+                 if (MANAGER_IS_SYSTEM(m))
+diff --git a/src/core/manager.h b/src/core/manager.h
+index 1479813de4..86e7e40989 100644
+--- a/src/core/manager.h
++++ b/src/core/manager.h
+@@ -491,11 +491,6 @@ DEFINE_TRIVIAL_CLEANUP_FUNC(Manager*, manager_free);
+ 
+ int manager_startup(Manager *m, FILE *serialization, FDSet *fds, const char *root);
+ 
+-bool manager_dbus_is_running_full(Manager *m, bool deserialized);
+-static inline bool manager_dbus_is_running(Manager *m) {
+-        return manager_dbus_is_running_full(m, false);
+-}
+-
+ Job *manager_get_job(Manager *m, uint32_t id);
+ Unit *manager_get_unit(Manager *m, const char *name);
+ 

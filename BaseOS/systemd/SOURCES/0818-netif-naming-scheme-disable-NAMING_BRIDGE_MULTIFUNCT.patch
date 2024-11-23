@@ -1,0 +1,71 @@
+From 753e1b1c9b255d528eb8b2a2af072a83eb85d784 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 24 Aug 2023 00:01:19 +0900
+Subject: [PATCH] netif-naming-scheme: disable NAMING_BRIDGE_MULTIFUNCTION_SLOT
+
+This effectively reverts 66425daf2c68793adf24a48a26d58add8662e83f.
+
+The commit assumes that if the network interface has multifunctions,
+then the function fields of the pci devices under the same PCI bridge
+device are unique.
+But it seems not, at least on some setups. See issue #28929.
+Let's revert the change, and always refuse to set slot base naming if
+a PCI bridge is detected.
+
+Fixes #28929.
+
+(cherry picked from commit af7417ac7b07bc01232982bf46e9d72e69e7f820)
+
+Resolves: RHEL-44630
+---
+ man/systemd.net-naming-scheme.xml | 14 ++++++++++++++
+ src/shared/netif-naming-scheme.h  |  4 +++-
+ 2 files changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/man/systemd.net-naming-scheme.xml b/man/systemd.net-naming-scheme.xml
+index a5903c6d04..83293e5636 100644
+--- a/man/systemd.net-naming-scheme.xml
++++ b/man/systemd.net-naming-scheme.xml
+@@ -499,6 +499,20 @@
+ 
+            <listitem><para>Same as naming scheme <constant>rhel-9.3</constant>.</para></listitem>
+         </varlistentry>
++
++        <varlistentry>
++            <term><constant>rhel-9.5</constant></term>
++
++          <listitem><para>Never generate a slot name when a PCI bridge is detected.</para>
++
++          <para>Since version <constant>"rhel-9.0"</constant>, we have generated slot-based names
++          for PCI multifunction devices, because we assumed that it is enough to use function numbers
++          to distinguish between devices. However, name conflict can occur if these devices are not
++          children of the same PCI bridge, e.g. there are multiple PCI bridges in the same slot.
++          </para>
++          </listitem>
++        </varlistentry>
++
+       </variablelist>
+ 
+     <para>By default <constant>rhel-9.0</constant> is used.</para>
+diff --git a/src/shared/netif-naming-scheme.h b/src/shared/netif-naming-scheme.h
+index 5f49157aaa..5bc071f8db 100644
+--- a/src/shared/netif-naming-scheme.h
++++ b/src/shared/netif-naming-scheme.h
+@@ -38,7 +38,8 @@ typedef enum NamingSchemeFlags {
+         NAMING_16BIT_INDEX               = 1 << 11, /* Allow full 16-bit for the onboard index */
+         NAMING_REPLACE_STRICTLY          = 1 << 12, /* Use udev_replace_ifname() for NAME= rule */
+         NAMING_XEN_VIF                   = 1 << 13, /* Generate names for Xen netfront devices */
+-        NAMING_BRIDGE_MULTIFUNCTION_SLOT = 1 << 14, /* Use PCI hotplug slot information associated with bridge, but only if PCI device is multifunction */
++        NAMING_BRIDGE_MULTIFUNCTION_SLOT = 1 << 14, /* Use PCI hotplug slot information associated with bridge, but only if PCI device is multifunction.
++                                                     * This is disabled since rhel-9.5, as it seems not to work at least for some setups. See upstream issue #28929. */
+         NAMING_DEVICETREE_ALIASES        = 1 << 15, /* Generate names from devicetree aliases */
+         NAMING_SR_IOV_R                  = 1 << 17, /* Use "r" suffix for SR-IOV VF representors */
+ 
+@@ -72,6 +73,7 @@ typedef enum NamingSchemeFlags {
+         NAMING_RHEL_9_2 = NAMING_RHEL_9_0,
+         NAMING_RHEL_9_3 = NAMING_RHEL_9_0 | NAMING_SR_IOV_R,
+         NAMING_RHEL_9_4 = NAMING_RHEL_9_3,
++        NAMING_RHEL_9_5 = NAMING_RHEL_9_4 & ~NAMING_BRIDGE_MULTIFUNCTION_SLOT,
+ 
+         EXTRA_NET_NAMING_SCHEMES
+ 

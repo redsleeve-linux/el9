@@ -1,0 +1,36 @@
+From c77533f7cc265ce7fc4c933f8ebb3828c0c9ff57 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 5 Mar 2024 11:51:52 +0100
+Subject: [PATCH] Revert "mkosi: Disable cmdline addon test for now"
+
+Let's see if this finally works.
+
+This reverts commit e167a8283d5964ca0f903b3e362ab7e48a1ed2ab.
+
+(cherry picked from commit d9c8cf40b5c920ae59a02fa2bab32e93dad33542)
+
+Related: RHEL-27512
+---
+ .../usr/lib/systemd/mkosi-check-and-shutdown.sh          | 9 ++++++---
+ 1 file changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/mkosi.images/system/mkosi.extra/usr/lib/systemd/mkosi-check-and-shutdown.sh b/mkosi.images/system/mkosi.extra/usr/lib/systemd/mkosi-check-and-shutdown.sh
+index 210fa78850..076026d097 100755
+--- a/mkosi.images/system/mkosi.extra/usr/lib/systemd/mkosi-check-and-shutdown.sh
++++ b/mkosi.images/system/mkosi.extra/usr/lib/systemd/mkosi-check-and-shutdown.sh
+@@ -12,9 +12,12 @@ systemctl --failed --no-legend | tee /failed-services
+ if ! systemd-detect-virt --container; then
+     cmp /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c <(printf '\6\0\0\0\1')
+     cmp /sys/firmware/efi/efivars/SetupMode-8be4df61-93ca-11d2-aa0d-00e098032b8c <(printf '\6\0\0\0\0')
+-    # TODO: Figure out why this is failing
+-    # grep -q this_should_be_here /proc/cmdline
+-    # grep -q this_should_not_be_here /proc/cmdline && exit 1
++
++    if command -v sbsign &>/dev/null; then
++        cat /proc/cmdline
++        grep -q this_should_be_here /proc/cmdline
++        (! grep -q this_should_not_be_here /proc/cmdline)
++    fi
+ fi
+ 
+ # Exit with non-zero EC if the /failed-services file is not empty (we have -e set)

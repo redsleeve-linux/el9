@@ -1,0 +1,1030 @@
+From ee1ada1bdb8074de6e1bdc956ab19aef7b6a7872 Mon Sep 17 00:00:00 2001
+From: Florian Weimer <fweimer@redhat.com>
+Date: Thu, 3 Nov 2022 09:39:31 +0100
+Subject: elf: Rework exception handling in the dynamic loader [BZ #25486]
+
+The old exception handling implementation used function interposition
+to replace the dynamic loader implementation (no TLS support) with the
+libc implementation (TLS support).  This results in problems if the
+link order between the dynamic loader and libc is reversed (bug 25486).
+
+The new implementation moves the entire implementation of the
+exception handling functions back into the dynamic loader, using
+THREAD_GETMEM and THREAD_SETMEM for thread-local data support.
+These depends on Hurd support for these macros, added in commit
+b65a82e4e757c1e6cb7073916 ("hurd: Add THREAD_GET/SETMEM/_NC").
+
+One small obstacle is that the exception handling facilities are used
+before the TCB has been set up, so a check is needed if the TCB is
+available.  If not, a regular global variable is used to store the
+exception handling information.
+
+Also rename dl-error.c to dl-catch.c, to avoid confusion with the
+dlerror function.
+
+Reviewed-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+
+Conflicts
+	Rebased due to context changes
+
+diff -rupN a/elf/Makefile b/elf/Makefile
+--- a/elf/Makefile	2024-08-29 11:28:38.488322915 -0400
++++ b/elf/Makefile	2024-08-29 11:29:16.773809945 -0400
+@@ -34,7 +34,6 @@ routines = \
+   dl-addr \
+   dl-addr-obj \
+   dl-early_allocate \
+-  dl-error \
+   dl-iteratephdr \
+   dl-libc \
+   dl-origin \
+@@ -52,6 +51,7 @@ routines = \
+ # profiled libraries.
+ dl-routines = \
+   dl-call-libc-early-init \
++  dl-catch \
+   dl-close \
+   dl-debug \
+   dl-deps \
+@@ -127,7 +127,6 @@ rtld-routines = \
+   dl-diagnostics-cpu \
+   dl-diagnostics-kernel \
+   dl-environ \
+-  dl-error-minimal \
+   dl-hwcaps \
+   dl-hwcaps-subdirs \
+   dl-hwcaps_split \
+diff -rupN a/elf/Versions b/elf/Versions
+--- a/elf/Versions	2024-08-29 11:28:36.214234588 -0400
++++ b/elf/Versions	2024-08-29 11:29:16.778810139 -0400
+@@ -23,10 +23,6 @@ libc {
+   GLIBC_PRIVATE {
+     # functions used in other libraries
+     __libc_early_init;
+-
+-    # Internal error handling support.  Interposes the functions in ld.so.
+-    _dl_signal_exception; _dl_catch_exception;
+-    _dl_signal_error; _dl_catch_error;
+   }
+ }
+ 
+@@ -69,10 +65,8 @@ ld {
+ 
+     # Internal error handling support.
+     _dl_exception_create; _dl_exception_create_format; _dl_exception_free;
+-
+-    # Internal error handling support.  Interposed by libc.so.
+     _dl_signal_exception; _dl_catch_exception;
+-    _dl_signal_error; _dl_catch_error;
++    _dl_signal_error;
+ 
+     # Set value of a tunable.
+     __tunable_get_val;
+diff -rupN a/elf/dl-catch.c b/elf/dl-catch.c
+--- a/elf/dl-catch.c	1969-12-31 19:00:00.000000000 -0500
++++ b/elf/dl-catch.c	2024-08-29 11:29:16.782810295 -0400
+@@ -0,0 +1,261 @@
++/* Exception handling in the dynamic linker.
++   Copyright (C) 1995-2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <libintl.h>
++#include <setjmp.h>
++#include <stdbool.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++#include <ldsodefs.h>
++#include <stdio.h>
++#include <tls.h>
++
++/* This structure communicates state between _dl_catch_error and
++   _dl_signal_error.  */
++struct rtld_catch
++  {
++    struct dl_exception *exception; /* The exception data is stored there.  */
++    volatile int *errcode;	/* Return value of _dl_signal_error.  */
++    jmp_buf env;		/* longjmp here on error.  */
++  };
++
++/* Multiple threads at once can use the `_dl_catch_error' function.
++   The calls can come from `_dl_map_object_deps', `_dlerror_run', or
++   from any of the libc functionality which loads dynamic objects
++   (NSS, iconv).  Therefore we have to be prepared to save the state
++   in thread-local memory.  We use THREAD_GETMEM and THREAD_SETMEM
++   instead of ELF TLS because ELF TLS is not available in the dynamic
++   loader.  Additionally, the exception handling mechanism must be
++   usable before the TCB has been set up, which is why
++   rtld_catch_notls is used if !__rtld_tls_init_tp_called.  This is
++   not needed for static builds, where initialization completes before
++   static dlopen etc. can be called.  */
++
++#if IS_IN (rtld)
++static struct rtld_catch *rtld_catch_notls;
++#endif
++
++static struct rtld_catch *
++get_catch (void)
++{
++#if IS_IN (rtld)
++  if (!__rtld_tls_init_tp_called)
++    return rtld_catch_notls;
++  else
++#endif
++    return THREAD_GETMEM (THREAD_SELF, rtld_catch);
++}
++
++static void
++set_catch (struct rtld_catch *catch)
++{
++#if IS_IN (rtld)
++  if (!__rtld_tls_init_tp_called)
++    rtld_catch_notls = catch;
++  else
++#endif
++    THREAD_SETMEM (THREAD_SELF, rtld_catch, catch);
++}
++
++/* Lossage while resolving the program's own symbols is always fatal.  */
++static void
++__attribute__ ((noreturn))
++fatal_error (int errcode, const char *objname, const char *occasion,
++	     const char *errstring)
++{
++  char buffer[1024];
++  _dl_fatal_printf ("%s: %s: %s%s%s%s%s\n",
++		    RTLD_PROGNAME,
++		    occasion ?: N_("error while loading shared libraries"),
++		    objname, *objname ? ": " : "",
++		    errstring, errcode ? ": " : "",
++		    (errcode
++		     ? __strerror_r (errcode, buffer, sizeof buffer)
++		     : ""));
++}
++
++void
++_dl_signal_exception (int errcode, struct dl_exception *exception,
++		      const char *occasion)
++{
++  struct rtld_catch *lcatch = get_catch ();
++  if (lcatch != NULL)
++    {
++      *lcatch->exception = *exception;
++      *lcatch->errcode = errcode;
++
++      /* We do not restore the signal mask because none was saved.  */
++      __longjmp (lcatch->env[0].__jmpbuf, 1);
++    }
++  else
++    fatal_error (errcode, exception->objname, occasion, exception->errstring);
++}
++rtld_hidden_def (_dl_signal_exception)
++
++void
++_dl_signal_error (int errcode, const char *objname, const char *occation,
++		  const char *errstring)
++{
++  struct rtld_catch *lcatch = get_catch ();
++
++  if (! errstring)
++    errstring = N_("DYNAMIC LINKER BUG!!!");
++
++  if (lcatch != NULL)
++    {
++      _dl_exception_create (lcatch->exception, objname, errstring);
++      *lcatch->errcode = errcode;
++
++      /* We do not restore the signal mask because none was saved.  */
++      __longjmp (lcatch->env[0].__jmpbuf, 1);
++    }
++  else
++    fatal_error (errcode, objname, occation, errstring);
++}
++rtld_hidden_def (_dl_signal_error)
++
++#if IS_IN (rtld)
++/* This points to a function which is called when a continuable error is
++   received.  Unlike the handling of `catch' this function may return.
++   The arguments will be the `errstring' and `objname'.
++
++   Since this functionality is not used in normal programs (only in ld.so)
++   we do not care about multi-threaded programs here.  We keep this as a
++   global variable.  */
++static receiver_fct receiver;
++
++void
++_dl_signal_cexception (int errcode, struct dl_exception *exception,
++		       const char *occasion)
++{
++  if (__builtin_expect (GLRO(dl_debug_mask)
++			& ~(DL_DEBUG_STATISTICS), 0))
++    _dl_debug_printf ("%s: error: %s: %s (%s)\n",
++		      exception->objname, occasion,
++		      exception->errstring, receiver ? "continued" : "fatal");
++
++  if (receiver)
++    {
++      /* We are inside _dl_receive_error.  Call the user supplied
++	 handler and resume the work.  The receiver will still be
++	 installed.  */
++      (*receiver) (errcode, exception->objname, exception->errstring);
++    }
++  else
++    _dl_signal_exception (errcode, exception, occasion);
++}
++
++void
++_dl_signal_cerror (int errcode, const char *objname, const char *occation,
++		   const char *errstring)
++{
++  if (__builtin_expect (GLRO(dl_debug_mask)
++			& ~(DL_DEBUG_STATISTICS), 0))
++    _dl_debug_printf ("%s: error: %s: %s (%s)\n", objname, occation,
++		      errstring, receiver ? "continued" : "fatal");
++
++  if (receiver)
++    {
++      /* We are inside _dl_receive_error.  Call the user supplied
++	 handler and resume the work.  The receiver will still be
++	 installed.  */
++      (*receiver) (errcode, objname, errstring);
++    }
++  else
++    _dl_signal_error (errcode, objname, occation, errstring);
++}
++
++void
++_dl_receive_error (receiver_fct fct, void (*operate) (void *), void *args)
++{
++  struct rtld_catch *old_catch = get_catch ();
++  receiver_fct old_receiver = receiver;
++
++  /* Set the new values.  */
++  set_catch (NULL);
++  receiver = fct;
++
++  (*operate) (args);
++
++  set_catch (old_catch);
++  receiver = old_receiver;
++}
++#endif
++
++int
++_dl_catch_exception (struct dl_exception *exception,
++		     void (*operate) (void *), void *args)
++{
++  /* If exception is NULL, temporarily disable exception handling.
++     Exceptions during operate (args) are fatal.  */
++  if (exception == NULL)
++    {
++      struct rtld_catch *old_catch = get_catch ();
++      set_catch (NULL);
++      operate (args);
++      /* If we get here, the operation was successful.  */
++      set_catch (old_catch);
++      return 0;
++    }
++
++  /* We need not handle `receiver' since setting a `catch' is handled
++     before it.  */
++
++  /* Only this needs to be marked volatile, because it is the only local
++     variable that gets changed between the setjmp invocation and the
++     longjmp call.  All others are just set here (before setjmp) and read
++     in _dl_signal_error (before longjmp).  */
++  volatile int errcode;
++
++  struct rtld_catch c;
++  /* Don't use an initializer since we don't need to clear C.env.  */
++  c.exception = exception;
++  c.errcode = &errcode;
++
++  struct rtld_catch *old = get_catch ();
++  set_catch (&c);
++
++  /* Do not save the signal mask.  */
++  if (__builtin_expect (__sigsetjmp (c.env, 0), 0) == 0)
++    {
++      (*operate) (args);
++      set_catch (old);
++      *exception = (struct dl_exception) { NULL };
++      return 0;
++    }
++
++  /* We get here only if we longjmp'd out of OPERATE.
++     _dl_signal_exception has already stored values into
++     *EXCEPTION.  */
++  set_catch (old);
++  return errcode;
++}
++rtld_hidden_def (_dl_catch_exception)
++
++int
++_dl_catch_error (const char **objname, const char **errstring,
++		 bool *mallocedp, void (*operate) (void *), void *args)
++{
++  struct dl_exception exception;
++  int errorcode = _dl_catch_exception (&exception, operate, args);
++  *objname = exception.objname;
++  *errstring = exception.errstring;
++  *mallocedp = exception.message_buffer == exception.errstring;
++  return errorcode;
++}
+diff -rupN a/elf/dl-error-minimal.c b/elf/dl-error-minimal.c
+--- a/elf/dl-error-minimal.c	2021-08-01 21:33:43.000000000 -0400
++++ b/elf/dl-error-minimal.c	1969-12-31 19:00:00.000000000 -0500
+@@ -1,23 +0,0 @@
+-/* Error handling for runtime dynamic linker, minimal version.
+-   Copyright (C) 1995-2021 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-/* This version does lives in ld.so, does not use thread-local data
+-   and supports _dl_signal_cerror and _dl_receive_error.  */
+-
+-#define DL_ERROR_BOOTSTRAP 1
+-#include "dl-error-skeleton.c"
+diff -rupN a/elf/dl-error-skeleton.c b/elf/dl-error-skeleton.c
+--- a/elf/dl-error-skeleton.c	2021-08-01 21:33:43.000000000 -0400
++++ b/elf/dl-error-skeleton.c	1969-12-31 19:00:00.000000000 -0500
+@@ -1,263 +0,0 @@
+-/* Template for error handling for runtime dynamic linker.
+-   Copyright (C) 1995-2021 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-/* The following macro needs to be defined before including this
+-   skeleton file:
+-
+-   DL_ERROR_BOOTSTRAP
+-
+-     If 1, do not use TLS and implement _dl_signal_cerror and
+-     _dl_receive_error.  If 0, TLS is used, and the variants with
+-     error callbacks are not provided.  */
+-
+-
+-#include <libintl.h>
+-#include <setjmp.h>
+-#include <stdbool.h>
+-#include <stdlib.h>
+-#include <string.h>
+-#include <unistd.h>
+-#include <ldsodefs.h>
+-#include <stdio.h>
+-
+-/* This structure communicates state between _dl_catch_error and
+-   _dl_signal_error.  */
+-struct catch
+-  {
+-    struct dl_exception *exception; /* The exception data is stored there.  */
+-    volatile int *errcode;	/* Return value of _dl_signal_error.  */
+-    jmp_buf env;		/* longjmp here on error.  */
+-  };
+-
+-/* Multiple threads at once can use the `_dl_catch_error' function.  The
+-   calls can come from `_dl_map_object_deps', `_dlerror_run', or from
+-   any of the libc functionality which loads dynamic objects (NSS, iconv).
+-   Therefore we have to be prepared to save the state in thread-local
+-   memory.  */
+-#if !DL_ERROR_BOOTSTRAP
+-static __thread struct catch *catch_hook attribute_tls_model_ie;
+-#else
+-/* The version of this code in ld.so cannot use thread-local variables
+-   and is used during bootstrap only.  */
+-static struct catch *catch_hook;
+-#endif
+-
+-#if DL_ERROR_BOOTSTRAP
+-/* This points to a function which is called when an continuable error is
+-   received.  Unlike the handling of `catch' this function may return.
+-   The arguments will be the `errstring' and `objname'.
+-
+-   Since this functionality is not used in normal programs (only in ld.so)
+-   we do not care about multi-threaded programs here.  We keep this as a
+-   global variable.  */
+-static receiver_fct receiver;
+-#endif /* DL_ERROR_BOOTSTRAP */
+-
+-/* Lossage while resolving the program's own symbols is always fatal.  */
+-static void
+-__attribute__ ((noreturn))
+-fatal_error (int errcode, const char *objname, const char *occasion,
+-	     const char *errstring)
+-{
+-  char buffer[1024];
+-  _dl_fatal_printf ("%s: %s: %s%s%s%s%s\n",
+-		    RTLD_PROGNAME,
+-		    occasion ?: N_("error while loading shared libraries"),
+-		    objname, *objname ? ": " : "",
+-		    errstring, errcode ? ": " : "",
+-		    (errcode
+-		     ? __strerror_r (errcode, buffer, sizeof buffer)
+-		     : ""));
+-}
+-
+-void
+-_dl_signal_exception (int errcode, struct dl_exception *exception,
+-		      const char *occasion)
+-{
+-  struct catch *lcatch = catch_hook;
+-  if (lcatch != NULL)
+-    {
+-      *lcatch->exception = *exception;
+-      *lcatch->errcode = errcode;
+-
+-      /* We do not restore the signal mask because none was saved.  */
+-      __longjmp (lcatch->env[0].__jmpbuf, 1);
+-    }
+-  else
+-    fatal_error (errcode, exception->objname, occasion, exception->errstring);
+-}
+-libc_hidden_def (_dl_signal_exception)
+-
+-void
+-_dl_signal_error (int errcode, const char *objname, const char *occation,
+-		  const char *errstring)
+-{
+-  struct catch *lcatch = catch_hook;
+-
+-  if (! errstring)
+-    errstring = N_("DYNAMIC LINKER BUG!!!");
+-
+-  if (lcatch != NULL)
+-    {
+-      _dl_exception_create (lcatch->exception, objname, errstring);
+-      *lcatch->errcode = errcode;
+-
+-      /* We do not restore the signal mask because none was saved.  */
+-      __longjmp (lcatch->env[0].__jmpbuf, 1);
+-    }
+-  else
+-    fatal_error (errcode, objname, occation, errstring);
+-}
+-libc_hidden_def (_dl_signal_error)
+-
+-
+-#if DL_ERROR_BOOTSTRAP
+-void
+-_dl_signal_cexception (int errcode, struct dl_exception *exception,
+-		       const char *occasion)
+-{
+-  if (__builtin_expect (GLRO(dl_debug_mask)
+-			& ~(DL_DEBUG_STATISTICS|DL_DEBUG_PRELINK), 0))
+-    _dl_debug_printf ("%s: error: %s: %s (%s)\n",
+-		      exception->objname, occasion,
+-		      exception->errstring, receiver ? "continued" : "fatal");
+-
+-  if (receiver)
+-    {
+-      /* We are inside _dl_receive_error.  Call the user supplied
+-	 handler and resume the work.  The receiver will still be
+-	 installed.  */
+-      (*receiver) (errcode, exception->objname, exception->errstring);
+-    }
+-  else
+-    _dl_signal_exception (errcode, exception, occasion);
+-}
+-
+-void
+-_dl_signal_cerror (int errcode, const char *objname, const char *occation,
+-		   const char *errstring)
+-{
+-  if (__builtin_expect (GLRO(dl_debug_mask)
+-			& ~(DL_DEBUG_STATISTICS|DL_DEBUG_PRELINK), 0))
+-    _dl_debug_printf ("%s: error: %s: %s (%s)\n", objname, occation,
+-		      errstring, receiver ? "continued" : "fatal");
+-
+-  if (receiver)
+-    {
+-      /* We are inside _dl_receive_error.  Call the user supplied
+-	 handler and resume the work.  The receiver will still be
+-	 installed.  */
+-      (*receiver) (errcode, objname, errstring);
+-    }
+-  else
+-    _dl_signal_error (errcode, objname, occation, errstring);
+-}
+-#endif /* DL_ERROR_BOOTSTRAP */
+-
+-int
+-_dl_catch_exception (struct dl_exception *exception,
+-		     void (*operate) (void *), void *args)
+-{
+-  /* If exception is NULL, temporarily disable exception handling.
+-     Exceptions during operate (args) are fatal.  */
+-  if (exception == NULL)
+-    {
+-      struct catch *const old = catch_hook;
+-      catch_hook = NULL;
+-      operate (args);
+-      /* If we get here, the operation was successful.  */
+-      catch_hook = old;
+-      return 0;
+-    }
+-
+-  /* We need not handle `receiver' since setting a `catch' is handled
+-     before it.  */
+-
+-  /* Only this needs to be marked volatile, because it is the only local
+-     variable that gets changed between the setjmp invocation and the
+-     longjmp call.  All others are just set here (before setjmp) and read
+-     in _dl_signal_error (before longjmp).  */
+-  volatile int errcode;
+-
+-  struct catch c;
+-  /* Don't use an initializer since we don't need to clear C.env.  */
+-  c.exception = exception;
+-  c.errcode = &errcode;
+-
+-  struct catch *const old = catch_hook;
+-  catch_hook = &c;
+-
+-  /* Do not save the signal mask.  */
+-  if (__builtin_expect (__sigsetjmp (c.env, 0), 0) == 0)
+-    {
+-      (*operate) (args);
+-      catch_hook = old;
+-      *exception = (struct dl_exception) { NULL };
+-      return 0;
+-    }
+-
+-  /* We get here only if we longjmp'd out of OPERATE.
+-     _dl_signal_exception has already stored values into
+-     *EXCEPTION.  */
+-  catch_hook = old;
+-  return errcode;
+-}
+-libc_hidden_def (_dl_catch_exception)
+-
+-int
+-_dl_catch_error (const char **objname, const char **errstring,
+-		 bool *mallocedp, void (*operate) (void *), void *args)
+-{
+-  struct dl_exception exception;
+-  int errorcode = _dl_catch_exception (&exception, operate, args);
+-  *objname = exception.objname;
+-  *errstring = exception.errstring;
+-  *mallocedp = exception.message_buffer == exception.errstring;
+-  return errorcode;
+-}
+-libc_hidden_def (_dl_catch_error)
+-
+-#if DL_ERROR_BOOTSTRAP
+-void
+-_dl_receive_error (receiver_fct fct, void (*operate) (void *), void *args)
+-{
+-  struct catch *old_catch = catch_hook;
+-  receiver_fct old_receiver = receiver;
+-
+-  /* Set the new values.  */
+-  catch_hook = NULL;
+-  receiver = fct;
+-
+-  (*operate) (args);
+-
+-  catch_hook = old_catch;
+-  receiver = old_receiver;
+-}
+-
+-/* Forwarder used for initializing GLRO (_dl_catch_error).  */
+-int
+-_rtld_catch_error (const char **objname, const char **errstring,
+-		   bool *mallocedp, void (*operate) (void *),
+-		   void *args)
+-{
+-  /* The reference to _dl_catch_error will eventually be relocated to
+-     point to the implementation in libc.so.  */
+-  return _dl_catch_error (objname, errstring, mallocedp, operate, args);
+-}
+-
+-#endif /* DL_ERROR_BOOTSTRAP */
+diff -rupN a/elf/dl-error.c b/elf/dl-error.c
+--- a/elf/dl-error.c	2021-08-01 21:33:43.000000000 -0400
++++ b/elf/dl-error.c	1969-12-31 19:00:00.000000000 -0500
+@@ -1,27 +0,0 @@
+-/* Error handling for runtime dynamic linker, full version.
+-   Copyright (C) 1995-2021 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-/* This implementation lives in libc.so because it uses thread-local
+-   data, which is not available in ld.so.  It interposes the version
+-   in dl-error-minimal.c after ld.so bootstrap.
+-
+-   The signal/catch mechanism is used by the audit framework, which
+-   means that even in ld.so, not all errors are fatal.  */
+-
+-#define DL_ERROR_BOOTSTRAP 0
+-#include "dl-error-skeleton.c"
+diff -rupN a/elf/rtld.c b/elf/rtld.c
+--- a/elf/rtld.c	2024-08-29 11:28:38.569326061 -0400
++++ b/elf/rtld.c	2024-08-29 11:29:16.798810916 -0400
+@@ -377,7 +377,7 @@ struct rtld_global_ro _rtld_global_ro at
+     ._dl_lookup_symbol_x = _dl_lookup_symbol_x,
+     ._dl_open = _dl_open,
+     ._dl_close = _dl_close,
+-    ._dl_catch_error = _rtld_catch_error,
++    ._dl_catch_error = _dl_catch_error,
+     ._dl_error_free = _dl_error_free,
+     ._dl_tls_get_addr_soft = _dl_tls_get_addr_soft,
+ #ifdef HAVE_DL_DISCOVER_OSVERSION
+diff -rupN a/nptl/descr.h b/nptl/descr.h
+--- a/nptl/descr.h	2024-08-29 11:28:37.858298444 -0400
++++ b/nptl/descr.h	2024-08-29 11:29:16.801811033 -0400
+@@ -396,6 +396,9 @@ struct pthread
+      masked.)  */
+   sigset_t sigmask;
+ 
++  /* Used by the exception handling implementation in the dynamic loader.  */
++  struct rtld_catch *rtld_catch;
++
+   /* Indicates whether is a C11 thread created by thrd_creat.  */
+   bool c11;
+ 
+diff -rupN a/sysdeps/generic/ldsodefs.h b/sysdeps/generic/ldsodefs.h
+--- a/sysdeps/generic/ldsodefs.h	2024-08-29 11:28:38.571326139 -0400
++++ b/sysdeps/generic/ldsodefs.h	2024-08-29 11:29:16.805811188 -0400
+@@ -897,13 +897,13 @@ rtld_hidden_proto (_dl_exception_free)
+ void _dl_signal_exception (int errcode, struct dl_exception *,
+ 			   const char *occasion)
+   __attribute__ ((__noreturn__));
+-libc_hidden_proto (_dl_signal_exception)
++rtld_hidden_proto (_dl_signal_exception)
+ 
+ /* Like _dl_signal_exception, but creates the exception first.  */
+ extern void _dl_signal_error (int errcode, const char *object,
+ 			      const char *occasion, const char *errstring)
+      __attribute__ ((__noreturn__));
+-libc_hidden_proto (_dl_signal_error)
++rtld_hidden_proto (_dl_signal_error)
+ 
+ /* Like _dl_signal_exception, but may return when called in the
+    context of _dl_receive_error.  This is only used during ld.so
+@@ -955,11 +955,7 @@ extern void _dl_receive_error (receiver_
+    the returned string is allocated using the libc's malloc.  */
+ extern int _dl_catch_error (const char **objname, const char **errstring,
+ 			    bool *mallocedp, void (*operate) (void *),
+-			    void *args);
+-libc_hidden_proto (_dl_catch_error)
+-
+-/* Used for initializing GLRO (_dl_catch_error).  */
+-extern __typeof__ (_dl_catch_error) _rtld_catch_error attribute_hidden;
++			    void *args) attribute_hidden;
+ 
+ /* Call OPERATE (ARGS).  If no error occurs, set *EXCEPTION to zero.
+    Otherwise, store a copy of the raised exception in *EXCEPTION,
+@@ -968,7 +964,7 @@ extern __typeof__ (_dl_catch_error) _rtl
+    disabled (so that exceptions are fatal).  */
+ int _dl_catch_exception (struct dl_exception *exception,
+ 			 void (*operate) (void *), void *args);
+-libc_hidden_proto (_dl_catch_exception)
++rtld_hidden_proto (_dl_catch_exception)
+ 
+ /* Open the shared object NAME and map in its segments.
+    LOADER's DT_RPATH is used in searching for NAME.
+diff -rupN a/sysdeps/generic/localplt.data b/sysdeps/generic/localplt.data
+--- a/sysdeps/generic/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/generic/localplt.data	2024-08-29 11:29:16.806811227 -0400
+@@ -6,8 +6,3 @@ libc.so: free
+ libc.so: malloc
+ libc.so: realloc
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/mach/hurd/i386/localplt.data b/sysdeps/mach/hurd/i386/localplt.data
+--- a/sysdeps/mach/hurd/i386/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/mach/hurd/i386/localplt.data	2024-08-29 11:29:16.808811305 -0400
+@@ -8,11 +8,6 @@ libc.so: free + REL R_386_GLOB_DAT
+ libc.so: malloc + REL R_386_GLOB_DAT
+ libc.so: realloc + REL R_386_GLOB_DAT
+ libm.so: matherr + REL R_386_GLOB_DAT
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error + REL R_386_GLOB_DAT
+-ld.so: _dl_catch_error + REL R_386_GLOB_DAT
+-ld.so: _dl_signal_exception + REL R_386_GLOB_DAT
+-ld.so: _dl_catch_exception + REL R_386_GLOB_DAT
+ # The dynamic linker has its own versions of basic functions for initial loading
+ # of shared libraries.  These need to be overriden by libc once loaded.
+ ld.so: __open ?
+diff -rupN a/sysdeps/mach/hurd/i386/tls.h b/sysdeps/mach/hurd/i386/tls.h
+--- a/sysdeps/mach/hurd/i386/tls.h	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/mach/hurd/i386/tls.h	2024-08-29 11:29:16.810811382 -0400
+@@ -48,6 +48,9 @@ typedef struct
+      compatible with the i386 Linux version.  */
+   mach_port_t reply_port;      /* This thread's reply port.  */
+   struct hurd_sigstate *_hurd_sigstate;
++
++  /* Used by the exception handling implementation in the dynamic loader.  */
++  struct rtld_catch *rtld_catch;
+ } tcbhead_t;
+ #endif
+ 
+diff -rupN a/sysdeps/unix/sysv/linux/aarch64/localplt.data b/sysdeps/unix/sysv/linux/aarch64/localplt.data
+--- a/sysdeps/unix/sysv/linux/aarch64/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/aarch64/localplt.data	2024-08-29 11:29:16.810811382 -0400
+@@ -11,8 +11,3 @@ libm.so: matherr
+ libc.so: __getauxval ?
+ # The dynamic loader needs __tls_get_addr for TLS.
+ ld.so: __tls_get_addr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/alpha/localplt.data b/sysdeps/unix/sysv/linux/alpha/localplt.data
+--- a/sysdeps/unix/sysv/linux/alpha/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/alpha/localplt.data	2024-08-29 11:29:16.810811382 -0400
+@@ -25,8 +25,3 @@ libm.so: matherr + RELA R_ALPHA_GLOB_DAT
+ libm.so: __atan2
+ # The dynamic loader needs __tls_get_addr for TLS.
+ ld.so: __tls_get_addr ?
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error + RELA R_ALPHA_GLOB_DAT
+-ld.so: _dl_catch_error + RELA R_ALPHA_GLOB_DAT
+-ld.so: _dl_signal_exception + RELA R_ALPHA_GLOB_DAT
+-ld.so: _dl_catch_exception + RELA R_ALPHA_GLOB_DAT
+diff -rupN a/sysdeps/unix/sysv/linux/arc/localplt.data b/sysdeps/unix/sysv/linux/arc/localplt.data
+--- a/sysdeps/unix/sysv/linux/arc/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/arc/localplt.data	2024-08-29 11:29:16.814811538 -0400
+@@ -4,8 +4,3 @@ libc.so: calloc
+ libc.so: free
+ # At -Os, a struct assignment in libgcc-static pulls this in
+ libc.so: memcpy ?
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/arm/localplt.data b/sysdeps/unix/sysv/linux/arm/localplt.data
+--- a/sysdeps/unix/sysv/linux/arm/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/arm/localplt.data	2024-08-29 11:29:16.814811538 -0400
+@@ -6,8 +6,3 @@ libc.so: realloc
+ libm.so: matherr
+ # The dynamic loader needs __tls_get_addr for TLS.
+ ld.so: __tls_get_addr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/csky/localplt.data b/sysdeps/unix/sysv/linux/csky/localplt.data
+--- a/sysdeps/unix/sysv/linux/csky/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/csky/localplt.data	2024-08-29 11:29:16.814811538 -0400
+@@ -5,8 +5,3 @@ libc.so: calloc
+ libc.so: free
+ libc.so: malloc
+ libc.so: realloc
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/hppa/localplt.data b/sysdeps/unix/sysv/linux/hppa/localplt.data
+--- a/sysdeps/unix/sysv/linux/hppa/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/hppa/localplt.data	2024-08-29 11:29:16.814811538 -0400
+@@ -9,8 +9,3 @@ libc.so: __sigsetjmp
+ libc.so: _IO_funlockfile
+ libc.so: __errno_location
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/i386/localplt.data b/sysdeps/unix/sysv/linux/i386/localplt.data
+--- a/sysdeps/unix/sysv/linux/i386/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/i386/localplt.data	2024-08-29 11:29:16.816811615 -0400
+@@ -6,8 +6,3 @@ libc.so: free + REL R_386_GLOB_DAT
+ libc.so: malloc + REL R_386_GLOB_DAT
+ libc.so: realloc + REL R_386_GLOB_DAT
+ libm.so: matherr + REL R_386_GLOB_DAT
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error + REL R_386_GLOB_DAT
+-ld.so: _dl_catch_error + REL R_386_GLOB_DAT
+-ld.so: _dl_signal_exception + REL R_386_GLOB_DAT
+-ld.so: _dl_catch_exception + REL R_386_GLOB_DAT
+diff -rupN a/sysdeps/unix/sysv/linux/ia64/localplt.data b/sysdeps/unix/sysv/linux/ia64/localplt.data
+--- a/sysdeps/unix/sysv/linux/ia64/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/ia64/localplt.data	2024-08-29 11:29:16.816811615 -0400
+@@ -5,8 +5,3 @@ libc.so: realloc
+ libm.so: matherr
+ libm.so: matherrf
+ libm.so: matherrl
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/m68k/coldfire/localplt.data b/sysdeps/unix/sysv/linux/m68k/coldfire/localplt.data
+--- a/sysdeps/unix/sysv/linux/m68k/coldfire/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/m68k/coldfire/localplt.data	2024-08-29 11:29:16.819811732 -0400
+@@ -4,8 +4,3 @@ libc.so: free
+ libc.so: malloc
+ libc.so: realloc
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/m68k/m680x0/localplt.data b/sysdeps/unix/sysv/linux/m68k/m680x0/localplt.data
+--- a/sysdeps/unix/sysv/linux/m68k/m680x0/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/m68k/m680x0/localplt.data	2024-08-29 11:29:16.820811771 -0400
+@@ -5,8 +5,3 @@ libc.so: free
+ libc.so: malloc
+ libc.so: realloc
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/microblaze/localplt.data b/sysdeps/unix/sysv/linux/microblaze/localplt.data
+--- a/sysdeps/unix/sysv/linux/microblaze/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/microblaze/localplt.data	2024-08-29 11:29:16.822811848 -0400
+@@ -6,8 +6,3 @@ libc.so: realloc
+ libm.so: matherr
+ # The dynamic loader needs __tls_get_addr for TLS.
+ ld.so: __tls_get_addr ?
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/nios2/localplt.data b/sysdeps/unix/sysv/linux/nios2/localplt.data
+--- a/sysdeps/unix/sysv/linux/nios2/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/nios2/localplt.data	2024-08-29 11:29:16.825811965 -0400
+@@ -27,8 +27,3 @@ libc.so: __eqdf2
+ libc.so: __extendsfdf2
+ libc.so: __floatundidf ?
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/localplt.data b/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/localplt.data
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/localplt.data	2024-08-29 11:29:16.829812120 -0400
+@@ -4,8 +4,3 @@ libc.so: free
+ libc.so: malloc
+ libc.so: realloc
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/localplt.data b/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/localplt.data
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/localplt.data	2024-08-29 11:29:16.831812198 -0400
+@@ -35,8 +35,3 @@ libc.so: realloc
+ libm.so: copysignl ?
+ libm.so: fabsl
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/powerpc/powerpc64/localplt.data b/sysdeps/unix/sysv/linux/powerpc/powerpc64/localplt.data
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/localplt.data	2024-08-29 11:29:16.833812276 -0400
+@@ -3,8 +3,3 @@ libc.so: free
+ libc.so: malloc
+ libc.so: realloc
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/riscv/localplt.data b/sysdeps/unix/sysv/linux/riscv/localplt.data
+--- a/sysdeps/unix/sysv/linux/riscv/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/riscv/localplt.data	2024-08-29 11:29:16.835812353 -0400
+@@ -6,8 +6,3 @@ libc.so: free
+ libc.so: malloc
+ libc.so: memset ?
+ libc.so: realloc
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/s390/localplt.data b/sysdeps/unix/sysv/linux/s390/localplt.data
+--- a/sysdeps/unix/sysv/linux/s390/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/s390/localplt.data	2024-08-29 11:29:16.837812431 -0400
+@@ -4,8 +4,3 @@ libc.so: free
+ libc.so: malloc
+ libc.so: realloc
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/sh/localplt.data b/sysdeps/unix/sysv/linux/sh/localplt.data
+--- a/sysdeps/unix/sysv/linux/sh/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/sh/localplt.data	2024-08-29 11:29:16.838812470 -0400
+@@ -11,8 +11,3 @@ libc.so: __errno_location
+ libm.so: matherr
+ # Generated by the compiler because there is no trap insn pattern.
+ libc.so: abort ?
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/sparc/sparc32/localplt.data b/sysdeps/unix/sysv/linux/sparc/sparc32/localplt.data
+--- a/sysdeps/unix/sysv/linux/sparc/sparc32/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/sparc/sparc32/localplt.data	2024-08-29 11:29:16.840812547 -0400
+@@ -18,8 +18,3 @@ libc.so: free
+ libc.so: malloc
+ libc.so: realloc
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/unix/sysv/linux/sparc/sparc64/localplt.data b/sysdeps/unix/sysv/linux/sparc/sparc64/localplt.data
+--- a/sysdeps/unix/sysv/linux/sparc/sparc64/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/unix/sysv/linux/sparc/sparc64/localplt.data	2024-08-29 11:29:16.844812703 -0400
+@@ -17,8 +17,3 @@ libc.so: free
+ libc.so: malloc
+ libc.so: realloc
+ libm.so: matherr
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error
+-ld.so: _dl_catch_error
+-ld.so: _dl_signal_exception
+-ld.so: _dl_catch_exception
+diff -rupN a/sysdeps/x86_64/localplt.data b/sysdeps/x86_64/localplt.data
+--- a/sysdeps/x86_64/localplt.data	2021-08-01 21:33:43.000000000 -0400
++++ b/sysdeps/x86_64/localplt.data	2024-08-29 11:29:16.847812819 -0400
+@@ -8,8 +8,3 @@ libc.so: free + RELA R_X86_64_GLOB_DAT
+ libc.so: malloc + RELA R_X86_64_GLOB_DAT
+ libc.so: realloc + RELA R_X86_64_GLOB_DAT
+ libm.so: matherr + RELA R_X86_64_GLOB_DAT
+-# The TLS-enabled version of these functions is interposed from libc.so.
+-ld.so: _dl_signal_error + RELA R_X86_64_GLOB_DAT
+-ld.so: _dl_catch_error + RELA R_X86_64_GLOB_DAT
+-ld.so: _dl_signal_exception + RELA R_X86_64_GLOB_DAT
+-ld.so: _dl_catch_exception + RELA R_X86_64_GLOB_DAT

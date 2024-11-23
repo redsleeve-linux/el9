@@ -1,0 +1,40 @@
+From 8e90076fa7503595ebf413ebeb9dff46907e9967 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Mon, 3 Jul 2023 10:20:47 +0100
+Subject: [PATCH] core: log detected confidential virtualization type
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Related: https://github.com/systemd/systemd/issues/27604
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 024469ddb99ebbf0e0b0f1d77f763116ca251c5d)
+
+Related: RHEL-50651
+---
+ src/core/main.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/core/main.c b/src/core/main.c
+index e7b8e98bca..f230270340 100644
+--- a/src/core/main.c
++++ b/src/core/main.c
+@@ -32,6 +32,7 @@
+ #include "cgroup-util.h"
+ #include "clock-util.h"
+ #include "conf-parser.h"
++#include "confidential-virt.h"
+ #include "cpu-set-util.h"
+ #include "crash-handler.h"
+ #include "dbus-manager.h"
+@@ -2060,6 +2061,10 @@ static void log_execution_mode(bool *ret_first_boot) {
+                 if (v > 0)
+                         log_info("Detected virtualization %s.", virtualization_to_string(v));
+ 
++                v = detect_confidential_virtualization();
++                if (v > 0)
++                        log_info("Detected confidential virtualization %s.", confidential_virtualization_to_string(v));
++
+                 log_info("Detected architecture %s.", architecture_to_string(uname_architecture()));
+ 
+                 if (in_initrd())

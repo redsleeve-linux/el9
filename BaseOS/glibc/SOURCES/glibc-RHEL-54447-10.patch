@@ -1,0 +1,201 @@
+commit 9556acd249687ac562deb6309503165d66eb06fa
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Thu Dec 21 15:59:15 2023 -0300
+
+    debug: Adapt fortify tests to libsupport
+    
+    Checked on aarch64, armhf, x86_64, and i686.
+    Reviewed-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+
+diff --git a/debug/test-stpcpy_chk.c b/debug/test-stpcpy_chk.c
+index 96ad600bc2760cbd..c3cb52d987f9db4f 100644
+--- a/debug/test-stpcpy_chk.c
++++ b/debug/test-stpcpy_chk.c
+@@ -20,7 +20,7 @@
+ #define STRCPY_RESULT(dst, len) ((dst) + (len))
+ #define TEST_MAIN
+ #define TEST_NAME "stpcpy_chk"
+-#include "../string/test-string.h"
++#include <string/test-string.h>
+ 
+ extern void __attribute__ ((noreturn)) __chk_fail (void);
+ char *simple_stpcpy_chk (char *, const char *, size_t);
+diff --git a/debug/test-strcpy_chk.c b/debug/test-strcpy_chk.c
+index 80c07482aaa54e3b..bb89e342caef470b 100644
+--- a/debug/test-strcpy_chk.c
++++ b/debug/test-strcpy_chk.c
+@@ -21,7 +21,7 @@
+ # define STRCPY_RESULT(dst, len) dst
+ # define TEST_MAIN
+ # define TEST_NAME "strcpy_chk"
+-# include "../string/test-string.h"
++# include <string/test-string.h>
+ 
+ /* This test case implicitly tests the availability of the __chk_fail
+    symbol, which is part of the public ABI and may be used
+diff --git a/debug/tst-fortify.c b/debug/tst-fortify.c
+index fb02452f5993c594..01a8703de1e6e09a 100644
+--- a/debug/tst-fortify.c
++++ b/debug/tst-fortify.c
+@@ -24,6 +24,7 @@
+ 
+ #include <assert.h>
+ #include <fcntl.h>
++#include <limits.h>
+ #include <locale.h>
+ #include <obstack.h>
+ #include <setjmp.h>
+@@ -37,6 +38,10 @@
+ #include <sys/select.h>
+ #include <sys/socket.h>
+ #include <sys/un.h>
++#include <paths.h>
++
++#include <support/temp_file.h>
++#include <support/support.h>
+ 
+ #ifndef _GNU_SOURCE
+ # define MEMPCPY memcpy
+@@ -53,15 +58,10 @@
+ #define obstack_chunk_alloc malloc
+ #define obstack_chunk_free free
+ 
+-char *temp_filename;
+-static void do_prepare (void);
+-static int do_test (void);
+-#define PREPARE(argc, argv) do_prepare ()
+-#define TEST_FUNCTION do_test ()
+-#include "../test-skeleton.c"
++static char *temp_filename;
+ 
+ static void
+-do_prepare (void)
++do_prepare (int argc, char *argv[])
+ {
+   int temp_fd = create_temp_file ("tst-chk1.", &temp_filename);
+   if (temp_fd == -1)
+@@ -78,10 +78,11 @@ do_prepare (void)
+       exit (1);
+     }
+ }
++#define PREPARE do_prepare
+ 
+-volatile int chk_fail_ok;
+-volatile int ret;
+-jmp_buf chk_fail_buf;
++static volatile int chk_fail_ok;
++static volatile int ret;
++static jmp_buf chk_fail_buf;
+ 
+ static void
+ handler (int sig)
+@@ -103,22 +104,22 @@ wchar_t wbuf[10];
+ #define buf_size sizeof (buf)
+ #endif
+ 
+-volatile size_t l0;
+-volatile char *p;
+-volatile wchar_t *wp;
+-const char *str1 = "JIHGFEDCBA";
+-const char *str2 = "F";
+-const char *str3 = "%s%n%s%n";
+-const char *str4 = "Hello, ";
+-const char *str5 = "World!\n";
+-const wchar_t *wstr1 = L"JIHGFEDCBA";
+-const wchar_t *wstr2 = L"F";
+-const wchar_t *wstr3 = L"%s%n%s%n";
+-const wchar_t *wstr4 = L"Hello, ";
+-const wchar_t *wstr5 = L"World!\n";
+-char buf2[10] = "%s";
+-int num1 = 67;
+-int num2 = 987654;
++static volatile size_t l0;
++static volatile char *p;
++static volatile wchar_t *wp;
++static const char *str1 = "JIHGFEDCBA";
++static const char *str2 = "F";
++static const char *str3 = "%s%n%s%n";
++static const char *str4 = "Hello, ";
++static const char *str5 = "World!\n";
++static const wchar_t *wstr1 = L"JIHGFEDCBA";
++static const wchar_t *wstr2 = L"F";
++static const wchar_t *wstr3 = L"%s%n%s%n";
++static const wchar_t *wstr4 = L"Hello, ";
++static const wchar_t *wstr5 = L"World!\n";
++static char buf2[10] = "%s";
++static int num1 = 67;
++static int num2 = 987654;
+ 
+ #define FAIL() \
+   do { printf ("Failure on line %d\n", __LINE__); ret = 1; } while (0)
+@@ -1763,3 +1764,5 @@ do_test (void)
+ 
+   return ret;
+ }
++
++#include <support/test-driver.c>
+diff --git a/debug/tst-longjmp_chk.c b/debug/tst-longjmp_chk.c
+index e4e93d2a36b537d9..37f858606be4c4a2 100644
+--- a/debug/tst-longjmp_chk.c
++++ b/debug/tst-longjmp_chk.c
+@@ -10,11 +10,7 @@
+ #include <stdlib.h>
+ #include <unistd.h>
+ 
+-
+-static int do_test(void);
+-#define TEST_FUNCTION do_test ()
+-#include "../test-skeleton.c"
+-
++#include <support/support.h>
+ 
+ static jmp_buf b;
+ 
+@@ -76,3 +72,5 @@ do_test (void)
+   puts ("second longjmp returned");
+   return 1;
+ }
++
++#include <support/test-driver.c>
+diff --git a/debug/tst-longjmp_chk2.c b/debug/tst-longjmp_chk2.c
+index 23d3436d1d26d2d1..69c1ab9db73f14ae 100644
+--- a/debug/tst-longjmp_chk2.c
++++ b/debug/tst-longjmp_chk2.c
+@@ -12,9 +12,7 @@
+ #include <sys/resource.h>
+ #include <unistd.h>
+ 
+-static int do_test (void);
+-#define TEST_FUNCTION do_test ()
+-#include "../test-skeleton.c"
++#include <support/support.h>
+ 
+ static jmp_buf mainloop;
+ static sigset_t mainsigset;
+@@ -128,3 +126,5 @@ do_test (void)
+ 
+   return 0;
+ }
++
++#include <support/test-driver.c>
+diff --git a/debug/tst-longjmp_chk3.c b/debug/tst-longjmp_chk3.c
+index 3155c7769fcbd83f..4434937c597dbe10 100644
+--- a/debug/tst-longjmp_chk3.c
++++ b/debug/tst-longjmp_chk3.c
+@@ -20,10 +20,6 @@
+ #include <signal.h>
+ #include <string.h>
+ 
+-static int do_test (void);
+-#define TEST_FUNCTION do_test ()
+-#include "../test-skeleton.c"
+-
+ static char buf[SIGSTKSZ * 4];
+ static jmp_buf jb;
+ 
+@@ -83,3 +79,5 @@ do_test (void)
+   puts ("longjmp returned and shouldn't");
+   return 1;
+ }
++
++#include <support/test-driver.c>

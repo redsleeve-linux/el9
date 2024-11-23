@@ -1,0 +1,240 @@
+commit 3395157ff2b0657d70c36169156f67440205c8bf
+Author: Joe Simmons-Talbott <josimmon@redhat.com>
+Date:   Tue May 14 14:36:50 2024 +0000
+
+    malloc: Improve aligned_alloc and calloc test coverage.
+    
+    Add a DSO (malloc/tst-aligned_alloc-lib.so) that can be used during
+    testing to interpose malloc with a call that randomly uses either
+    aligned_alloc, __libc_malloc, or __libc_calloc in the place of malloc.
+    Use LD_PRELOAD with the DSO to mirror malloc/tst-malloc.c testing as an
+    example in malloc/tst-malloc-random.c.  Add malloc/tst-aligned-alloc-random.c
+    as another example that does a number of malloc calls with randomly sized,
+    but limited to 0xffff, requests.
+    
+    The intention is to be able to utilize existing malloc testing to ensure
+    that similar allocation APIs are also exposed to the same rigors.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+Conflicts:
+	malloc/Makefile
+	  (usual tests conflict)
+
+diff --git a/malloc/Makefile b/malloc/Makefile
+index cb4e027d28b179f0..e0fb433a15bad2c2 100644
+--- a/malloc/Makefile
++++ b/malloc/Makefile
+@@ -44,6 +44,8 @@ tests := mallocbug tst-malloc tst-valloc tst-calloc tst-obstack \
+ 	 tst-safe-linking \
+ 	 tst-mallocalign1 \
+ 	 tst-malloc-alternate-path \
++	 tst-aligned-alloc-random \
++	 tst-malloc-random \
+ 
+ tests-static := \
+ 	 tst-interpose-static-nothread \
+@@ -123,6 +125,7 @@ extra-libs-others = $(extra-libs)
+ 
+ # Helper objects for some tests.
+ extra-tests-objs += \
++  tst-aligned_alloc-lib.so \
+   tst-interpose-aux-nothread.o \
+   tst-interpose-aux-thread.o \
+ 
+@@ -130,6 +133,9 @@ test-extras = \
+   tst-interpose-aux-nothread \
+   tst-interpose-aux-thread \
+ 
++modules-names = \
++  tst-aligned_alloc-lib
++
+ libmemusage-routines = memusage
+ libmemusage-inhibit-o = $(filter-out .os,$(object-suffixes))
+ 
+@@ -328,3 +334,9 @@ tst-mallocstate-malloc-check-ENV = LD_PRELOAD=$(objpfx)libc_malloc_debug.so
+ # libc_malloc_debug.so.
+ $(objpfx)tst-mallocstate: $(objpfx)libc_malloc_debug.so
+ $(objpfx)tst-mallocstate-malloc-check: $(objpfx)libc_malloc_debug.so
++
++$(objpfx)tst-aligned-alloc-random.out: $(objpfx)tst-aligned_alloc-lib.so
++$(objpfx)tst-malloc-random.out: $(objpfx)tst-aligned_alloc-lib.so
++
++tst-aligned-alloc-random-ENV = LD_PRELOAD=$(objpfx)tst-aligned_alloc-lib.so
++tst-malloc-random-ENV = LD_PRELOAD=$(objpfx)tst-aligned_alloc-lib.so
+diff --git a/malloc/tst-aligned-alloc-random.c b/malloc/tst-aligned-alloc-random.c
+new file mode 100644
+index 0000000000000000..f2825ce38f04e04e
+--- /dev/null
++++ b/malloc/tst-aligned-alloc-random.c
+@@ -0,0 +1,43 @@
++/* Test for randomized malloc that calls aligned_alloc
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdlib.h>
++#include <support/check.h>
++#include <time.h>
++
++static int
++do_test (void)
++{
++  void *p1;
++  int i;
++
++  srandom (time (NULL));
++
++  for (i = 0; i < 1024; i++)
++  {
++    size_t size = random () & 0xffff;
++
++    p1 = malloc (size);
++    TEST_VERIFY (p1 != NULL);
++  }
++
++  return 0;
++}
++
++
++#include <support/test-driver.c>
+diff --git a/malloc/tst-aligned_alloc-lib.c b/malloc/tst-aligned_alloc-lib.c
+new file mode 100644
+index 0000000000000000..0205df5acf6297a5
+--- /dev/null
++++ b/malloc/tst-aligned_alloc-lib.c
+@@ -0,0 +1,72 @@
++/* Module used for improved aligned_alloc testing.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   Copyright The GNU Toolchain Authors.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; see the file COPYING.LIB.  If
++   not, see <https://www.gnu.org/licenses/>.  */
++
++#include <array_length.h>
++#include <libc-symbols.h>
++#include <stdlib.h>
++
++extern void *__libc_malloc (size_t size);
++extern void *__libc_calloc (size_t n, size_t size);
++
++int aligned_alloc_count = 0;
++int libc_malloc_count = 0;
++int libc_calloc_count = 0;
++
++/* Get a random alignment value.  Biased towards the smaller values.  Must be
++   a power of 2. */
++static size_t get_random_alignment (void)
++{
++  size_t aligns[] = {
++    1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384
++  };
++
++  return aligns[random () % array_length (aligns)];
++}
++
++static void *get_random_alloc (size_t size)
++{
++  void *retval;
++  size_t align;
++
++  switch (random() % 3)
++  {
++    case 1:
++      align = get_random_alignment ();
++      retval = aligned_alloc (align, size);
++      aligned_alloc_count++;
++      break;
++    case 2:
++      retval = __libc_calloc (1, size);
++      libc_calloc_count++;
++      break;
++    default:
++      retval = __libc_malloc (size);
++      libc_malloc_count++;
++      break;
++  }
++
++  return retval;
++}
++
++
++void * __random_malloc (size_t size)
++{
++  return get_random_alloc (size);
++}
++strong_alias (__random_malloc, malloc)
+diff --git a/malloc/tst-malloc-random.c b/malloc/tst-malloc-random.c
+new file mode 100644
+index 0000000000000000..762b70c918cc6004
+--- /dev/null
++++ b/malloc/tst-malloc-random.c
+@@ -0,0 +1,20 @@
++/* Test malloc with random calls to aligned_alloc and calloc.
++
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-malloc.c"
+diff --git a/malloc/tst-malloc.c b/malloc/tst-malloc.c
+index a587cbded66039fb..98be3ee254d75d4e 100644
+--- a/malloc/tst-malloc.c
++++ b/malloc/tst-malloc.c
+@@ -19,7 +19,9 @@
+ #include <errno.h>
+ #include <malloc.h>
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <libc-diag.h>
++#include <time.h>
+ 
+ static int errors = 0;
+ 
+@@ -36,6 +38,8 @@ do_test (void)
+   void *p, *q;
+   int save;
+ 
++  srandom (time (NULL));
++
+   errno = 0;
+ 
+   DIAG_PUSH_NEEDS_COMMENT;

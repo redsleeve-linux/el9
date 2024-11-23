@@ -1,0 +1,90 @@
+From f47239f3e5aed9d7887aac1b15021f5c63996378 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Fri, 2 Aug 2024 11:03:10 +0100
+Subject: [PATCH] confidential-virt: add detection for s390x target
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The s390x platform provides confidential VMs using the "Secure Execution"
+technology, which is also referred to as "Protected Virtualization" or
+just "prot virt" in Linux / QEMU.
+
+This can be detected through a simple sysfs attribute.
+
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 6c35e0a51cc6a852ce239ea46cd75c133212a68e)
+
+Related: RHEL-50651
+---
+ src/basic/confidential-virt.c | 30 +++++++++++++++++++++++++-----
+ src/basic/confidential-virt.h |  1 +
+ 2 files changed, 26 insertions(+), 5 deletions(-)
+
+diff --git a/src/basic/confidential-virt.c b/src/basic/confidential-virt.c
+index 5c96b449b1..746aa8c313 100644
+--- a/src/basic/confidential-virt.c
++++ b/src/basic/confidential-virt.c
+@@ -11,6 +11,7 @@
+ 
+ #include "confidential-virt.h"
+ #include "fd-util.h"
++#include "fileio.h"
+ #include "missing_threads.h"
+ #include "string-table.h"
+ #include "utf8.h"
+@@ -269,6 +270,24 @@ static ConfidentialVirtualization detect_confidential_virtualization_impl(void)
+ 
+         return CONFIDENTIAL_VIRTUALIZATION_NONE;
+ }
++#elif defined(__s390x__)
++static ConfidentialVirtualization detect_confidential_virtualization_impl(void) {
++        _cleanup_free_ char *s = NULL;
++        size_t readsize;
++        int r;
++
++        r = read_full_virtual_file("/sys/firmware/uv/prot_virt_guest", &s, &readsize);
++        if (r < 0) {
++                log_debug_errno(r, "Unable to read /sys/firmware/uv/prot_virt_guest: %m");
++                return CONFIDENTIAL_VIRTUALIZATION_NONE;
++        }
++
++        if (readsize >= 1 && s[0] == '1')
++                return CONFIDENTIAL_VIRTUALIZATION_PROTVIRT;
++
++        return CONFIDENTIAL_VIRTUALIZATION_NONE;
++}
++
+ #else /* ! x86_64 */
+ static ConfidentialVirtualization detect_confidential_virtualization_impl(void) {
+         log_debug("No confidential virtualization detection on this architecture");
+@@ -286,11 +305,12 @@ ConfidentialVirtualization detect_confidential_virtualization(void) {
+ }
+ 
+ static const char *const confidential_virtualization_table[_CONFIDENTIAL_VIRTUALIZATION_MAX] = {
+-        [CONFIDENTIAL_VIRTUALIZATION_NONE]    = "none",
+-        [CONFIDENTIAL_VIRTUALIZATION_SEV]     = "sev",
+-        [CONFIDENTIAL_VIRTUALIZATION_SEV_ES]  = "sev-es",
+-        [CONFIDENTIAL_VIRTUALIZATION_SEV_SNP] = "sev-snp",
+-        [CONFIDENTIAL_VIRTUALIZATION_TDX]     = "tdx",
++        [CONFIDENTIAL_VIRTUALIZATION_NONE]     = "none",
++        [CONFIDENTIAL_VIRTUALIZATION_SEV]      = "sev",
++        [CONFIDENTIAL_VIRTUALIZATION_SEV_ES]   = "sev-es",
++        [CONFIDENTIAL_VIRTUALIZATION_SEV_SNP]  = "sev-snp",
++        [CONFIDENTIAL_VIRTUALIZATION_TDX]      = "tdx",
++        [CONFIDENTIAL_VIRTUALIZATION_PROTVIRT] = "protvirt",
+ };
+ 
+ DEFINE_STRING_TABLE_LOOKUP(confidential_virtualization, ConfidentialVirtualization);
+diff --git a/src/basic/confidential-virt.h b/src/basic/confidential-virt.h
+index c02f3b2321..f92e3e883d 100644
+--- a/src/basic/confidential-virt.h
++++ b/src/basic/confidential-virt.h
+@@ -13,6 +13,7 @@ typedef enum ConfidentialVirtualization {
+         CONFIDENTIAL_VIRTUALIZATION_SEV_ES,
+         CONFIDENTIAL_VIRTUALIZATION_SEV_SNP,
+         CONFIDENTIAL_VIRTUALIZATION_TDX,
++        CONFIDENTIAL_VIRTUALIZATION_PROTVIRT,
+ 
+         _CONFIDENTIAL_VIRTUALIZATION_MAX,
+         _CONFIDENTIAL_VIRTUALIZATION_INVALID = -EINVAL,

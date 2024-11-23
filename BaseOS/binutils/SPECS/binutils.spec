@@ -2,7 +2,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 42%{?dist}.1.redsleeve
+Release: 54%{?dist}
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -445,6 +445,26 @@ Patch66: binutils-aarch64-flagm.patch
 # Lifetime: Fixed in 2.38
 Patch67: binutils-verdef.patch
 
+# Purpose:  Make objcopy's --section-alignment option also affect sections.
+# Lifetime: Fixed in 2.43
+Patch68: binutils-objcopy-pe-section-align.patch
+
+# Purpose:  Fix handling of .gnu.debuglto_.debug_* sections.
+# Lifetime: Fixed in 2.37
+Patch69: binutils-gnu.debuglto_.patch
+
+# Purpose:  Remove messages from gcc lto-wrapper which can confuse testsuite results.
+# Lifetime: Fixed in 2.37
+Patch70: binutils-prune-lto-messages.patch
+
+# Purpose:  Remove the gap between LOAD segments when using RELRO
+# Lifetime: Fixed in 2.38
+Patch71: binutils-relro.patch
+
+# Purpose:  Stop the BFD library from treating the .relro-padding section as a REL section.
+# Lifetime: Fixed in 2.44
+Patch72: binutils-relro-padding.patch
+
 #----------------------------------------------------------------------------
 
 Provides: bundled(libiberty)
@@ -510,7 +530,6 @@ Requires(post): coreutils
 BuildRequires: elfutils-debuginfod-client-devel
 %endif
 
-Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 %description
@@ -1286,10 +1305,40 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
-* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-42.1.redsleeve
-- minor adjustments for armv6
+* Wed Aug 14 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-54
+- Re fix AArch64 EFI test after applying previous delta.  (RHEL-39953)
 
-* Thu Jan 25 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-42.1
+* Mon Aug 12 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-53
+- Backport commit bc5baa9f13ff to ensure that objcopy does not loose the minimum section alignment for PE binaries.  (RHEL-30268)
+
+* Thu Jul 25 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-52
+- Backport commit 6fde04116b4b to stop objcopy from crashing when copying non-PE binaries into a PE output.  (RHEL-48882)
+
+* Thu Jul 25 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-51
+- Backport commit 88141209e25ce19473ec07d7aac09cc68f06a630 to fix stripping lld linked binaries.  (RHEL-50536)
+
+* Fri Jul 12 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-50
+- Additional patch (commit 31b4d3a16f200bf04db8439a63b72bba7af4e1be).  (RHEL-45873)
+
+* Thu Jul 11 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-49
+- Remove the gap between LOAD segments when using RELRO.  (RHEL-45873)
+
+* Thu Jun 27 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-48
+- Add missing test driver for section-alignment patch.  (RHEL-30268)
+
+* Thu Jun 27 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-47
+- Prune messages from gcc's lto-wrapper which can confure testsuite tests.  (RHEL-45264)
+
+* Thu Jun 20 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-46
+- Fix handling of .gnu.debuglto_.debug_* sections.  (RHEL-43758)
+
+* Tue Jun 04 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-45
+- Fix AArch64 EFI test.  (RHEL-39953)
+
+* Thu Jan 25 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-44
+- Make objcopy's --section-alignment option also affect sections.  (RHEL-30268)
+
+* Thu Jan 25 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-43
 - Do not set version info on unversion symbols.  (RHEL-22601)
 
 * Wed Apr 26 2023 Nick Clifton  <nickc@redhat.com> - 2.35.2-42

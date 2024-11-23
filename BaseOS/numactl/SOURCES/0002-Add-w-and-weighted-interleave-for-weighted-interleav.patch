@@ -1,0 +1,149 @@
+From b67fb88e77b3c200b0e300e2e0edc4f66c1d9ea5 Mon Sep 17 00:00:00 2001
+From: Gregory Price <gregory.price@memverge.com>
+Date: Tue, 5 Dec 2023 17:04:39 +0000
+Subject: [PATCH 2/8] Add `-w` and `--weighted-interleave` for weighted
+ interleave mode
+
+Usage is `numactl --weighted-interleave=[...nodes...]`
+
+The logic is the exact same as the `--interleave` logic, and so we
+simply add the 'w' case, update a single bit flip, and fall-through
+to the --interleave case.
+
+Weights are set via /sys/kernel/mm/mempolicy/weighted_interleave
+
+Signed-off-by: Gregory Price <gregory.price@memverge.com>
+---
+ VERSION           |  2 +-
+ libnuma.c         |  9 +++++++++
+ numa.h            |  3 +++
+ numactl.c         | 18 +++++++++++++++---
+ numaif.h          |  3 ++-
+ versions.ldscript |  7 +++++++
+ 6 files changed, 37 insertions(+), 5 deletions(-)
+
+diff --git a/VERSION b/VERSION
+index c945ef1..879b416 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-2.0.18
++2.1
+diff --git a/libnuma.c b/libnuma.c
+index 5340261..89a17e0 100644
+--- a/libnuma.c
++++ b/libnuma.c
+@@ -1033,6 +1033,15 @@ numa_set_interleave_mask_v2(struct bitmask *bmp)
+ 		setpol(MPOL_INTERLEAVE, bmp);
+ }
+ 
++void
++numa_set_weighted_interleave_mask(struct bitmask *bmp)
++{
++	if (numa_bitmask_equal(bmp, numa_no_nodes_ptr))
++		setpol(MPOL_DEFAULT, bmp);
++	else
++		setpol(MPOL_WEIGHTED_INTERLEAVE, bmp);
++}
++
+ SYMVER("numa_get_interleave_mask_v1", "numa_get_interleave_mask@libnuma_1.1")
+ nodemask_t
+ numa_get_interleave_mask_v1(void)
+diff --git a/numa.h b/numa.h
+index fae15c5..9583bc4 100644
+--- a/numa.h
++++ b/numa.h
+@@ -172,6 +172,9 @@ void numa_bind(struct bitmask *nodes);
+ /* Set the NUMA node interleaving mask. 0 to turn off interleaving */
+ void numa_set_interleave_mask(struct bitmask *nodemask);
+ 
++/* Set the NUMA node weighted interleaving mask. 0 to turn off */
++void numa_set_weighted_interleave_mask(struct bitmask *nodemask);
++
+ /* Return the current interleaving mask */
+ struct bitmask *numa_get_interleave_mask(void);
+ 
+diff --git a/numactl.c b/numactl.c
+index e765b6d..16a90a0 100755
+--- a/numactl.c
++++ b/numactl.c
+@@ -43,6 +43,7 @@ enum {
+ static struct option opts[] = {
+ 	{"all", 0, 0, 'a'},
+ 	{"interleave", 1, 0, 'i' },
++	{"weighted-interleave", 1, 0, 'w' },
+ 	{"preferred", 1, 0, 'p' },
+ 	{"preferred-many", 1, 0, 'P' },
+ 	{"cpubind", 1, 0, 'c' },
+@@ -479,6 +480,7 @@ int main(int ac, char **av)
+ 	int parse_all = 0;
+ 	int numa_balancing = 0;
+ 	int do_hardware = 0;
++	int weighted_interleave = 0;
+ 
+ 	get_short_opts(opts,shortopts);
+ 	while ((c = getopt_long(ac, av, shortopts, opts, NULL)) != -1) {
+@@ -494,6 +496,9 @@ int main(int ac, char **av)
+ 			nopolicy();
+ 			numa_balancing = 1;
+ 			break;
++		case 'w': /* --weighted-interleave */
++			weighted_interleave = 1;
++			/* fall-through - logic is the same as interleave */
+ 		case 'i': /* --interleave */
+ 			checknuma();
+ 			if (parse_all)
+@@ -507,11 +512,18 @@ int main(int ac, char **av)
+ 
+ 			errno = 0;
+ 			did_node_cpu_parse = 1;
+-			setpolicy(MPOL_INTERLEAVE);
++			if (weighted_interleave)
++				setpolicy(MPOL_WEIGHTED_INTERLEAVE);
++			else
++				setpolicy(MPOL_INTERLEAVE);
+ 			if (shmfd >= 0)
+ 				numa_interleave_memory(shmptr, shmlen, mask);
+-			else
+-				numa_set_interleave_mask(mask);
++			else {
++				if (weighted_interleave)
++					numa_set_weighted_interleave_mask(mask);
++				else
++					numa_set_interleave_mask(mask);
++			}
+ 			checkerror("setting interleave mask");
+ 			break;
+ 		case 'N': /* --cpunodebind */
+diff --git a/numaif.h b/numaif.h
+index d2c9f64..adbdf9e 100644
+--- a/numaif.h
++++ b/numaif.h
+@@ -31,7 +31,8 @@ extern int set_mempolicy_home_node(void *start, unsigned long len,
+ #define MPOL_INTERLEAVE  3
+ #define MPOL_LOCAL       4
+ #define MPOL_PREFERRED_MANY   5
+-#define MPOL_MAX         6
++#define MPOL_WEIGHTED_INTERLEAVE   6
++#define MPOL_MAX         7
+ 
+ /* Flags for set_mempolicy, specified in mode */
+ #define MPOL_F_NUMA_BALANCING	(1 << 13) /* Optimize with NUMA balancing if possible */
+diff --git a/versions.ldscript b/versions.ldscript
+index caa7c75..769294b 100644
+--- a/versions.ldscript
++++ b/versions.ldscript
+@@ -172,3 +172,10 @@ libnuma_1.7{
+   local:
+     *;
+ } libnuma_1.6;
++
++libnuma_2.1{
++  global:
++    numa_set_weighted_interleave_mask;
++  local:
++    *;
++} libnuma_1.7;
+-- 
+2.41.0
+

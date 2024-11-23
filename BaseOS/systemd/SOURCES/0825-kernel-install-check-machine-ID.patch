@@ -1,0 +1,32 @@
+From 09d24c06b52ff9aee3257cbd6bfc23ee72497da8 Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Wed, 31 Jul 2024 16:16:17 +0200
+Subject: [PATCH] kernel-install: check machine ID
+
+Let's do at least a minimal check that the read machine ID is valid.
+
+RHEL-only: feature
+
+Related: RHEL-50672
+---
+ src/kernel-install/kernel-install.in | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/kernel-install/kernel-install.in b/src/kernel-install/kernel-install.in
+index 25884fc0e2..440df56f54 100755
+--- a/src/kernel-install/kernel-install.in
++++ b/src/kernel-install/kernel-install.in
+@@ -160,7 +160,12 @@ if [ -z "$MACHINE_ID" ] && [ -f /etc/machine-info ]; then
+ fi
+ if [ -z "$MACHINE_ID" ] && [ -s /etc/machine-id ]; then
+     read -r MACHINE_ID </etc/machine-id
+-    [ "$MACHINE_ID" = "uninitialized" ] && unset MACHINE_ID
++    if [ "$MACHINE_ID" = "uninitialized" ]; then
++        unset MACHINE_ID
++    elif [ {{ '${#MACHINE_ID}' }} -ne 32 ]; then
++        echo "Error: invalid machine-id $MACHINE_ID read from /etc/machine-id" >&2
++        exit 1
++    fi
+     [ -n "$MACHINE_ID" ] && \
+         log_verbose "machine-id $MACHINE_ID acquired from /etc/machine-id"
+ fi

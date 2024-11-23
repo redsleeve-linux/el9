@@ -1,0 +1,69 @@
+From 91aa9fde20a25db18bbb76e13a92692c20cdf5e4 Mon Sep 17 00:00:00 2001
+From: uerdogan <35709819+uerdogan@users.noreply.github.com>
+Date: Mon, 12 Dec 2022 21:46:50 +0100
+Subject: [PATCH] Update 60-evdev.hwdb (#25704)
+
+This solves Debian Bug report 1008760:
+https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1008760.
+
+Solution was inspired by this kernel bug report message:
+https://bugzilla.kernel.org/show_bug.cgi?id=204967#c15.
+
+My measured pad dimensions with a ruler were 85x44mm.
+But I decided to take the 2x size reported by the current kernel
+when invoking the touchpad-edge-detector command from the
+libdev-tools package. Because this comment claims that the old
+vs new kernel reportings differ by factor 2:
+https://bugzilla.kernel.org/show_bug.cgi?id=204967#c3 .
+
+Therefore I have used this command to get the new entry to 60-evdev.hwdb:
+
+"root@pb:~# touchpad-edge-detector 80x34 /dev/input/event2
+Touchpad ETPS/2 Elantech Touchpad on /dev/input/event2
+
+Move one finger around the touchpad to detect the actual edges
+Kernel says:	x [0..1254], y [0..528]
+Touchpad sends:	x [0..2472], y [-524..528] -^C
+
+Touchpad size as listed by the kernel: 40x17mm
+User-specified touchpad size: 80x34mm
+Calculated ranges: 2472/1052
+
+Suggested udev rule:
+# <Laptop model description goes here>
+evdev:name:ETPS/2 Elantech Touchpad:dmi:bvnPackardBell:bvrV1.21:bd08/09/2012:br21.240:svnPackardBell:pnEasyNoteTS11HR:pvrV1.21:rvnPackardBell:rnSJV50_HR:rvrBaseBoardVersion:cvnPackardBell:ct10:cvrV1.21:*
+ EVDEV_ABS_00=0:2472:31
+ EVDEV_ABS_01=-524:528:31
+ EVDEV_ABS_35=0:2472:31
+ EVDEV_ABS_36=-524:528:31
+"
+
+(cherry picked from commit d8100dd17e23f91da2f9c25cf46d8701af70c11a)
+
+Related: RHEL-5950
+---
+ hwdb.d/60-evdev.hwdb | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/hwdb.d/60-evdev.hwdb b/hwdb.d/60-evdev.hwdb
+index 8902b8b163..ef42637ed7 100644
+--- a/hwdb.d/60-evdev.hwdb
++++ b/hwdb.d/60-evdev.hwdb
+@@ -711,6 +711,17 @@ evdev:input:b0003v6161p4D15*
+  EVDEV_ABS_00=::152
+  EVDEV_ABS_01=::244
+ 
++#########################################
++# Packard Bell
++#########################################
++
++# EASYNOTE_TS11HR-200GE
++evdev:name:ETPS/2 Elantech Touchpad:dmi:bvnPackardBell:bvr*:br*:svnPackardBell:pnEasyNoteTS11HR:*
++ EVDEV_ABS_00=0:2472:31
++ EVDEV_ABS_01=-524:528:31
++ EVDEV_ABS_35=0:2472:31
++ EVDEV_ABS_36=-524:528:31
++
+ ###########################################################
+ # Pine64
+ ###########################################################

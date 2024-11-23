@@ -1,0 +1,35 @@
+From e100e3855305a86367c690689833a460fa166428 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 5 Dec 2023 15:56:54 +0100
+Subject: [PATCH] coredump: keep core files for two weeks
+
+We have two mechanisms that remove old coredumps: systemd-coredump has
+parameters based on disk use / remaining disk free, and systemd-tmpfiles does
+cleanup based on time. The first mechanism should prevent us from using too much
+disk space in case something is crashing continuously or there are very large
+core files.
+
+The limit of 3 days makes it likely that the core file will be gone by the time
+the admin looks at the issue. E.g. if something crashes on Friday, the coredump
+would likely be gone before people are back on Monday to look at it.
+
+(cherry picked from commit f8d67130b8b492a1f2eedd07a3189051f98db648)
+
+Related: RHEL-15501
+---
+ tmpfiles.d/systemd.conf.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tmpfiles.d/systemd.conf.in b/tmpfiles.d/systemd.conf.in
+index fa838d8d06..958935a04f 100644
+--- a/tmpfiles.d/systemd.conf.in
++++ b/tmpfiles.d/systemd.conf.in
+@@ -59,7 +59,7 @@ a+ /var/log/journal/%m/system.journal - - - - group:wheel:r--
+ {% endif %}
+ 
+ d /var/lib/systemd 0755 root root -
+-d /var/lib/systemd/coredump 0755 root root 3d
++d /var/lib/systemd/coredump 0755 root root 2w
+ 
+ d /var/lib/private 0700 root root -
+ d /var/log/private 0700 root root -

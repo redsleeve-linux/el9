@@ -1,0 +1,67 @@
+From c000dc894fafbb22aef77a749d1a1352cf5465f6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Wed, 15 Nov 2023 15:24:34 +0100
+Subject: [PATCH] hwdb/acpi-update.py: streamline python code
+
+Use f-strings and simplify the code a bit.
+
+When I call 'acpi-update.py' after those changes, the resulting .hwdb files are
+the same except for two additions that appeared in the meantime. I don't think
+it makes sense to update them again, because the ma-*.txt files changed and we
+don't want to store big blobs unnecessarilly.
+
+(cherry picked from commit a05bf18ed9cf427e56f86139aece0731f70f3e45)
+
+Related: RHEL-5950
+---
+ hwdb.d/acpi-update.py | 30 ++++++++++++------------------
+ 1 file changed, 12 insertions(+), 18 deletions(-)
+
+diff --git a/hwdb.d/acpi-update.py b/hwdb.d/acpi-update.py
+index 386575067b..41670b32bb 100755
+--- a/hwdb.d/acpi-update.py
++++ b/hwdb.d/acpi-update.py
+@@ -2,31 +2,25 @@
+ # SPDX-License-Identifier: LGPL-2.1-or-later
+ 
+ from csv import reader
+-from enum import Enum
+ 
+-def read_table(a):
+-
+-    table = []
+-
+-    with open(a, newline='') as csvfile:
+-        for row in reader(csvfile):
+-            if row[0] == "Company":
+-                # Skip header
+-                continue
+-            table.append(row)
++# pylint: disable=consider-using-with
+ 
++def read_table(filename):
++    table = list(reader(open(filename, newline='')))
++    table = table[1:]  # Skip header
+     table.sort(key=lambda x: x[1])
+ 
+     for row in table:
+         # Some IDs end with whitespace, while they didn't in the old HTML table, so it's probably
+         # a mistake, strip it.
+-        print("\nacpi:{0}*:\n ID_VENDOR_FROM_DATABASE={1}".format(row[1].strip(), row[0].strip()))
+-
+-print('# This file is part of systemd.\n'
+-      '#\n'
+-      '# Data imported from:\n'
+-      '#     https://uefi.org/uefi-pnp-export\n'
+-      '#     https://uefi.org/uefi-acpi-export')
++        print(f'\nacpi:{row[1].strip()}*:\n ID_VENDOR_FROM_DATABASE={row[0].strip()}')
++
++print('''\
++# This file is part of systemd.
++#
++# Data imported from:
++#     https://uefi.org/uefi-pnp-export
++#     https://uefi.org/uefi-acpi-export''')
+ 
+ read_table('acpi_id_registry.csv')
+ read_table('pnp_id_registry.csv')

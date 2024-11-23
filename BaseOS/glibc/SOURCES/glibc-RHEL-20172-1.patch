@@ -1,0 +1,369 @@
+From 317f1c0a8a71a862b1e600ff5386b08e02cf4b95 Mon Sep 17 00:00:00 2001
+From: "H.J. Lu" <hjl.tools@gmail.com>
+Date: Thu, 26 Jan 2023 08:26:18 -0800
+Subject: [PATCH] x86-64: Add glibc.cpu.prefer_map_32bit_exec [BZ #28656]
+Content-type: text/plain; charset=UTF-8
+
+Crossing 2GB boundaries with indirect calls and jumps can use more
+branch prediction resources on Intel Golden Cove CPU (see the
+"Misprediction for Branches >2GB" section in Intel 64 and IA-32
+Architectures Optimization Reference Manual.)  There is visible
+performance improvement on workloads with many PLT calls when executable
+and shared libraries are mmapped below 2GB.  Add the Prefer_MAP_32BIT_EXEC
+bit so that mmap will try to map executable or denywrite pages in shared
+libraries with MAP_32BIT first.
+
+NB: Prefer_MAP_32BIT_EXEC reduces bits available for address space
+layout randomization (ASLR), which is always disabled for SUID programs
+and can only be enabled by the tunable, glibc.cpu.prefer_map_32bit_exec,
+or the environment variable, LD_PREFER_MAP_32BIT_EXEC.  This works only
+between shared libraries or between shared libraries and executables with
+addresses below 2GB.  PIEs are usually loaded at a random address above
+4GB by the kernel.
+
+Conflicts:
+	manual/tunables.texi
+	(line numbers)
+	sysdeps/unix/sysv/linux/x86_64/64/dl-tunables.list
+	(merged local @order list)
+	sysdeps/x86/cpu-features.c
+	(line numbers)
+
+---
+ manual/tunables.texi                          | 33 ++++++++++----
+ sysdeps/unix/sysv/linux/x86_64/64/Makefile    | 25 +++++++++++
+ .../sysv/linux/x86_64/64/dl-tunables.list     | 29 +++++++++++++
+ .../unix/sysv/linux/x86_64/64/mmap_internal.h | 43 +++++++++++++++++++
+ .../sysv/linux/x86_64/64/tst-map-32bit-1a.c   | 34 +++++++++++++++
+ .../sysv/linux/x86_64/64/tst-map-32bit-1b.c   |  1 +
+ .../sysv/linux/x86_64/64/tst-map-32bit-mod.c  | 33 ++++++++++++++
+ sysdeps/x86/cpu-features.c                    | 15 +++++++
+ ...cpu-features-preferred_feature_index_1.def |  1 +
+ 9 files changed, 205 insertions(+), 9 deletions(-)
+ create mode 100644 sysdeps/unix/sysv/linux/x86_64/64/dl-tunables.list
+ create mode 100644 sysdeps/unix/sysv/linux/x86_64/64/mmap_internal.h
+ create mode 100644 sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-1a.c
+ create mode 100644 sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-1b.c
+ create mode 100644 sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-mod.c
+
+diff --git a/manual/tunables.texi b/manual/tunables.texi
+index 0be7231e36..c76c5c53cd 100644
+--- a/manual/tunables.texi
++++ b/manual/tunables.texi
+@@ -35,27 +35,32 @@ tunables with minimum and maximum values:
+ @example
+ $ /lib64/ld-linux-x86-64.so.2 --list-tunables
+ glibc.rtld.nns: 0x4 (min: 0x1, max: 0x10)
+-glibc.elision.skip_lock_after_retries: 3 (min: -2147483648, max: 2147483647)
++glibc.elision.skip_lock_after_retries: 3 (min: 0, max: 2147483647)
+ glibc.malloc.trim_threshold: 0x0 (min: 0x0, max: 0xffffffffffffffff)
+ glibc.malloc.perturb: 0 (min: 0, max: 255)
+ glibc.cpu.x86_shared_cache_size: 0x100000 (min: 0x0, max: 0xffffffffffffffff)
++glibc.pthread.rseq: 1 (min: 0, max: 1)
++glibc.cpu.prefer_map_32bit_exec: 0 (min: 0, max: 1)
+ glibc.mem.tagging: 0 (min: 0, max: 255)
+-glibc.elision.tries: 3 (min: -2147483648, max: 2147483647)
++glibc.elision.tries: 3 (min: 0, max: 2147483647)
+ glibc.elision.enable: 0 (min: 0, max: 1)
+-glibc.cpu.x86_rep_movsb_threshold: 0x1000 (min: 0x100, max: 0xffffffffffffffff)
++glibc.malloc.hugetlb: 0x0 (min: 0x0, max: 0xffffffffffffffff)
++glibc.cpu.x86_rep_movsb_threshold: 0x2000 (min: 0x100, max: 0xffffffffffffffff)
+ glibc.malloc.mxfast: 0x0 (min: 0x0, max: 0xffffffffffffffff)
+-glibc.elision.skip_lock_busy: 3 (min: -2147483648, max: 2147483647)
+-glibc.malloc.top_pad: 0x0 (min: 0x0, max: 0xffffffffffffffff)
++glibc.rtld.dynamic_sort: 2 (min: 1, max: 2)
++glibc.elision.skip_lock_busy: 3 (min: 0, max: 2147483647)
++glibc.malloc.top_pad: 0x20000 (min: 0x0, max: 0xffffffffffffffff)
+ glibc.cpu.x86_rep_stosb_threshold: 0x800 (min: 0x1, max: 0xffffffffffffffff)
+-glibc.cpu.x86_non_temporal_threshold: 0xc0000 (min: 0x4040, max: 0x0fffffffffffffff)
++glibc.cpu.x86_non_temporal_threshold: 0xc0000 (min: 0x4040, max: 0xfffffffffffffff)
+ glibc.cpu.x86_shstk:
++glibc.pthread.stack_cache_size: 0x2800000 (min: 0x0, max: 0xffffffffffffffff)
+ glibc.cpu.hwcap_mask: 0x6 (min: 0x0, max: 0xffffffffffffffff)
+-glibc.malloc.mmap_max: 0 (min: -2147483648, max: 2147483647)
+-glibc.elision.skip_trylock_internal_abort: 3 (min: -2147483648, max: 2147483647)
++glibc.malloc.mmap_max: 0 (min: 0, max: 2147483647)
++glibc.elision.skip_trylock_internal_abort: 3 (min: 0, max: 2147483647)
+ glibc.malloc.tcache_unsorted_limit: 0x0 (min: 0x0, max: 0xffffffffffffffff)
+ glibc.cpu.x86_ibt:
+ glibc.cpu.hwcaps:
+-glibc.elision.skip_lock_internal_abort: 3 (min: -2147483648, max: 2147483647)
++glibc.elision.skip_lock_internal_abort: 3 (min: 0, max: 2147483647)
+ glibc.malloc.arena_max: 0x0 (min: 0x1, max: 0xffffffffffffffff)
+ glibc.malloc.mmap_threshold: 0x0 (min: 0x0, max: 0xffffffffffffffff)
+ glibc.cpu.x86_data_cache_size: 0x8000 (min: 0x0, max: 0xffffffffffffffff)
+@@ -569,6 +574,16 @@ instead.
+ This tunable is specific to i386 and x86-64.
+ @end deftp
+ 
++@deftp Tunable glibc.cpu.prefer_map_32bit_exec
++When this tunable is set to \code{1}, shared libraries of non-setuid
++programs will be loaded below 2GB with MAP_32BIT.
++
++Note that the @env{LD_PREFER_MAP_32BIT_EXEC} environment is an alias of
++this tunable.
++
++This tunable is specific to 64-bit x86-64.
++@end deftp
++
+ @node Memory Related Tunables
+ @section Memory Related Tunables
+ @cindex memory related tunables
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/Makefile b/sysdeps/unix/sysv/linux/x86_64/64/Makefile
+index a7b6dc5a53..8ff4f27786 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/64/Makefile
++++ b/sysdeps/unix/sysv/linux/x86_64/64/Makefile
+@@ -1,2 +1,27 @@
+ # The default ABI is 64.
+ default-abi := 64
++
++ifeq ($(subdir),elf)
++ifneq ($(have-tunables),no)
++
++tests-map-32bit = \
++  tst-map-32bit-1a \
++  tst-map-32bit-1b \
++# tests-map-32bit
++tst-map-32bit-1a-no-pie = yes
++tst-map-32bit-1b-no-pie = yes
++tests += $(tests-map-32bit)
++
++modules-map-32bit = \
++  tst-map-32bit-mod \
++# modules-map-32bit
++modules-names += $(modules-map-32bit)
++
++$(objpfx)tst-map-32bit-mod.so: $(libsupport)
++tst-map-32bit-1a-ENV = LD_PREFER_MAP_32BIT_EXEC=1
++$(objpfx)tst-map-32bit-1a: $(objpfx)tst-map-32bit-mod.so
++tst-map-32bit-1b-ENV = GLIBC_TUNABLES=glibc.cpu.prefer_map_32bit_exec=1
++$(objpfx)tst-map-32bit-1b: $(objpfx)tst-map-32bit-mod.so
++
++endif
++endif
+diff -rup a/sysdeps/unix/sysv/linux/x86_64/64/dl-tunables.list b/sysdeps/unix/sysv/linux/x86_64/64/dl-tunables.list
+--- a/sysdeps/unix/sysv/linux/x86_64/64/dl-tunables.list	2024-03-06 17:52:50.968514369 -0500
++++ b/sysdeps/unix/sysv/linux/x86_64/64/dl-tunables.list	2024-03-06 17:55:48.778264896 -0500
+@@ -1,3 +1,33 @@
++# x86-64 specific tunables.
++# Copyright (C) 2023 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++glibc {
++  cpu {
++    prefer_map_32bit_exec {
++      type: INT_32
++      minval: 0
++      maxval: 1
++      env_alias: LD_PREFER_MAP_32BIT_EXEC
++      security_level: SXID_IGNORE
++    }
++  }
++}
++
+ # Order of tunables in RHEL 9.1.z.
+ @order glibc.rtld.nns
+ @order glibc.elision.skip_lock_after_retries
+@@ -35,3 +65,5 @@
+ @order glibc.malloc.check
+ @order glibc.gmon.minarcs
+ @order glibc.gmon.maxarcs
++# Order of tunables in RHEL 9.5.z
++@order glibc.cpu.prefer_map_32bit_exec
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/mmap_internal.h b/sysdeps/unix/sysv/linux/x86_64/64/mmap_internal.h
+new file mode 100644
+index 0000000000..33dec3f805
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/x86_64/64/mmap_internal.h
+@@ -0,0 +1,43 @@
++/* Linux mmap system call.  x86-64 version.
++   Copyright (C) 2015-2023 Free Software Foundation, Inc.
++
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef MMAP_X86_64_INTERNAL_H
++#define MMAP_X86_64_INTERNAL_H
++
++#include <ldsodefs.h>
++
++/* If the Prefer_MAP_32BIT_EXEC bit is set, try to map executable or
++    denywrite pages with MAP_32BIT first.  */
++#define MMAP_PREPARE(addr, len, prot, flags, fd, offset)		\
++  if ((addr) == NULL							\
++      && (((prot) & PROT_EXEC) != 0					\
++	  || ((flags) & MAP_DENYWRITE) != 0)				\
++      && HAS_ARCH_FEATURE (Prefer_MAP_32BIT_EXEC))			\
++    {									\
++      void *ret = (void*) INLINE_SYSCALL_CALL (mmap, (addr), (len),	\
++					      (prot),			\
++					      (flags) | MAP_32BIT,	\
++					      (fd), (offset));		\
++      if (ret != MAP_FAILED)						\
++	return ret;							\
++    }
++
++#include_next <mmap_internal.h>
++
++#endif
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-1a.c b/sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-1a.c
+new file mode 100644
+index 0000000000..abc396589e
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-1a.c
+@@ -0,0 +1,34 @@
++/* Check that LD_PREFER_MAP_32BIT_EXEC works in PDE and shared library.
++   Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <stdint.h>
++#include <support/check.h>
++
++extern void dso_check_map_32bit (void);
++
++static int
++do_test (void)
++{
++  printf ("do_test: %p\n", do_test);
++  TEST_VERIFY ((uintptr_t) do_test < 0xffffffffUL);
++  dso_check_map_32bit ();
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-1b.c b/sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-1b.c
+new file mode 100644
+index 0000000000..34ab01c773
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-1b.c
+@@ -0,0 +1 @@
++#include "tst-map-32bit-1a.c"
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-mod.c b/sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-mod.c
+new file mode 100644
+index 0000000000..78d4b6133c
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/x86_64/64/tst-map-32bit-mod.c
+@@ -0,0 +1,33 @@
++/* Check that LD_PREFER_MAP_32BIT_EXEC works in shared library.
++   Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <stdint.h>
++#include <support/check.h>
++
++static void
++dso_do_test (void)
++{
++}
++
++void
++dso_check_map_32bit (void)
++{
++  printf ("dso_do_test: %p\n", dso_do_test);
++  TEST_VERIFY ((uintptr_t) dso_do_test < 0xffffffffUL);
++}
+diff --git a/sysdeps/x86/cpu-features.c b/sysdeps/x86/cpu-features.c
+index a2197ed211..822688e21f 100644
+--- a/sysdeps/x86/cpu-features.c
++++ b/sysdeps/x86/cpu-features.c
+@@ -27,6 +27,16 @@
+ extern void TUNABLE_CALLBACK (set_hwcaps) (tunable_val_t *)
+   attribute_hidden;
+ 
++# ifdef __LP64__
++static void
++TUNABLE_CALLBACK (set_prefer_map_32bit_exec) (tunable_val_t *valp)
++{
++  if (valp->numval)
++    GLRO(dl_x86_cpu_features).preferred[index_arch_Prefer_MAP_32BIT_EXEC]
++      |= bit_arch_Prefer_MAP_32BIT_EXEC;
++}
++# endif
++
+ # if CET_ENABLED
+ extern void TUNABLE_CALLBACK (set_x86_ibt) (tunable_val_t *)
+   attribute_hidden;
+@@ -949,6 +959,11 @@ no_cpuid:
+ #if HAVE_TUNABLES
+   TUNABLE_GET (hwcaps, tunable_val_t *, TUNABLE_CALLBACK (set_hwcaps));
+ 
++# ifdef __LP64__
++  TUNABLE_GET (prefer_map_32bit_exec, tunable_val_t *,
++	       TUNABLE_CALLBACK (set_prefer_map_32bit_exec));
++# endif
++
+   bool disable_xsave_features = false;
+ 
+   if (!CPU_FEATURE_USABLE_P (cpu_features, OSXSAVE))
+diff --git a/sysdeps/x86/include/cpu-features-preferred_feature_index_1.def b/sysdeps/x86/include/cpu-features-preferred_feature_index_1.def
+index e45f9cb159..d20c5b3196 100644
+--- a/sysdeps/x86/include/cpu-features-preferred_feature_index_1.def
++++ b/sysdeps/x86/include/cpu-features-preferred_feature_index_1.def
+@@ -26,6 +26,7 @@ BIT (I586)
+ BIT (I686)
+ BIT (Slow_SSE4_2)
+ BIT (AVX_Fast_Unaligned_Load)
++BIT (Prefer_MAP_32BIT_EXEC)
+ BIT (Prefer_No_VZEROUPPER)
+ BIT (Prefer_ERMS)
+ BIT (Prefer_No_AVX512)
+-- 
+2.39.3
+

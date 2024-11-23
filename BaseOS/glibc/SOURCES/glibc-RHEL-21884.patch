@@ -1,0 +1,73 @@
+commit 85860ad6eaf4c9739318f6b2a1ff7c2fa6b12ab5
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Mon Aug 15 16:45:40 2022 +0200
+
+    malloc: Do not use MAP_NORESERVE to allocate heap segments
+    
+    Address space for heap segments is reserved in a mmap call with
+    MAP_ANONYMOUS | MAP_PRIVATE and protection flags PROT_NONE.  This
+    reservation does not count against the RSS limit of the process or
+    system.  Backing memory is allocated using mprotect in alloc_new_heap
+    and grow_heap, and at this point, the allocator expects the kernel
+    to provide memory (subject to memory overcommit).
+    
+    The SIGSEGV that might generate due to MAP_NORESERVE (according to
+    the mmap manual page) does not seem to occur in practice, it's always
+    SIGKILL from the OOM killer.  Even if there is a way that SIGSEGV
+    could be generated, it is confusing to applications that this only
+    happens for secondary heaps, not for large mmap-based allocations,
+    and not for the main arena.
+    
+    Reviewed-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+
+Conflicts:
+	malloc/arena.c
+	(huge page support was added upstream)
+
+diff --git a/malloc/arena.c b/malloc/arena.c
+index 667484630ed0afa5..2852783355d3d869 100644
+--- a/malloc/arena.c
++++ b/malloc/arena.c
+@@ -466,8 +466,7 @@ new_heap (size_t size, size_t top_pad)
+   p2 = MAP_FAILED;
+   if (aligned_heap_area)
+     {
+-      p2 = (char *) MMAP (aligned_heap_area, HEAP_MAX_SIZE, PROT_NONE,
+-                          MAP_NORESERVE);
++      p2 = (char *) MMAP (aligned_heap_area, HEAP_MAX_SIZE, PROT_NONE, 0);
+       aligned_heap_area = NULL;
+       if (p2 != MAP_FAILED && ((unsigned long) p2 & (HEAP_MAX_SIZE - 1)))
+         {
+@@ -477,7 +476,7 @@ new_heap (size_t size, size_t top_pad)
+     }
+   if (p2 == MAP_FAILED)
+     {
+-      p1 = (char *) MMAP (0, HEAP_MAX_SIZE << 1, PROT_NONE, MAP_NORESERVE);
++      p1 = (char *) MMAP (0, HEAP_MAX_SIZE << 1, PROT_NONE, 0);
+       if (p1 != MAP_FAILED)
+         {
+           p2 = (char *) (((unsigned long) p1 + (HEAP_MAX_SIZE - 1))
+@@ -493,7 +492,7 @@ new_heap (size_t size, size_t top_pad)
+         {
+           /* Try to take the chance that an allocation of only HEAP_MAX_SIZE
+              is already aligned. */
+-          p2 = (char *) MMAP (0, HEAP_MAX_SIZE, PROT_NONE, MAP_NORESERVE);
++          p2 = (char *) MMAP (0, HEAP_MAX_SIZE, PROT_NONE, 0);
+           if (p2 == MAP_FAILED)
+             return 0;
+ 
+diff --git a/malloc/malloc.c b/malloc/malloc.c
+index 375f50f5db13e234..fe80b8239756a7c9 100644
+--- a/malloc/malloc.c
++++ b/malloc/malloc.c
+@@ -1112,10 +1112,6 @@ static mchunkptr mremap_chunk(mchunkptr p, size_t new_size);
+ # define MAP_ANONYMOUS MAP_ANON
+ #endif
+ 
+-#ifndef MAP_NORESERVE
+-# define MAP_NORESERVE 0
+-#endif
+-
+ #define MMAP(addr, size, prot, flags) \
+  __mmap((addr), (size), (prot), (flags)|MAP_ANONYMOUS|MAP_PRIVATE, -1, 0)
+ 

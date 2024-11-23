@@ -1,0 +1,49 @@
+From e1ec7dfe667b557d79bce3ea501716709d01edbb Mon Sep 17 00:00:00 2001
+From: Maxim Mikityanskiy <maxtram95@gmail.com>
+Date: Thu, 3 Aug 2023 17:40:15 +0300
+Subject: [PATCH] hwdb: Mute SW rfkill keys on MSI Wind U100
+
+Kernel patch [1] fixed bugs in rfkill handling on MSI Wind U100. Now
+that the HW rfkill reports the correct state, and the SW rfkill is
+controllable from userspace, it's necessary to mute KEY_WLAN and
+KEY_BLUETOOTH generated on HW rfkill state changes. Otherwise, the
+userspace will react to these keys and toggle the SW rfkill as well,
+which is not desired, because the user may end up with non-functional
+radios if HW and SW rfkills are out of sync.
+
+Blocking these keycodes doesn't impair user experience, because the
+desktop environment can still react to HW rfkill events and act
+accordingly (for example, show notifications).
+
+While at it, use "unknown" instead of "reserved" to mute keys, to avoid
+the "atkbd serio0: Unknown key pressed" flood in dmesg.
+
+[1]: https://lore.kernel.org/all/20230721145423.161057-1-maxtram95@gmail.com/
+
+(cherry picked from commit fa8216e20605ff42054ee316201a13ac6cdd4cd1)
+
+Related: RHEL-5950
+---
+ hwdb.d/60-keyboard.hwdb | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/hwdb.d/60-keyboard.hwdb b/hwdb.d/60-keyboard.hwdb
+index f3f40ef2ff..87d592d2cd 100644
+--- a/hwdb.d/60-keyboard.hwdb
++++ b/hwdb.d/60-keyboard.hwdb
+@@ -1438,9 +1438,13 @@ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnMicro-Star*:pn*PR200*:*
+  KEYBOARD_KEY_f7=reserved
+  KEYBOARD_KEY_f8=reserved
+ 
+-# MSI Wind U90/U100 generates separate touchpad on/off keycodes so ignore touchpad toggle keycode
++# MSI Wind U90/U100 generates separate touchpad on/off keycodes so ignore touchpad toggle keycode.
++# Also ignore Wi-Fi and Bluetooth keycodes, because they are generated when the HW rfkill state
++# changes, but the userspace also toggles the SW rfkill upon receiving these keycodes.
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnMICRO-STAR*:pnU90/U100:*
+- KEYBOARD_KEY_e4=reserved
++ KEYBOARD_KEY_e4=unknown
++ KEYBOARD_KEY_e2=unknown
++ KEYBOARD_KEY_f6=unknown
+ 
+ # Keymaps MSI Prestige And MSI Modern FnKeys and Special keys
+ evdev:atkbd:dmi:bvn*:bvr*:bd*:svnMicro-Star*:pn*Prestige*:*

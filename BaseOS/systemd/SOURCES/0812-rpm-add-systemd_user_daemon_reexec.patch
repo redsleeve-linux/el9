@@ -1,0 +1,38 @@
+From 2400e5c6395459fa3629747168c36df8ef543811 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Fri, 28 Jul 2023 19:24:58 +0200
+Subject: [PATCH] rpm: add `systemd_user_daemon_reexec`
+
+This macros wraps the call to daemon-reexec in all user managers. It would be
+called for example from systemd %post right after the call to systemctl
+daemon-reexec.
+
+This will be used in the Fedora systemd package to fix a long-standing FIXME.
+
+Tested via building and reinstalling the systemd package with the patches.
+
+(cherry picked from commit 9ff28e312bffe7567aa5d3f2c41303dd456f1691)
+
+Resolves: RHEL-40878
+---
+ src/rpm/macros.systemd.in | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/rpm/macros.systemd.in b/src/rpm/macros.systemd.in
+index fc607346e3..8d5895eba1 100644
+--- a/src/rpm/macros.systemd.in
++++ b/src/rpm/macros.systemd.in
+@@ -117,6 +117,13 @@ if [ $1 -ge 1 ] && [ -x "{{SYSTEMD_UPDATE_HELPER_PATH}}" ]; then \
+ fi \
+ %{nil}
+ 
++%systemd_user_daemon_reexec() \
++if [ $1 -ge 1 ] && [ -x "{{SYSTEMD_UPDATE_HELPER_PATH}}" ]; then \
++    # Package upgrade, not uninstall \
++    {{SYSTEMD_UPDATE_HELPER_PATH}} user-reexec || : \
++fi \
++%{nil}
++
+ %udev_hwdb_update() %{nil}
+ 
+ %udev_rules_update() %{nil}

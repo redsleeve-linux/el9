@@ -1,0 +1,59 @@
+From 8db17468f2c0dd07d5e9618e3b49fddda26724c6 Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Wed, 26 Apr 2023 14:19:33 +0100
+Subject: [PATCH] coredump filter: add mask for 'all' using UINT32_MAX, not
+ UINT64_MAX
+
+The kernel returns ERANGE when UINT64_MAX is passed. Create a mask
+and use UINT32_max, which is accepted, so that future bits will also
+be set.
+
+(cherry picked from commit 7f3bb8f20dcccaceea8b1ee05f0560b81162037b)
+
+Related: RHEL-29430
+---
+ src/shared/coredump-util.c    | 2 +-
+ src/shared/coredump-util.h    | 3 +++
+ src/test/test-coredump-util.c | 2 ++
+ 3 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/shared/coredump-util.c b/src/shared/coredump-util.c
+index aaf3e16eff..7a44816834 100644
+--- a/src/shared/coredump-util.c
++++ b/src/shared/coredump-util.c
+@@ -43,7 +43,7 @@ int coredump_filter_mask_from_string(const char *s, uint64_t *ret) {
+                 }
+ 
+                 if (streq(n, "all")) {
+-                        m = UINT64_MAX;
++                        m = COREDUMP_FILTER_MASK_ALL;
+                         continue;
+                 }
+ 
+diff --git a/src/shared/coredump-util.h b/src/shared/coredump-util.h
+index 09e7ed443f..f4d4098136 100644
+--- a/src/shared/coredump-util.h
++++ b/src/shared/coredump-util.h
+@@ -22,6 +22,9 @@ typedef enum CoredumpFilter {
+                                       1u << COREDUMP_FILTER_ELF_HEADERS | \
+                                       1u << COREDUMP_FILTER_PRIVATE_HUGE)
+ 
++/* The kernel doesn't like UINT64_MAX and returns ERANGE, use UINT32_MAX to support future new flags */
++#define COREDUMP_FILTER_MASK_ALL UINT32_MAX
++
+ const char* coredump_filter_to_string(CoredumpFilter i) _const_;
+ CoredumpFilter coredump_filter_from_string(const char *s) _pure_;
+ int coredump_filter_mask_from_string(const char *s, uint64_t *ret);
+diff --git a/src/test/test-coredump-util.c b/src/test/test-coredump-util.c
+index 40b68df9f4..87dc371a88 100644
+--- a/src/test/test-coredump-util.c
++++ b/src/test/test-coredump-util.c
+@@ -23,6 +23,8 @@ TEST(coredump_filter_mask_from_string) {
+         uint64_t f;
+         assert_se(coredump_filter_mask_from_string("default", &f) == 0);
+         assert_se(f == COREDUMP_FILTER_MASK_DEFAULT);
++        assert_se(coredump_filter_mask_from_string("all", &f) == 0);
++        assert_se(f == COREDUMP_FILTER_MASK_ALL);
+ 
+         assert_se(coredump_filter_mask_from_string("  default\tdefault\tdefault  ", &f) == 0);
+         assert_se(f == COREDUMP_FILTER_MASK_DEFAULT);

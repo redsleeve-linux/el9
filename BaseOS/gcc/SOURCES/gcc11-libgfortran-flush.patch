@@ -1,0 +1,51 @@
+commit c14f38d4292ec22462a4080841d526f87428130a
+Author: Francois-Xavier Coudert <fxcoudert@gcc.gnu.org>
+Date:   Thu Dec 16 15:33:17 2021 +0100
+
+    Fix FLUSH IOSTAT value
+    
+    PR libfortran/101255
+    
+    libgfortran/ChangeLog:
+    
+            * io/file_pos.c: Fix error code.
+    
+    gcc/testsuite/ChangeLog:
+    
+            * gfortran.dg/iostat_5.f90: New file.
+
+diff --git a/gcc/testsuite/gfortran.dg/iostat_5.f90 b/gcc/testsuite/gfortran.dg/iostat_5.f90
+new file mode 100644
+index 00000000000..1e72dfdf7e1
+--- /dev/null
++++ b/gcc/testsuite/gfortran.dg/iostat_5.f90
+@@ -0,0 +1,16 @@
++! PR libfortran/101255
++! { dg-do run }
++
++program test
++  use ISO_FORTRAN_ENV, only: IOSTAT_EOR, IOSTAT_END
++  implicit none
++  character(len=50) :: err
++  integer :: i
++
++  err = ""
++  flush(99, iostat=i, iomsg=err)
++
++  if (err == "") stop 1
++  if (i >= 0) stop 2
++  if (i == IOSTAT_EOR .or. i == IOSTAT_END) stop 3
++end
+diff --git a/libgfortran/io/file_pos.c b/libgfortran/io/file_pos.c
+index 7e71ca577e0..4ed1698f17a 100644
+--- a/libgfortran/io/file_pos.c
++++ b/libgfortran/io/file_pos.c
+@@ -527,7 +527,7 @@ st_flush (st_parameter_filepos *fpp)
+     }
+   else
+     /* FLUSH on unconnected unit is illegal: F95 std., 9.3.5. */ 
+-    generate_error (&fpp->common, LIBERROR_BAD_OPTION,
++    generate_error (&fpp->common, -LIBERROR_BAD_UNIT,
+ 			"Specified UNIT in FLUSH is not connected");
+ 
+   if (needs_unlock)

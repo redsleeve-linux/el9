@@ -1,0 +1,38 @@
+From 41d2e7fbb87a99e80e9be1873775c79879f8b821 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 2 Dec 2022 14:30:22 +0900
+Subject: [PATCH] bootspec: fix null-dereference-read
+
+Fixes [oss-fuzz#53578](https://bugs.chromium.org/p/oss-fuzz/issues/detail?id=53578).
+Fixes #25450.
+
+(cherry picked from commit 46dc071985ff487f5ccf20808531168a6add73d3)
+
+Resolves: RHEL-36284
+---
+ src/shared/bootspec.c                                           | 2 ++
+ ...lusterfuzz-testcase-minimized-fuzz-bootspec-5731869371269120 | 1 +
+ 2 files changed, 3 insertions(+)
+ create mode 100644 test/fuzz/fuzz-bootspec/clusterfuzz-testcase-minimized-fuzz-bootspec-5731869371269120
+
+diff --git a/src/shared/bootspec.c b/src/shared/bootspec.c
+index 61e20c40a8..7fe8845429 100644
+--- a/src/shared/bootspec.c
++++ b/src/shared/bootspec.c
+@@ -996,6 +996,8 @@ static int boot_config_find(const BootConfig *config, const char *id) {
+         if (id[0] == '@') {
+                 if (!strcaseeq(id, "@saved"))
+                         return -1;
++                if (!config->entry_selected)
++                        return -1;
+                 id = config->entry_selected;
+         }
+ 
+diff --git a/test/fuzz/fuzz-bootspec/clusterfuzz-testcase-minimized-fuzz-bootspec-5731869371269120 b/test/fuzz/fuzz-bootspec/clusterfuzz-testcase-minimized-fuzz-bootspec-5731869371269120
+new file mode 100644
+index 0000000000..8804abd094
+--- /dev/null
++++ b/test/fuzz/fuzz-bootspec/clusterfuzz-testcase-minimized-fuzz-bootspec-5731869371269120
+@@ -0,0 +1 @@
++{"config":"default @saved","loader":[""]}
+\ No newline at end of file

@@ -1,0 +1,31 @@
+From 366cfe45170487488d33997f832487f8841556c7 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 1 Aug 2023 03:22:57 +0900
+Subject: [PATCH] udev-builtin-net_id: skip non-directory entry earlier
+
+In the below, we will try to read 'address' file in the directory,
+hence the entry must be a directory.
+
+No functional change, just a tiny optimization.
+
+(cherry picked from commit 4103dca1b5664f937ce125219ca70ea54f810ac8)
+
+Related: RHEL-50103
+---
+ src/udev/udev-builtin-net_id.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/udev/udev-builtin-net_id.c b/src/udev/udev-builtin-net_id.c
+index c20df41c37..40f7454ba0 100644
+--- a/src/udev/udev-builtin-net_id.c
++++ b/src/udev/udev-builtin-net_id.c
+@@ -441,6 +441,9 @@ static int dev_pci_slot(sd_device *dev, const LinkInfo *info, NetNames *names) {
+                         if (dot_or_dot_dot(de->d_name))
+                                 continue;
+ 
++                        if (de->d_type != DT_DIR)
++                                continue;
++
+                         r = safe_atou32(de->d_name, &i);
+                         if (r < 0 || i <= 0)
+                                 continue;

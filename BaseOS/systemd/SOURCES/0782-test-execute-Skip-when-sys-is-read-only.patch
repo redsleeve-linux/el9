@@ -1,0 +1,29 @@
+From db9c5f759c7c4163d9de1db398b72ef01abaec24 Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Wed, 25 Jan 2023 09:39:13 +0100
+Subject: [PATCH] test-execute: Skip when /sys is read-only
+
+The test depends on /sys being writable, so let's skip it when /sys
+is read-only.
+
+(cherry picked from commit 34b5977015a557840988e825ac116a7f09d0be75)
+
+Related: RHEL-27512
+---
+ src/test/test-execute.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index 0283caeca6..ce3489d708 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -1228,6 +1228,9 @@ int main(int argc, char *argv[]) {
+         if (r == -ENOMEDIUM)
+                 return log_tests_skipped("cgroupfs not available");
+ 
++        if (path_is_read_only_fs("/sys") > 0)
++                return log_tests_skipped("/sys is mounted read-only");
++
+         _cleanup_free_ char *unit_dir = NULL, *unit_paths = NULL;
+         assert_se(get_testdata_dir("test-execute/", &unit_dir) >= 0);
+         assert_se(runtime_dir = setup_fake_runtime_dir());

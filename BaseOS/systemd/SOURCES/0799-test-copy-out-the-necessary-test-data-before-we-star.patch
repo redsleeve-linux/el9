@@ -1,0 +1,65 @@
+From 59162dc947e9c9538f98f0a00ab9eeef9c7bae71 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 11 Jul 2023 21:03:22 +0200
+Subject: [PATCH] test: copy out the necessary test data before we start
+ overmounting stuff
+
+Otherwise the get_testdata_dir() call fails if the source tree is under
+/root (which is usually the case in CIs).
+
+I got bitten by this after leaving the source tree under /root but moving the
+$BUILD_DIR elsewhere. This used to work by accident, as load_testdata_env()
+would try to read $BUILD_DIR/systemd-runtest.env, but would fail if the
+$BUILD_DIR is also under /root and fall back to SYSTEMD_TEST_DATA
+(/lib/systemd/tests/testdata), which usually exist as we install the just built
+revision. However, if the $BUILD_DIR is outside of /root we'd read
+$BUILD_DIR/systemd-runtest.env which contains
+SYSTEMD_TEST_DATA=/path/to/source/tree/test and that source tree is not visible
+once we overmount /root with tmpfs making the test fail:
+
+/* test_run_tests_unprivileged */
+Successfully forked off '(test-execute-unprivileged)' as PID 10672.
+Changing mount flags / (MS_REMOUNT|MS_BIND "")...
+Changing mount propagation / (MS_REC|MS_SHARED "")
+Mounting tmpfs (tmpfs) on /dev/shm (MS_NOSUID|MS_NODEV "")...
+Mounting tmpfs (tmpfs) on /root (MS_NOSUID|MS_NODEV "")...
+Mounting tmpfs (tmpfs) on /tmp (MS_NOSUID|MS_NODEV "")...
+Mounting tmpfs (tmpfs) on /var/tmp (MS_NOSUID|MS_NODEV "")...
+Mounting tmpfs (tmpfs) on /var/lib (MS_NOSUID|MS_NODEV "")...
+Mounting tmpfs (tmpfs) on /run/test-execute-unit-dir (MS_NOSUID|MS_NODEV "")...
+ERROR: $SYSTEMD_TEST_DATA directory [/root/systemd/test] not accessible: No such file or directory
+Assertion 'get_testdata_dir("test-execute/", &unit_dir) >= 0' failed at src/test/test-execute.c:1306, function prepare_ns(). Aborting.
+(test-execute-unprivileged) terminated by signal ABRT.
+
+(cherry picked from commit c109cff9f998876c3b5abd62501132d0fb0f80a2)
+
+Related: RHEL-27512
+---
+ src/test/test-execute.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index f37da945b6..e6bd21b6b9 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -1260,15 +1260,16 @@ static int prepare_ns(const char *process_name) {
+                 assert_se(mount_follow_verbose(LOG_DEBUG, NULL, "/", NULL, MS_SHARED|MS_REC, NULL) >= 0);
+ 
+                 assert_se(mkdir_p(PRIVATE_UNIT_DIR, 0755) >= 0);
+-
+-                /* Mount tmpfs on the following directories to make not StateDirectory= or friends disturb the host. */
+-                FOREACH_STRING(p, "/dev/shm", "/root", "/tmp", "/var/tmp", "/var/lib", PRIVATE_UNIT_DIR)
+-                        assert_se(mount_nofollow_verbose(LOG_DEBUG, "tmpfs", p, "tmpfs", MS_NOSUID|MS_NODEV, NULL) >= 0);
++                assert_se(mount_nofollow_verbose(LOG_DEBUG, "tmpfs", PRIVATE_UNIT_DIR, "tmpfs", MS_NOSUID|MS_NODEV, NULL) >= 0);
+ 
+                 /* Copy unit files to make them accessible even when unprivileged. */
+                 assert_se(get_testdata_dir("test-execute/", &unit_dir) >= 0);
+                 assert_se(copy_directory(unit_dir, PRIVATE_UNIT_DIR, COPY_MERGE_EMPTY) >= 0);
+ 
++                /* Mount tmpfs on the following directories to make not StateDirectory= or friends disturb the host. */
++                FOREACH_STRING(p, "/dev/shm", "/root", "/tmp", "/var/tmp", "/var/lib")
++                        assert_se(mount_nofollow_verbose(LOG_DEBUG, "tmpfs", p, "tmpfs", MS_NOSUID|MS_NODEV, NULL) >= 0);
++
+                 /* Prepare credstore like tmpfiles.d/credstore.conf for LoadCredential= tests. */
+                 FOREACH_STRING(p, "/run/credstore", "/run/credstore.encrypted") {
+                         assert_se(mkdir_p(p, 0) >= 0);

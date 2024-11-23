@@ -1,0 +1,74 @@
+From 5a310f31d5d42bb7a556c274c3839c34c600e9f5 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 6 Mar 2024 15:21:10 +0100
+Subject: [PATCH] ci: explicitly change oom-{score}-adj before running tests
+
+For some reason root in GH actions is able to _decrease_ its oom score
+even after dropping all capabilities (including CAP_SYS_RESOURCE), until
+the oom score is changed explicitly after sudo:
+
+$ systemd-detect-virt
+microsoft
+$ sudo su -
+~# capsh --drop=all -- -c 'capsh --print; grep -H . /proc/self/oom*; choom -p $$ -n -101'
+Current: =
+Bounding set =
+Ambient set =
+Current IAB: !cap_chown,!cap_dac_override,!cap_dac_read_search,...,!cap_sys_resource,...,!cap_checkpoint_restore
+Securebits: 00/0x0/1'b0
+ secure-noroot: no (unlocked)
+ secure-no-suid-fixup: no (unlocked)
+ secure-keep-caps: no (unlocked)
+ secure-no-ambient-raise: no (unlocked)
+uid=0(root) euid=0(root)
+gid=0(root)
+groups=0(root)
+Guessed mode: UNCERTAIN (0)
+/proc/self/oom_adj:8
+/proc/self/oom_score:1000
+/proc/self/oom_score_adj:500
+pid 22180's OOM score adjust value changed from 500 to -101
+~# choom -p $$ -n 500
+pid 22027's OOM score adjust value changed from 500 to 500
+~# capsh --drop=all -- -c 'capsh --print; grep -H . /proc/self/oom*; choom -p $$ -n -101'
+Current: =
+Bounding set =
+Ambient set =
+...
+uid=0(root) euid=0(root)
+gid=0(root)
+groups=0(root)
+Guessed mode: UNCERTAIN (0)
+/proc/self/oom_adj:8
+/proc/self/oom_score:1000
+/proc/self/oom_score_adj:500
+choom: failed to set score adjust value: Permission denied
+
+I have no idea what's going on, but it breaks
+exec-oomscoreadjust-negative.service from test-execute when running
+unprivileged.
+
+(cherry picked from commit 7161af9612d2d4f79cfbe8ed34ea7614d08901f7)
+
+Related: RHEL-27512
+---
+ .github/workflows/unit_tests.sh | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/.github/workflows/unit_tests.sh b/.github/workflows/unit_tests.sh
+index cb8ea332aa..6dcbc393fd 100755
+--- a/.github/workflows/unit_tests.sh
++++ b/.github/workflows/unit_tests.sh
+@@ -41,6 +41,12 @@ set -ex
+ 
+ MESON_ARGS=(-Dcryptolib=${CRYPTOLIB:-auto})
+ 
++# (Re)set the current oom-{score-}adj. For some reason root on GH actions is able to _decrease_
++# its oom-score even after dropping all capabilities (including CAP_SYS_RESOURCE), until the
++# score is explicitly changed after sudo. No idea what's going on, but it breaks
++# exec-oomscoreadjust-negative.service from test-execute when running unprivileged.
++choom -p $$ -n 0
++
+ for phase in "${PHASES[@]}"; do
+     case $phase in
+         SETUP)

@@ -1,0 +1,134 @@
+From dfd60d406727c03e5d6390639361aeb4f8a5849a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Fri, 30 Jun 2023 19:07:29 +0100
+Subject: [PATCH] detect-virt: add --cvm option
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The --cvm option detects whether the OS is running inside a confidential
+virtual machine.
+
+Related: https://github.com/systemd/systemd/issues/27604
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 5e0c61f64d22ed9d4ae53ed94209ed4be25feb30)
+
+Resolves: RHEL-50651
+---
+ man/systemd-detect-virt.xml               | 10 ++++++++++
+ shell-completion/bash/systemd-detect-virt |  2 +-
+ src/detect-virt/detect-virt.c             | 18 ++++++++++++++++++
+ 3 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/man/systemd-detect-virt.xml b/man/systemd-detect-virt.xml
+index a8c089d0b5..9b24f061bb 100644
+--- a/man/systemd-detect-virt.xml
++++ b/man/systemd-detect-virt.xml
+@@ -252,6 +252,16 @@
+         for more information.</para></listitem>
+       </varlistentry>
+ 
++      <varlistentry>
++        <term><option>--cvm</option></term>
++
++        <listitem><para>Detect whether invoked in a confidential virtual machine.
++        The result of this detection may be used to disable features that should
++        not be used in confidential VMs. It must not be used to release security
++        sensitive information. The latter must only be released after attestation
++        of the confidential environment.</para></listitem>
++      </varlistentry>
++
+       <varlistentry>
+         <term><option>-q</option></term>
+         <term><option>--quiet</option></term>
+diff --git a/shell-completion/bash/systemd-detect-virt b/shell-completion/bash/systemd-detect-virt
+index 05e44903e0..e67570e674 100644
+--- a/shell-completion/bash/systemd-detect-virt
++++ b/shell-completion/bash/systemd-detect-virt
+@@ -28,7 +28,7 @@ _systemd_detect_virt() {
+     local i verb comps
+ 
+     local -A OPTS=(
+-        [STANDALONE]='-h --help --version -c --container -v --vm -q --quiet
++        [STANDALONE]='-h --help --version -c --container -v --vm -q --quiet --cvm
+                              --private-users'
+     )
+ 
+diff --git a/src/detect-virt/detect-virt.c b/src/detect-virt/detect-virt.c
+index af2a58b78d..6b470642dd 100644
+--- a/src/detect-virt/detect-virt.c
++++ b/src/detect-virt/detect-virt.c
+@@ -6,6 +6,7 @@
+ #include <stdlib.h>
+ 
+ #include "alloc-util.h"
++#include "confidential-virt.h"
+ #include "main-func.h"
+ #include "pretty-print.h"
+ #include "string-table.h"
+@@ -19,6 +20,7 @@ static enum {
+         ONLY_CONTAINER,
+         ONLY_CHROOT,
+         ONLY_PRIVATE_USERS,
++        ONLY_CVM,
+ } arg_mode = ANY_VIRTUALIZATION;
+ 
+ static int help(void) {
+@@ -37,6 +39,7 @@ static int help(void) {
+                "  -v --vm               Only detect whether we are run in a VM\n"
+                "  -r --chroot           Detect whether we are run in a chroot() environment\n"
+                "     --private-users    Only detect whether we are running in a user namespace\n"
++               "     --cvm              Only detect whether we are run in a confidential VM\n"
+                "  -q --quiet            Don't output anything, just set return value\n"
+                "     --list             List all known and detectable types of virtualization\n"
+                "\nSee the %s for details.\n",
+@@ -52,6 +55,7 @@ static int parse_argv(int argc, char *argv[]) {
+                 ARG_VERSION = 0x100,
+                 ARG_PRIVATE_USERS,
+                 ARG_LIST,
++                ARG_CVM,
+         };
+ 
+         static const struct option options[] = {
+@@ -62,6 +66,7 @@ static int parse_argv(int argc, char *argv[]) {
+                 { "chroot",        no_argument, NULL, 'r'               },
+                 { "private-users", no_argument, NULL, ARG_PRIVATE_USERS },
+                 { "quiet",         no_argument, NULL, 'q'               },
++                { "cvm",           no_argument, NULL, ARG_CVM           },
+                 { "list",          no_argument, NULL, ARG_LIST          },
+                 {}
+         };
+@@ -105,6 +110,10 @@ static int parse_argv(int argc, char *argv[]) {
+                         DUMP_STRING_TABLE(virtualization, Virtualization, _VIRTUALIZATION_MAX);
+                         return 0;
+ 
++                case ARG_CVM:
++                        arg_mode = ONLY_CVM;
++                        return 1;
++
+                 case '?':
+                         return -EINVAL;
+ 
+@@ -122,6 +131,7 @@ static int parse_argv(int argc, char *argv[]) {
+ 
+ static int run(int argc, char *argv[]) {
+         Virtualization v;
++        ConfidentialVirtualization c;
+         int r;
+ 
+         /* This is mostly intended to be used for scripts which want
+@@ -159,6 +169,14 @@ static int run(int argc, char *argv[]) {
+                         return log_error_errno(r, "Failed to check for user namespace: %m");
+                 return !r;
+ 
++        case ONLY_CVM:
++                c = detect_confidential_virtualization();
++                if (c < 0)
++                        return log_error_errno(c, "Failed to check for confidential virtualization: %m");
++                if (!arg_quiet)
++                        puts(confidential_virtualization_to_string(c));
++                return c == CONFIDENTIAL_VIRTUALIZATION_NONE;
++
+         case ANY_VIRTUALIZATION:
+         default:
+                 v = detect_virtualization();

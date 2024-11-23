@@ -1,0 +1,31 @@
+From 86572fe65c896cceea54a1fb94a4089ad5ce5dfe Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Wed, 31 Jul 2024 16:06:26 +0200
+Subject: [PATCH] kernel-install: ignore errors when reading /etc/machine-id
+
+If /etc/machine-id doesn't end with a newline (which is wrong, but it
+can happen), kernel-install fails. That's because `read` returns 1 if it
+reaches EOF and we're using `set -e`. Let's just ignore that error, as
+it doesn't matter: we have either read a valid machine ID, in which case
+we continue, or we haven't, in which case we exit anyway.
+
+RHEL-only: feature
+
+Resolves: RHEL-50672
+---
+ src/kernel-install/kernel-install.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/kernel-install/kernel-install.in b/src/kernel-install/kernel-install.in
+index 440df56f54..105bd54acc 100755
+--- a/src/kernel-install/kernel-install.in
++++ b/src/kernel-install/kernel-install.in
+@@ -159,7 +159,7 @@ if [ -z "$MACHINE_ID" ] && [ -f /etc/machine-info ]; then
+         log_verbose "machine-id $MACHINE_ID acquired from /etc/machine-info"
+ fi
+ if [ -z "$MACHINE_ID" ] && [ -s /etc/machine-id ]; then
+-    read -r MACHINE_ID </etc/machine-id
++    read -r MACHINE_ID </etc/machine-id || :
+     if [ "$MACHINE_ID" = "uninitialized" ]; then
+         unset MACHINE_ID
+     elif [ {{ '${#MACHINE_ID}' }} -ne 32 ]; then

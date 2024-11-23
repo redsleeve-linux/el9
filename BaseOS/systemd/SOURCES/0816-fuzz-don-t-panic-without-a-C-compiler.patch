@@ -1,0 +1,67 @@
+From b327fbd6f262d2bbf2f20136d94a8edd28e43be8 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 15 Nov 2023 11:41:45 +0100
+Subject: [PATCH] fuzz: don't panic without a C++ compiler
+
+meson's `cpp_args` option is defined only if it detects a C++ compiler,
+otherwise we get an error:
+
+../test/fuzz/meson.build:56:28: ERROR: Tried to access unknown option 'cpp_args'.
+
+[fsumsal]: make the RHS of the c_args/cpp_args expressions lists as
+well, since it's a meson 0.60.0 feature (we ship 0.63.3 in RHEL 9 ATTOW,
+but our baseline is 0.53.2, so meson rightfully complains about it;
+bumping it would require several other commits to be pulled in as well
+with lots of conflicts)
+
+(cherry picked from commit a3d3bf559c9789c8abe96d931fc5d3f109886db9)
+
+Related: RHEL-30372
+---
+ test/fuzz/meson.build | 12 ++++++++++--
+ tools/meson-build.sh  |  2 +-
+ 2 files changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/test/fuzz/meson.build b/test/fuzz/meson.build
+index 813c2cfb8b..8637c66458 100644
+--- a/test/fuzz/meson.build
++++ b/test/fuzz/meson.build
+@@ -31,6 +31,14 @@ endforeach
+ 
+ ############################################################
+ 
++
++fuzz_c_args = get_option('c_args')
++if cxx_cmd != ''
++        fuzz_cpp_args = get_option('cpp_args')
++else
++        fuzz_cpp_args = []
++endif
++
+ sanitize_address_undefined = custom_target(
+         'sanitize-address-undefined-fuzzers',
+         output : 'sanitize-address-undefined-fuzzers',
+@@ -38,8 +46,8 @@ sanitize_address_undefined = custom_target(
+                    project_source_root,
+                    '@OUTPUT@',
+                    'fuzzers',
+-                   ' '.join(get_option('c_args') + '-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION'),
+-                   ' '.join(get_option('cpp_args') + '-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION'),
++                   ' '.join(fuzz_c_args + ['-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION']),
++                   ' '.join(fuzz_cpp_args + ['-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION']),
+                    '-Dfuzz-tests=true -Db_lundef=false -Db_sanitize=address,undefined --optimization=@0@ @1@ -Dskip-deps=@2@'.format(
+                            get_option('optimization'),
+                            get_option('werror') ? '--werror' : '',
+diff --git a/tools/meson-build.sh b/tools/meson-build.sh
+index 311b778f0a..2366df23f9 100755
+--- a/tools/meson-build.sh
++++ b/tools/meson-build.sh
+@@ -9,7 +9,7 @@ c_args="${4:?}"
+ cpp_args="${5:?}"
+ options="${6:?}"
+ CC="${7:?}"
+-CXX="${8:?}"
++CXX="$8"
+ 
+ if [ ! -f "$builddir/build.ninja" ]; then
+     # shellcheck disable=SC2086

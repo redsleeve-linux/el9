@@ -1,0 +1,30 @@
+From c16e8cd675313ceaf557465334b5e6c80ac1aa48 Mon Sep 17 00:00:00 2001
+From: Daan De Meyer <daan.j.demeyer@gmail.com>
+Date: Wed, 28 Aug 2024 14:08:30 +0200
+Subject: [PATCH] ukify: Skip test on architectures without UEFI
+
+(cherry picked from commit 5121f7c45b37afca53c89f42123b1dd6a04fa80f)
+
+Related: RHEL-56019
+---
+ src/ukify/test/test_ukify.py | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/src/ukify/test/test_ukify.py b/src/ukify/test/test_ukify.py
+index f233e25cf7..d6a9350398 100755
+--- a/src/ukify/test/test_ukify.py
++++ b/src/ukify/test/test_ukify.py
+@@ -35,6 +35,13 @@ except ImportError as e:
+ sys.path.append(os.path.dirname(__file__) + '/..')
+ import ukify
+ 
++# Skip if we're running on an architecture that does not use UEFI.
++try:
++    ukify.guess_efi_arch()
++except ValueError as e:
++    print(str(e), file=sys.stderr)
++    sys.exit(77)
++
+ build_root = os.getenv('PROJECT_BUILD_ROOT')
+ arg_tools = ['--tools', build_root] if build_root else []
+ 

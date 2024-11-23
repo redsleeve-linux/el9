@@ -1,0 +1,92 @@
+From 00cb3bb597a6fb8bf825b79c96945bd051669080 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Fri, 30 Jun 2023 19:01:17 +0100
+Subject: [PATCH] unit: add "cvm" option for ConditionSecurity
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The "cvm" flag indicates whether the OS is running inside a confidential
+virtual machine.
+
+Related: https://github.com/systemd/systemd/issues/27604
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit 95d043b1595e7684163714aae46822b18cef0f65)
+
+Related: RHEL-50651
+---
+ man/systemd.unit.xml      | 4 ++--
+ src/shared/condition.c    | 3 +++
+ src/test/test-condition.c | 9 +++++++++
+ 3 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/man/systemd.unit.xml b/man/systemd.unit.xml
+index d41909bcc6..afa4aea5c9 100644
+--- a/man/systemd.unit.xml
++++ b/man/systemd.unit.xml
+@@ -1393,8 +1393,8 @@
+           security technology is enabled on the system. Currently, the recognized values are
+           <literal>selinux</literal>, <literal>apparmor</literal>, <literal>tomoyo</literal>,
+           <literal>ima</literal>, <literal>smack</literal>, <literal>audit</literal>,
+-          <literal>uefi-secureboot</literal> and <literal>tpm2</literal>. The test may be negated by prepending
+-          an exclamation mark.</para>
++          <literal>uefi-secureboot</literal>, <literal>tpm2</literal> and <literal>cvm</literal>.
++          The test may be negated by prepending an exclamation mark.</para>
+           </listitem>
+         </varlistentry>
+ 
+diff --git a/src/shared/condition.c b/src/shared/condition.c
+index a23d6a3e45..e736b78d8a 100644
+--- a/src/shared/condition.c
++++ b/src/shared/condition.c
+@@ -23,6 +23,7 @@
+ #include "cgroup-util.h"
+ #include "compare-operator.h"
+ #include "condition.h"
++#include "confidential-virt.h"
+ #include "cpu-set-util.h"
+ #include "creds-util.h"
+ #include "efi-api.h"
+@@ -694,6 +695,8 @@ static int condition_test_security(Condition *c, char **env) {
+                 return is_efi_secure_boot();
+         if (streq(c->parameter, "tpm2"))
+                 return has_tpm2();
++        if (streq(c->parameter, "cvm"))
++                return detect_confidential_virtualization() > 0;
+ 
+         return false;
+ }
+diff --git a/src/test/test-condition.c b/src/test/test-condition.c
+index b16e8047c6..0894c4bfdb 100644
+--- a/src/test/test-condition.c
++++ b/src/test/test-condition.c
+@@ -13,6 +13,7 @@
+ #include "audit-util.h"
+ #include "cgroup-util.h"
+ #include "condition.h"
++#include "confidential-virt.h"
+ #include "cpu-set-util.h"
+ #include "efi-loader.h"
+ #include "env-util.h"
+@@ -784,6 +785,12 @@ TEST(condition_test_security) {
+         assert_se(condition);
+         assert_se(condition_test(condition, environ) == is_efi_secure_boot());
+         condition_free(condition);
++
++        condition = condition_new(CONDITION_SECURITY, "cvm", false, false);
++        assert_se(condition);
++        assert_se(condition_test(condition, environ) ==
++                  (detect_confidential_virtualization() != CONFIDENTIAL_VIRTUALIZATION_NONE));
++        condition_free(condition);
+ }
+ 
+ TEST(print_securities) {
+@@ -795,6 +802,8 @@ TEST(print_securities) {
+         log_info("SMACK: %s", yes_no(mac_smack_use()));
+         log_info("Audit: %s", yes_no(use_audit()));
+         log_info("UEFI secure boot: %s", yes_no(is_efi_secure_boot()));
++        log_info("Confidential VM: %s", yes_no
++                 (detect_confidential_virtualization() != CONFIDENTIAL_VIRTUALIZATION_NONE));
+         log_info("-------------------------------------------");
+ }
+ 

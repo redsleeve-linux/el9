@@ -1,0 +1,30 @@
+From aa18f6b2b2cad6977f39e1e323705e2b11a7829c Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekleta@redhat.com>
+Date: Thu, 23 May 2024 17:35:51 +0200
+Subject: [PATCH] libsystemd: link with '-z nodelete'
+
+We want to avoid reinitialization of our global variables with static
+storage duration in case we get dlopened multiple times by the same
+application. This will avoid potential resource leaks that could have
+happened otherwise (e.g. leaking journal socket fd).
+
+(cherry picked from commit 9d8533b7152daf792356c601516b57c6412d3e52)
+
+Resolves: RHEL-6589
+---
+ meson.build | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/meson.build b/meson.build
+index 843d823e3e..274e43ba9e 100644
+--- a/meson.build
++++ b/meson.build
+@@ -2004,6 +2004,8 @@ libsystemd = shared_library(
+         version : libsystemd_version,
+         include_directories : libsystemd_includes,
+         link_args : ['-shared',
++                     # Make sure our library is never deleted from memory, so that our open logging fds don't leak on dlopen/dlclose cycles.
++                     '-z', 'nodelete',
+                      '-Wl,--version-script=' + libsystemd_sym_path],
+         link_with : [libbasic,
+                      libbasic_gcrypt,

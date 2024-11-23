@@ -1,0 +1,60 @@
+From 3e5091146213b8b4abf0c5f5577a98b9da9c9f2c Mon Sep 17 00:00:00 2001
+From: Jan Macku <jamacku@redhat.com>
+Date: Tue, 11 Jun 2024 15:21:14 +0200
+Subject: [PATCH] ci: define `runas` function inline
+
+We don't have `test/units/util.sh`, which provides the definition of `runas` function in the RHEL9 codebase
+
+Also partially backport https://github.com/systemd/systemd/commit/c7bf1959d7580e1b7e918b75f852b3bf3fb6eb3c
+
+rhel-only
+
+Related: RHEL-35703
+---
+ test/test-functions        | 5 +++--
+ test/units/testsuite-65.sh | 7 +++++++
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/test/test-functions b/test/test-functions
+index 947f8589c5..52eff07510 100644
+--- a/test/test-functions
++++ b/test/test-functions
+@@ -206,6 +206,7 @@ BASICTOOLS=(
+     seq
+     setfattr
+     setfont
++    setpriv
+     setsid
+     sfdisk
+     sh
+@@ -2616,10 +2617,10 @@ inst_binary() {
+     # Same as above, but we need to wrap certain libraries unconditionally
+     #
+     # chown, getent, login, su, useradd, userdel - dlopen()s (not only) systemd's PAM modules
+-    # ls, stat - pulls in nss_systemd with certain options (like ls -l) when
++    # ls, setpriv, stat - pulls in nss_systemd with certain options (like ls -l) when
+     #            nsswitch.conf uses [SUCCESS=merge] (like on Arch Linux)
+     # tar - called by machinectl in TEST-25
+-    if get_bool "$IS_BUILT_WITH_ASAN" && [[ "$bin" =~ /(chown|getent|login|id|ls|stat|su|tar|useradd|userdel)$ ]]; then
++    if get_bool "$IS_BUILT_WITH_ASAN" && [[ "$bin" =~ /(chown|getent|login|id|ls|setpriv|stat|su|tar|useradd|userdel)$ ]]; then
+         wrap_binary=1
+     fi
+ 
+diff --git a/test/units/testsuite-65.sh b/test/units/testsuite-65.sh
+index f416194922..0fb143bde7 100755
+--- a/test/units/testsuite-65.sh
++++ b/test/units/testsuite-65.sh
+@@ -6,6 +6,13 @@ set -eux
+ # shellcheck source=test/units/assert.sh
+ . "$(dirname "$0")"/assert.sh
+ 
++# On RHEL9 we don't have the `util.sh` script, so we need to define the `runas` function here
++runas() {
++    local userid="${1:?}"
++    shift
++    XDG_RUNTIME_DIR=/run/user/"$(id -u "$userid")" setpriv --reuid="$userid" --init-groups "$@"
++}
++
+ systemctl log-level debug
+ export SYSTEMD_LOG_LEVEL=debug
+ 

@@ -1,0 +1,66 @@
+commit 6687a6e3f962759536a8019d31c68c1009ccd6eb
+Author: Sergey Kolosov <skolosov@redhat.com>
+Date:   Wed Apr 10 17:58:04 2024 +0200
+
+    libsupport: Add xgetpeername
+
+    The patch adds redirections for getpeername.
+
+    Reviewed-by: Arjun Shankar <arjun@redhat.com>
+
+diff -Nrup a/support/Makefile b/support/Makefile
+--- a/support/Makefile	2024-05-19 23:27:12.379362736 -0400
++++ b/support/Makefile	2024-05-19 23:29:28.668182089 -0400
+@@ -126,6 +126,7 @@ libsupport-routines = \
+   xfork \
+   xftruncate \
+   xgetline \
++  xgetpeername \
+   xgetsockname \
+   xlisten \
+   xlseek \
+diff -Nrup a/support/xgetpeername.c b/support/xgetpeername.c
+--- a/support/xgetpeername.c	1969-12-31 19:00:00.000000000 -0500
++++ b/support/xgetpeername.c	2024-05-19 23:30:31.852561947 -0400
+@@ -0,0 +1,30 @@
++/* getpeername with error checking.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xsocket.h>
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <support/check.h>
++
++void
++xgetpeername (int fd, struct sockaddr *sa, socklen_t *plen)
++{
++  if (getpeername (fd, sa, plen) != 0)
++    FAIL_EXIT1 ("getpeername (%d): %m", fd);
++}
+diff -Nrup a/support/xsocket.h b/support/xsocket.h
+--- a/support/xsocket.h	2021-08-01 21:33:43.000000000 -0400
++++ b/support/xsocket.h	2024-05-19 23:31:24.541878715 -0400
+@@ -26,6 +26,7 @@
+ int xsocket (int, int, int);
+ void xsetsockopt (int, int, int, const void *, socklen_t);
+ void xgetsockname (int, struct sockaddr *, socklen_t *);
++void xgetpeername (int, struct sockaddr *, socklen_t *);
+ void xconnect (int, const struct sockaddr *, socklen_t);
+ void xbind (int, const struct sockaddr *, socklen_t);
+ void xlisten (int, int);

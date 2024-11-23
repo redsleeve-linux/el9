@@ -1,0 +1,130 @@
+From 57d14d938573b0670d3205bf27a416bcf18424d4 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 28 Feb 2024 12:15:44 +0100
+Subject: [PATCH] mkosi: make sure we build & use RHEL 9 stuff
+
+- drop Hyperscale SIG repos, so we don't pull in btrfs stuff
+- use XFS for rootfs
+- install gnu-efi headers, since RHEL 9 sd-boot still requires it
+
+RHEL-only
+
+Related: RHEL-27512
+---
+ mkosi.conf                                          |  2 +-
+ mkosi.conf.d/10-centos.conf                         |  2 +-
+ mkosi.images/base/mkosi.build.chroot                |  8 ++++++++
+ .../base/mkosi.conf.d/10-centos-fedora.conf         |  2 ++
+ .../usr/lib/systemd/system-preset/00-mkosi.preset   | 13 ++++---------
+ .../system/mkosi.conf.d/10-centos-fedora.conf       |  1 +
+ .../mkosi.extra/usr/lib/repart.d/20-root.conf       |  3 +--
+ 7 files changed, 18 insertions(+), 13 deletions(-)
+
+diff --git a/mkosi.conf b/mkosi.conf
+index 9ec4faf122..d5cde391dd 100644
+--- a/mkosi.conf
++++ b/mkosi.conf
+@@ -23,7 +23,7 @@ KernelCommandLineExtra=systemd.crash_shell
+                        systemd.log_level=debug
+                        systemd.log_ratelimit_kmsg=0
+                        systemd.journald.forward_to_console
+-                       systemd.journald.max_level_console=warning
++                       systemd.journald.max_level_console=info
+                        # Disable the kernel's ratelimiting on userspace logging to kmsg.
+                        printk.devkmsg=on
+                        # Make sure /sysroot is mounted rw in the initrd.
+diff --git a/mkosi.conf.d/10-centos.conf b/mkosi.conf.d/10-centos.conf
+index ae2706c791..a740548d46 100644
+--- a/mkosi.conf.d/10-centos.conf
++++ b/mkosi.conf.d/10-centos.conf
+@@ -7,4 +7,4 @@ Distribution=centos
+ @Release=9
+ Repositories=epel
+              epel-next
+-             hyperscale-packages-main
++             crb
+diff --git a/mkosi.images/base/mkosi.build.chroot b/mkosi.images/base/mkosi.build.chroot
+index ba0c92eef2..3427d0e241 100755
+--- a/mkosi.images/base/mkosi.build.chroot
++++ b/mkosi.images/base/mkosi.build.chroot
+@@ -106,6 +106,14 @@ if [ ! -f "$BUILDDIR"/build.ninja ]; then
+         -D xenctrl="$([[ "$ID" =~ debian|ubuntu|fedora|opensuse ]] && echo true || echo false)"
+         -D libiptc="$([[ "$ID" =~ debian|ubuntu ]] && echo true || echo false)"
+         -D libcryptsetup-plugins="$([[ "$ID" = "centos" ]] && [[ "$VERSION" = "8" ]] && echo false || echo true)"
++        # Necessary on RHEL 9 to build sd-boot stuff
++        -D gnu-efi=true
++        # Disable stuff we don't build on RHEL
++        -D timesyncd=false
++        -D homed=false
++        -D userdb=false
++        -D portabled=false
++        -D networkd=false
+     )
+ 
+     # On debian-like systems the library directory is not /usr/lib64 but /usr/lib/<arch-triplet>/.
+diff --git a/mkosi.images/base/mkosi.conf.d/10-centos-fedora.conf b/mkosi.images/base/mkosi.conf.d/10-centos-fedora.conf
+index d7a135a5c0..b25b7b4185 100644
+--- a/mkosi.images/base/mkosi.conf.d/10-centos-fedora.conf
++++ b/mkosi.images/base/mkosi.conf.d/10-centos-fedora.conf
+@@ -29,6 +29,8 @@ BuildPackages=
+         bpftool
+         docbook-xsl
+         findutils
++        gnu-efi-compat # Necessary for sd-boot on RHEL 9
++        gnu-efi-devel # Necessary for sd-boot on RHEL 9
+         libgcrypt-devel # CentOS Stream 8 libgcrypt-devel doesn't ship a pkg-config file.
+         libxslt
+         pam-devel
+diff --git a/mkosi.images/base/mkosi.extra/usr/lib/systemd/system-preset/00-mkosi.preset b/mkosi.images/base/mkosi.extra/usr/lib/systemd/system-preset/00-mkosi.preset
+index 070af4c67a..42e5af3ec9 100644
+--- a/mkosi.images/base/mkosi.extra/usr/lib/systemd/system-preset/00-mkosi.preset
++++ b/mkosi.images/base/mkosi.extra/usr/lib/systemd/system-preset/00-mkosi.preset
+@@ -9,16 +9,9 @@ disable dnsmasq.service
+ disable isc-dhcp-server.service
+ disable isc-dhcp-server6.service
+ 
+-# Pulled in via dracut-network by kexec-tools on Fedora.
+-disable NetworkManager*
+-
+ # Make sure dbus-broker is started by default on Debian/Ubuntu.
+ enable dbus-broker.service
+ 
+-# systemd-networkd is disabled by default on Fedora so make sure it is enabled.
+-enable systemd-networkd.service
+-enable systemd-networkd-wait-online.service
+-
+ # We install dnf in some images but it's only going to be used rarely,
+ # so let's not have dnf create its cache.
+ disable dnf-makecache.*
+@@ -26,5 +19,7 @@ disable dnf-makecache.*
+ # We have journald to receive audit data so let's make sure we're not running auditd as well
+ disable auditd.service
+ 
+-# systemd-timesyncd is not enabled by default in the default systemd preset so enable it here instead.
+-enable systemd-timesyncd.service
++# We don't ship sd-networkd on RHEL 9, so replace it with NM
++disable systemd-networkd.service
++disable systemd-networkd-wait-online.service
++enable NetworkManager*
+diff --git a/mkosi.images/system/mkosi.conf.d/10-centos-fedora.conf b/mkosi.images/system/mkosi.conf.d/10-centos-fedora.conf
+index 871186d5ca..23cfd4ecc0 100644
+--- a/mkosi.images/system/mkosi.conf.d/10-centos-fedora.conf
++++ b/mkosi.images/system/mkosi.conf.d/10-centos-fedora.conf
+@@ -31,3 +31,4 @@ Packages=
+         python3dist(pytest)
+         quota
+         vim-common
++        vim
+diff --git a/mkosi.images/system/mkosi.extra/usr/lib/repart.d/20-root.conf b/mkosi.images/system/mkosi.extra/usr/lib/repart.d/20-root.conf
+index 71eb9e38c4..31e8313263 100644
+--- a/mkosi.images/system/mkosi.extra/usr/lib/repart.d/20-root.conf
++++ b/mkosi.images/system/mkosi.extra/usr/lib/repart.d/20-root.conf
+@@ -2,7 +2,6 @@
+ 
+ [Partition]
+ Type=root
+-Format=btrfs
++Format=xfs
+ SizeMinBytes=1G
+-Subvolumes=/home /var
+ MakeDirectories=/home /var
