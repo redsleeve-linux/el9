@@ -1,0 +1,264 @@
+From 706f06c39a9e08a4708a53722429d13ae4069c2f Mon Sep 17 00:00:00 2001
+From: Josh Stone <jistone@redhat.com>
+Date: Wed, 1 May 2024 15:25:26 -0700
+Subject: [PATCH] Use an explicit x86-64 cpu in tests that are sensitive to it
+
+There are a few tests that depend on some target features **not** being
+enabled by default, and usually they are correct with the default x86-64
+target CPU. However, in downstream builds we have modified the default
+to fit our distros -- `x86-64-v2` in RHEL 9 and `x86-64-v3` in RHEL 10
+-- and the latter especially trips tests that expect not to have AVX.
+
+These cases are few enough that we can just set them back explicitly.
+---
+ tests/assembly/simd-intrinsic-mask-reduce.rs  |  1 +
+ tests/assembly/x86_64-floating-point-clamp.rs |  2 +-
+ .../codegen/target-feature-inline-closure.rs  |  2 +-
+ tests/ui/asm/x86_64/target-feature-attr.rs    |  1 +
+ .../ui/asm/x86_64/target-feature-attr.stderr  |  8 +++---
+ .../const-eval/const_fn_target_feature.rs     |  2 +-
+ .../rfc-2396-target_feature-11/safe-calls.rs  |  1 +
+ .../safe-calls.stderr                         | 28 +++++++++----------
+ tests/ui/sse2.rs                              |  4 +--
+ 9 files changed, 26 insertions(+), 23 deletions(-)
+
+diff --git a/tests/assembly/simd-intrinsic-mask-reduce.rs b/tests/assembly/simd-intrinsic-mask-reduce.rs
+index 763401755fad..0d77fc410511 100644
+--- a/tests/assembly/simd-intrinsic-mask-reduce.rs
++++ b/tests/assembly/simd-intrinsic-mask-reduce.rs
+@@ -1,6 +1,7 @@
+ // verify that simd mask reductions do not introduce additional bit shift operations
+ //@ revisions: x86 aarch64
+ //@ [x86] compile-flags: --target=x86_64-unknown-linux-gnu -C llvm-args=-x86-asm-syntax=intel
++//@ [x86] compile-flags: -C target-cpu=x86-64
+ //@ [x86] needs-llvm-components: x86
+ //@ [aarch64] compile-flags: --target=aarch64-unknown-linux-gnu
+ //@ [aarch64] needs-llvm-components: aarch64
+diff --git a/tests/assembly/x86_64-floating-point-clamp.rs b/tests/assembly/x86_64-floating-point-clamp.rs
+index 4a72a7f44fa0..b963aee35590 100644
+--- a/tests/assembly/x86_64-floating-point-clamp.rs
++++ b/tests/assembly/x86_64-floating-point-clamp.rs
+@@ -2,7 +2,7 @@
+ // so check to make sure that's what it's actually emitting.
+ 
+ //@ assembly-output: emit-asm
+-//@ compile-flags: --crate-type=lib -O -C llvm-args=-x86-asm-syntax=intel
++//@ compile-flags: --crate-type=lib -O -C llvm-args=-x86-asm-syntax=intel -C target-cpu=x86-64
+ //@ only-x86_64
+ //@ ignore-sgx
+ 
+diff --git a/tests/codegen/target-feature-inline-closure.rs b/tests/codegen/target-feature-inline-closure.rs
+index 88bd413a8707..20bb4e66ff21 100644
+--- a/tests/codegen/target-feature-inline-closure.rs
++++ b/tests/codegen/target-feature-inline-closure.rs
+@@ -1,5 +1,5 @@
+ //@ only-x86_64
+-//@ compile-flags: -Copt-level=3
++//@ compile-flags: -Copt-level=3 -Ctarget-cpu=x86-64
+ 
+ #![crate_type = "lib"]
+ #![feature(target_feature_11)]
+diff --git a/tests/ui/asm/x86_64/target-feature-attr.rs b/tests/ui/asm/x86_64/target-feature-attr.rs
+index 820be132ef79..51829be15065 100644
+--- a/tests/ui/asm/x86_64/target-feature-attr.rs
++++ b/tests/ui/asm/x86_64/target-feature-attr.rs
+@@ -1,4 +1,5 @@
+ //@ only-x86_64
++//@ compile-flags: -C target-cpu=x86-64
+ 
+ #![feature(avx512_target_feature)]
+ 
+diff --git a/tests/ui/asm/x86_64/target-feature-attr.stderr b/tests/ui/asm/x86_64/target-feature-attr.stderr
+index c852726ee7ff..1a9962732cfb 100644
+--- a/tests/ui/asm/x86_64/target-feature-attr.stderr
++++ b/tests/ui/asm/x86_64/target-feature-attr.stderr
+@@ -1,23 +1,23 @@
+ error: register class `ymm_reg` requires the `avx` target feature
+-  --> $DIR/target-feature-attr.rs:18:40
++  --> $DIR/target-feature-attr.rs:19:40
+    |
+ LL |     asm!("vaddps {2:y}, {0:y}, {1:y}", in(ymm_reg) x, in(ymm_reg) y, lateout(ymm_reg) x);
+    |                                        ^^^^^^^^^^^^^
+ 
+ error: register class `ymm_reg` requires the `avx` target feature
+-  --> $DIR/target-feature-attr.rs:18:55
++  --> $DIR/target-feature-attr.rs:19:55
+    |
+ LL |     asm!("vaddps {2:y}, {0:y}, {1:y}", in(ymm_reg) x, in(ymm_reg) y, lateout(ymm_reg) x);
+    |                                                       ^^^^^^^^^^^^^
+ 
+ error: register class `ymm_reg` requires the `avx` target feature
+-  --> $DIR/target-feature-attr.rs:18:70
++  --> $DIR/target-feature-attr.rs:19:70
+    |
+ LL |     asm!("vaddps {2:y}, {0:y}, {1:y}", in(ymm_reg) x, in(ymm_reg) y, lateout(ymm_reg) x);
+    |                                                                      ^^^^^^^^^^^^^^^^^^
+ 
+ error: register class `kreg` requires at least one of the following target features: avx512bw, avx512f
+-  --> $DIR/target-feature-attr.rs:33:23
++  --> $DIR/target-feature-attr.rs:34:23
+    |
+ LL |     asm!("/* {0} */", in(kreg) x);
+    |                       ^^^^^^^^^^
+diff --git a/tests/ui/consts/const-eval/const_fn_target_feature.rs b/tests/ui/consts/const-eval/const_fn_target_feature.rs
+index b56b68a57958..d0de9d8d7a34 100644
+--- a/tests/ui/consts/const-eval/const_fn_target_feature.rs
++++ b/tests/ui/consts/const-eval/const_fn_target_feature.rs
+@@ -1,5 +1,5 @@
+ //@ only-x86_64
+-//@ compile-flags:-C target-feature=+ssse3
++//@ compile-flags: -C target-cpu=x86-64 -C target-feature=+ssse3
+ 
+ #![crate_type = "lib"]
+ 
+diff --git a/tests/ui/rfcs/rfc-2396-target_feature-11/safe-calls.rs b/tests/ui/rfcs/rfc-2396-target_feature-11/safe-calls.rs
+index c73b8d7e4d29..6fb0688008e6 100644
+--- a/tests/ui/rfcs/rfc-2396-target_feature-11/safe-calls.rs
++++ b/tests/ui/rfcs/rfc-2396-target_feature-11/safe-calls.rs
+@@ -1,4 +1,5 @@
+ //@ only-x86_64
++//@ compile-flags: -C target-cpu=x86-64
+ 
+ #![feature(target_feature_11)]
+ 
+diff --git a/tests/ui/rfcs/rfc-2396-target_feature-11/safe-calls.stderr b/tests/ui/rfcs/rfc-2396-target_feature-11/safe-calls.stderr
+index d9d7e297f8e9..fed3da6594cb 100644
+--- a/tests/ui/rfcs/rfc-2396-target_feature-11/safe-calls.stderr
++++ b/tests/ui/rfcs/rfc-2396-target_feature-11/safe-calls.stderr
+@@ -1,5 +1,5 @@
+ error[E0133]: call to function `sse2` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:25:5
++  --> $DIR/safe-calls.rs:26:5
+    |
+ LL |     sse2();
+    |     ^^^^^^ call to function with `#[target_feature]`
+@@ -8,7 +8,7 @@ LL |     sse2();
+    = note: the sse2 target feature being enabled in the build configuration does not remove the requirement to list it in `#[target_feature]`
+ 
+ error[E0133]: call to function `avx_bmi2` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:27:5
++  --> $DIR/safe-calls.rs:28:5
+    |
+ LL |     avx_bmi2();
+    |     ^^^^^^^^^^ call to function with `#[target_feature]`
+@@ -16,7 +16,7 @@ LL |     avx_bmi2();
+    = help: in order for the call to be safe, the context requires the following additional target features: avx and bmi2
+ 
+ error[E0133]: call to function `Quux::avx_bmi2` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:29:5
++  --> $DIR/safe-calls.rs:30:5
+    |
+ LL |     Quux.avx_bmi2();
+    |     ^^^^^^^^^^^^^^^ call to function with `#[target_feature]`
+@@ -24,7 +24,7 @@ LL |     Quux.avx_bmi2();
+    = help: in order for the call to be safe, the context requires the following additional target features: avx and bmi2
+ 
+ error[E0133]: call to function `avx_bmi2` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:35:5
++  --> $DIR/safe-calls.rs:36:5
+    |
+ LL |     avx_bmi2();
+    |     ^^^^^^^^^^ call to function with `#[target_feature]`
+@@ -32,7 +32,7 @@ LL |     avx_bmi2();
+    = help: in order for the call to be safe, the context requires the following additional target features: avx and bmi2
+ 
+ error[E0133]: call to function `Quux::avx_bmi2` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:37:5
++  --> $DIR/safe-calls.rs:38:5
+    |
+ LL |     Quux.avx_bmi2();
+    |     ^^^^^^^^^^^^^^^ call to function with `#[target_feature]`
+@@ -40,7 +40,7 @@ LL |     Quux.avx_bmi2();
+    = help: in order for the call to be safe, the context requires the following additional target features: avx and bmi2
+ 
+ error[E0133]: call to function `sse2` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:43:5
++  --> $DIR/safe-calls.rs:44:5
+    |
+ LL |     sse2();
+    |     ^^^^^^ call to function with `#[target_feature]`
+@@ -49,7 +49,7 @@ LL |     sse2();
+    = note: the sse2 target feature being enabled in the build configuration does not remove the requirement to list it in `#[target_feature]`
+ 
+ error[E0133]: call to function `avx_bmi2` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:45:5
++  --> $DIR/safe-calls.rs:46:5
+    |
+ LL |     avx_bmi2();
+    |     ^^^^^^^^^^ call to function with `#[target_feature]`
+@@ -57,7 +57,7 @@ LL |     avx_bmi2();
+    = help: in order for the call to be safe, the context requires the following additional target feature: bmi2
+ 
+ error[E0133]: call to function `Quux::avx_bmi2` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:47:5
++  --> $DIR/safe-calls.rs:48:5
+    |
+ LL |     Quux.avx_bmi2();
+    |     ^^^^^^^^^^^^^^^ call to function with `#[target_feature]`
+@@ -65,7 +65,7 @@ LL |     Quux.avx_bmi2();
+    = help: in order for the call to be safe, the context requires the following additional target feature: bmi2
+ 
+ error[E0133]: call to function `sse2` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:54:5
++  --> $DIR/safe-calls.rs:55:5
+    |
+ LL |     sse2();
+    |     ^^^^^^ call to function with `#[target_feature]`
+@@ -74,7 +74,7 @@ LL |     sse2();
+    = note: the sse2 target feature being enabled in the build configuration does not remove the requirement to list it in `#[target_feature]`
+ 
+ error[E0133]: call to function `sse2` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:58:15
++  --> $DIR/safe-calls.rs:59:15
+    |
+ LL | const _: () = sse2();
+    |               ^^^^^^ call to function with `#[target_feature]`
+@@ -83,7 +83,7 @@ LL | const _: () = sse2();
+    = note: the sse2 target feature being enabled in the build configuration does not remove the requirement to list it in `#[target_feature]`
+ 
+ error[E0133]: call to function `sse2_and_fxsr` with `#[target_feature]` is unsafe and requires unsafe function or block
+-  --> $DIR/safe-calls.rs:61:15
++  --> $DIR/safe-calls.rs:62:15
+    |
+ LL | const _: () = sse2_and_fxsr();
+    |               ^^^^^^^^^^^^^^^ call to function with `#[target_feature]`
+@@ -92,7 +92,7 @@ LL | const _: () = sse2_and_fxsr();
+    = note: the fxsr and sse2 target features being enabled in the build configuration does not remove the requirement to list them in `#[target_feature]`
+ 
+ error: call to function `sse2` with `#[target_feature]` is unsafe and requires unsafe block (error E0133)
+-  --> $DIR/safe-calls.rs:68:5
++  --> $DIR/safe-calls.rs:69:5
+    |
+ LL |     sse2();
+    |     ^^^^^^ call to function with `#[target_feature]`
+@@ -101,12 +101,12 @@ LL |     sse2();
+    = help: in order for the call to be safe, the context requires the following additional target feature: sse2
+    = note: the sse2 target feature being enabled in the build configuration does not remove the requirement to list it in `#[target_feature]`
+ note: an unsafe function restricts its caller, but its body is safe by default
+-  --> $DIR/safe-calls.rs:67:1
++  --> $DIR/safe-calls.rs:68:1
+    |
+ LL | unsafe fn needs_unsafe_block() {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ note: the lint level is defined here
+-  --> $DIR/safe-calls.rs:64:8
++  --> $DIR/safe-calls.rs:65:8
+    |
+ LL | #[deny(unsafe_op_in_unsafe_fn)]
+    |        ^^^^^^^^^^^^^^^^^^^^^^
+diff --git a/tests/ui/sse2.rs b/tests/ui/sse2.rs
+index fa6d79713b4b..c203ca2716ff 100644
+--- a/tests/ui/sse2.rs
++++ b/tests/ui/sse2.rs
+@@ -20,6 +20,6 @@ fn main() {
+                 "SSE2 was not detected as available on an x86 platform");
+     }
+     // check a negative case too -- allowed on x86, but not enabled by default
+-    assert!(cfg!(not(target_feature = "avx2")),
+-            "AVX2 shouldn't be detected as available by default on any platform");
++    assert!(cfg!(not(target_feature = "avx512f")),
++            "AVX512 shouldn't be detected as available by default on any platform");
+ }
+-- 
+2.44.0
+

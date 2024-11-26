@@ -1,4 +1,4 @@
-From df0d6f1d8b46db82d7599ca8eff6e8f844cf52f2 Mon Sep 17 00:00:00 2001
+From 2b99134e2884fa56bcab6d360885ec5421048e66 Mon Sep 17 00:00:00 2001
 From: Josh Stone <jistone@redhat.com>
 Date: Thu, 28 Sep 2023 18:14:28 -0700
 Subject: [PATCH 1/2] bootstrap: allow disabling target self-contained
@@ -11,12 +11,12 @@ Subject: [PATCH 1/2] bootstrap: allow disabling target self-contained
  4 files changed, 22 insertions(+)
 
 diff --git a/config.example.toml b/config.example.toml
-index e5df28a49af6..2fcd8b8cb057 100644
+index f94553dd63f7..5ec969c80a37 100644
 --- a/config.example.toml
 +++ b/config.example.toml
-@@ -807,6 +807,11 @@ change-id = 116881
- # target triples containing `-none`, `nvptx`, `switch`, or `-uefi`.
- #no-std = <platform-specific> (bool)
+@@ -869,6 +869,11 @@
+ # argument as the test binary.
+ #runner = <none> (string)
  
 +# Copy libc and CRT objects into the target lib/self-contained/ directory.
 +# Enabled by default on `musl`, `wasi`, and `windows-gnu` targets. Other
@@ -27,10 +27,10 @@ index e5df28a49af6..2fcd8b8cb057 100644
  # Distribution options
  #
 diff --git a/src/bootstrap/src/core/build_steps/compile.rs b/src/bootstrap/src/core/build_steps/compile.rs
-index 7021a9543582..11555c65ca87 100644
+index e927b491c71e..69a80d01d6b9 100644
 --- a/src/bootstrap/src/core/build_steps/compile.rs
 +++ b/src/bootstrap/src/core/build_steps/compile.rs
-@@ -302,6 +302,10 @@ fn copy_self_contained_objects(
+@@ -356,6 +356,10 @@ fn copy_self_contained_objects(
      compiler: &Compiler,
      target: TargetSelection,
  ) -> Vec<(PathBuf, DependencyType)> {
@@ -42,18 +42,18 @@ index 7021a9543582..11555c65ca87 100644
      t!(fs::create_dir_all(&libdir_self_contained));
      let mut target_deps = vec![];
 diff --git a/src/bootstrap/src/core/config/config.rs b/src/bootstrap/src/core/config/config.rs
-index 0a9175aa3ea5..a2e028b25036 100644
+index 3e1bc9a9acdd..5e24a9cc4f60 100644
 --- a/src/bootstrap/src/core/config/config.rs
 +++ b/src/bootstrap/src/core/config/config.rs
-@@ -533,6 +533,7 @@ pub struct Target {
-     pub wasi_root: Option<PathBuf>,
-     pub qemu_rootfs: Option<PathBuf>,
+@@ -586,6 +586,7 @@ pub struct Target {
+     pub runner: Option<String>,
      pub no_std: bool,
+     pub codegen_backends: Option<Vec<String>>,
 +    pub self_contained: bool,
  }
  
  impl Target {
-@@ -541,6 +542,9 @@ pub fn from_triple(triple: &str) -> Self {
+@@ -594,6 +595,9 @@ pub fn from_triple(triple: &str) -> Self {
          if triple.contains("-none") || triple.contains("nvptx") || triple.contains("switch") {
              target.no_std = true;
          }
@@ -63,15 +63,15 @@ index 0a9175aa3ea5..a2e028b25036 100644
          target
      }
  }
-@@ -1051,6 +1055,7 @@ struct TomlTarget {
-         wasi_root: Option<String> = "wasi-root",
-         qemu_rootfs: Option<String> = "qemu-rootfs",
+@@ -1150,6 +1154,7 @@ struct TomlTarget {
          no_std: Option<bool> = "no-std",
+         codegen_backends: Option<Vec<String>> = "codegen-backends",
+         runner: Option<String> = "runner",
 +        self_contained: Option<bool> = "self-contained",
      }
  }
  
-@@ -1600,6 +1605,9 @@ fn get_table(option: &str) -> Result<TomlConfig, toml::de::Error> {
+@@ -1870,6 +1875,9 @@ fn get_table(option: &str) -> Result<TomlConfig, toml::de::Error> {
                  if let Some(s) = cfg.no_std {
                      target.no_std = s;
                  }
@@ -82,10 +82,10 @@ index 0a9175aa3ea5..a2e028b25036 100644
                  target.cxx = cfg.cxx.map(PathBuf::from);
                  target.ar = cfg.ar.map(PathBuf::from);
 diff --git a/src/bootstrap/src/lib.rs b/src/bootstrap/src/lib.rs
-index 33b8f1a7ce72..f36e53187576 100644
+index 5ed6b357e20a..c23b21d65713 100644
 --- a/src/bootstrap/src/lib.rs
 +++ b/src/bootstrap/src/lib.rs
-@@ -1335,6 +1335,11 @@ fn no_std(&self, target: TargetSelection) -> Option<bool> {
+@@ -1348,6 +1348,11 @@ fn no_std(&self, target: TargetSelection) -> Option<bool> {
          self.config.target_config.get(&target).map(|t| t.no_std)
      }
  
@@ -98,5 +98,5 @@ index 33b8f1a7ce72..f36e53187576 100644
      /// and `remote-test-server` binaries.
      fn remote_tested(&self, target: TargetSelection) -> bool {
 -- 
-2.41.0
+2.44.0
 

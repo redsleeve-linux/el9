@@ -6,8 +6,8 @@
 
 Summary:              Red Hat specific rpm configuration files
 Name:                 redhat-rpm-config
-Version:              207
-Release:              1%{?dist}.redsleeve
+Version:              208
+Release:              1%{?dist}
 # No version specified.
 License:              GPL+
 URL:                  https://src.fedoraproject.org/rpms/redhat-rpm-config
@@ -88,8 +88,6 @@ Source801:            forge.lua
 # Documentation
 Source900:            buildflags.md
 
-
-Patch1: macros-arm.patch
 
 BuildArch:            noarch
 BuildRequires:        perl-generators
@@ -175,8 +173,6 @@ mkdir -p %{buildroot}%{_rpmluadir}/fedora/{rpm,srpm}
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora common.lua
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
 
-patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
-
 # This trigger is used to decide which version of the annobin plugin for gcc
 # should be used.  See comments in the script for full details.
 #
@@ -259,15 +255,12 @@ patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
 %doc buildflags.md
 
 %changelog
-* Fri May 31 2024 Jacco Ligthart <jaco@redsleeve.org> 207-1.el9.redsleeve
-- patched for sha1 build-ids on arm when using clang
-- cherry picked from https://src.fedoraproject.org/rpms/redhat-rpm-config/pull-request/155
-
-* Tue Apr 02 2024 Release Engineering <releng@rockylinux.org> - 207-1
+* Tue Nov 12 2024 Release Engineering <releng@rockylinux.org> - 208-1
 - Add Rocky to dist.sh
 
-* Tue Apr 02 2024 Release Engineering <releng@rockylinux.org> - 207-1
-- Change Red Hat to Rocky and add Rocky to dist.sh
+* Fri Jul 19 2024 Michal Domonkos <mdomonko@redhat.com> - 208-1
+- brp-mangle-shebangs: Strip env flags when mangling shebangs (RHEL-26961)
+- Fix automatic soname requires on non-versioned symlink targets (RHEL-28767)
 
 * Thu Jan 18 2024 Miro Hrončok <mhroncok@redhat.com> - 207-1
 - brp-python-bytecompile: Pass --invalidation-mode=timestamp to compileall

@@ -1,0 +1,46 @@
+From d7fae9f17479c44dae68483d457fc3fbb58c4b83 Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Wed, 25 Aug 2021 15:57:36 -0400
+Subject: [PATCH 04/17] operator>>(istream&, char(&)[N]) eofbit fixes are not
+ available in DTS
+
+The upstream commit on 2020-08--6:
+  Do not set eofbit eagerly in operator>>(istream&, char(&)[N])
+    https://gcc.gnu.org/git/?p=gcc.git;a=commitdiff;h=4e39f563c0cd25401f689c2093cb8c13692156ef
+altered the behaviour of std::istream symbols defined in libstdc++.so,
+but with DTS you get the old definitions from the system libstdc++.so
+
+Hence this patch tweaks the new tests to avoid failing when run against
+the system libstdc++.so
+---
+ .../21_strings/basic_string/inserters_extractors/char/13.cc      | 1 -
+ .../21_strings/basic_string/inserters_extractors/wchar_t/13.cc   | 1 -
+ 2 files changed, 2 deletions(-)
+
+diff --git a/libstdc++-v3/testsuite/21_strings/basic_string/inserters_extractors/char/13.cc b/libstdc++-v3/testsuite/21_strings/basic_string/inserters_extractors/char/13.cc
+index a25d8a93d..7d85e6ead 100644
+--- a/libstdc++-v3/testsuite/21_strings/basic_string/inserters_extractors/char/13.cc
++++ b/libstdc++-v3/testsuite/21_strings/basic_string/inserters_extractors/char/13.cc
+@@ -29,7 +29,6 @@ test01()
+   std::string buf;
+   in.width(4);
+   in >> buf;
+-  VERIFY( !in.eof() ); // should stop after reading 4 chars
+   VERIFY( buf == str );
+ }
+ 
+diff --git a/libstdc++-v3/testsuite/21_strings/basic_string/inserters_extractors/wchar_t/13.cc b/libstdc++-v3/testsuite/21_strings/basic_string/inserters_extractors/wchar_t/13.cc
+index f15294a44..fa5fe3d4a 100644
+--- a/libstdc++-v3/testsuite/21_strings/basic_string/inserters_extractors/wchar_t/13.cc
++++ b/libstdc++-v3/testsuite/21_strings/basic_string/inserters_extractors/wchar_t/13.cc
+@@ -29,7 +29,6 @@ test01()
+   std::wstring buf;
+   in.width(4);
+   in >> buf;
+-  VERIFY( !in.eof() ); // should stop after reading 4 chars
+   VERIFY( buf == str );
+ }
+ 
+-- 
+2.31.1
+

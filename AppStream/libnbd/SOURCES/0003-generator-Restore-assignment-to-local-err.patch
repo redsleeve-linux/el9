@@ -1,0 +1,43 @@
+From ff5ee9308e66fe9fd19ea578623c4540f44942d6 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Thu, 25 Jul 2024 13:39:28 +0100
+Subject: [PATCH] generator: Restore assignment to local 'err'
+
+I accidentally removed the assignment of local variable 'err' along
+these paths in commit cf49a49adc ("generator: Print full error in
+handle_reply_error").
+
+Fixes: commit cf49a49adc8abc8c917437db7461ed9956583877
+(cherry picked from commit e75d20b9e19143b1bd0d232fc49cb2e0287f824a)
+---
+ generator/states-newstyle-opt-list.c         | 1 +
+ generator/states-newstyle-opt-meta-context.c | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/generator/states-newstyle-opt-list.c b/generator/states-newstyle-opt-list.c
+index 6605ee0a..48559574 100644
+--- a/generator/states-newstyle-opt-list.c
++++ b/generator/states-newstyle-opt-list.c
+@@ -129,6 +129,7 @@ STATE_MACHINE {
+     }
+     debug (h, "unexpected response, possibly the server does not "
+            "support listing exports");
++    err = ENOTSUP;
+     break;
+   }
+ 
+diff --git a/generator/states-newstyle-opt-meta-context.c b/generator/states-newstyle-opt-meta-context.c
+index 3945411e..699e24aa 100644
+--- a/generator/states-newstyle-opt-meta-context.c
++++ b/generator/states-newstyle-opt-meta-context.c
+@@ -272,6 +272,7 @@ STATE_MACHINE {
+     if (opt == h->opt_current) {
+       debug (h, "unexpected response, possibly the server does not "
+              "support meta contexts");
++      err = ENOTSUP;
+       CALL_CALLBACK (h->opt_cb.completion, &err);
+       nbd_internal_free_option (h);
+       SET_NEXT_STATE (%.NEGOTIATING);
+-- 
+2.43.0
+

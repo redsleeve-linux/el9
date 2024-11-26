@@ -1,8 +1,8 @@
 
 Name:    annobin
 Summary: Annotate and examine compiled binary files
-Version: 12.31
-Release: 2%{?dist}.redsleeve
+Version: 12.65
+Release: 1%{?dist}
 License: GPL-3.0-or-later AND LGPL-2.0-or-later AND (GPL-2.0-or-later WITH GCC-exception-2.0) AND (LGPL-2.0-or-later WITH GCC-exception-2.0) AND GFDL-1.3-or-later 
 # Maintainer: nickc@redhat.com
 # Web Page: https://sourceware.org/annobin/
@@ -62,7 +62,7 @@ Source: https://nickc.fedorapeople.org/%{annobin_sources}
 %global annobin_source_dir %{_usrsrc}/annobin
 
 # Insert patches here, if needed.  Eg:
-Patch01: annobin-strings-no-attach.patch
+# Patch01: annobin-strings-no-attach.patch
 
 #---------------------------------------------------------------------------------
 
@@ -248,9 +248,8 @@ CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS" CXXFLAGS="$CFLAGS" %configure ${CONFIG_ARGS}
 export CLANG_TARGET_OPTIONS="-fcf-protection"
 %endif
 
-%ifarch armv6hl
-# FIXME: There should be a better way to do this.
-export CLANG_TARGET_OPTIONS="-march=armv6 -mfpu=vfp -mfloat-abi=hard"
+%ifnarch riscv64
+export CLANG_TARGET_OPTIONS="$CLANG_TARGET_OPTIONS -flto"
 %endif
 
 %make_build
@@ -371,8 +370,61 @@ exit $res
 #---------------------------------------------------------------------------------
 
 %changelog
-* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 12.31-2.redsleeve
-- added compiler flags for armv6
+* Mon Jul 29 2024 Nick Clifton  <nickc@redhat.com> - 12.65-1
+- Annocheck: Fix recording arguments for later re-use.  (RHEL-50802)
+- Spec File: Add LTO option to clang and llvm plugin builds.  (RHEL-50796)
+
+* Fri Jul 26 2024 Nick Clifron  <nickc@redhat.com> - 12.64-1
+- Rebase to 12.64, allowing build with LLVM 18.  (RHEL-49953)
+- Retire: annobin-strings-no-attach.patch
+- Annocheck: Add improvements to the builtby utility.
+- Annocheck: Add support for ADA binaries.
+- Annocheck: Add support for binaries built from more than two high level source languages.
+- Annocheck: Add support for object files containing no executable code.
+- Annocheck: Do not FAIL LLVM compiled binaries that have not been built with sanitize-cfi and/or sanitize-safe-stack.
+- Annocheck: Add support for Fortran binaries.
+- Annocheck: Add heuristic for detecting parts of the CGO runtime library.
+- Annocheck: Add improvements for handling Clang runtime binaries.
+- Annocheck: Add tweaks for mixed Rust/C binaries.  (#2284605)
+- Annocheck: Add more glibc source file names.
+- Annocheck: Skip GAPS test for GO binaries.  (RHEL-36308)
+- Annocheck: Remove some false positives for Rust binaries.  (#2280239)
+- Annocheck: Defer passing the branch protection test until all notes have been checked.
+- GCC Plugin: Add extra code for detecting the branch protection setting.  (RHEL-35958)
+- Annocheck: Add OpenSSL Engine test.  (PTG-319)
+- Annocheck: Test for gaps even when only one note is present.
+- Annocheck: Skip AArch64 branch protection test for GO binaries.
+- GCC Plugin: Disable active check for -Wimplicit-int for non-C sources.  (#2275884)
+- Annocheck: Ignore stack checks for AMD GPU binaries.
+- Annocheck: Do not produce FAIL result for i686 binaries in the RHEL-10 profile.
+- Annocheck: Test for __stack_chk_guard being writeable.
+- Annocheck: Update heuristics for detecting glibc code in executables.  (RHEL-30579)
+- Clang & LLVM Plugins: Allow environment to override fortification level.  (RHEL-30579)
+- Annocheck: Improve detection of -mbranch-protection option.
+- Clang Plugin: Add global-file-syms option.
+- LLVM Plugin: Add global-file-syms option.
+- Plugins: Add support for ANNOBIN environment variable.
+- GCC Plugin: Fix bug extracing the value of target specific command line options.
+- Configure: Remove check for FrontendPluginRegistry.h header as it is stored in a non-standard location on Debian systems.
+- Debuginfod test: Allow for the libdwfl library silently contacting the debuginfod server.
+- LLVM Plugin: Use llvm-config to get the correct paths and options for building executables.
+- Clang Plugin: Likewise.
+- Enable silent rules for most building.
+- Annocheck: Correctly extract DWARF attributes from DT_REL files.
+- Annocheck: Improve heuristics for locating debug info files.  (#2267097)
+- Configure: Harmonize configure options.    
+- Clang Plugin: Fix building with Clang 18.  (#31414)
+- GCC Plugin: Add support for MIPS specific target functions.
+- GCC Plugin: Use .dc.a for address expressions in 64-bit ELF format notes.
+- Annocheck: Improve heuristic for skipping LTO and FORTIFY tests.  (#2264000)
+- Annocheck: Also skip property note test for i686 binaries. (#2258571)
+- Annocheck: Also skip the entry point test for i686 binaries. (#2258571)
+- GCC Plugin: Do not use section groups with string format notes.
+- Annocheck: Disable cf-protection test for i686 architecture. (#2258571)
+- Annocheck: Improve detection of FIPS compliant GO binaries.
+- GCC Plugin: Fix recording of the -Wimplicit-int and -Wimplicit-function-declaration warnings.  Add active checks for when they are deliberately disabled.
+- Tests: Fix implicit-values test so that it will compile with gcc 14+.
+- GCC Plugin: Add support for -fhardended.
 
 * Wed Jan 17 2024 Nick Clifron  <nickc@redhat.com> - 12.31-2
 - GCC Plugin: Do not use section groups with string notes.  (RHEL-21772)

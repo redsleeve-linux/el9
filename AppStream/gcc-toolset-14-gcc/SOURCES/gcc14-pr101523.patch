@@ -1,0 +1,76 @@
+Based on Richi's patch:
+<https://gcc.gnu.org/pipermail/gcc-patches/2024-April/648725.html>
+~~
+The following avoids re-walking and re-combining the instructions
+between i2 and i3 when the pattern of i2 doesn't change.
+
+Bootstrap and regtest running ontop of a reversal of
+r14-9692-g839bc42772ba7a.
+
+It brings down memory use from 9GB to 400MB and compile-time from
+80s to 3.5s.  r14-9692-g839bc42772ba7a does better in both metrics
+but has shown code generation regressions across architectures.
+
+	PR rtl-optimization/101523
+	* combine.cc (try_combine): When the pattern of i2 doesn't
+	change do not re-start combining at i2 or an earlier insn which
+	had links or notes added.
+~~
+But, since the patch affects code generation (for instance,
+libstdc++-v3/src/c++17/floating_from_chars.o), we limit the bailing out
+only when I2 hasn't been changed 1000x.  I've measured how many times
+at most is I2 unchanged during a bootstrap + regtest.
+x86: 134
+aarch64: 736 (gimple-match-1.cc)
+s390x: 635 (gimple-match-*)
+ppc64le: 620 (gimple-match-*)
+while certain pathological testcases trigger it more than 10,000 times.
+With the limit in place this patch doesn't affect common code.
+
+--- a/gcc/combine.cc
++++ b/gcc/combine.cc
+@@ -92,6 +92,11 @@ along with GCC; see the file COPYING3.  If not see
+ #include "function-abi.h"
+ #include "rtlanal.h"
+ 
++/* Number of times I2 didn't change in try_combine.  Used to prevent a
++   combinatorial explosion.  */
++
++static int combine_i2_unchanged;
++
+ /* Number of attempts to combine instructions in this function.  */
+ 
+ static int combine_attempts;
+@@ -1127,6 +1132,7 @@ combine_instructions (rtx_insn *f, unsigned int nregs)
+     return false;
+ 
+   combine_attempts = 0;
++  combine_i2_unchanged = 0;
+   combine_merges = 0;
+   combine_extras = 0;
+   combine_successes = 0;
+@@ -4196,6 +4201,10 @@ try_combine (rtx_insn *i3, rtx_insn *i2, rtx_insn *i1, rtx_insn *i0,
+       adjust_for_new_dest (i3);
+     }
+ 
++  bool i2_i2_unchanged = false;
++  if (rtx_equal_p (newi2pat, PATTERN (i2)))
++    i2_i2_unchanged = true;
++
+   /* We now know that we can do this combination.  Merge the insns and
+      update the status of registers and LOG_LINKS.  */
+ 
+@@ -4762,6 +4771,13 @@ try_combine (rtx_insn *i3, rtx_insn *i2, rtx_insn *i1, rtx_insn *i0,
+   combine_successes++;
+   undo_commit ();
+ 
++  if (i2_i2_unchanged)
++    {
++      if (combine_i2_unchanged == 1000)
++	return i3;
++      ++combine_i2_unchanged;
++    }
++
+   rtx_insn *ret = newi2pat ? i2 : i3;
+   if (added_links_insn && DF_INSN_LUID (added_links_insn) < DF_INSN_LUID (ret))
+     ret = added_links_insn;

@@ -1,15 +1,27 @@
+# i686 no longer has any kind of OCaml compiler, not even ocamlc.
+%ifnarch %{ix86}
+%global have_ocaml 1
+%endif
+
+# No ublk in RHEL 9.
+%if !0%{?rhel}
+%global have_ublk 1
+%endif
+
+# No nbd.ko in RHEL 9.
+%if !0%{?rhel}
+%global have_nbd_ko 1
+%endif
+
 # If we should verify tarball signature with GPGv2.
 %global verify_tarball_signature 1
 
-# If there are patches which touch autotools files, set this to 1.
-%global patches_touch_autotools 1
-
 # The source directory.
-%global source_directory 1.18-stable
+%global source_directory 1.20-stable
 
 Name:           libnbd
-Version:        1.18.1
-Release:        4%{?dist}.redsleeve
+Version:        1.20.2
+Release:        2%{?dist}
 Summary:        NBD client library in userspace
 
 License:        LGPL-2.0-or-later AND BSD-3-Clause
@@ -26,29 +38,20 @@ Source2:       libguestfs.keyring
 Source3:        copy-patches.sh
 
 # Patches are stored in the upstream repository:
-# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.4/
+# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.5/
 
-# Patches.
-Patch0001:     0001-generator-Fix-assertion-in-ext-mode-BLOCK_STATUS-CVE.patch
-Patch0002:     0002-docs-Fix-incorrect-xref-in-libnbd-release-notes-for-.patch
-Patch0003:     0003-tests-Check-behavior-of-nbd_set_strict_mode-STRICT_A.patch
-Patch0004:     0004-build-Move-to-minimum-gnutls-3.5.18.patch
-Patch0005:     0005-lib-crypto.c-Check-server-certificate-even-when-usin.patch
-Patch0006:     0006-lib-crypto.c-Allow-CA-verification-even-if-h-hostnam.patch
-Patch0007:     0007-interop-Pass-DCERTS-and-DPSK-as-strings.patch
-Patch0008:     0008-interop-Add-DEXPECT_FAIL-1-where-we-expect-the-test-.patch
-Patch0009:     0009-interop-Test-interop-with-a-bad-system-CA.patch
-Patch0010:     0010-lib-uri.c-Allow-tls-verify-peer-to-be-overridden-in-.patch
-Patch0011:     0011-docs-security-Add-link-to-TLS-server-certificate-che.patch
-Patch0012:     0012-docs-libnbd-security.pod-Assign-CVE-2024-7383.patch
-
-%if 0%{patches_touch_autotools}
-BuildRequires: autoconf, automake, libtool
-%endif
+Patch0001:     0001-generator-Print-full-error-in-handle_reply_error.patch
+Patch0002:     0002-lib-Don-t-overwrite-error-in-nbd_opt_-go-info.patch
+Patch0003:     0003-generator-Restore-assignment-to-local-err.patch
+Patch0004:     0004-generator-states-newstyle.c-Quote-untrusted-string-f.patch
+Patch0005:     0005-generator-states-newstyle.c-Don-t-sign-extend-escape.patch
 
 %if 0%{verify_tarball_signature}
 BuildRequires:  gnupg2
 %endif
+
+# For rebuilding autoconf cruft.
+BuildRequires:  autoconf, automake, libtool
 
 # For the core library.
 BuildRequires:  gcc
@@ -60,7 +63,7 @@ BuildRequires:  libxml2-devel
 # For nbdfuse.
 BuildRequires:  fuse3, fuse3-devel
 
-%if !0%{?rhel}
+%if 0%{?have_ublk}
 # For nbdublk
 BuildRequires:  liburing-devel >= 2.2
 BuildRequires:  ubdsrv-devel >= 1.0-3.rc6
@@ -69,7 +72,7 @@ BuildRequires:  ubdsrv-devel >= 1.0-3.rc6
 # For the Python 3 bindings.
 BuildRequires:  python3-devel
 
-%ifnarch %{ix86}
+%if 0%{?have_ocaml}
 # For the OCaml bindings.
 BuildRequires:  ocaml
 BuildRequires:  ocaml-findlib-devel
@@ -88,7 +91,7 @@ BuildRequires:  gcc-c++
 BuildRequires:  gnutls-utils
 BuildRequires:  iproute
 BuildRequires:  jq
-%if !0%{?rhel}
+%if 0%{?have_nbd_ko}
 BuildRequires:  nbd
 %endif
 BuildRequires:  util-linux
@@ -97,7 +100,7 @@ BuildRequires:  util-linux
 # nbdkit for i686.  These are only needed for the test suite so make
 # them optional.  This reduces our test exposure on 32 bit platforms,
 # although there is still Fedora/armv7 and some upstream testing.
-%ifnarch %{ix86} %{arm}
+%ifnarch %{ix86}
 BuildRequires:  qemu-img
 BuildRequires:  nbdkit
 BuildRequires:  nbdkit-data-plugin
@@ -109,7 +112,7 @@ BuildRequires:  nbdkit-sh-plugin
 BuildRequires:  nbdkit-sparse-random-plugin
 %endif
 
-%ifnarch %{ix86}
+%if 0%{?have_ocaml}
 # The OCaml runtime system does not provide this symbol
 %global __ocaml_requires_opts -x Stdlib__Callback
 %endif
@@ -145,7 +148,7 @@ Requires:       %{name}%{?_isa} = %{version}-%{release}
 This package contains development headers for %{name}.
 
 
-%ifnarch %{ix86}
+%if 0%{?have_ocaml}
 %package -n ocaml-%{name}
 Summary:        OCaml language bindings for %{name}
 Requires:       %{name}%{?_isa} = %{version}-%{release}
@@ -191,7 +194,7 @@ Recommends:     fuse3
 This package contains FUSE support for %{name}.
 
 
-%if !0%{?rhel}
+%if 0%{?have_ublk}
 %package -n nbdublk
 Summary:        Userspace NBD block device
 Requires:       %{name}%{?_isa} = %{version}-%{release}
@@ -224,25 +227,30 @@ for %{name}.
 %{gpgverify} --keyring='%{SOURCE2}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
 %endif
 %autosetup -p1
-%if 0%{patches_touch_autotools}
 autoreconf -i
-%endif
 
 
 %build
 %configure \
     --disable-static \
     --with-tls-priority=@LIBNBD,SYSTEM \
+    --with-bash-completions \
     PYTHON=%{__python3} \
     --enable-python \
-%ifnarch %{ix86}
+%if 0%{?have_ocaml}
     --enable-ocaml \
 %else
     --disable-ocaml \
 %endif
     --enable-fuse \
     --disable-golang \
-    --disable-rust
+    --disable-rust \
+%if 0%{?have_ublk}
+    --enable-ublk \
+%else
+    --disable-ublk \
+%endif
+    %{nil}
 
 make %{?_smp_mflags}
 
@@ -256,14 +264,9 @@ find $RPM_BUILD_ROOT -name '*.la' -delete
 # Delete the golang man page since we're not distributing the bindings.
 rm $RPM_BUILD_ROOT%{_mandir}/man3/libnbd-golang.3*
 
-%ifarch %{ix86}
+%if !0%{?have_ocaml}
 # Delete the OCaml man page on i686.
 rm $RPM_BUILD_ROOT%{_mandir}/man3/libnbd-ocaml.3*
-%endif
-
-%if 0%{?rhel}
-# Delete nbdublk on RHEL.
-rm $RPM_BUILD_ROOT%{_datadir}/bash-completion/completions/nbdublk
 %endif
 
 
@@ -276,12 +279,6 @@ function skip_test ()
         chmod +x "$f"
     done
 }
-
-# interop/structured-read.sh fails with the old qemu-nbd in Fedora 29,
-# so disable it there.
-%if 0%{?fedora} <= 29
-skip_test interop/structured-read.sh
-%endif
 
 # interop/interop-qemu-storage-daemon.sh fails in RHEL 9 because of
 # this bug in qemu:
@@ -333,7 +330,7 @@ make %{?_smp_mflags} check || {
 %{_mandir}/man3/nbd_*.3*
 
 
-%ifnarch %{ix86}
+%if 0%{?have_ocaml}
 %files -n ocaml-%{name}
 %dir %{_libdir}/ocaml/nbd
 %{_libdir}/ocaml/nbd/META
@@ -372,7 +369,7 @@ make %{?_smp_mflags} check || {
 %{_mandir}/man1/nbdfuse.1*
 
 
-%if !0%{?rhel}
+%if 0%{?have_ublk}
 %files -n nbdublk
 %{_bindir}/nbdublk
 %{_mandir}/man1/nbdublk.1*
@@ -392,12 +389,17 @@ make %{?_smp_mflags} check || {
 
 
 %changelog
-* Fri Sep 27 2024 Jacco Ligthart <jacco@redsleeve.org> - 1.18.1-4.redsleeve
-- fixed builddeps for arm
+* Fri Jul 26 2024 Richard W.M. Jones <rjones@redhat.com> - 1.20.2-2
+- Rebase to libnbd 1.20.2
+  resolves: RHEL-31883
+- Fix multiple flaws in TLS server certificate checking
+  resolves: RHEL-49801
+- Print full NBD error from server
+  resolves: RHEL-50665
 
-* Tue Aug 27 2024 Richard W.M. Jones <rjones@redhat.com> - 1.18.1-4
-- Fix CVE-2024-7383 NBD server improper certificate validation
-  resolves: RHEL-52730
+* Tue Apr 09 2024 Miroslav Rezanina <mrezanin@redhat.com> - 1.20.0-1
+- Rebase to 1.20.0
+  resolves: RHEL-31883
 
 * Mon Nov 13 2023 Eric Blake <eblake@redhat.com> - 1.18.1-3
 - Backport unit test of recent libnbd API addition

@@ -1,0 +1,27 @@
+From 75a528c97a3960e993d378ab3bedd37be3620975 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Alejandro=20S=C3=A1ez?= <asm@redhat.com>
+Date: Tue, 30 Jul 2024 17:05:39 +0200
+Subject: [PATCH] Avoid using rpm.isdefined function
+
+isdefined is in rpm >= 4.17.0 but RHEL 9.5 is a little bit behind that
+version so if fails. This should behave similar.
+---
+ rpm/lua/srpm/go.lua | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/rpm/lua/srpm/go.lua b/rpm/lua/srpm/go.lua
+index 01a43a1..4f8011b 100644
+--- a/rpm/lua/srpm/go.lua
++++ b/rpm/lua/srpm/go.lua
+@@ -69,7 +69,7 @@ local function rpmname(goipath, compatid)
+   -- numbers on top of it, keep a - prefix before version strings
+   result = string.gsub(result, "%-v([%.%d]+)$", "-%1")
+   result = string.gsub(result, "%-v([%.%d]+%-)", "-%1")
+-  if rpm.isdefined('go_use_new_versioning') then
++  if rpm.expand("%{?go_use_new_versioning}") ~= "" then
+     -- according to the guidelines, if the base package name does not end with
+     -- a digit, the version MUST be directly appended to the package name with
+     -- no intervening separator.
+-- 
+2.45.2
+

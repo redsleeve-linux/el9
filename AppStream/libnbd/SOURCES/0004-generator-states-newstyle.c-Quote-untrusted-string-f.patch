@@ -1,0 +1,175 @@
+From 923357f49704d55cd74dc5334a12a7089825ff57 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Thu, 25 Jul 2024 13:25:34 +0100
+Subject: [PATCH] generator/states-newstyle.c: Quote untrusted string from the
+ server
+
+Updates: commit cf49a49adc8abc8c917437db7461ed9956583877
+(cherry picked from commit 5dbfc418cb6176102634acea2256b2335520159c)
+---
+ generator/states-newstyle.c | 124 ++++++++++++++++++++----------------
+ 1 file changed, 68 insertions(+), 56 deletions(-)
+
+diff --git a/generator/states-newstyle.c b/generator/states-newstyle.c
+index 6c7cc45c..8c483bd2 100644
+--- a/generator/states-newstyle.c
++++ b/generator/states-newstyle.c
+@@ -18,6 +18,7 @@
+ 
+ #include <assert.h>
+ 
++#include "ascii-ctype.h"
+ #include "internal.h"
+ 
+ /* Common code for parsing a reply to NBD_OPT_*. */
+@@ -88,80 +89,91 @@ prepare_for_reply_payload (struct nbd_handle *h, uint32_t opt)
+ static int
+ handle_reply_error (struct nbd_handle *h)
+ {
+-  uint32_t len;
+   uint32_t reply;
+-  char *msg = NULL;
++  uint32_t replylen;
++  FILE *fp;
++  char *s = NULL;
++  size_t len = 0;
++  int err = 0;
+ 
+-  len = be32toh (h->sbuf.or.option_reply.replylen);
+   reply = be32toh (h->sbuf.or.option_reply.reply);
+   if (!NBD_REP_IS_ERR (reply)) {
+     set_error (0, "handshake: unexpected option reply type %d", reply);
+     return -1;
+   }
+ 
++  replylen = be32toh (h->sbuf.or.option_reply.replylen);
+   assert (NBD_MAX_STRING < sizeof h->sbuf.or.payload);
+-  if (len > NBD_MAX_STRING) {
++  if (replylen > NBD_MAX_STRING) {
+     set_error (0, "handshake: option error string too long");
+     return -1;
+   }
+ 
+-  /* Decode expected errors into a nicer string.
+-   *
+-   * XXX Note this string comes directly from the server, and most
+-   * libnbd users simply print the error using 'fprintf'.  We really
+-   * ought to quote this string somehow, but we don't have a useful
+-   * function for that.
+-   */
+-  if (len > 0) {
+-    if (asprintf (&msg, ": %.*s",
+-                  (int)len, h->sbuf.or.payload.err_msg) == -1) {
+-      set_error (errno, "asprintf");
+-      return -1;
+-    }
++  /* Decode expected errors into a nicer string. */
++  fp = open_memstream (&s, &len);
++  if (fp == NULL) {
++    set_error (errno, "open_memstream");
++    return -1;
+   }
+ 
+   switch (reply) {
+   case NBD_REP_ERR_UNSUP:
+-    set_error (ENOTSUP, "the operation is not supported by the server%s",
+-               msg ? : "");
+-      break;
+-    case NBD_REP_ERR_POLICY:
+-      set_error (0, "server policy prevents the operation%s",
+-                 msg ? : "");
+-      break;
+-    case NBD_REP_ERR_PLATFORM:
+-      set_error (0, "the operation is not supported by the server platform%s",
+-                 msg ? : "");
+-      break;
+-    case NBD_REP_ERR_INVALID:
+-      set_error (EINVAL, "the server rejected this operation as invalid%s",
+-                 msg ? : "");
+-      break;
+-    case NBD_REP_ERR_TOO_BIG:
+-      set_error (EINVAL, "the operation is too large to process%s",
+-                 msg ? : "");
+-      break;
+-    case NBD_REP_ERR_TLS_REQD:
+-      set_error (ENOTSUP, "the server requires TLS encryption first%s",
+-                 msg ? : "");
+-      break;
+-    case NBD_REP_ERR_UNKNOWN:
+-      set_error (ENOENT, "the server has no export named '%s'%s",
+-                 h->export_name, msg ? : "");
+-      break;
+-    case NBD_REP_ERR_SHUTDOWN:
+-      set_error (ESHUTDOWN, "the server is shutting down%s",
+-                 msg ? : "");
+-      break;
+-    case NBD_REP_ERR_BLOCK_SIZE_REQD:
+-      set_error (EINVAL, "the server requires specific block sizes%s",
+-                 msg ? : "");
+-      break;
+-    default:
+-      set_error (0, "handshake: unknown reply from the server: 0x%" PRIx32 "%s",
+-                 reply, msg ? : "");
++    err = ENOTSUP;
++    fprintf (fp, "the operation is not supported by the server");
++    break;
++  case NBD_REP_ERR_POLICY:
++    fprintf (fp, "server policy prevents the operation");
++    break;
++  case NBD_REP_ERR_PLATFORM:
++    fprintf (fp, "the operation is not supported by the server platform");
++    break;
++  case NBD_REP_ERR_INVALID:
++    err = EINVAL;
++    fprintf (fp, "the server rejected this operation as invalid");
++    break;
++  case NBD_REP_ERR_TOO_BIG:
++    err = EINVAL;
++    fprintf (fp, "the operation is too large to process");
++    break;
++  case NBD_REP_ERR_TLS_REQD:
++    err = ENOTSUP;
++    fprintf (fp, "the server requires TLS encryption first");
++    break;
++  case NBD_REP_ERR_UNKNOWN:
++    err = ENOENT;
++    fprintf (fp, "the server has no export named '%s'", h->export_name);
++    break;
++  case NBD_REP_ERR_SHUTDOWN:
++    err = ESHUTDOWN;
++    fprintf (fp, "the server is shutting down");
++    break;
++  case NBD_REP_ERR_BLOCK_SIZE_REQD:
++    err = EINVAL;
++    fprintf (fp, "the server requires specific block sizes");
++    break;
++  default:
++    fprintf (fp, "handshake: unknown reply from the server: 0x%" PRIx32,
++             reply);
++  }
++
++  if (replylen > 0) {
++    /* Since this message comes from the server, take steps to quote it. */
++    uint32_t i;
++    const char *msg = h->sbuf.or.payload.err_msg;
++
++    fprintf (fp, ": ");
++    for (i = 0; i < replylen; ++i) {
++      if (ascii_isprint (msg[i]))
++        fputc (msg[i], fp);
++      else
++        fprintf (fp, "\\x%02x", msg[i]);
+     }
+-  free (msg);
++  }
++
++  fclose (fp);
++
++  set_error (err, "%s", s);
++  free (s);
+ 
+   return 0;
+ }
+-- 
+2.43.0
+

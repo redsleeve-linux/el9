@@ -1,0 +1,191 @@
+From 89f0e33f355681b7c5b1835a09c5fac93c08e71e Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Tue, 23 Jul 2024 17:22:12 +0100
+Subject: [PATCH] generator: Print full error in handle_reply_error
+
+Print the full error from the server during handshaking.  This
+modifies the contract of handle_reply_error so it calls set_error,
+which can be overridden by callers or ignored completely.
+
+(cherry picked from commit cf49a49adc8abc8c917437db7461ed9956583877)
+---
+ generator/states-newstyle-opt-go.c           | 32 +--------
+ generator/states-newstyle-opt-list.c         |  5 +-
+ generator/states-newstyle-opt-meta-context.c |  8 +--
+ generator/states-newstyle.c                  | 68 ++++++++++++++++++--
+ 4 files changed, 69 insertions(+), 44 deletions(-)
+
+diff --git a/generator/states-newstyle-opt-go.c b/generator/states-newstyle-opt-go.c
+index 5bc9a9ae..f6eb8afc 100644
+--- a/generator/states-newstyle-opt-go.c
++++ b/generator/states-newstyle-opt-go.c
+@@ -247,37 +247,9 @@ STATE_MACHINE {
+       SET_NEXT_STATE (%.DEAD);
+       return 0;
+     }
+-    /* Decode expected known errors into a nicer string */
+-    switch (reply) {
+-    case NBD_REP_ERR_UNSUP:
++    if (reply == NBD_REP_ERR_UNSUP)
+       assert (h->opt_current == NBD_OPT_INFO);
+-      set_error (ENOTSUP, "handshake: server lacks NBD_OPT_INFO support");
+-      break;
+-    case NBD_REP_ERR_POLICY:
+-    case NBD_REP_ERR_PLATFORM:
+-      set_error (0, "handshake: server policy prevents NBD_OPT_GO");
+-      break;
+-    case NBD_REP_ERR_INVALID:
+-    case NBD_REP_ERR_TOO_BIG:
+-      set_error (EINVAL, "handshake: server rejected NBD_OPT_GO as invalid");
+-      break;
+-    case NBD_REP_ERR_TLS_REQD:
+-      set_error (ENOTSUP, "handshake: server requires TLS encryption first");
+-      break;
+-    case NBD_REP_ERR_UNKNOWN:
+-      set_error (ENOENT, "handshake: server has no export named '%s'",
+-                 h->export_name);
+-      break;
+-    case NBD_REP_ERR_SHUTDOWN:
+-      set_error (ESHUTDOWN, "handshake: server is shutting down");
+-      break;
+-    case NBD_REP_ERR_BLOCK_SIZE_REQD:
+-      set_error (EINVAL, "handshake: server requires specific block sizes");
+-      break;
+-    default:
+-      set_error (0, "handshake: unknown reply from NBD_OPT_GO: 0x%" PRIx32,
+-                 reply);
+-    }
++
+     nbd_internal_reset_size_and_flags (h);
+     h->meta_valid = false;
+     err = nbd_get_errno () ? : ENOTSUP;
+diff --git a/generator/states-newstyle-opt-list.c b/generator/states-newstyle-opt-list.c
+index cdd4676e..6605ee0a 100644
+--- a/generator/states-newstyle-opt-list.c
++++ b/generator/states-newstyle-opt-list.c
+@@ -127,9 +127,8 @@ STATE_MACHINE {
+       SET_NEXT_STATE (%.DEAD);
+       return 0;
+     }
+-    err = ENOTSUP;
+-    set_error (err, "unexpected response, possibly the server does not "
+-               "support listing exports");
++    debug (h, "unexpected response, possibly the server does not "
++           "support listing exports");
+     break;
+   }
+ 
+diff --git a/generator/states-newstyle-opt-meta-context.c b/generator/states-newstyle-opt-meta-context.c
+index 6f016e66..3945411e 100644
+--- a/generator/states-newstyle-opt-meta-context.c
++++ b/generator/states-newstyle-opt-meta-context.c
+@@ -270,12 +270,8 @@ STATE_MACHINE {
+     }
+ 
+     if (opt == h->opt_current) {
+-      /* XXX Should we decode specific expected errors, like
+-       * REP_ERR_UNKNOWN to ENOENT or REP_ERR_TOO_BIG to ERANGE?
+-       */
+-      err = ENOTSUP;
+-      set_error (err, "unexpected response, possibly the server does not "
+-                 "support meta contexts");
++      debug (h, "unexpected response, possibly the server does not "
++             "support meta contexts");
+       CALL_CALLBACK (h->opt_cb.completion, &err);
+       nbd_internal_free_option (h);
+       SET_NEXT_STATE (%.NEGOTIATING);
+diff --git a/generator/states-newstyle.c b/generator/states-newstyle.c
+index 45893a8b..6c7cc45c 100644
+--- a/generator/states-newstyle.c
++++ b/generator/states-newstyle.c
+@@ -79,14 +79,18 @@ prepare_for_reply_payload (struct nbd_handle *h, uint32_t opt)
+   return 0;
+ }
+ 
+-/* Check an unexpected server reply. If it is an error, log any
+- * message from the server and return 0; otherwise, return -1.
++/* Check an unexpected server reply error.
++ *
++ * This calls set_error with a descriptive error message and returns
++ * 0.  Unless there is a further unexpected error while processing
++ * this error, in which case it calls set_error and returns -1.
+  */
+ static int
+ handle_reply_error (struct nbd_handle *h)
+ {
+   uint32_t len;
+   uint32_t reply;
++  char *msg = NULL;
+ 
+   len = be32toh (h->sbuf.or.option_reply.replylen);
+   reply = be32toh (h->sbuf.or.option_reply.reply);
+@@ -101,9 +105,63 @@ handle_reply_error (struct nbd_handle *h)
+     return -1;
+   }
+ 
+-  if (len > 0)
+-    debug (h, "handshake: server error message: %.*s", (int)len,
+-           h->sbuf.or.payload.err_msg);
++  /* Decode expected errors into a nicer string.
++   *
++   * XXX Note this string comes directly from the server, and most
++   * libnbd users simply print the error using 'fprintf'.  We really
++   * ought to quote this string somehow, but we don't have a useful
++   * function for that.
++   */
++  if (len > 0) {
++    if (asprintf (&msg, ": %.*s",
++                  (int)len, h->sbuf.or.payload.err_msg) == -1) {
++      set_error (errno, "asprintf");
++      return -1;
++    }
++  }
++
++  switch (reply) {
++  case NBD_REP_ERR_UNSUP:
++    set_error (ENOTSUP, "the operation is not supported by the server%s",
++               msg ? : "");
++      break;
++    case NBD_REP_ERR_POLICY:
++      set_error (0, "server policy prevents the operation%s",
++                 msg ? : "");
++      break;
++    case NBD_REP_ERR_PLATFORM:
++      set_error (0, "the operation is not supported by the server platform%s",
++                 msg ? : "");
++      break;
++    case NBD_REP_ERR_INVALID:
++      set_error (EINVAL, "the server rejected this operation as invalid%s",
++                 msg ? : "");
++      break;
++    case NBD_REP_ERR_TOO_BIG:
++      set_error (EINVAL, "the operation is too large to process%s",
++                 msg ? : "");
++      break;
++    case NBD_REP_ERR_TLS_REQD:
++      set_error (ENOTSUP, "the server requires TLS encryption first%s",
++                 msg ? : "");
++      break;
++    case NBD_REP_ERR_UNKNOWN:
++      set_error (ENOENT, "the server has no export named '%s'%s",
++                 h->export_name, msg ? : "");
++      break;
++    case NBD_REP_ERR_SHUTDOWN:
++      set_error (ESHUTDOWN, "the server is shutting down%s",
++                 msg ? : "");
++      break;
++    case NBD_REP_ERR_BLOCK_SIZE_REQD:
++      set_error (EINVAL, "the server requires specific block sizes%s",
++                 msg ? : "");
++      break;
++    default:
++      set_error (0, "handshake: unknown reply from the server: 0x%" PRIx32 "%s",
++                 reply, msg ? : "");
++    }
++  free (msg);
+ 
+   return 0;
+ }
+-- 
+2.43.0
+

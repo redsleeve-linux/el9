@@ -1,0 +1,53 @@
+From 3ede89bd19328c26bcd881b873cf4a766ae0da3a Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Wed, 25 Aug 2021 17:04:02 -0400
+Subject: [PATCH 05/17] Disable tests for PR libstdc++/79820 and PR
+ libstdc++/81751 under DTS
+
+Upstream commit 2017-08-09
+  PR libstdc++/81751 don't call fflush(NULL)
+    https://gcc.gnu.org/git/?p=gcc.git;a=commitdiff;h=04d07b61cb80fd97e98eb39451ff6a8675a63d90
+added these test cases as part of verifying the behavior of sys_open (that
+it resets errno and doesn't call fflush on NULL).
+
+These symbols are in the system stdlib when run from DTS and thus aren't
+fixed by the above change:
+
+ 1521: 000000000007c430    104 FUNC    GLOBAL DEFAULT       12 std::__basic_file<char>::sys_open(int, std::_Ios_Openmode)@@GLIBCXX_3.4
+ 2895: 000000000007c730     95 FUNC    GLOBAL DEFAULT       12 std::__basic_file<char>::sys_open(_IO_FILE*, std::_Ios_Openmode)@@GLIBCXX_3.4
+
+This patch disables the non-fixed assertions.
+---
+ libstdc++-v3/testsuite/ext/stdio_filebuf/char/79820.cc | 2 --
+ libstdc++-v3/testsuite/ext/stdio_filebuf/char/81751.cc | 1 -
+ 2 files changed, 3 deletions(-)
+
+diff --git a/libstdc++-v3/testsuite/ext/stdio_filebuf/char/79820.cc b/libstdc++-v3/testsuite/ext/stdio_filebuf/char/79820.cc
+index 278b99169..e2a8e3b3d 100644
+--- a/libstdc++-v3/testsuite/ext/stdio_filebuf/char/79820.cc
++++ b/libstdc++-v3/testsuite/ext/stdio_filebuf/char/79820.cc
+@@ -26,9 +26,7 @@ void
+ test01()
+ {
+   FILE* f = std::fopen("79820.txt", "w");
+-  errno = 127;
+   __gnu_cxx::stdio_filebuf<char> b(f, std::ios::out, BUFSIZ);
+-  VERIFY(errno == 127); // PR libstdc++/79820
+   b.close();
+   std::fclose(f);
+ }
+diff --git a/libstdc++-v3/testsuite/ext/stdio_filebuf/char/81751.cc b/libstdc++-v3/testsuite/ext/stdio_filebuf/char/81751.cc
+index 21aa06f78..6a231d7cf 100644
+--- a/libstdc++-v3/testsuite/ext/stdio_filebuf/char/81751.cc
++++ b/libstdc++-v3/testsuite/ext/stdio_filebuf/char/81751.cc
+@@ -31,7 +31,6 @@ test01()
+   FILE* in1 = std::fopen("81751.txt", "r");
+   __gnu_cxx::stdio_filebuf<char> buf1(in1, std::ios::in, BUFSIZ);
+   int c = buf1.sgetc();
+-  VERIFY( c == std::char_traits<char>::eof() ); // PR libstdc++/81751
+ 
+   std::fflush(out);
+   FILE* in2 = std::fopen("81751.txt", "r");
+-- 
+2.31.1
+

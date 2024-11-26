@@ -1,0 +1,212 @@
+From 49166c7dd925244f631277b4aa9ae4233f300884 Mon Sep 17 00:00:00 2001
+From: Nilstrieb <48135649+Nilstrieb@users.noreply.github.com>
+Date: Sat, 27 Jul 2024 15:08:11 +0200
+Subject: [PATCH] Disable jump threading of float equality
+
+Jump threading stores values as `u128` (`ScalarInt`) and does its
+comparisons for equality as integer comparisons.
+This works great for integers. Sadly, not everything is an integer.
+
+Floats famously have wonky equality semantcs, with `NaN!=NaN` and
+`0.0 == -0.0`. This does not match our beautiful integer bitpattern
+equality and therefore causes things to go horribly wrong.
+
+While jump threading could be extended to support floats by remembering
+that they're floats in the value state and handling them properly,
+it's signficantly easier to just disable it for now.
+
+(cherry picked from commit eca0a7e72346ba123ace318a0f9c28c57d990aeb)
+---
+ .../rustc_mir_transform/src/jump_threading.rs |  7 +++
+ ...ding.floats.JumpThreading.panic-abort.diff | 59 +++++++++++++++++++
+ ...ing.floats.JumpThreading.panic-unwind.diff | 59 +++++++++++++++++++
+ tests/mir-opt/jump_threading.rs               | 12 ++++
+ 4 files changed, 137 insertions(+)
+ create mode 100644 tests/mir-opt/jump_threading.floats.JumpThreading.panic-abort.diff
+ create mode 100644 tests/mir-opt/jump_threading.floats.JumpThreading.panic-unwind.diff
+
+diff --git a/compiler/rustc_mir_transform/src/jump_threading.rs b/compiler/rustc_mir_transform/src/jump_threading.rs
+index a458297210db..e2d2864ad2a0 100644
+--- a/compiler/rustc_mir_transform/src/jump_threading.rs
++++ b/compiler/rustc_mir_transform/src/jump_threading.rs
+@@ -493,6 +493,13 @@ fn process_assign(
+                     BinOp::Ne => ScalarInt::FALSE,
+                     _ => return None,
+                 };
++                if value.const_.ty().is_floating_point() {
++                    // Floating point equality does not follow bit-patterns.
++                    // -0.0 and NaN both have special rules for equality,
++                    // and therefore we cannot use integer comparisons for them.
++                    // Avoid handling them, though this could be extended in the future.
++                    return None;
++                }
+                 let value = value.const_.normalize(self.tcx, self.param_env).try_to_scalar_int()?;
+                 let conds = conditions.map(self.arena, |c| Condition {
+                     value,
+diff --git a/tests/mir-opt/jump_threading.floats.JumpThreading.panic-abort.diff b/tests/mir-opt/jump_threading.floats.JumpThreading.panic-abort.diff
+new file mode 100644
+index 000000000000..6ca37e96d297
+--- /dev/null
++++ b/tests/mir-opt/jump_threading.floats.JumpThreading.panic-abort.diff
+@@ -0,0 +1,59 @@
++- // MIR for `floats` before JumpThreading
+++ // MIR for `floats` after JumpThreading
++  
++  fn floats() -> u32 {
++      let mut _0: u32;
++      let _1: f64;
++      let mut _2: bool;
++      let mut _3: bool;
++      let mut _4: f64;
++      scope 1 {
++          debug x => _1;
++      }
++  
++      bb0: {
++          StorageLive(_1);
++          StorageLive(_2);
++          _2 = const true;
++-         switchInt(move _2) -> [0: bb2, otherwise: bb1];
+++         goto -> bb1;
++      }
++  
++      bb1: {
++          _1 = const -0f64;
++          goto -> bb3;
++      }
++  
++      bb2: {
++          _1 = const 1f64;
++          goto -> bb3;
++      }
++  
++      bb3: {
++          StorageDead(_2);
++          StorageLive(_3);
++          StorageLive(_4);
++          _4 = _1;
++          _3 = Eq(move _4, const 0f64);
++          switchInt(move _3) -> [0: bb5, otherwise: bb4];
++      }
++  
++      bb4: {
++          StorageDead(_4);
++          _0 = const 0_u32;
++          goto -> bb6;
++      }
++  
++      bb5: {
++          StorageDead(_4);
++          _0 = const 1_u32;
++          goto -> bb6;
++      }
++  
++      bb6: {
++          StorageDead(_3);
++          StorageDead(_1);
++          return;
++      }
++  }
++  
+diff --git a/tests/mir-opt/jump_threading.floats.JumpThreading.panic-unwind.diff b/tests/mir-opt/jump_threading.floats.JumpThreading.panic-unwind.diff
+new file mode 100644
+index 000000000000..6ca37e96d297
+--- /dev/null
++++ b/tests/mir-opt/jump_threading.floats.JumpThreading.panic-unwind.diff
+@@ -0,0 +1,59 @@
++- // MIR for `floats` before JumpThreading
+++ // MIR for `floats` after JumpThreading
++  
++  fn floats() -> u32 {
++      let mut _0: u32;
++      let _1: f64;
++      let mut _2: bool;
++      let mut _3: bool;
++      let mut _4: f64;
++      scope 1 {
++          debug x => _1;
++      }
++  
++      bb0: {
++          StorageLive(_1);
++          StorageLive(_2);
++          _2 = const true;
++-         switchInt(move _2) -> [0: bb2, otherwise: bb1];
+++         goto -> bb1;
++      }
++  
++      bb1: {
++          _1 = const -0f64;
++          goto -> bb3;
++      }
++  
++      bb2: {
++          _1 = const 1f64;
++          goto -> bb3;
++      }
++  
++      bb3: {
++          StorageDead(_2);
++          StorageLive(_3);
++          StorageLive(_4);
++          _4 = _1;
++          _3 = Eq(move _4, const 0f64);
++          switchInt(move _3) -> [0: bb5, otherwise: bb4];
++      }
++  
++      bb4: {
++          StorageDead(_4);
++          _0 = const 0_u32;
++          goto -> bb6;
++      }
++  
++      bb5: {
++          StorageDead(_4);
++          _0 = const 1_u32;
++          goto -> bb6;
++      }
++  
++      bb6: {
++          StorageDead(_3);
++          StorageDead(_1);
++          return;
++      }
++  }
++  
+diff --git a/tests/mir-opt/jump_threading.rs b/tests/mir-opt/jump_threading.rs
+index 57f4e4a2654f..3e7e8995f1a3 100644
+--- a/tests/mir-opt/jump_threading.rs
++++ b/tests/mir-opt/jump_threading.rs
+@@ -514,6 +514,16 @@ fn assume(a: u8, b: bool) -> u8 {
+     )
+ }
+ 
++fn floats() -> u32 {
++    // CHECK-LABEL: fn floats(
++    // CHECK: switchInt(
++
++    // Test for issue #128243, where float equality was assumed to be bitwise.
++    // When adding float support, it must be ensured that this continues working properly.
++    let x = if true { -0.0 } else { 1.0 };
++    if x == 0.0 { 0 } else { 1 }
++}
++
+ fn main() {
+     // CHECK-LABEL: fn main(
+     too_complex(Ok(0));
+@@ -528,6 +538,7 @@ fn main() {
+     disappearing_bb(7);
+     aggregate(7);
+     assume(7, false);
++    floats();
+ }
+ 
+ // EMIT_MIR jump_threading.too_complex.JumpThreading.diff
+@@ -542,3 +553,4 @@ fn main() {
+ // EMIT_MIR jump_threading.disappearing_bb.JumpThreading.diff
+ // EMIT_MIR jump_threading.aggregate.JumpThreading.diff
+ // EMIT_MIR jump_threading.assume.JumpThreading.diff
++// EMIT_MIR jump_threading.floats.JumpThreading.diff
+-- 
+2.46.0
+

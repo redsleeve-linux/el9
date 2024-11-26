@@ -1,0 +1,102 @@
+From db8f53df0be1daeda3159c1413549ff40696c710 Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Thu, 2 Sep 2021 17:02:33 -0400
+Subject: [PATCH 16/17] Conditionalize test for hashtable bucket sizes on
+ __LIBSTDCXX_SO_VERSION >= 11
+
+These tests were added upstream 2020-01-20 as part of:
+  libstdc++: Do not over-size hashtable buckets on range insertion
+    https://gcc.gnu.org/git/?p=gcc.git;a=commitdiff;h=6dcf042368012e2d7ce1626ee5d378bf3ad0ccfc
+
+but fail when run in DTS against a system libstdc++.so from an older GCC.
+
+In particular, _M_insert_unique_node from the header is using the older
+implementation of
+  std::__detail::_Prime_rehash_policy::_M_need_rehash
+from the dynamic library.
+
+   23: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::__detail::_Prime_rehash_policy::_M_need_rehash(unsigned long, unsigned long, unsigned long) const@GLIBCXX_3.4.18 (5)
+  412: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF std::__detail::_Prime_rehash_policy::_M_need_rehash(unsigned long, unsigned long, unsigned long) const@@GLIBCXX_3.4.18
+---
+ .../23_containers/unordered_set/cons/bucket_hint.cc    | 10 ++++++++++
+ .../23_containers/unordered_set/modifiers/insert.cc    |  9 +++++++++
+ 2 files changed, 19 insertions(+)
+
+diff --git a/libstdc++-v3/testsuite/23_containers/unordered_set/cons/bucket_hint.cc b/libstdc++-v3/testsuite/23_containers/unordered_set/cons/bucket_hint.cc
+index a3b014a3a..af231e54e 100644
+--- a/libstdc++-v3/testsuite/23_containers/unordered_set/cons/bucket_hint.cc
++++ b/libstdc++-v3/testsuite/23_containers/unordered_set/cons/bucket_hint.cc
+@@ -29,7 +29,11 @@ void test01()
+   a.reserve(2);
+ 
+   std::unordered_set<int> b({ 0, 1, 0, 1, 0, 1, 0, 1 }, a.bucket_count());
++
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( b.bucket_count() == a.bucket_count() );
++#endif
+ }
+ 
+ void test02()
+@@ -40,7 +44,10 @@ void test02()
+   std::vector<int> v { 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 };
+ 
+   std::unordered_set<int> b(v.begin(), v.end(), a.bucket_count());
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( b.bucket_count() == a.bucket_count() );
++#endif
+ }
+ 
+ void test03()
+@@ -51,7 +58,10 @@ void test03()
+   std::forward_list<int> fl { 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 };
+ 
+   std::unordered_set<int> b(fl.begin(), fl.end(), a.bucket_count());
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( b.bucket_count() == a.bucket_count() );
++#endif
+ }
+ 
+ int main()
+diff --git a/libstdc++-v3/testsuite/23_containers/unordered_set/modifiers/insert.cc b/libstdc++-v3/testsuite/23_containers/unordered_set/modifiers/insert.cc
+index 015c2f872..aae8298ae 100644
+--- a/libstdc++-v3/testsuite/23_containers/unordered_set/modifiers/insert.cc
++++ b/libstdc++-v3/testsuite/23_containers/unordered_set/modifiers/insert.cc
+@@ -30,7 +30,10 @@ void test01()
+ 
+   auto bkt_count = a.bucket_count();
+   a.insert({ 0, 1, 0, 1, 0, 1, 0, 1 });
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( a.bucket_count() == bkt_count );
++#endif
+ }
+ 
+ void test02()
+@@ -42,7 +45,10 @@ void test02()
+ 
+   auto bkt_count = a.bucket_count();
+   a.insert(v.begin(), v.end());
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( a.bucket_count() == bkt_count );
++#endif
+ }
+ 
+ void test03()
+@@ -54,7 +60,10 @@ void test03()
+ 
+   auto bkt_count = a.bucket_count();
+   a.insert(fl.begin(), fl.end());
++  // Fixed upstream in GCC 11
++#if __LIBSTDCXX_SO_VERSION >= 11
+   VERIFY( a.bucket_count() == bkt_count );
++#endif
+ }
+ 
+ int main()
+-- 
+2.31.1
+

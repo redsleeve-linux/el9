@@ -1,5 +1,5 @@
 %global forgeurl  https://pagure.io/go-rpm-macros
-Version:   3.2.0
+Version:   3.6.0
 %forgemeta
 
 #https://src.fedoraproject.org/rpms/redhat-rpm-config/pull-request/51
@@ -11,7 +11,7 @@ Version:   3.2.0
 %global golang_arches   %{ix86} %{golang_arches_future}
 %global gccgo_arches    %{mips}
 %if 0%{?rhel} >= 9
-%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
+%global golang_arches   x86_64 aarch64 ppc64le s390x
 %endif
 # Go sources can contain arch-specific files and our macros will package the
 # correct files for each architecture. Therefore, move gopath to _libdir and
@@ -24,7 +24,7 @@ Version:   3.2.0
 %if 0%{?bundle_golist}
 # do not create debuginfo packages when we add a build section
 %global debug_package %{nil}
-%global golist_version 0.10.1
+%global golist_version 0.10.4
 %global golist_builddir %{_builddir}/golist-%{golist_version}/_build
 %global golist_goipath pagure.io/golist
 # where to bundle the golist executable
@@ -36,7 +36,7 @@ Version:   3.2.0
 ExclusiveArch: %{golang_arches} %{gccgo_arches}
 
 Name:      go-rpm-macros
-Release:   3%{?dist}.redsleeve
+Release:   3%{?dist}
 Summary:   Build-stage rpm automation for Go packages
 
 License:   GPLv3+
@@ -69,11 +69,12 @@ Provides:  compiler(go-compiler) = 1
 Obsoletes: go-compilers-gcc-go-compiler < %{version}-%{release}
 %endif
 
-Patch0: update-default-gobuild-args.patch
 # Replace golang-github-urfave-cli with a minimal
 # command line parser backend to bootstrap golist
 # without dependencies.
 Patch1: golist-bootstrap-cli-no-vendor.patch
+# Add libexec to PATH in order to launch golist in every script
+Patch2: 0001-Add-libexec-to-path-for-EPEL9-golist.patch
 
 # RHEL 8 only provides the macros.go-srpm file which includes gobuild and gotest.
 # C9S also only provides the macros.go-srpm file but it also follows upstream which includes gobuild and gotest in the macros.go-compilers-gcc.
@@ -81,7 +82,10 @@ Patch1: golist-bootstrap-cli-no-vendor.patch
 # This also sets the GOAMD64 variable to v2
 # Resolves: rhbz#1965292
 # Resolves: RHEL-5529
-Patch2: add-gobuild-and-gotest.patch
+Patch3: add-gobuild-and-gotest.patch
+
+# Remove when rpm >= 4.17.0
+Patch4: remove-isdefined-function.patch
 
 %description
 This package provides build-stage rpm automation to simplify the creation of Go
@@ -127,8 +131,6 @@ macros provided by go-rpm-macros to create Go packages.
 %prep
 %forgesetup
 
-%patch0 -p1
-
 %writevars -f rpm/macros.d/macros.go-srpm golang_arches golang_arches_future gccgo_arches gopath
 for template in templates/rpm/*\.spec ; do
   target=$(echo "${template}" | sed "s|^\(.*\)\.spec$|\1-bare.spec|g")
@@ -138,6 +140,8 @@ done
 
 # unpack golist and patch
 %if 0%{?bundle_golist}
+# Add libexec to PATH
+%patch2 -p1
 pushd %{_builddir}
 tar -xf %{_sourcedir}/golist-%{golist_version}.tar.gz
 cd golist-%{golist_version}
@@ -157,7 +161,8 @@ if [[ ! -e %{golist_builddir}/src/%{golist_goipath} ]]; then
 fi
 %endif
 
-%patch2 -p1
+%patch3 -p1
+%patch4 -p1
 
 %build
 # build golist
@@ -216,7 +221,6 @@ install -m 0644 -vp   rpm/macros.d/macros.go-compilers-gcc \
 %if 0%{?bundle_golist}
 install -m 0755 -vd                     %{buildroot}%{golist_execdir}
 install -m 0755 -vp %{golist_builddir}/bin/* %{buildroot}%{golist_execdir}/
-sed -i "s,golist,%{golist_execdir}/golist,g" %{buildroot}%{_bindir}/go-rpm-integration
 %endif
 
 %files
@@ -253,8 +257,18 @@ sed -i "s,golist,%{golist_execdir}/golist,g" %{buildroot}%{_bindir}/go-rpm-integ
 %{_spectemplatedir}/*.spec
 
 %changelog
-* Fri MAy 31 2024 Jaccco Ligthart <jacco@redsleeve.org> 3.2.0-3.redsleeve
-- added arm to golang_arches
+* Wed Jul 31 2024 Alejandro Sáez <asm@redhat.com> - 3.6.0-3
+- Fix typo in add-gobuild-and-gotest.patch
+- Resolves: RHEL-7437
+
+* Wed Jul 31 2024 Alejandro Sáez <asm@redhat.com> - 3.6.0-2
+- Remove rpm.isdefined function
+- Resolves: RHEL-51368
+
+* Mon Jul 29 2024 Alejandro Sáez <asm@redhat.com> - 3.6.0-1
+- Update to 3.6.0
+- Revert the usage of rpmautospec, check git's history
+- Resolves: RHEL-14963
 
 * Fri Sep 22 2023 Alejandro Sáez <asm@redhat.com> - 3.2.0-3
 - Update add-gobuild-and-gotest.patch to add GOPPC64 and GOAMD64

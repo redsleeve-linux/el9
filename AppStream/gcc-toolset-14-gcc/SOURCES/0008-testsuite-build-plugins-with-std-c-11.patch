@@ -1,0 +1,42 @@
+From 16694079a3f415f5e5683b0afe6978810ac259b1 Mon Sep 17 00:00:00 2001
+From: David Malcolm <dmalcolm@redhat.com>
+Date: Tue, 31 Aug 2021 17:01:05 -0400
+Subject: [PATCH 08/17] testsuite: build plugins with -std=c++11
+
+Various testsuite plugins fail when built within DTS with e.g.:
+  cc1: error: cannot load plugin ./diagnostic_plugin_test_paths.so: /builddir/build/BUILD/gcc-11.1.1-20210623/obj-x86_64-redhat-linux/x86_64-redhat-linux/libstdc++-v3/src/.libs/libstdc++.so.6: version `CXXABI_1.3.9' not found (required by ./diagnostic_plugin_test_paths.so)
+
+These turn out to C++14's sized deletion
+(see https://en.cppreference.com/w/cpp/memory/new/operator_delete):
+
+   14: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF _ZdlPvm@CXXABI_1.3.9 (4)
+   48: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF _ZdlPvm@CXXABI_1.3.9
+   14: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF operator delete(void*, unsigned long)@CXXABI_1.3.9 (4)
+   48: 0000000000000000      0 FUNC    GLOBAL DEFAULT    UNDEF operator delete(void*, unsigned long)@CXXABI_1.3.9
+
+Looks like plugin.exp is building the test plugins against the
+freshly-built libstdc++, and then trying to dynamically load them
+against the system libstdc++.
+
+This patch forces the use of -std=c++11 when building these test plugins,
+to sidestep the problem.
+---
+ gcc/testsuite/lib/plugin-support.exp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gcc/testsuite/lib/plugin-support.exp b/gcc/testsuite/lib/plugin-support.exp
+index 6d651901e..9943dbb37 100644
+--- a/gcc/testsuite/lib/plugin-support.exp
++++ b/gcc/testsuite/lib/plugin-support.exp
+@@ -103,7 +103,7 @@ proc plugin-test-execute { plugin_src plugin_tests } {
+ 	}
+ 	set optstr [concat $optstr "-DIN_GCC -fPIC -shared -fno-rtti -undefined dynamic_lookup"]
+     } else {
+-	set plug_cflags $PLUGINCFLAGS 
++	set plug_cflags "$PLUGINCFLAGS -std=c++11"
+ 	set optstr "$includes $extra_flags -DIN_GCC -fPIC -shared -fno-rtti"
+     }
+ 
+-- 
+2.31.1
+

@@ -5,21 +5,23 @@
 %{llvm_sb}
 %endif
 
-%global toolchain gcc
-
-%global maj_ver 17
-%global libomp_version %{maj_ver}.0.6
+%global maj_ver 18
+%global min_ver 1
+%global libomp_version %{maj_ver}.%{min_ver}.8
 #global rc_ver 4
 %global libomp_srcdir openmp-%{libomp_version}%{?rc_ver:rc%{rc_ver}}.src
-%global so_suffix %{maj_ver}
+%global so_suffix %{maj_ver}.%{min_ver}
 
 %if %{with snapshot_build}
 %undefine rc_ver
 %global maj_ver %{llvm_snapshot_version_major}
 %global libomp_version %{llvm_snapshot_version}
-%global so_suffix %{maj_ver}%{llvm_snapshot_version_suffix}
+%global so_suffix %{maj_ver}.%{min_ver}%{llvm_snapshot_version_suffix}
 %endif
 
+%global libomp_srcdir openmp-%{libomp_version}%{?rc_ver:rc%{rc_ver}}.src
+
+%global toolchain clang
 
 # Opt out of https://fedoraproject.org/wiki/Changes/fno-omit-frame-pointer
 # https://bugzilla.redhat.com/show_bug.cgi?id=2158587
@@ -33,7 +35,7 @@
 
 Name: libomp
 Version: %{libomp_version}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
-Release: 1%{?dist}.redsleeve
+Release: 1%{?dist}
 Summary: OpenMP runtime for clang
 
 License: Apache-2.0 WITH LLVM-exception OR NCSA
@@ -67,10 +69,7 @@ BuildRequires: llvm-cmake-utils
 
 Requires: elfutils-libelf%{?isa}
 
-Obsoletes: libomp-test < 17.0.2
-
-# libomp does not support s390x.
-ExcludeArch: s390x
+Obsoletes: libomp-test < 18.1.8
 
 %description
 OpenMP runtime for clang.
@@ -90,11 +89,6 @@ OpenMP header files.
 %autosetup -n %{libomp_srcdir} -p2
 
 %build
-
-%if "%toolchain" == "gcc"
-# Building openmp with LTO fails with GCC but works with Clang
-%define _lto_cflags %{nil}
-%endif
 %cmake	-GNinja \
 	-DLIBOMP_INSTALL_ALIASES=OFF \
 	-DCMAKE_MODULE_PATH=%{_datadir}/llvm/cmake/Modules \
@@ -125,31 +119,38 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %files
 %license LICENSE.TXT
 %{_libdir}/libomp.so
-%ifnarch %{arm}
 %{_libdir}/libompd.so
+%ifnarch %{arm}
 %{_libdir}/libarcher.so
 %endif
 %ifnarch %{ix86} %{arm}
 # libomptarget is not supported on 32-bit systems.
+# s390x does not support the offloading plugins.
+%ifnarch s390x
 %{_libdir}/libomptarget.rtl.amdgpu.so.%{so_suffix}
 %{_libdir}/libomptarget.rtl.cuda.so.%{so_suffix}
 %{_libdir}/libomptarget.rtl.%{libomp_arch}.so.%{so_suffix}
+%endif
 %{_libdir}/libomptarget.so.%{so_suffix}
 %endif
 
 %files devel
 %{_prefix}/lib/clang/%{maj_ver}/include/omp.h
+%{_prefix}/lib/clang/%{maj_ver}/include/ompx.h
 %ifnarch %{arm}
 %{_prefix}/lib/clang/%{maj_ver}/include/omp-tools.h
 %{_prefix}/lib/clang/%{maj_ver}/include/ompt.h
 %{_prefix}/lib/clang/%{maj_ver}/include/ompt-multiplex.h
 %endif
-%{_libdir}/cmake/openmp/FindOpenMPTarget.cmake
+%{_libdir}/cmake/openmp/
 %ifnarch %{ix86} %{arm}
 # libomptarget is not supported on 32-bit systems.
+# s390x does not support the offloading plugins.
+%ifnarch s390x
 %{_libdir}/libomptarget.rtl.amdgpu.so
 %{_libdir}/libomptarget.rtl.cuda.so
 %{_libdir}/libomptarget.rtl.%{libomp_arch}.so
+%endif
 %{_libdir}/libomptarget.devicertl.a
 %{_libdir}/libomptarget-amdgpu-*.bc
 %{_libdir}/libomptarget-nvptx-*.bc
@@ -157,10 +158,14 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %endif
 
 %changelog
-%{?llvm_snapshot_changelog_entry}
+* Wed Jul 17 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.8-1
+- Update to 18.1.8
 
-* Fri May 31 2024 Jacco Ligthart <jaccor@redsleeve.org> - 17.0.6-1.redsleeve
-- disabled libompd.so for arm
+* Wed Jun 05 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.6-3
+- Rebuild against clang-18.1.6-2 which defaults to DWARF4
+
+* Mon Jun 03 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.6-1
+- Update to 18.1.6
 
 * Mon Dec 11 2023 Timm Bäder <tbaeder@redhat.com> - 17.0.6-1
 - Update to 17.0.6

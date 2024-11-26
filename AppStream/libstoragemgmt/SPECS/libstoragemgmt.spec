@@ -1,14 +1,14 @@
 %bcond_with     test
 
 Name:           libstoragemgmt
-Version:        1.9.7
-Release:        2%{?dist}.redsleeve
+Version:        1.10.1
+Release:        1%{?dist}
 Summary:        Storage array management library
-License:        LGPLv2+
+License:        LGPL-2.1-or-later
 URL:            https://github.com/libstorage/libstoragemgmt
 Source0:        https://github.com/libstorage/libstoragemgmt/releases/download/%{version}/%{name}-%{version}.tar.gz
-Patch1:         0001-Correction-for-fips-error.patch
 Requires:       python3-%{name}%{_isa}
+Requires:       ledmon-libs
 
 # Packages that have been removed
 Obsoletes:      %{name}-netapp-plugin <= 1.6.2-10
@@ -17,7 +17,7 @@ Obsoletes:      %{name}-nstor-plugin <= 1.9.0-1
 Provides:       %{name}-nstor-plugin <= 1.9.0-1
 
 BuildRequires:  gcc gcc-c++
-BuildRequires:  autoconf automake libtool libxml2-devel check-devel perl-interpreter
+BuildRequires:  autoconf automake libtool check-devel perl-interpreter
 BuildRequires:  glib2-devel
 BuildRequires:  systemd
 BuildRequires:  bash-completion
@@ -27,12 +27,13 @@ BuildRequires:  procps
 BuildRequires:  sqlite-devel
 BuildRequires:  python3-six
 BuildRequires:  python3-devel
+BuildRequires:  ledmon-devel
 
 %{?systemd_requires}
 BuildRequires:  systemd systemd-devel
 
 BuildRequires:  chrpath
-#BuildRequires:  valgrind
+BuildRequires:  valgrind
 
 %description
 The libStorageMgmt library will provide a vendor agnostic open source storage
@@ -167,7 +168,7 @@ plugin selection for locally managed storage.
 %build
 ./autogen.sh
 
-%configure --with-python3 --disable-static --without-mem-leak-test
+%configure --with-python3 --disable-static
 %make_build
 
 %install
@@ -195,8 +196,9 @@ fi
 %endif
 
 %pre
+
 echo 'u libstoragemgmt - "daemon account for libstoragemgmt"' | \
-	systemd-sysusers --replace=/usr/lib/sysusers.d/libstoragemgmt.conf -
+            systemd-sysusers --replace=/usr/lib/sysusers.d/libstoragemgmt.conf -
 
 %post
 /sbin/ldconfig
@@ -444,8 +446,11 @@ fi
 %{_mandir}/man1/local_lsmplugin.1*
 
 %changelog
-* Sat Nov 25 2023 Jacco Ligthart <jacco@redsleeve.org> - 1.9.7-2.redsleeve
-- removed valgrind dependency
+* Mon Jul 15 2024 Tony Asleson <tasleson@redhat.com> - 1.10.1-1
+- Upgrade to 1.10.1
+
+* Mon May 20 2024 Tony Asleson <tasleson@redhat.com> - 1.10.0-1
+- Upgrade to 1.10.0
 
 * Tue Apr 18 2023 Tony Asleson <tasleson@redhat.com> - 1.9.7-2
 - FIPS correction ref: https://issues.redhat.com/browse/RHEL-376

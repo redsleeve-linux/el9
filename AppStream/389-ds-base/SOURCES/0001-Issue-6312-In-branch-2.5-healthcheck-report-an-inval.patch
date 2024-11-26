@@ -1,0 +1,60 @@
+From 0ff5aa641d619bdcc154c2c94f8f8180bcaec776 Mon Sep 17 00:00:00 2001
+From: tbordaz <tbordaz@redhat.com>
+Date: Thu, 29 Aug 2024 10:49:57 +0200
+Subject: [PATCH] Issue 6312 - In branch 2.5, healthcheck report an invalid
+ warning regarding BDB deprecation (#6313)
+
+Bug description:
+	during healthcheck, _lint_backend_implementation checks that
+	the instance is not running a BDB backend.
+	This check only applies for instance after 3.0.0
+
+Fix description:
+	If the instance is newer than 3.0.0 the health check
+	just returns
+
+relates: #6312
+
+Reviewed by:
+---
+ dirsrvtests/tests/suites/healthcheck/healthcheck_test.py | 1 +
+ src/lib389/lib389/backend.py                             | 4 ++--
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/dirsrvtests/tests/suites/healthcheck/healthcheck_test.py b/dirsrvtests/tests/suites/healthcheck/healthcheck_test.py
+index 29cca187e..66cf3c7d3 100644
+--- a/dirsrvtests/tests/suites/healthcheck/healthcheck_test.py
++++ b/dirsrvtests/tests/suites/healthcheck/healthcheck_test.py
+@@ -556,6 +556,7 @@ def test_lint_backend_implementation_wrong_files(topology_st):
+ 
+ 
+ @pytest.mark.skipif(get_default_db_lib() == "mdb", reason="Not needed for mdb")
++@pytest.mark.skipif(ds_is_older("3.0.0"), reason="mdb and bdb are both supported")
+ def test_lint_backend_implementation(topology_st):
+     """Test the lint for backend implementation mismatch
+ 
+diff --git a/src/lib389/lib389/backend.py b/src/lib389/lib389/backend.py
+index caee88e6a..0ed00a4a7 100644
+--- a/src/lib389/lib389/backend.py
++++ b/src/lib389/lib389/backend.py
+@@ -14,7 +14,7 @@ from lib389._constants import DN_LDBM, DN_CHAIN, DN_PLUGIN, DEFAULT_BENAME
+ from lib389.properties import BACKEND_OBJECTCLASS_VALUE, BACKEND_PROPNAME_TO_ATTRNAME, BACKEND_CHAIN_BIND_DN, \
+                               BACKEND_CHAIN_BIND_PW, BACKEND_CHAIN_URLS, BACKEND_PROPNAME_TO_ATTRNAME, BACKEND_NAME, \
+                               BACKEND_SUFFIX, BACKEND_SAMPLE_ENTRIES, TASK_WAIT
+-from lib389.utils import normalizeDN, ensure_str, assert_c
++from lib389.utils import normalizeDN, ensure_str, assert_c, ds_is_newer
+ from lib389 import Entry
+ 
+ # Need to fix this ....
+@@ -513,7 +513,7 @@ class Backend(DSLdapObject):
+ 
+     def _lint_backend_implementation(self):
+         backend_impl = self._instance.get_db_lib()
+-        if backend_impl == 'bdb':
++        if backend_impl == 'bdb' and ds_is_newer('3.0.0', instance=self._instance):
+             result = DSBLE0006
+             result['items'] = [self.lint_uid()]
+             yield result
+-- 
+2.46.0
+

@@ -1,23 +1,20 @@
-From adbe188f3b1e3a0dd5ec80d9409601ba7f5b0423 Mon Sep 17 00:00:00 2001
+From 8ce0e2a14ba0743c06b543c0503203a56c905e8c Mon Sep 17 00:00:00 2001
 From: Konrad Kleine <kkleine@redhat.com>
-Date: Thu, 24 Mar 2022 09:44:21 +0100
-Subject: [PATCH] Produce DWARF4 by default
+Date: Tue, 4 Jun 2024 14:11:23 +0200
+Subject: Produce DWARF4 by default
 
-Have a look at the following commit to see when the move from DWARF 4 to 5 first happened upstream:
-
-https://github.com/llvm/llvm-project/commit/d3b26dea16108c427b19b5480c9edc76edf8f5b4?diff=unified
 ---
  clang/lib/Driver/ToolChain.cpp     | 4 +---
- clang/test/CodeGen/dwarf-version.c | 4 ++--
+ clang/test/CodeGen/dwarf-version.c | 8 ++++----
  clang/test/Driver/as-options.s     | 4 ++--
  clang/test/Driver/cl-options.c     | 2 +-
  clang/test/Driver/clang-g-opts.c   | 2 +-
  clang/test/Driver/ve-toolchain.c   | 2 +-
  clang/test/Driver/ve-toolchain.cpp | 2 +-
- 7 files changed, 9 insertions(+), 11 deletions(-)
+ 7 files changed, 11 insertions(+), 13 deletions(-)
 
 diff --git a/clang/lib/Driver/ToolChain.cpp b/clang/lib/Driver/ToolChain.cpp
-index 8dafc3d481c2..92bf26dc8ec6 100644
+index 388030592b48..6542895cf857 100644
 --- a/clang/lib/Driver/ToolChain.cpp
 +++ b/clang/lib/Driver/ToolChain.cpp
 @@ -428,9 +428,7 @@ ToolChain::getDefaultUnwindTableLevel(const ArgList &Args) const {
@@ -32,17 +29,21 @@ index 8dafc3d481c2..92bf26dc8ec6 100644
  
  Tool *ToolChain::getClang() const {
 diff --git a/clang/test/CodeGen/dwarf-version.c b/clang/test/CodeGen/dwarf-version.c
-index d307eb3f101f..e7e93bf6688c 100644
+index e63316ace69c..3d68b06c58ff 100644
 --- a/clang/test/CodeGen/dwarf-version.c
 +++ b/clang/test/CodeGen/dwarf-version.c
-@@ -2,8 +2,8 @@
+@@ -2,10 +2,10 @@
  // RUN: %clang -target x86_64-linux-gnu -gdwarf-3 -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER3
  // RUN: %clang -target x86_64-linux-gnu -gdwarf-4 -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER4
  // RUN: %clang -target x86_64-linux-gnu -gdwarf-5 -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER5
 -// RUN: %clang -target x86_64-linux-gnu -g -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER5
 -// RUN: %clang -target x86_64-linux-gnu -gdwarf -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER5
+-// RUN: %clang --target=i386-pc-solaris -g -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER5
+-// RUN: %clang --target=i386-pc-solaris -gdwarf -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER5
 +// RUN: %clang -target x86_64-linux-gnu -g -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER4
 +// RUN: %clang -target x86_64-linux-gnu -gdwarf -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER4
++// RUN: %clang --target=i386-pc-solaris -g -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER4
++// RUN: %clang --target=i386-pc-solaris -gdwarf -S -emit-llvm -o - %s | FileCheck %s --check-prefix=VER4
  
  // The -isysroot is used as a hack to avoid LIT messing with the SDKROOT
  // environment variable which indirecty overrides the version in the target
@@ -69,12 +70,12 @@ index 73d002c7ef7e..71d55f7fd537 100644
  // RUN: %clang --target=aarch64-linux-gnu -fno-integrated-as -gdwarf-5 %s -### 2>&1 | \
  // RUN:   FileCheck --check-prefix=GDWARF5 %s
 diff --git a/clang/test/Driver/cl-options.c b/clang/test/Driver/cl-options.c
-index 6d929b19e7e2..373905c2e0fc 100644
+index 5b6dfe308a76..4da65272a1b0 100644
 --- a/clang/test/Driver/cl-options.c
 +++ b/clang/test/Driver/cl-options.c
-@@ -569,7 +569,7 @@
- // RUN: %clang_cl /Z7 -gdwarf /c -### -- %s 2>&1 | FileCheck -check-prefix=Z7_gdwarf %s
- // Z7_gdwarf: "-gcodeview"
+@@ -571,7 +571,7 @@
+ // RUN: %clang_cl -gdwarf /Z7 /c -### -- %s 2>&1 | FileCheck -check-prefix=Z7_gdwarf %s
+ // Z7_gdwarf-NOT: "-gcodeview"
  // Z7_gdwarf: "-debug-info-kind=constructor"
 -// Z7_gdwarf: "-dwarf-version=
 +// Z7_gdwarf: "-dwarf-version=4
@@ -82,20 +83,20 @@ index 6d929b19e7e2..373905c2e0fc 100644
  // RUN: %clang_cl /ZH:MD5 /c -### -- %s 2>&1 | FileCheck -check-prefix=ZH_MD5 %s
  // ZH_MD5: "-gsrc-hash=md5"
 diff --git a/clang/test/Driver/clang-g-opts.c b/clang/test/Driver/clang-g-opts.c
-index 5ee0fe64fe48..985158746137 100644
+index b73602a155b0..b0cf64674253 100644
 --- a/clang/test/Driver/clang-g-opts.c
 +++ b/clang/test/Driver/clang-g-opts.c
-@@ -32,7 +32,7 @@
+@@ -36,7 +36,7 @@
  
  // CHECK-WITHOUT-G-NOT: -debug-info-kind
  // CHECK-WITH-G: "-debug-info-kind=constructor"
 -// CHECK-WITH-G: "-dwarf-version=5"
 +// CHECK-WITH-G: "-dwarf-version=4"
+ // CHECK-WITH-G-DWARF4: "-dwarf-version=4"
  // CHECK-WITH-G-DWARF2: "-dwarf-version=2"
  
- // CHECK-WITH-G-STANDALONE: "-debug-info-kind=standalone"
 diff --git a/clang/test/Driver/ve-toolchain.c b/clang/test/Driver/ve-toolchain.c
-index 32e25769b6da..b8a2852daba8 100644
+index 078341eb1202..6ccbef6a0c36 100644
 --- a/clang/test/Driver/ve-toolchain.c
 +++ b/clang/test/Driver/ve-toolchain.c
 @@ -6,7 +6,7 @@
@@ -108,7 +109,7 @@ index 32e25769b6da..b8a2852daba8 100644
  ///-----------------------------------------------------------------------------
  /// Checking include-path
 diff --git a/clang/test/Driver/ve-toolchain.cpp b/clang/test/Driver/ve-toolchain.cpp
-index 5a33d5eceb61..cedf895b36dc 100644
+index cd48dd792f85..f77781d4c6fa 100644
 --- a/clang/test/Driver/ve-toolchain.cpp
 +++ b/clang/test/Driver/ve-toolchain.cpp
 @@ -7,7 +7,7 @@
@@ -121,5 +122,5 @@ index 5a33d5eceb61..cedf895b36dc 100644
  ///-----------------------------------------------------------------------------
  /// Checking include-path
 -- 
-2.41.0
+2.45.1
 

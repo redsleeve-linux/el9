@@ -1,7 +1,3 @@
-# Workaround for
-# Cannot handle 8-byte build ID
-%define debug_package %{nil}
-
 %bcond_with snapshot_build
 
 %if %{with snapshot_build}
@@ -11,12 +7,16 @@
 
 # We are building with clang for faster/lower memory LTO builds.
 # See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
-%global toolchain gcc
+%global toolchain clang
+
+# Opt out of https://fedoraproject.org/wiki/Changes/fno-omit-frame-pointer
+# https://bugzilla.redhat.com/show_bug.cgi?id=2158587
+%undefine _include_frame_pointers
 
 %global gts_version 13
 
 # Components enabled if supported by target architecture:
-%define gold_arches %{ix86} x86_64 %{arm} aarch64 %{power64} s390x
+%define gold_arches %{ix86} x86_64 aarch64 %{power64} s390x
 %ifarch %{gold_arches}
   %bcond_without gold
 %else
@@ -27,7 +27,7 @@
 %bcond_with bundle_compat_lib
 %bcond_without check
 
-%ifarch %ix86 %{arm}
+%ifarch %ix86 riscv64
 # Disable LTO on x86 in order to reduce memory consumption
 %bcond_with lto_build
 %elif %{with snapshot_build}
@@ -38,13 +38,13 @@
 %endif
 
 %if %{with bundle_compat_lib}
-%global compat_maj_ver 16
+%global compat_maj_ver 17
 %global compat_ver %{compat_maj_ver}.0.6
 %endif
 
-%global maj_ver 17
-%global min_ver 0
-%global patch_ver 6
+%global maj_ver 18
+%global min_ver 1
+%global patch_ver 8
 #global rc_ver 4
 
 %if %{with snapshot_build}
@@ -57,7 +57,6 @@
 %global llvm_srcdir llvm-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
 %global cmake_srcdir cmake-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
 %global third_party_srcdir third-party-%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:rc%{rc_ver}}.src
-%global _lto_cflags -flto=thin
 
 %if %{with compat_build}
 %global pkg_name llvm%{maj_ver}
@@ -93,14 +92,7 @@
 %global _dwz_low_mem_die_limit_s390x 1
 %global _dwz_max_die_limit_s390x 1000000
 
-%ifarch %{arm}
-# koji overrides the _gnu variable to be gnu, which is not correct for clang, so
-# we need to hard-code the correct triple here.
-#global llvm_triple armv7l-redhat-linux-gnueabihf
-%global llvm_triple armv6l-redhat-linux-gnueabihf
-%else
 %global llvm_triple %{_target_platform}
-%endif
 
 # https://fedoraproject.org/wiki/Changes/PythonSafePath#Opting_out
 # Don't add -P to Python shebangs
@@ -109,7 +101,7 @@
 
 Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
-Release:	5%{?dist}.redsleeve
+Release:	3%{?dist}
 Summary:	The Low Level Virtual Machine
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
@@ -134,10 +126,12 @@ Source8:	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{compat
 %endif
 %endif
 
-# Backport of https://reviews.llvm.org/D156485 for rhbz#2262260/RHEL-23638
-Patch0: 0001-PEI-Don-t-zero-out-noreg-operands.patch
+# Backport with modifications from
+# https://github.com/llvm/llvm-project/pull/99273
+# Fixes RHEL-49517.
+Patch001:	99273.patch
 
-# RHEL-specific patch to avoid unwanted recommonmark dep
+# RHEL-specific patch to avoid unwanted python3-myst-parser dep
 Patch101:	0101-Deactivate-markdown-doc.patch
 
 BuildRequires:	gcc
@@ -150,8 +144,8 @@ BuildRequires:	libffi-devel
 BuildRequires:	ncurses-devel
 BuildRequires:	python3-psutil
 BuildRequires:	python3-sphinx
-%if !0%{?rhel}
-BuildRequires:	python3-recommonmark
+%if %{undefined rhel}
+BuildRequires:	python3-myst-parser
 %endif
 BuildRequires:	multilib-rpm-config
 %if %{with gold}
@@ -196,14 +190,12 @@ Requires:	libedit-devel
 # but this caused bugs (rhbz#1773678) and forced us to carry two non-upstream
 # patches.
 Requires:	%{name}-static%{?_isa} = %{version}-%{release}
-%if %{without compat_build}
 Requires:	%{name}-test%{?_isa} = %{version}-%{release}
 Requires:	%{name}-googletest%{?_isa} = %{version}-%{release}
-%endif
 
 
-Requires(post):	%{_sbindir}/alternatives
-Requires(postun):	%{_sbindir}/alternatives
+Requires(post):	/usr/sbin/alternatives
+Requires(postun):	/usr/sbin/alternatives
 
 Provides:	llvm-devel(major) = %{maj_ver}
 
@@ -221,6 +213,8 @@ Documentation for the LLVM compiler infrastructure.
 
 %package libs
 Summary:	LLVM shared libraries
+Requires(post): /sbin/ldconfig
+Requires(postun): /sbin/ldconfig
 
 %description libs
 Shared libraries for the LLVM compiler infrastructure.
@@ -241,8 +235,6 @@ Summary: CMake utilities shared across LLVM subprojects
 CMake utilities shared across LLVM subprojects.
 This is for internal use by LLVM packages only.
 
-%if %{without compat_build}
-
 %package test
 Summary:	LLVM regression tests
 Requires:	%{name}%{?_isa} = %{version}-%{release}
@@ -259,28 +251,23 @@ Summary: LLVM's modified googletest sources
 %description googletest
 LLVM's modified googletest sources.
 
+%if 0%{?rhel}
 %package toolset
 Summary: 	Package that installs llvm-toolset
 Requires:	clang = %{version}
 Requires:	llvm = %{version}
-
-%ifnarch s390x
 Requires:	lld = %{version}
-%endif
 
 %description toolset
 This is the main package for llvm-toolset.
-
 %endif
 
 %prep
-%if %{without snapshot_build}
 %{gpgverify} --keyring='%{SOURCE6}' --signature='%{SOURCE1}' --data='%{SOURCE0}'
 %{gpgverify} --keyring='%{SOURCE6}' --signature='%{SOURCE3}' --data='%{SOURCE2}'
 %{gpgverify} --keyring='%{SOURCE6}' --signature='%{SOURCE5}' --data='%{SOURCE4}'
 %if %{with bundle_compat_lib}
 %{gpgverify} --keyring='%{SOURCE6}' --signature='%{SOURCE8}' --data='%{SOURCE7}'
-%endif
 %endif
 
 %setup -T -q -b 2 -n %{cmake_srcdir}
@@ -288,9 +275,7 @@ This is the main package for llvm-toolset.
 # but this is not a CACHED variable, so we can't actually set it externally :(
 cd ..
 mv %{cmake_srcdir} cmake
-
 %setup -T -q -b 4 -n %{third_party_srcdir}
-%autopatch -m200 -p2
 cd ..
 mv %{third_party_srcdir} third-party
 
@@ -299,7 +284,7 @@ mv %{third_party_srcdir} third-party
 %endif
 
 %setup -T -q -b 0 -n %{llvm_srcdir}
-%autopatch -M200 -p2
+%autopatch -M%{?!rhel:100}%{?rhel:200} -p2
 
 %py3_shebang_fix \
 	test/BugPoint/compile-custom.ll.py \
@@ -308,12 +293,11 @@ mv %{third_party_srcdir} third-party
 
 %build
 
-%ifarch %ix86 %{arm}
-# Linking libLLVM.so goes out of memory even with ThinLTO and a single link job.
+%if %{without lto_build}
 %global _lto_cflags %nil
 %endif
 
-%ifarch s390 s390x %{arm} %ix86
+%ifarch s390 s390x %ix86 riscv64
 # Decrease debuginfo verbosity to reduce memory consumption during final library linking
 %global optflags %(echo %{optflags} | sed 's/-g /-g1 /')
 %endif
@@ -328,7 +312,7 @@ export ASMFLAGS="%{build_cflags}"
 	-DLLVM_PARALLEL_LINK_JOBS=1 \
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
 	-DCMAKE_SKIP_RPATH:BOOL=ON \
-%ifarch s390 %{arm} %ix86
+%ifarch s390 %ix86 riscv64
 	-DCMAKE_C_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
 	-DCMAKE_CXX_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
 %endif
@@ -358,31 +342,25 @@ export ASMFLAGS="%{build_cflags}"
 	\
 	-DLLVM_INCLUDE_TESTS:BOOL=ON \
 	-DLLVM_BUILD_TESTS:BOOL=ON \
-%if %{with compat_build}
-	-DLLVM_INSTALL_GTEST:BOOL=OFF \
-%else
 	-DLLVM_INSTALL_GTEST:BOOL=ON \
-%endif
 	-DLLVM_LIT_ARGS=-v \
 	\
 	-DLLVM_INCLUDE_EXAMPLES:BOOL=ON \
 	-DLLVM_BUILD_EXAMPLES:BOOL=OFF \
 	\
 	-DLLVM_INCLUDE_UTILS:BOOL=ON \
-%if %{with compat_build}
-	-DLLVM_INSTALL_UTILS:BOOL=OFF \
-%else
 	-DLLVM_INSTALL_UTILS:BOOL=ON \
-	-DLLVM_UTILS_INSTALL_DIR:PATH=%{_bindir} \
+	-DLLVM_UTILS_INSTALL_DIR:PATH=bin \
 	-DLLVM_TOOLS_INSTALL_DIR:PATH=bin \
-%endif
 	\
 	-DLLVM_INCLUDE_DOCS:BOOL=ON \
 	-DLLVM_BUILD_DOCS:BOOL=ON \
 	-DLLVM_ENABLE_SPHINX:BOOL=ON \
 	-DLLVM_ENABLE_DOXYGEN:BOOL=OFF \
 	\
-%if %{without compat_build}
+%if %{with snapshot_build}
+	-DLLVM_VERSION_SUFFIX="%{llvm_snapshot_version_suffix}" \
+%else
 	-DLLVM_VERSION_SUFFIX='' \
 %endif
 	-DLLVM_UNREACHABLE_OPTIMIZE:BOOL=ON \
@@ -394,12 +372,14 @@ export ASMFLAGS="%{build_cflags}"
 	-DSPHINX_WARNINGS_AS_ERRORS=OFF \
 	-DCMAKE_INSTALL_PREFIX=%{install_prefix} \
 	-DLLVM_INSTALL_SPHINX_HTML_DIR=%{_pkgdocdir}/html \
-	-DSPHINX_EXECUTABLE=%{_bindir}/sphinx-build-3 \
+	-DSPHINX_EXECUTABLE=/usr/bin/sphinx-build-3 \
 	-DLLVM_INCLUDE_BENCHMARKS=OFF \
 %if %{with lto_build}
 	-DLLVM_UNITTEST_LINK_FLAGS="-Wl,-plugin-opt=O0" \
 %endif
-	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -Wl"
+%ifarch x86_64
+	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -Wl,-z,cet-report=error"
+%endif
 
 # Build libLLVM.so first.  This ensures that when libLLVM.so is linking, there
 # are no other compile jobs running.  This will help reduce OOM errors on the
@@ -440,29 +420,34 @@ rm -Rf ../llvm-compat-libs
 
 mkdir -p %{buildroot}/%{_bindir}
 
-%if %{without compat_build}
-
-# Fix some man pages
-ln -s llvm-config.1 %{buildroot}%{_mandir}/man1/llvm-config%{exec_suffix}-%{__isa_bits}.1
-
 # Install binaries needed for lit tests
 %global test_binaries llvm-isel-fuzzer llvm-opt-fuzzer
 
 for f in %{test_binaries}
 do
-    install -m 0755 %{_vpath_builddir}/bin/$f %{buildroot}%{_bindir}
+    install -m 0755 %{_vpath_builddir}/bin/$f %{buildroot}%{install_bindir}
 done
 
 # Remove testing of update utility tools
 rm -rf test/tools/UpdateTestChecks
 
-%multilib_fix_c_header --file %{_includedir}/llvm/Config/llvm-config.h
-
 # Install libraries needed for unittests
+%if %{without compat_build}
 %global build_libdir %{_vpath_builddir}/%{_lib}
+%else
+%global build_libdir %{_vpath_builddir}/lib
+%endif
 
-install %{build_libdir}/libLLVMTestingSupport.a %{buildroot}%{_libdir}
-install %{build_libdir}/libLLVMTestingAnnotations.a %{buildroot}%{_libdir}
+install %{build_libdir}/libLLVMTestingSupport.a %{buildroot}%{install_libdir}
+install %{build_libdir}/libLLVMTestingAnnotations.a %{buildroot}%{install_libdir}
+
+# Fix multi-lib
+%multilib_fix_c_header --file %{install_includedir}/llvm/Config/llvm-config.h
+
+%if %{without compat_build}
+
+# Fix some man pages
+ln -s llvm-config.1 %{buildroot}%{_mandir}/man1/llvm-config%{exec_suffix}-%{__isa_bits}.1
 
 %if %{with gold}
 # Add symlink to lto plugin in the binutils plugin directory.
@@ -478,17 +463,9 @@ for f in %{buildroot}/%{install_bindir}/*; do
   ln -s ../../%{install_bindir}/$filename %{buildroot}/%{_bindir}/$filename%{exec_suffix}
 done
 
-# Move header files
-mkdir -p %{buildroot}/%{pkg_includedir}
-ln -s ../../../%{install_includedir}/llvm %{buildroot}/%{pkg_includedir}/llvm
-ln -s ../../../%{install_includedir}/llvm-c %{buildroot}/%{pkg_includedir}/llvm-c
-
-# Fix multi-lib
-%multilib_fix_c_header --file %{install_includedir}/llvm/Config/llvm-config.h
-
 # Create ld.so.conf.d entry
-mkdir -p %{buildroot}%{_sysconfdir}/ld.so.conf.d
-cat >> %{buildroot}%{_sysconfdir}/ld.so.conf.d/%{name}-%{_arch}.conf << EOF
+mkdir -p %{buildroot}/etc/ld.so.conf.d
+cat >> %{buildroot}/etc/ld.so.conf.d/%{name}-%{_arch}.conf << EOF
 %{install_libdir}
 EOF
 
@@ -498,9 +475,6 @@ for f in %{build_install_prefix}/share/man/man1/*; do
   filename=`basename $f | cut -f 1 -d '.'`
   mv $f %{buildroot}%{_mandir}/man1/$filename%{exec_suffix}.1
 done
-
-# Remove opt-viewer, since this is just a compatibility package.
-rm -Rf %{build_install_prefix}/share/opt-viewer
 
 %endif
 
@@ -530,22 +504,10 @@ rm %{buildroot}%{_bindir}/llvm-config%{exec_suffix}
 # ghost presence
 touch %{buildroot}%{_bindir}/llvm-config%{exec_suffix}
 
-%if %{without compat_build}
 mkdir -p %{buildroot}%{pkg_datadir}/llvm/cmake
 cp -Rv ../cmake/* %{buildroot}%{pkg_datadir}/llvm/cmake
-%endif
-
 
 %check
-# Disable check section on arm due to some kind of memory related failure.
-# Possibly related to https://bugzilla.redhat.com/show_bug.cgi?id=1920183
-%ifnarch %{arm}
-
-# TODO: Fix the failures below
-%ifarch %{arm}
-rm test/tools/llvm-readobj/ELF/dependent-libraries.test
-%endif
-
 # non reproducible errors
 rm test/tools/dsymutil/X86/swift-interface.test
 
@@ -554,67 +516,87 @@ rm test/tools/dsymutil/X86/swift-interface.test
 LD_LIBRARY_PATH=%{buildroot}/%{install_libdir}  %{__ninja} check-all -C %{_vpath_builddir}
 %endif
 
+%if %{with compat_build}
+# Packages that install files in /etc/ld.so.conf have to manually run
+# ldconfig.
+# See https://bugzilla.redhat.com/show_bug.cgi?id=2001328 and
+# https://docs.fedoraproject.org/en-US/packaging-guidelines/Scriptlets/#_linker_configuration_files
+%post -p /sbin/ldconfig libs
+%postun -p /sbin/ldconfig libs
 %endif
-
-%ldconfig_scriptlets libs
 
 %post devel
-%{_sbindir}/update-alternatives --install %{_bindir}/llvm-config%{exec_suffix} llvm-config%{exec_suffix} %{install_bindir}/llvm-config%{exec_suffix}-%{__isa_bits} %{__isa_bits}
+/usr/sbin/update-alternatives --install %{_bindir}/llvm-config%{exec_suffix} llvm-config%{exec_suffix} %{install_bindir}/llvm-config%{exec_suffix}-%{__isa_bits} %{__isa_bits}
 %if %{without compat_build}
-%{_sbindir}/update-alternatives --install %{_bindir}/llvm-config-%{maj_ver} llvm-config-%{maj_ver} %{install_bindir}/llvm-config%{exec_suffix}-%{__isa_bits} %{__isa_bits}
+/usr/sbin/update-alternatives --install %{_bindir}/llvm-config-%{maj_ver} llvm-config-%{maj_ver} %{install_bindir}/llvm-config%{exec_suffix}-%{__isa_bits} %{__isa_bits}
+
+# During the upgrade from LLVM 16 (F38) to LLVM 17 (F39), we found out the
+# main llvm-devel package was leaving entries in the alternatives system.
+# Try to remove them now.
+for v in 14 15 16; do
+  if [[ -e %{_bindir}/llvm-config-$v
+		&& "x$(%{_bindir}/llvm-config-$v --version | awk -F . '{ print $1 }')" != "x$v" ]]; then
+    /usr/sbin/update-alternatives --remove llvm-config-$v %{install_bindir}/llvm-config%{exec_suffix}-%{__isa_bits}
+  fi
+done
 %endif
+
 
 %postun devel
 if [ $1 -eq 0 ]; then
-  %{_sbindir}/update-alternatives --remove llvm-config%{exec_suffix} %{install_bindir}/llvm-config%{exec_suffix}-%{__isa_bits}
-%if %{without compat_build}
-  %{_sbindir}/update-alternatives --remove llvm-config-%{maj_ver} %{install_bindir}/llvm-config%{exec_suffix}-%{__isa_bits}
-%endif
+  /usr/sbin/update-alternatives --remove llvm-config%{exec_suffix} %{install_bindir}/llvm-config%{exec_suffix}-%{__isa_bits}
 fi
+%if %{without compat_build}
+# When upgrading between minor versions (i.e. from x.y.1 to x.y.2), we must
+# not remove the alternative.
+# However, during a major version upgrade (i.e. from 16.x.y to 17.z.w), the
+# alternative must be removed in order to give priority to a newly installed
+# compat package.
+if [[ $1 -eq 0
+	  || "x$(%{_bindir}/llvm-config-%{maj_ver} --version | awk -F . '{ print $1 }')" != "x%{maj_ver}" ]]; then
+  /usr/sbin/update-alternatives --remove llvm-config-%{maj_ver} %{install_bindir}/llvm-config%{exec_suffix}-%{__isa_bits}
+fi
+%endif
 
 %files
 %license LICENSE.TXT
 %exclude %{_mandir}/man1/llvm-config*
 %{_mandir}/man1/*
-%{_bindir}/*
+%{install_bindir}/*
+%if %{with compat_build}
+# This is for all the binaries with the version suffix.
+%{_bindir}/*%{exec_suffix}
+%endif
 
 %exclude %{_bindir}/llvm-config%{exec_suffix}
 %exclude %{install_bindir}/llvm-config%{exec_suffix}-%{__isa_bits}
 
-%if %{without compat_build}
 %exclude %{_bindir}/llvm-config-%{maj_ver}
 %exclude %{install_bindir}/llvm-config-%{maj_ver}-%{__isa_bits}
-%exclude %{_bindir}/not
-%exclude %{_bindir}/count
-%exclude %{_bindir}/yaml-bench
-%exclude %{_bindir}/lli-child-target
-%exclude %{_bindir}/llvm-isel-fuzzer
-%exclude %{_bindir}/llvm-opt-fuzzer
-%{_datadir}/opt-viewer
-%else
-%{install_bindir}
-%endif
+%exclude %{install_bindir}/not
+%exclude %{install_bindir}/count
+%exclude %{install_bindir}/yaml-bench
+%exclude %{install_bindir}/lli-child-target
+%exclude %{install_bindir}/llvm-isel-fuzzer
+%exclude %{install_bindir}/llvm-opt-fuzzer
+%{pkg_datadir}/opt-viewer
 
 %files libs
 %license LICENSE.TXT
 %{install_libdir}/libLLVM-%{maj_ver}%{?llvm_snapshot_version_suffix:%{llvm_snapshot_version_suffix}}.so
-%if %{without compat_build}
 %if %{with gold}
-%{_libdir}/LLVMgold.so
+%{install_libdir}/LLVMgold.so
+%if %{without compat_build}
 %{_libdir}/bfd-plugins/LLVMgold.so
 %endif
-%{_libdir}/libLLVM-%{maj_ver}.%{min_ver}*.so
-%{_libdir}/libLTO.so*
-%else
-%config(noreplace) %{_sysconfdir}/ld.so.conf.d/%{name}-%{_arch}.conf
-%if %{with gold}
-%{_libdir}/%{name}/lib/LLVMgold.so
 %endif
-%{install_libdir}/libLLVM-%{maj_ver}.%{min_ver}*.so
+%{install_libdir}/libLLVM-%{maj_ver}.so
+%{install_libdir}/libLLVM.so.%{maj_ver}.%{min_ver}
 %{install_libdir}/libLTO.so*
-%exclude %{install_libdir}/libLTO.so
-%endif
 %{install_libdir}/libRemarks.so*
+%if %{with compat_build}
+%config(noreplace) /etc/ld.so.conf.d/%{name}-%{_arch}.conf
+%endif
 %if %{with bundle_compat_lib}
 %{_libdir}/libLLVM-%{compat_maj_ver}.so
 %endif
@@ -630,14 +612,8 @@ fi
 %{install_includedir}/llvm-c
 %{install_libdir}/libLLVM.so
 %{install_libdir}/cmake/llvm
-%if %{without compat_build}
 %{install_bindir}/llvm-config-%{maj_ver}-%{__isa_bits}
 %ghost %{_bindir}/llvm-config-%{maj_ver}
-%else
-%{pkg_includedir}/llvm
-%{pkg_includedir}/llvm-c
-%{install_libdir}/libLTO.so
-%endif
 %if %{with bundle_compat_lib}
 %{_libdir}/llvm%{compat_maj_ver}/
 %endif
@@ -649,27 +625,23 @@ fi
 %files static
 %license LICENSE.TXT
 %{install_libdir}/*.a
-%if %{without compat_build}
 %exclude %{install_libdir}/libLLVMTestingSupport.a
 %exclude %{install_libdir}/libLLVMTestingAnnotations.a
 %exclude %{install_libdir}/libllvm_gtest.a
 %exclude %{install_libdir}/libllvm_gtest_main.a
-%endif
 
 %files cmake-utils
 %license LICENSE.TXT
 %{pkg_datadir}/llvm/cmake
 
-%if %{without compat_build}
-
 %files test
 %license LICENSE.TXT
-%{_bindir}/not
-%{_bindir}/count
-%{_bindir}/yaml-bench
-%{_bindir}/lli-child-target
-%{_bindir}/llvm-isel-fuzzer
-%{_bindir}/llvm-opt-fuzzer
+%{install_bindir}/not
+%{install_bindir}/count
+%{install_bindir}/yaml-bench
+%{install_bindir}/lli-child-target
+%{install_bindir}/llvm-isel-fuzzer
+%{install_bindir}/llvm-opt-fuzzer
 
 %files googletest
 %license LICENSE.TXT
@@ -680,15 +652,29 @@ fi
 %{install_includedir}/llvm-gtest
 %{install_includedir}/llvm-gmock
 
-%endif
 
 
 %files toolset
 %license LICENSE.TXT
 
 %changelog
-* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 17.0.6-5.redsleeve
-- changed llvm_triple for armv6
+* Thu Aug 15 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.8-3
+- Workaround for GFX11.5 export priority (RHEL-49517)
+
+* Thu Aug 08 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.8-2
+- Remove llvm 17 compat lib
+
+* Tue Jul 16 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.8-1
+- Update to LLVM 18.1.8
+
+* Tue May 28 2024 Nikita Popov <npopov@redhat.com> - 18.1.6-3
+- Fix use after free on ppc64le (rhbz#2283525)
+
+* Wed May 22 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.6-2
+- Turn on build condition bundle_compat_lib by default
+
+* Tue May 21 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.6-1
+- Update to 18.1.6
 
 * Fri Feb 02 2024 Timm Bäder <tbaeder@redhat.com> - 17.0.6-5
 - Backport a patch for RHEL-23638

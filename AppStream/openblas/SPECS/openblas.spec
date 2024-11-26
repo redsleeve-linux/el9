@@ -1,6 +1,6 @@
 %bcond_with system_lapack
 # Version of bundled lapack
-%global lapackver 3.9.1
+%global lapackver 3.11.0
 
 # DO NOT "CLEAN UP" OR MODIFY THIS SPEC FILE WITHOUT ASKING THE
 # MAINTAINER FIRST!
@@ -14,12 +14,12 @@
 # "obsoleted" features are still kept in the spec.
 
 Name:           openblas
-Version:        0.3.21
-Release:        2%{?dist}.redsleeve
+Version:        0.3.26
+Release:        2%{?dist}
 Summary:        An optimized BLAS library based on GotoBLAS2
-License:        BSD
-URL:            https://github.com/xianyi/OpenBLAS/
-Source0:        https://github.com/xianyi/OpenBLAS/archive/v%{version}/openblas-%{version}.tar.gz
+License:        BSD-3-Clause
+URL:            https://github.com/OpenMathLib/OpenBLAS
+Source0:        %url/archive/v%{version}/OpenBLAS-%{version}.tar.gz
 # Use system lapack
 Patch0:         openblas-0.2.15-system_lapack.patch
 # Drop extra p from threaded library name
@@ -28,8 +28,8 @@ Patch1:         openblas-0.2.5-libname.patch
 Patch2:         openblas-0.2.15-constructor.patch
 # Supply the proper flags to the test makefile
 Patch3:         openblas-0.3.11-tests.patch
-# Fix SBGEMM test to work with INTERFACE64
-Patch4:         openblas-0.3.21-sbgemm-test.patch
+# Fix incompatible pointer types (causes FTBFS on ppc64le)
+Patch4:         openblas-0.3.26-incompatibletypes.patch
 
 BuildRequires: make
 BuildRequires:  gcc
@@ -243,7 +243,7 @@ cd OpenBLAS-%{version}
 %patch2 -p1 -b .constructor
 %endif
 %patch3 -p1 -b .tests
-%patch4 -p1 -b .sbgemm
+%patch4 -p1 -b .incompatibletypes
 
 # Fix source permissions
 find -name \*.f -exec chmod 644 {} \;
@@ -362,9 +362,6 @@ export AVX="NO_AVX2=1"
 %endif
 
 %endif
-%ifarch armv6hl
-TARGET="TARGET=ARMV6 DYNAMIC_ARCH=0"
-%endif
 %ifarch armv7hl
 # ARM v7 still doesn't have runtime cpu detection...
 TARGET="TARGET=ARMV7 DYNAMIC_ARCH=0"
@@ -443,9 +440,6 @@ cp -a %{_includedir}/lapacke %{buildroot}%{_includedir}/%{name}
 # Fix name of libraries: runtime CPU detection has none
 suffix=""
 # but archs that don't have it do have one
-%ifarch armv6hl
-suffix="_armv6"
-%endif
 %ifarch armv7hl
 suffix="_armv7"
 %endif
@@ -655,8 +649,13 @@ rm -rf %{buildroot}%{_libdir}/cmake
 %endif
 
 %changelog
-* Fri May 26 2023 Jacco Ligthart <jacco@redsleeve.org> - 0.3.21-2.redsleeve
-- added armv6hl
+* Thu Aug 22 2024 Pavel Simovec <psimovec@redhat.com> - 0.3.26-2
+- Re-include openblas.pc
+- Resolves: RHEL-20160
+
+* Thu Jun 27 2024 Pavel Simovec <psimovec@redhat.com> - 0.3.26-1
+- Update to 0.3.26
+- Resolves: RHEL-20160
 
 * Tue Jan 31 2023 Matej Mužila <mmuzila@redhat.com> - 0.3.21-2
 - Include openblas.pc
