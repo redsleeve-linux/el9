@@ -25,7 +25,7 @@
 Name: systemd
 Url: https://systemd.io
 Version: 252
-Release: 46%{?dist}.2.0.1
+Release: 46%{?dist}.2.0.1.redsleeve
 # For a breakdown of the licensing, see README
 License: LGPLv2+ and MIT and GPLv2+
 Summary: System and Service Manager
@@ -1188,7 +1188,7 @@ BuildRequires: libseccomp-devel
 BuildRequires: meson >= 0.43
 BuildRequires: gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-BuildRequires: valgrind-devel
+#BuildRequires: valgrind-devel
 BuildRequires: pkgconfig(bash-completion)
 BuildRequires: pkgconfig(tss2-esys)
 BuildRequires: pkgconfig(tss2-rc)
@@ -2028,6 +2028,9 @@ systemd-hwdb update &>/dev/null || :
 %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
 
 %changelog
+* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org> - 252-46.0.1.redsleeve
+- removed valgrind
+
 * Sat Nov 16 2024 Release Engineering <releng@rockylinux.org> - 252-46.0.1
 - Set support URL to the wiki
 - Set sbat mail to security@rockylinux.org

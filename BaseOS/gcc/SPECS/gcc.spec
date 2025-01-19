@@ -128,7 +128,7 @@
 Summary:              Various compilers (C, C++, Objective-C, ...)
 Name:                 gcc
 Version:              %{gcc_version}
-Release:              %{gcc_release}%{?dist}
+Release:              %{gcc_release}%{?dist}.redsleeve
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License:              GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -1203,6 +1203,9 @@ CONFIGURE_OPTS_NATIVE="\
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
+%endif
+%ifarch armv6hl
+	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch mips mipsel
 	--with-arch=mips32r2 --with-fp-32=xx \
@@ -3594,6 +3597,9 @@ end
 %endif
 
 %changelog
+* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org> 11.5.0-2.redsleeve
+- added config options for armv6hl
+
 * Mon Jul 22 2024 Marek Polacek <polacek@redhat.com> 11.5.0-2
 - fix TARGET_CPU_DEFAULT (PR target/105157, RHEL-50037)
 - libstdc++: Workaround kernel-headers on s390x-linux (RHEL-50054)

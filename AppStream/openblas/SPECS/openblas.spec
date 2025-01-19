@@ -15,7 +15,7 @@
 
 Name:           openblas
 Version:        0.3.26
-Release:        2%{?dist}
+Release:        2%{?dist}.redsleeve
 Summary:        An optimized BLAS library based on GotoBLAS2
 License:        BSD-3-Clause
 URL:            https://github.com/OpenMathLib/OpenBLAS
@@ -362,6 +362,9 @@ export AVX="NO_AVX2=1"
 %endif
 
 %endif
+%ifarch armv6hl
+TARGET="TARGET=ARMV6 DYNAMIC_ARCH=0"
+%endif
 %ifarch armv7hl
 # ARM v7 still doesn't have runtime cpu detection...
 TARGET="TARGET=ARMV7 DYNAMIC_ARCH=0"
@@ -440,6 +443,9 @@ cp -a %{_includedir}/lapacke %{buildroot}%{_includedir}/%{name}
 # Fix name of libraries: runtime CPU detection has none
 suffix=""
 # but archs that don't have it do have one
+%ifarch armv6hl
+suffix="_armv6"
+%endif
 %ifarch armv7hl
 suffix="_armv7"
 %endif
@@ -649,6 +655,9 @@ rm -rf %{buildroot}%{_libdir}/cmake
 %endif
 
 %changelog
+* Thu Jan 02 2025 Jacco Ligthart <jacco@redsleeve.org> - 0.3.26-2.redsleeve
+- added armv6hl
+
 * Thu Aug 22 2024 Pavel Simovec <psimovec@redhat.com> - 0.3.26-2
 - Re-include openblas.pc
 - Resolves: RHEL-20160

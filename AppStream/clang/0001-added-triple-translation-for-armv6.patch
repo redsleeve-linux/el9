@@ -1,79 +1,131 @@
-From 09a16ce24b9fbd721d12a81fcd1adc366c640e22 Mon Sep 17 00:00:00 2001
+From 685df3debba4a72d2bc5de88182ec0b85d9258f2 Mon Sep 17 00:00:00 2001
 From: Jacco Ligthart <jacco@redsleeve.org>
-Date: Fri, 31 May 2024 15:16:51 +0200
+Date: Sun, 19 Jan 2025 12:58:39 +0100
 Subject: [PATCH] added triple translation for armv6
 
 ---
- .../100-armv6-add-llc-gcc-triplet-translation.diff    | 10 ++++++++++
- SPECS/clang.spec                                      | 11 ++++++++---
- 2 files changed, 18 insertions(+), 3 deletions(-)
+ ...armv6-add-llc-gcc-triplet-translation.diff | 10 +++++++
+ SPECS/clang.spec                              | 26 +++++++++++++------
+ 2 files changed, 28 insertions(+), 8 deletions(-)
  create mode 100755 SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff
 
 diff --git a/SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff b/SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff
 new file mode 100755
-index 0000000..2b9fa26
+index 0000000..12ffc9a
 --- /dev/null
 +++ b/SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff
 @@ -0,0 +1,10 @@
-+--- a/clang/lib/Driver/ToolChains/Gnu.cpp-bak	2023-06-04 16:48:04.389190068 +0200
-++++ b/clang/lib/Driver/ToolChains/Gnu.cpp	2023-06-04 16:50:14.327438386 +0200
-+@@ -1974,6 +1974,7 @@
-+ static const char *ConvertToGccTriple(StringRef CandidateTriple) {
-+   return llvm::StringSwitch<const char *>(CandidateTriple)
-+       .Case("aarch64-redhat-linux-gnu", "aarch64-redhat-linux")
-++      .Case("armv6l-redhat-linux-gnueabihf", "armv6hl-redhat-linux-gnueabi")
-+       .Case("i686-redhat-linux-gnu", "i686-redhat-linux")
-+       .Case("ppc64le-redhat-linux-gnu", "ppc64le-redhat-linux")
-+       .Case("s390x-redhat-linux-gnu", "s390x-redhat-linux")
++--- a/clang/lib/Driver/ToolChains/Gnu.cpp	2024-12-30 00:38:04.157102471 +0100
+++++ b/clang/lib/Driver/ToolChains/Gnu.cpp	2024-12-30 00:49:46.296960756 +0100
++@@ -2461,6 +2461,7 @@
++   static const char *const ARMTriples[] = {"arm-linux-gnueabi"};
++   static const char *const ARMHFTriples[] = {"arm-linux-gnueabihf",
++                                              "armv7hl-redhat-linux-gnueabi",
+++                                             "armv6hl-redhat-linux-gnueabihf",
++                                              "armv6hl-suse-linux-gnueabi",
++                                              "armv7hl-suse-linux-gnueabi"};
++   static const char *const ARMebLibDirs[] = {"/lib"};
 diff --git a/SPECS/clang.spec b/SPECS/clang.spec
-index ec13f09..a14ef2d 100644
+index 26c0a69..c32764c 100644
 --- a/SPECS/clang.spec
 +++ b/SPECS/clang.spec
-@@ -6,7 +6,7 @@
+@@ -17,7 +17,7 @@
+ %bcond_with bundle_compat_lib
+ %bcond_without check
  
- # We are building with clang for faster/lower memory LTO builds.
- # See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
--%global toolchain clang
-+%global toolchain gcc
- 
- %global gts_version 13
- 
-@@ -62,7 +62,7 @@
+-%ifnarch s390x %ix86
++%ifnarch s390x %ix86 %{arm}
+ %global build_ldflags %{build_ldflags} -Wl,--build-id=sha1
+ %bcond_without linker_lld
+ %else
+@@ -85,7 +85,7 @@
  
  Name:		%pkg_name
  Version:	%{clang_version}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
--Release:	5%{?dist}
-+Release:	5%{?dist}.redsleeve
+-Release:	3%{?dist}
++Release:	3%{?dist}.redsleeve
  Summary:	A C language family front-end for LLVM
  
  License:	Apache-2.0 WITH LLVM-exception OR NCSA
-@@ -113,6 +113,8 @@ Patch7:     tsa.patch
- Patch101:     0009-disable-recommonmark.patch
+@@ -127,6 +127,8 @@ Patch101:  0009-disable-myst-parser.patch
  Patch102:     0001-Driver-Give-devtoolset-path-precedence-over-Installe.patch
+ Patch103:  0001-Produce-DWARF4-by-default.patch
  
 +Patch100:  100-armv6-add-llc-gcc-triplet-translation.diff
 +
- %if %{without compat_build}
  # Patches for clang-tools-extra
  # See https://reviews.llvm.org/D120301
-@@ -361,7 +363,7 @@ rm test/CodeGen/profile-filter.c
- # Use ThinLTO to limit build time.
- %define _lto_cflags -flto=thin
- # And disable LTO on AArch64 entirely.
--%ifarch aarch64
-+%ifarch aarch64 %{arm}
+ Patch201:   0001-clang-tools-extra-Make-test-dependency-on-LLVMHello-.patch
+@@ -367,7 +369,7 @@ rm test/CodeGen/profile-filter.c
+ %build
+ 
+ # Disable lto on i686 due to memory constraints.
+-%ifarch %ix86
++%ifarch %ix86 %{arm}
  %define _lto_cflags %{nil}
  %endif
  
-@@ -752,6 +754,9 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
+@@ -376,7 +378,7 @@ rm test/CodeGen/profile-filter.c
+ %global _lto_cflags %nil
+ %endif
+ 
+-%ifarch s390 s390x aarch64 %ix86 ppc64le
++%ifarch s390 s390x aarch64 %ix86 ppc64le %{arm}
+ # Decrease debuginfo verbosity to reduce memory consumption during final library linking
+ %global optflags %(echo %{optflags} | sed 's/-g /-g1 /')
+ %endif
+@@ -388,7 +390,7 @@ rm test/CodeGen/profile-filter.c
+ %endif
+ 
+ # Disable dwz on aarch64, because it takes a huge amount of time to decide not to optimize things.
+-%ifarch aarch64
++%ifarch aarch64 %{arm}
+ %define _find_debuginfo_dwz_opts %{nil}
+ %endif
+ 
+@@ -434,7 +436,7 @@ mv ../cmake-%{compat_ver}.src ../cmake
+ 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
+ 	-DPYTHON_EXECUTABLE=%{__python3} \
+ 	-DCMAKE_SKIP_RPATH:BOOL=ON \
+-%ifarch s390 s390x %ix86 ppc64le
++%ifarch s390 s390x %ix86 ppc64le %{arm}
+ 	-DCMAKE_C_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
+ 	-DCMAKE_CXX_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
+ %endif
+@@ -577,8 +579,13 @@ mv %{SOURCE6} %{buildroot}%{_sysconfdir}/%{name}/%{_target_platform}.cfg
+ # Install config file for clang
+ %if %{maj_ver} >=18
+ mkdir -p %{buildroot}%{_sysconfdir}/%{name}/
++%ifnarch armv6hl
+ echo "--gcc-triple=%{_target_cpu}-redhat-linux" >> %{buildroot}%{_sysconfdir}/%{name}/%{_target_platform}-clang.cfg
+ echo "--gcc-triple=%{_target_cpu}-redhat-linux" >> %{buildroot}%{_sysconfdir}/%{name}/%{_target_platform}-clang++.cfg
++%else
++echo "--gcc-triple=%{_target_cpu}-redhat-linux-gnueabi" >> %{buildroot}%{_sysconfdir}/%{name}/armv6l-redhat-linux-gnueabihf-clang.cfg
++echo "--gcc-triple=%{_target_cpu}-redhat-linux-gnueabi" >> %{buildroot}%{_sysconfdir}/%{name}/armv6l-redhat-linux-gnueabihf-clang++.cfg
++%endif
+ %endif
+ 
+ # Fix permissions of scan-view scripts
+@@ -655,8 +662,8 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
+ %{_libdir}/libclang.so.%{compat_maj_ver}*
+ %{_libdir}/libclang-cpp.so.%{compat_maj_ver}*
+ %endif
+-%{_sysconfdir}/%{name}/%{_target_platform}-clang.cfg
+-%{_sysconfdir}/%{name}/%{_target_platform}-clang++.cfg
++%{_sysconfdir}/%{name}/*-clang.cfg
++%{_sysconfdir}/%{name}/*-clang++.cfg
+ 
+ %files devel
+ %{install_libdir}/*.so
+@@ -800,6 +807,9 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
  
  %endif
  %changelog
-+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 17.0.6-5.redsleeve
++* Tue Nov 26 2024 Jacco Ligthart <jacco@redsleeve.org> - 18.1.0-3.redsleeve
 +- added triple translation for armv6
 +
- * Tue Jan 09 2024 Timm Bäder <tbaeder@redhat.com> - 17.0.6-5
- - Remove compat libs
+ * Thu Aug 08 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.8-3
+ - Remove clang 17 compat lib
  
 -- 
 2.43.5

@@ -2,7 +2,7 @@
 
 Name:           libstoragemgmt
 Version:        1.10.1
-Release:        1%{?dist}
+Release:        1%{?dist}.redsleeve
 Summary:        Storage array management library
 License:        LGPL-2.1-or-later
 URL:            https://github.com/libstorage/libstoragemgmt
@@ -33,7 +33,7 @@ BuildRequires:  ledmon-devel
 BuildRequires:  systemd systemd-devel
 
 BuildRequires:  chrpath
-BuildRequires:  valgrind
+#BuildRequires:  valgrind
 
 %description
 The libStorageMgmt library will provide a vendor agnostic open source storage
@@ -168,7 +168,7 @@ plugin selection for locally managed storage.
 %build
 ./autogen.sh
 
-%configure --with-python3 --disable-static
+%configure --with-python3 --disable-static --without-mem-leak-test
 %make_build
 
 %install
@@ -446,6 +446,9 @@ fi
 %{_mandir}/man1/local_lsmplugin.1*
 
 %changelog
+* Sat Jan 04 2025 Jacco Ligthart <jacco@redsleeve.org> - 1.10.1-1.redsleeve
+- removed valgrind dependency
+
 * Mon Jul 15 2024 Tony Asleson <tasleson@redhat.com> - 1.10.1-1
 - Upgrade to 1.10.1
 

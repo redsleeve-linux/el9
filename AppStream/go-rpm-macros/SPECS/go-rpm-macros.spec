@@ -11,7 +11,7 @@ Version:   3.6.0
 %global golang_arches   %{ix86} %{golang_arches_future}
 %global gccgo_arches    %{mips}
 %if 0%{?rhel} >= 9
-%global golang_arches   x86_64 aarch64 ppc64le s390x
+%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
 %endif
 # Go sources can contain arch-specific files and our macros will package the
 # correct files for each architecture. Therefore, move gopath to _libdir and
@@ -36,7 +36,7 @@ Version:   3.6.0
 ExclusiveArch: %{golang_arches} %{gccgo_arches}
 
 Name:      go-rpm-macros
-Release:   3%{?dist}
+Release:   3%{?dist}.redsleeve
 Summary:   Build-stage rpm automation for Go packages
 
 License:   GPLv3+
@@ -257,6 +257,9 @@ install -m 0755 -vp %{golist_builddir}/bin/* %{buildroot}%{golist_execdir}/
 %{_spectemplatedir}/*.spec
 
 %changelog
+* Tue Dec 24 2024 Jaccco Ligthart <jacco@redsleeve.org> 3.6.0-3.redsleeve
+- added arm to golang_arches
+
 * Wed Jul 31 2024 Alejandro Sáez <asm@redhat.com> - 3.6.0-3
 - Fix typo in add-gobuild-and-gotest.patch
 - Resolves: RHEL-7437

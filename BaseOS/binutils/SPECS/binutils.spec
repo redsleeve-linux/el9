@@ -2,7 +2,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 54%{?dist}
+Release: 54%{?dist}.redsleeve
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -530,6 +530,7 @@ Requires(post): coreutils
 BuildRequires: elfutils-debuginfod-client-devel
 %endif
 
+Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 %description
@@ -1305,6 +1306,9 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
+* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-54.redsleeve
+- minor adjustments for armv6
+
 * Wed Aug 14 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-54
 - Re fix AArch64 EFI test after applying previous delta.  (RHEL-39953)
 

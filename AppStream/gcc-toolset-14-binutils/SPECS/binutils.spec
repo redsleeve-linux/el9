@@ -9,7 +9,7 @@ BuildRequires: scl-utils-build
 Summary: A GNU collection of binary utilities
 Name: %{?scl_prefix}binutils
 Version: 2.41
-Release: 3%{?dist}
+Release: 3%{?dist}.redsleeve
 License: GPL-3.0-or-later AND (GPL-3.0-or-later WITH Bison-exception-2.2) AND (LGPL-2.0-or-later WITH GCC-exception-2.0) AND BSD-3-Clause AND GFDL-1.3-or-later AND GPL-2.0-or-later AND LGPL-2.1-or-later AND LGPL-2.0-or-later
 URL: https://sourceware.org/binutils
 
@@ -347,6 +347,8 @@ Patch40: binutils-Intel-APX-CODE_6_GOTTPOFF.patch
 # Purpose:  Suppress the x86 linker's p_align-1 tests due to kernel bug on CentOS-10
 # Lifetime: TEMPORARY
 Patch99: binutils-suppress-ld-align-tests.patch
+
+Patch1000: binutils-armv6.patch
 
 #----------------------------------------------------------------------------
 
@@ -1491,6 +1493,9 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
+* Tue Jan 07 2025 Jacco Ligthart <jacco@redsleeve.org> 2.41-3.redsleeve
+- minor adjustments for armv6
+
 * Fri Aug 16 2024 Nick Clifton  <nickc@redhat.com> - 2.41-3
 - Fix restoring contect to gprofng.rc file.  (RHEL-54563)
 

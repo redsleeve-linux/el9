@@ -17,7 +17,7 @@
 %bcond_with bundle_compat_lib
 %bcond_without check
 
-%ifnarch s390x %ix86
+%ifnarch s390x %ix86 %{arm}
 %global build_ldflags %{build_ldflags} -Wl,--build-id=sha1
 %bcond_without linker_lld
 %else
@@ -85,7 +85,7 @@
 
 Name:		%pkg_name
 Version:	%{clang_version}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
-Release:	3%{?dist}
+Release:	3%{?dist}.redsleeve
 Summary:	A C language family front-end for LLVM
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
@@ -126,6 +126,8 @@ Patch5:     0001-Workaround-a-bug-in-ORC-on-ppc64le.patch
 Patch101:  0009-disable-myst-parser.patch
 Patch102:     0001-Driver-Give-devtoolset-path-precedence-over-Installe.patch
 Patch103:  0001-Produce-DWARF4-by-default.patch
+
+Patch100:  100-armv6-add-llc-gcc-triplet-translation.diff
 
 # Patches for clang-tools-extra
 # See https://reviews.llvm.org/D120301
@@ -367,7 +369,7 @@ rm test/CodeGen/profile-filter.c
 %build
 
 # Disable lto on i686 due to memory constraints.
-%ifarch %ix86
+%ifarch %ix86 %{arm}
 %define _lto_cflags %{nil}
 %endif
 
@@ -376,7 +378,7 @@ rm test/CodeGen/profile-filter.c
 %global _lto_cflags %nil
 %endif
 
-%ifarch s390 s390x aarch64 %ix86 ppc64le
+%ifarch s390 s390x aarch64 %ix86 ppc64le %{arm}
 # Decrease debuginfo verbosity to reduce memory consumption during final library linking
 %global optflags %(echo %{optflags} | sed 's/-g /-g1 /')
 %endif
@@ -388,7 +390,7 @@ rm test/CodeGen/profile-filter.c
 %endif
 
 # Disable dwz on aarch64, because it takes a huge amount of time to decide not to optimize things.
-%ifarch aarch64
+%ifarch aarch64 %{arm}
 %define _find_debuginfo_dwz_opts %{nil}
 %endif
 
@@ -434,7 +436,7 @@ mv ../cmake-%{compat_ver}.src ../cmake
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
 	-DPYTHON_EXECUTABLE=%{__python3} \
 	-DCMAKE_SKIP_RPATH:BOOL=ON \
-%ifarch s390 s390x %ix86 ppc64le
+%ifarch s390 s390x %ix86 ppc64le %{arm}
 	-DCMAKE_C_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
 	-DCMAKE_CXX_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
 %endif
@@ -577,8 +579,13 @@ mv %{SOURCE6} %{buildroot}%{_sysconfdir}/%{name}/%{_target_platform}.cfg
 # Install config file for clang
 %if %{maj_ver} >=18
 mkdir -p %{buildroot}%{_sysconfdir}/%{name}/
+%ifnarch armv6hl
 echo "--gcc-triple=%{_target_cpu}-redhat-linux" >> %{buildroot}%{_sysconfdir}/%{name}/%{_target_platform}-clang.cfg
 echo "--gcc-triple=%{_target_cpu}-redhat-linux" >> %{buildroot}%{_sysconfdir}/%{name}/%{_target_platform}-clang++.cfg
+%else
+echo "--gcc-triple=%{_target_cpu}-redhat-linux-gnueabi" >> %{buildroot}%{_sysconfdir}/%{name}/armv6l-redhat-linux-gnueabihf-clang.cfg
+echo "--gcc-triple=%{_target_cpu}-redhat-linux-gnueabi" >> %{buildroot}%{_sysconfdir}/%{name}/armv6l-redhat-linux-gnueabihf-clang++.cfg
+%endif
 %endif
 
 # Fix permissions of scan-view scripts
@@ -655,8 +662,8 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
 %{_libdir}/libclang.so.%{compat_maj_ver}*
 %{_libdir}/libclang-cpp.so.%{compat_maj_ver}*
 %endif
-%{_sysconfdir}/%{name}/%{_target_platform}-clang.cfg
-%{_sysconfdir}/%{name}/%{_target_platform}-clang++.cfg
+%{_sysconfdir}/%{name}/*-clang.cfg
+%{_sysconfdir}/%{name}/*-clang++.cfg
 
 %files devel
 %{install_libdir}/*.so
@@ -800,6 +807,9 @@ mv ./libclang-cpp.so.%{compat_maj_ver} "$compat_lib"
 
 %endif
 %changelog
+* Tue Nov 26 2024 Jacco Ligthart <jacco@redsleeve.org> - 18.1.0-3.redsleeve
+- added triple translation for armv6
+
 * Thu Aug 08 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.8-3
 - Remove clang 17 compat lib
 

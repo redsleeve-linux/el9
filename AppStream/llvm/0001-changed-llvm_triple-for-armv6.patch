@@ -1,14 +1,14 @@
-From d758028d06854c3890591fffd1f7bf1e2b789a1f Mon Sep 17 00:00:00 2001
+From 0ae6c85f6f81a0c2bdef1cf25d43a4db34e95398 Mon Sep 17 00:00:00 2001
 From: Jacco Ligthart <jacco@redsleeve.org>
-Date: Fri, 31 May 2024 16:35:04 +0200
+Date: Sun, 19 Jan 2025 13:20:20 +0100
 Subject: [PATCH] changed llvm_triple for armv6
 
 ---
- SPECS/llvm.spec | 20 ++++++++++++++------
- 1 file changed, 14 insertions(+), 6 deletions(-)
+ SPECS/llvm.spec | 21 ++++++++++++++++-----
+ 1 file changed, 16 insertions(+), 5 deletions(-)
 
 diff --git a/SPECS/llvm.spec b/SPECS/llvm.spec
-index 02f2c17..98cf4d9 100644
+index 4a4ed09..60a6730 100644
 --- a/SPECS/llvm.spec
 +++ b/SPECS/llvm.spec
 @@ -1,3 +1,7 @@
@@ -19,70 +19,72 @@ index 02f2c17..98cf4d9 100644
  %bcond_with snapshot_build
  
  %if %{with snapshot_build}
-@@ -7,7 +11,7 @@
- 
- # We are building with clang for faster/lower memory LTO builds.
- # See https://docs.fedoraproject.org/en-US/packaging-guidelines/#_compiler_macros
--%global toolchain clang
-+%global toolchain gcc
- 
+@@ -16,7 +20,7 @@
  %global gts_version 13
  
-@@ -23,7 +27,7 @@
+ # Components enabled if supported by target architecture:
+-%define gold_arches %{ix86} x86_64 aarch64 %{power64} s390x
++%define gold_arches %{ix86} x86_64 aarch64 %{power64} s390x %{arm}
+ %ifarch %{gold_arches}
+   %bcond_without gold
+ %else
+@@ -27,7 +31,7 @@
  %bcond_with bundle_compat_lib
  %bcond_without check
  
--%ifarch %ix86
-+%ifarch %ix86 %{arm}
+-%ifarch %ix86 riscv64
++%ifarch %ix86 riscv64 %{arm}
  # Disable LTO on x86 in order to reduce memory consumption
  %bcond_with lto_build
  %elif %{with snapshot_build}
-@@ -92,7 +96,8 @@
- %ifarch %{arm}
- # koji overrides the _gnu variable to be gnu, which is not correct for clang, so
- # we need to hard-code the correct triple here.
--%global llvm_triple armv7l-redhat-linux-gnueabihf
-+#global llvm_triple armv7l-redhat-linux-gnueabihf
+@@ -92,7 +96,11 @@
+ %global _dwz_low_mem_die_limit_s390x 1
+ %global _dwz_max_die_limit_s390x 1000000
+ 
++%ifarch %{arm}
 +%global llvm_triple armv6l-redhat-linux-gnueabihf
- %else
++%else
  %global llvm_triple %{_target_platform}
- %endif
-@@ -104,7 +109,7 @@
++%endif
+ 
+ # https://fedoraproject.org/wiki/Changes/PythonSafePath#Opting_out
+ # Don't add -P to Python shebangs
+@@ -101,7 +109,7 @@
  
  Name:		%{pkg_name}
  Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
--Release:	5%{?dist}
-+Release:	5%{?dist}.redsleeve
+-Release:	3%{?dist}
++Release:	3%{?dist}.redsleeve
  Summary:	The Low Level Virtual Machine
  
  License:	Apache-2.0 WITH LLVM-exception OR NCSA
-@@ -303,7 +308,7 @@ mv %{third_party_srcdir} third-party
- 
- %build
- 
--%ifarch %ix86
-+%ifarch %ix86 %{arm}
- # Linking libLLVM.so goes out of memory even with ThinLTO and a single link job.
+@@ -297,7 +305,7 @@ mv %{third_party_srcdir} third-party
  %global _lto_cflags %nil
  %endif
-@@ -394,7 +399,7 @@ export ASMFLAGS="%{build_cflags}"
- %if %{with lto_build}
- 	-DLLVM_UNITTEST_LINK_FLAGS="-Wl,-plugin-opt=O0" \
- %endif
--	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -Wl,-z,cet-report=error"
-+	-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -Wl"
  
- # Build libLLVM.so first.  This ensures that when libLLVM.so is linking, there
- # are no other compile jobs running.  This will help reduce OOM errors on the
-@@ -682,6 +687,9 @@ fi
+-%ifarch s390 s390x %ix86 riscv64
++%ifarch s390 s390x %ix86 riscv64 %{arm}
+ # Decrease debuginfo verbosity to reduce memory consumption during final library linking
+ %global optflags %(echo %{optflags} | sed 's/-g /-g1 /')
+ %endif
+@@ -312,7 +320,7 @@ export ASMFLAGS="%{build_cflags}"
+ 	-DLLVM_PARALLEL_LINK_JOBS=1 \
+ 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
+ 	-DCMAKE_SKIP_RPATH:BOOL=ON \
+-%ifarch s390 %ix86 riscv64
++%ifarch s390 %ix86 riscv64 %{arm}
+ 	-DCMAKE_C_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
+ 	-DCMAKE_CXX_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
+ %endif
+@@ -658,6 +666,9 @@ fi
  %license LICENSE.TXT
  
  %changelog
-+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 17.0.6-5.redsleeve
++* Tue Nov 26 2024 Jacco Ligthart <jacco@redsleeve.org> - 18.1.0-3.redsleeve
 +- changed llvm_triple for armv6
 +
- * Fri Feb 02 2024 Timm Bäder <tbaeder@redhat.com> - 17.0.6-5
- - Backport a patch for RHEL-23638
+ * Thu Aug 15 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.8-3
+ - Workaround for GFX11.5 export priority (RHEL-49517)
  
 -- 
 2.43.5

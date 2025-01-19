@@ -1,3 +1,7 @@
+# Workaround for
+# Cannot handle 8-byte build ID
+%define debug_package %{nil}
+
 %bcond_with snapshot_build
 
 %if %{with snapshot_build}
@@ -16,7 +20,7 @@
 %global gts_version 13
 
 # Components enabled if supported by target architecture:
-%define gold_arches %{ix86} x86_64 aarch64 %{power64} s390x
+%define gold_arches %{ix86} x86_64 aarch64 %{power64} s390x %{arm}
 %ifarch %{gold_arches}
   %bcond_without gold
 %else
@@ -27,7 +31,7 @@
 %bcond_with bundle_compat_lib
 %bcond_without check
 
-%ifarch %ix86 riscv64
+%ifarch %ix86 riscv64 %{arm}
 # Disable LTO on x86 in order to reduce memory consumption
 %bcond_with lto_build
 %elif %{with snapshot_build}
@@ -92,7 +96,11 @@
 %global _dwz_low_mem_die_limit_s390x 1
 %global _dwz_max_die_limit_s390x 1000000
 
+%ifarch %{arm}
+%global llvm_triple armv6l-redhat-linux-gnueabihf
+%else
 %global llvm_triple %{_target_platform}
+%endif
 
 # https://fedoraproject.org/wiki/Changes/PythonSafePath#Opting_out
 # Don't add -P to Python shebangs
@@ -101,7 +109,7 @@
 
 Name:		%{pkg_name}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
-Release:	3%{?dist}
+Release:	3%{?dist}.redsleeve
 Summary:	The Low Level Virtual Machine
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
@@ -297,7 +305,7 @@ mv %{third_party_srcdir} third-party
 %global _lto_cflags %nil
 %endif
 
-%ifarch s390 s390x %ix86 riscv64
+%ifarch s390 s390x %ix86 riscv64 %{arm}
 # Decrease debuginfo verbosity to reduce memory consumption during final library linking
 %global optflags %(echo %{optflags} | sed 's/-g /-g1 /')
 %endif
@@ -312,7 +320,7 @@ export ASMFLAGS="%{build_cflags}"
 	-DLLVM_PARALLEL_LINK_JOBS=1 \
 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
 	-DCMAKE_SKIP_RPATH:BOOL=ON \
-%ifarch s390 %ix86 riscv64
+%ifarch s390 %ix86 riscv64 %{arm}
 	-DCMAKE_C_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
 	-DCMAKE_CXX_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
 %endif
@@ -658,6 +666,9 @@ fi
 %license LICENSE.TXT
 
 %changelog
+* Tue Nov 26 2024 Jacco Ligthart <jacco@redsleeve.org> - 18.1.0-3.redsleeve
+- changed llvm_triple for armv6
+
 * Thu Aug 15 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.8-3
 - Workaround for GFX11.5 export priority (RHEL-49517)
 

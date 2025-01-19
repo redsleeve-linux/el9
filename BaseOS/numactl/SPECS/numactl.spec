@@ -1,7 +1,7 @@
 Name:		numactl
 Summary:	Library for tuning for Non Uniform Memory Access machines
 Version:	2.0.18
-Release:	2%{dist}
+Release:	2%{dist}.redsleeve
 # libnuma is LGPLv2 and GPLv2
 # numactl binaries are GPLv2 only
 License:	LGPL-2.1-only and GPL-2.0-only
@@ -11,7 +11,7 @@ Source0:	%{url}/releases/download/v%{version}/%{name}-%{version}.tar.gz
 BuildRequires: make
 BuildRequires:	libtool automake autoconf
 
-ExcludeArch: s390 %{arm}
+ExcludeArch: s390
 
 #START INSERT
 #
@@ -115,6 +115,9 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man3/*.3*
 
 %changelog
+* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org>  2.0.18-1.redsleeve
+- remove %{arm} from excludearchs
+
 * Tue Jul 30 2024 Pingfan Liu <piliu@redhat.com> - 2.0.18-1
 - rebase to v2.0.18
 

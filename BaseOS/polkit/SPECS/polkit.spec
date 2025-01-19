@@ -22,7 +22,7 @@
 Summary: An authorization framework
 Name: polkit
 Version: 0.117
-Release: 13%{?dist}
+Release: 13%{?dist}.redsleeve
 License: LGPLv2+
 URL: http://www.freedesktop.org/wiki/Software/polkit
 Source0: http://www.freedesktop.org/software/polkit/releases/%{name}-%{version}.tar.gz
@@ -205,7 +205,7 @@ pushd firefox-%{mozjs_version}
 %patch14 -p1
 %patch15 -p1
 
-%ifarch armv7hl
+%ifarch %{arm}
 # Include definitions for user vfp on armv7 as it causes the compilation to fail without them
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1526653
 %patch17 -p1
@@ -394,6 +394,9 @@ exit 0
 %endif
 
 %changelog
+* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org> - 0.117-13.redsleeve
+- apply definitions_for_user_vfp also for armv6
+
 * Tue May 28 2024 Jan Rybar <jrybar@redhat.com> - 0.117-13
 - session-monitor: watch sessions only
 - PolkitPermission: react on really changed sessions

@@ -1,25 +1,25 @@
-From b63ff2f8764fa39495ac8b6ac26069802773a21e Mon Sep 17 00:00:00 2001
+From d0efec3181a56cf20922aa855adbeafa518ccd0d Mon Sep 17 00:00:00 2001
 From: Jacco Ligthart <jacco@redsleeve.org>
-Date: Fri, 31 May 2024 13:24:17 +0200
+Date: Tue, 26 Nov 2024 22:02:04 +0100
 Subject: [PATCH] patched for armv6
 
 ---
- SPECS/rdma-core.spec | 19 ++++++++++++++-----
- 1 file changed, 14 insertions(+), 5 deletions(-)
+ SPECS/rdma-core.spec | 23 ++++++++++++++++-------
+ 1 file changed, 16 insertions(+), 7 deletions(-)
 
 diff --git a/SPECS/rdma-core.spec b/SPECS/rdma-core.spec
-index 585986c..7bf9553 100644
+index 6fef177..81eaf04 100644
 --- a/SPECS/rdma-core.spec
 +++ b/SPECS/rdma-core.spec
 @@ -1,6 +1,6 @@
  Name: rdma-core
- Version: 48.0
+ Version: 51.0
 -Release: 1%{?dist}
 +Release: 1%{?dist}.redsleeve
  Summary: RDMA core userspace libraries and daemons
  
  # Almost everything is licensed under the OFA dual GPLv2, 2 Clause BSD license
-@@ -17,7 +17,7 @@ Patch9999: 9999-udev-keep-NAME_KERNEL-as-default-interface-naming-co.patch
+@@ -16,7 +16,7 @@ Patch9999: 9999-udev-keep-NAME_KERNEL-as-default-interface-naming-co.patch
  %define with_static %{?_with_static: 1} %{?!_with_static: 0}
  
  # 32-bit arm is missing required arch-specific memory barriers,
@@ -28,7 +28,7 @@ index 585986c..7bf9553 100644
  
  BuildRequires: binutils
  BuildRequires: cmake >= 2.8.11
-@@ -27,7 +27,7 @@ BuildRequires: pkgconfig
+@@ -26,7 +26,7 @@ BuildRequires: pkgconfig
  BuildRequires: pkgconfig(libnl-3.0)
  BuildRequires: pkgconfig(libnl-route-3.0)
  BuildRequires: /usr/bin/rst2man
@@ -37,22 +37,22 @@ index 585986c..7bf9553 100644
  BuildRequires: systemd
  BuildRequires: systemd-devel
  %if 0%{?fedora} >= 32 || 0%{?rhel} >= 8
-@@ -396,8 +396,10 @@ fi
- %config(noreplace) %{_sysconfdir}/rdma/modules/opa.conf
+@@ -395,7 +395,9 @@ fi
  %config(noreplace) %{_sysconfdir}/rdma/modules/rdma.conf
  %config(noreplace) %{_sysconfdir}/rdma/modules/roce.conf
-+%ifnarch %{arm}
  %dir %{_sysconfdir}/modprobe.d
++%ifnarch %{arm}
  %config(noreplace) %{_sysconfdir}/modprobe.d/mlx4.conf
 +%endif
+ %config(noreplace) %{_sysconfdir}/modprobe.d/truescale.conf
  %{_unitdir}/rdma-hw.target
  %{_unitdir}/rdma-load-modules@.service
- %dir %{dracutlibdir}
-@@ -432,12 +434,13 @@ fi
+@@ -432,13 +434,14 @@ fi
  %endif
  %{_libdir}/lib*.so
  %{_libdir}/pkgconfig/*.pc
 -%{_mandir}/man3/efadv*
+-%{_mandir}/man3/hnsdv*
  %{_mandir}/man3/ibv_*
  %{_mandir}/man3/rdma*
  %{_mandir}/man3/umad*
@@ -60,10 +60,11 @@ index 585986c..7bf9553 100644
  %{_mandir}/man7/rdma_cm.*
 +%ifnarch %{arm}
 +%{_mandir}/man3/efadv*
++%{_mandir}/man3/hnsdv*
  %{_mandir}/man3/mlx5dv*
  %{_mandir}/man3/mlx4dv*
  %{_mandir}/man3/manadv*
-@@ -445,6 +448,7 @@ fi
+@@ -447,6 +450,7 @@ fi
  %{_mandir}/man7/mlx5dv*
  %{_mandir}/man7/mlx4dv*
  %{_mandir}/man7/manadv*
@@ -71,15 +72,17 @@ index 585986c..7bf9553 100644
  %{_mandir}/man3/ibnd_*
  
  %files -n infiniband-diags
-@@ -518,12 +522,14 @@ fi
+@@ -520,13 +524,15 @@ fi
  %files -n libibverbs
  %dir %{_sysconfdir}/libibverbs.d
  %dir %{_libdir}/libibverbs
 -%{_libdir}/libefa.so.*
+-%{_libdir}/libhns.so.*
  %{_libdir}/libibverbs*.so.*
  %{_libdir}/libibverbs/*.so
 +%ifnarch %{arm}
 +%{_libdir}/libefa.so.*
++%{_libdir}/libhns.so.*
  %{_libdir}/libmana.so.*
  %{_libdir}/libmlx5.so.*
  %{_libdir}/libmlx4.so.*
@@ -87,16 +90,16 @@ index 585986c..7bf9553 100644
  %config(noreplace) %{_sysconfdir}/libibverbs.d/*.driver
  %doc %{_docdir}/%{name}/libibverbs.md
  
-@@ -615,6 +621,9 @@ fi
+@@ -618,6 +624,9 @@ fi
  %endif
  
  %changelog
-+* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org > - 48.0-1.redsleeve
++* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org > - 51.0-1.redsleeve
 +- patched for armv6
 +
- * Mon Sep 18 2023 Kamal Heib <kheib@redhat.com> - 48.0-1
- - Rebase to upstream release v48.0
- - Resolves: RHEL-884, RHEL-4800, RHEL-4799, RHEL-3527, RHEL-5486
+ * Mon Apr 22 2024 Kamal Heib <kheib@redhat.com> - 51.0-1
+ - Rebase to upstream release v51.0
+ - Resolves: RHEL-24473, RHEL-23180
 -- 
-2.39.3
+2.43.5
 
