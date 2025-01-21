@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.14.1
+%define pkgrelease 503.21.1
 %define kversion 5
-%define tarfile_release 5.14.0-503.14.1.el9_5
+%define tarfile_release 5.14.0-503.21.1.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.14.1%{?buildid}%{?dist}
+%define specrelease 503.21.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.14.1.el9_5
+%define kabiversion 5.14.0-503.21.1.el9_5
 
 #
 # End of genspec.sh variables
@@ -3795,9 +3795,149 @@ fi
 #
 #
 %changelog
-* Fri Nov 15 2024 Release Engineering <releng@rockylinux.org> - 5.14.0-503.14.1
+* Wed Jan 08 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.21.1
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Thu Dec 19 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.21.1.el9_5]
+- mlxsw: spectrum_ipip: Fix memory leak when changing remote IPv6 address (CKI Backport Bot) [RHEL-66899] {CVE-2024-50252}
+- CVE-2024-53122 mptcp: cope racing subflow creation in mptcp_rcv_space_adjust (Patrick Talbert) [RHEL-70083 RHEL-69670] {CVE-2024-53122}
+- mm: make show_free_areas() static (Aristeu Rozanski) [RHEL-66998 RHEL-27743]
+- mm: remove arguments of show_mem() (Aristeu Rozanski) [RHEL-66998 RHEL-27743]
+- KVM: s390: Change virtual to physical address access in diag 0x258 handler (Thomas Huth) [RHEL-67922 RHEL-65229]
+- KVM: s390: gaccess: Check if guest address is in memslot (Thomas Huth) [RHEL-67922 RHEL-65229]
+- KVM: s390: Fix SORTL and DFLTCC instruction format error in __insn32_query (Thomas Huth) [RHEL-67922 RHEL-65229]
+- s390/uv: Panic for set and remove shared access UVC errors (Thomas Huth) [RHEL-67922 RHEL-65229]
+- KVM: s390: remove useless include (Thomas Huth) [RHEL-67922 RHEL-65229]
+- s390/mm: Re-enable the shared zeropage for !PV and !skeys KVM guests (Thomas Huth) [RHEL-67922 RHEL-65229]
+- mm/userfaultfd: Do not place zeropages when zeropages are disallowed (Thomas Huth) [RHEL-67922 RHEL-65229]
+- s390: allow pte_offset_map_lock() to fail (Thomas Huth) [RHEL-67922 RHEL-54248]
+- KVM: s390: vsie: Use virt_to_phys for crypto control block (Thomas Huth) [RHEL-67922 RHEL-65229]
+- KVM: s390: vsie: Use virt_to_phys for facility control block (Thomas Huth) [RHEL-67922 RHEL-65229]
+- gfs2: Prevent inode creation race (Andreas Gruenbacher) [RHEL-68137 RHEL-68102]
+- gfs2: Only defer deletes when we have an iopen glock (Andreas Gruenbacher) [RHEL-68137 RHEL-68102]
+- gfs2: Randomize GLF_VERIFY_DELETE work delay (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Use mod_delayed_work in gfs2_queue_try_to_evict (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Update to the evict / remote delete documentation (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Call gfs2_queue_verify_delete from gfs2_evict_inode (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Clean up delete work processing (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Minor delete_work_func cleanup (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Return enum evict_behavior from gfs2_upgrade_iopen_glock (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Rename dinode_demise to evict_behavior (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Rename GIF_{DEFERRED -> DEFER}_DELETE (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Faster gfs2_upgrade_iopen_glock wakeups (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Fix unlinked inode cleanup (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Allow immediate GLF_VERIFY_DELETE work (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Initialize gl_no_formal_ino earlier (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Rename GLF_VERIFY_EVICT to GLF_VERIFY_DELETE (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: make timeout values more explicit (Wolfram Sang) [RHEL-62105 RHEL-60945]
+- gfs2: Simplify function gfs2_upgrade_iopen_glock (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- gfs2: Rename SDF_DEACTIVATING to SDF_KILL (Andreas Gruenbacher) [RHEL-62105 RHEL-60945]
+- smb: client: fix use-after-free of signing key (Jay Shin) [RHEL-69306 RHEL-66206]
+- net/iucv: fix use after free in iucv_sock_close() (Mete Durlu) [RHEL-60300 RHEL-53992]
+- KVM: arm64: Ensure vgic_ready() is ordered against MMIO registration (CKI Backport Bot) [RHEL-70294]
+
+* Thu Dec 12 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.20.1.el9_5]
+- bnxt_en: Add support for user configured RSS key (Michal Schmidt) [RHEL-68699 RHEL-54645]
+- bnxt_en: Add function to calculate Toeplitz hash (Michal Schmidt) [RHEL-68699 RHEL-54645]
+- kvm: Note an RCU quiescent state on guest exit (Leonardo Bras) [RHEL-65734 RHEL-20288]
+- rcu: Add rcutree.nohz_full_patience_delay to reduce nohz_full OS jitter (Leonardo Bras) [RHEL-65734 RHEL-20288]
+- context_tracking: Fix KCSAN noinstr violation (Leonardo Bras) [RHEL-65734 RHEL-20288]
+- perf/aux: Fix AUX buffer serialization (Michael Petlan) [RHEL-67495] {CVE-2024-46713}
+- RDMA/bnxt_re: Fix a bug while setting up Level-2 PBL pages (Mohammad Heib) [RHEL-66669 RHEL-52759] {CVE-2024-50208}
+
+* Fri Dec 06 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.19.1.el9_5]
+- xfrm: validate new SA's prefixlen using SA family when sel.family is unset (Sabrina Dubroca) [RHEL-66462 RHEL-66461] {CVE-2024-50142}
+- xfrm: fix one more kernel-infoleak in algo dumping (CKI Backport Bot) [RHEL-65960] {CVE-2024-50110}
+- Revert "Merge: [qed] softlockup triggered by ethtool -d  [rhel-9.5.z]" (Lucas Zampieri) [RHEL-61705]
+- tracing/hwlat: Fix a race during cpuhp processing (Tomas Glozar) [RHEL-69468]
+- tracing/timerlat: Fix a race during cpuhp processing (Tomas Glozar) [RHEL-69468] {CVE-2024-49866}
+- tracing/timerlat: Drop interface_lock in stop_kthread() (Tomas Glozar) [RHEL-69468]
+- tracing/timerlat: Fix duplicated kthread creation due to CPU online/offline (Tomas Glozar) [RHEL-69468]
+- ceph: remove the incorrect Fw reference check when dirtying pages (Xiubo Li) [RHEL-61416 RHEL-60255]
+
+* Tue Dec 03 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.18.1.el9_5]
+- bpf: Fix a kernel verifier crash in stacksafe() (CKI Backport Bot) [RHEL-66097 RHEL-66098] {CVE-2024-45020}
+- bpf: Fix a sdiv overflow issue (CKI Backport Bot) [RHEL-64598 RHEL-64597] {CVE-2024-49888}
+- bpf: Fix out-of-bounds write in trie_get_next_key() (CKI Backport Bot) [RHEL-66877] {CVE-2024-50262}
+- bpf: Fix use-after-free in bpf_uprobe_multi_link_attach() (CKI Backport Bot) [RHEL-63331] {CVE-2024-47675}
+- nfsd: ensure that nfsd4_fattr_args.context is zeroed out (Jay Shin) [RHEL-58884 RHEL-58883] {CVE-2024-46697}
+- KVM: nSVM: Ignore nCR3[4:0] when loading PDPTEs from memory (Jon Maloy) [RHEL-65872] {CVE-2024-50115}
+- net: tighten bad gso csum offset check in virtio_net_hdr (Guillaume Nault) [RHEL-67683]
+- udp: fix receiving fraglist GSO packets (Guillaume Nault) [RHEL-67683]
+- Bluetooth: hci: fix null-ptr-deref in hci_read_supported_codecs (CKI Backport Bot) [RHEL-66804] {CVE-2024-50255}
+- Bluetooth: ISO: Fix UAF on iso_sock_timeout (Bastien Nocera) [RHEL-66321] {CVE-2024-50124}
+- Bluetooth: SCO: Fix UAF on sco_sock_timeout (Bastien Nocera) [RHEL-65928] {CVE-2024-50125}
+- Bluetooth: Fix use-after-free bugs caused by sco_sock_timeout (Bastien Nocera) [RHEL-65928] {CVE-2024-27398}
+- bpf: Add BPF_PROG_TYPE_CGROUP_SKB attach type enforcement in BPF_LINK_CREATE (CKI Backport Bot) [RHEL-44173] {CVE-2024-38564}
+- Bluetooth: bnep: fix wild-memory-access in proto_unregister (CKI Backport Bot) [RHEL-66365] {CVE-2024-50148}
+- Bluetooth: l2cap: fix null-ptr-deref in l2cap_chan_timeout (CKI Backport Bot) [RHEL-57716 RHEL-36374] {CVE-2024-27399}
+
+* Thu Nov 28 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.17.1.el9_5]
+- arm64: probes: Remove broken LDR (literal) uprobe support (CKI Backport Bot) [RHEL-66046] {CVE-2024-50099}
+- qed: put cond_resched() in qed_dmae_operation_wait() (Michal Schmidt) [RHEL-61705 RHEL-6372]
+- qed: allow the callee of qed_mcp_nvm_read() to sleep (Michal Schmidt) [RHEL-61705 RHEL-6372]
+- qed: put cond_resched() in qed_grc_dump_ctx_data() (Michal Schmidt) [RHEL-61705 RHEL-6372]
+- qed: make 'ethtool -d' 10 times faster (Michal Schmidt) [RHEL-61705 RHEL-6372]
+- qed: allow sleep in qed_mcp_trace_dump() (Michal Schmidt) [RHEL-61705 RHEL-6372]
+- sched/numa: Fix the potential null pointer dereference in task_numa_work() (CKI Backport Bot) [RHEL-66810] {CVE-2024-50223}
+- irqchip/gic-v4: Correctly deal with set_affinity on lazily-mapped VPEs (Charles Mirabile) [RHEL-66969] {CVE-2024-50192}
+- irqchip/gic-v4: Don't allow a VMOVP on a dying VPE (Charles Mirabile) [RHEL-66969] {CVE-2024-50192}
+- perf/x86/intel/uncore: Support HBM and CXL PMON counters (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Cleanup unused unit structure (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Apply the unit control RB tree to PCI uncore units (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Apply the unit control RB tree to MSR uncore units (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Apply the unit control RB tree to MMIO uncore units (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Retrieve the unit ID from the unit control RB tree (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Support per PMU cpumask (Michael Petlan) [RHEL-65856]
+- perf/x86/uncore: Save the unit control address of all units (Michael Petlan) [RHEL-65856]
+
+* Thu Nov 21 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.16.1.el9_5]
+- s390/dasd: fix error recovery leading to data corruption on ESE devices (Mete Durlu) [RHEL-64902 RHEL-55873]
+- net/smc: fix illegal rmb_desc access in SMC-D connection dump (Steve Best) [RHEL-65436 RHEL-27748] {CVE-2024-26615}
+- gitlab-ci: use zstream builder container image (Michael Hofmann)
+- netfilter: nft_payload: sanitize offset and length before calling skb_checksum() (CKI Backport Bot) [RHEL-66856] {CVE-2024-50251}
+- net: avoid potential underflow in qdisc_pkt_len_init() with UFO (CKI Backport Bot) [RHEL-65401] {CVE-2024-49949}
+- block: initialize integrity buffer to zero before writing it to media (Ming Lei) [RHEL-58761 RHEL-54768] {CVE-2024-43854}
+- proc: fix dentry/inode overinstantiating under /proc/${pid}/net (Joel Savitz) [RHEL-62824 RHEL-57703]
+- iommu: Restore lost return in iommu_report_device_fault() (CKI Backport Bot) [RHEL-67364] {CVE-2024-44994}
+- net: ena: Extend customer metrics reporting support (Kamal Heib) [RHEL-66933 RHEL-59968]
+- net: ena: Add ENA Express metrics support (Kamal Heib) [RHEL-66933 RHEL-59968]
+- xsk: fix batch alloc API on non-coherent systems (Felix Maurer) [RHEL-59884 RHEL-58954]
+- selinux,smack: don't bypass permissions check in inode_setsecctx hook (Ondrej Mosnacek) [RHEL-66106] {CVE-2024-46695}
+- PCI/AER: Disable AER service on suspend (Lenny Szubowicz) [RHEL-67037 RHEL-22265]
+- ACPI: PM: s2idle: Evaluate all Low-Power S0 Idle _DSM functions (Mark Langsdorf) [RHEL-67037 RHEL-54149]
+- mptcp: fallback when MPTCP opts are dropped after 1st data (CKI Backport Bot) [RHEL-62216 RHEL-62218]
+- cpufreq: amd-pstate: add check for cpufreq_cpu_get's return value (David Arcari) [RHEL-61469 RHEL-45016]
+- cpufreq/amd-pstate: Add the missing cpufreq_cpu_put() (David Arcari) [RHEL-61469 RHEL-45016]
+- cpufreq/amd-pstate: Fix the scaling_max_freq setting on shared memory CPPC systems (David Arcari) [RHEL-61469 RHEL-45016]
+- cpufreq/amd-pstate-ut: Convert nominal_freq to khz during comparisons (David Arcari) [RHEL-61469 RHEL-45016]
+- cpufreq/amd-pstate: fix setting policy current frequency value (David Arcari) [RHEL-61469 RHEL-45016]
+- netfilter: flowtable: initialise extack before use (CKI Backport Bot) [RHEL-58545] {CVE-2024-45018}
+
+* Thu Nov 14 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.15.1.el9_5]
+- USB: serial: mos7840: fix crash on resume (Desnes Nunes) [RHEL-65484 RHEL-59050] {CVE-2024-42244}
+- attr: block mode changes of symlinks (CKI Backport Bot) [RHEL-61231 RHEL-60822]
+- ice: Adjust PTP init for 2x50G E825C devices (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Add NAC Topology device capability parser (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Add support for E825-C TS PLL handling (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Change CGU regs struct to anonymous (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Introduce ETH56G PHY model for E825C products (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Introduce ice_get_base_incval() helper (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Move CGU block (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Add PHY OFFSET_READY register clearing (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Implement Tx interrupt enablement functions (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Introduce helper to get tmr_cmd_reg values (Petr Oros) [RHEL-64017 RHEL-29210]
+- ice: Introduce ice_ptp_hw struct (Petr Oros) [RHEL-64017 RHEL-29210]
+- wifi: rtw89: limit the PPDU length for VHT rate to 0x40000 (Narpat Mali) [RHEL-61753 RHEL-35542]
+- wifi: rtw89: 885xbx: apply common settings to 8851B, 8852B and 8852BT (Narpat Mali) [RHEL-61753 RHEL-35542]
+- wifi: rtw89: 8852b: fix definition of KIP register number (Narpat Mali) [RHEL-61753 RHEL-35542]
+- wifi: rtw89: 8852b: set AMSDU limit to 5000 (Narpat Mali) [RHEL-61753 RHEL-35542]
+- bpf: Fix overrunning reservations in ringbuf (CKI Backport Bot) [RHEL-62940] {CVE-2024-41009}
+- net: tcp: accept old ack during closing (Jamie Bainbridge) [RHEL-61424 RHEL-60572]
+- cxl/port: Fix use-after-free, permit out-of-order decoder shutdown (CKI Backport Bot) [RHEL-66837] {CVE-2024-50226}
+- ethtool: check device is present when getting link settings (Michal Schmidt) [RHEL-60581 RHEL-57750]
+- iommu/amd: Fix argument order in amd_iommu_dev_flush_pasid_all() (CKI Backport Bot) [RHEL-59982 RHEL-59981]
 
 * Thu Nov 07 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.14.1.el9_5]
 - ext4: fix off by one issue in alloc_flex_gd() (Pavel Reichl) [RHEL-65318]
