@@ -1,0 +1,1906 @@
+commit 27f635fabe7c2933674ad40443906fc35eecf785
+Author: Sidraya Jayagond <sjayagond@openjdk.org>
+Date:   Tue Sep 12 09:07:09 2023 +0000
+
+    8311630: [s390] Implementation of Foreign Function & Memory API (Preview)
+    
+    Backport-of: ec1f7a8480db025a6f405817a106af8e92b69c44
+
+diff --git a/src/hotspot/cpu/s390/downcallLinker_s390.cpp b/src/hotspot/cpu/s390/downcallLinker_s390.cpp
+index baee7d7a043..f831da90755 100644
+--- a/src/hotspot/cpu/s390/downcallLinker_s390.cpp
++++ b/src/hotspot/cpu/s390/downcallLinker_s390.cpp
+@@ -23,8 +23,76 @@
+  */
+ 
+ #include "precompiled.hpp"
++#include "asm/macroAssembler.inline.hpp"
++#include "code/codeBlob.hpp"
++#include "code/codeCache.hpp"
++#include "code/vmreg.inline.hpp"
++#include "compiler/oopMap.hpp"
++#include "logging/logStream.hpp"
++#include "memory/resourceArea.hpp"
+ #include "prims/downcallLinker.hpp"
+-#include "utilities/debug.hpp"
++#include "runtime/globals.hpp"
++#include "runtime/stubCodeGenerator.hpp"
++
++#define __ _masm->
++
++class DowncallStubGenerator : public StubCodeGenerator {
++  BasicType* _signature;
++  int _num_args;
++  BasicType _ret_bt;
++  const ABIDescriptor& _abi;
++
++  const GrowableArray<VMStorage>&  _input_registers;
++  const GrowableArray<VMStorage>&  _output_registers;
++
++  bool _needs_return_buffer;
++  int _captured_state_mask;
++  bool _needs_transition;
++
++  int _frame_complete;
++  int _frame_size_slots;
++  OopMapSet* _oop_maps;
++  public:
++  DowncallStubGenerator(CodeBuffer* buffer,
++                         BasicType* signature,
++                         int num_args,
++                         BasicType ret_bt,
++                         const ABIDescriptor& abi,
++                         const GrowableArray<VMStorage>& input_registers,
++                         const GrowableArray<VMStorage>& output_registers,
++                         bool needs_return_buffer,
++                         int captured_state_mask,
++                         bool needs_transition)
++    :StubCodeGenerator(buffer, PrintMethodHandleStubs),
++    _signature(signature),
++    _num_args(num_args),
++    _ret_bt(ret_bt),
++    _abi(abi),
++    _input_registers(input_registers),
++    _output_registers(output_registers),
++    _needs_return_buffer(needs_return_buffer),
++    _captured_state_mask(captured_state_mask),
++    _needs_transition(needs_transition),
++    _frame_complete(0),
++    _frame_size_slots(0),
++    _oop_maps(nullptr) {
++    }
++  void generate();
++  int frame_complete() const {
++    return _frame_complete;
++  }
++
++  int framesize() const {
++    return (_frame_size_slots >> (LogBytesPerWord - LogBytesPerInt));
++  }
++
++  OopMapSet* oop_maps() const {
++    return _oop_maps;
++  }
++};
++
++static const int native_invoker_code_base_size = 512;
++static const int native_invoker_size_per_args = 8;
+ 
+ RuntimeStub* DowncallLinker::make_downcall_stub(BasicType* signature,
+                                                 int num_args,
+@@ -35,6 +103,197 @@ RuntimeStub* DowncallLinker::make_downcall_stub(BasicType* signature,
+                                                 bool needs_return_buffer,
+                                                 int captured_state_mask,
+                                                 bool needs_transition) {
+-  Unimplemented();
+-  return nullptr;
++
++  int code_size = native_invoker_code_base_size + (num_args * native_invoker_size_per_args);
++  int locs_size = 1; //must be non zero
++  CodeBuffer code("nep_invoker_blob", code_size, locs_size);
++
++  DowncallStubGenerator g(&code, signature, num_args, ret_bt, abi,
++                          input_registers, output_registers,
++                          needs_return_buffer, captured_state_mask,
++                          needs_transition);
++  g.generate();
++  code.log_section_sizes("nep_invoker_blob");
++
++  RuntimeStub* stub =
++    RuntimeStub::new_runtime_stub("nep_invoker_blob",
++                                  &code,
++                                  g.frame_complete(),
++                                  g.framesize(),
++                                  g.oop_maps(), false);
++
++#ifndef PRODUCT
++  LogTarget(Trace, foreign, downcall) lt;
++  if (lt.is_enabled()) {
++    ResourceMark rm;
++    LogStream ls(lt);
++    stub->print_on(&ls);
++  }
++#endif
++
++  return stub;
++}
++
++void DowncallStubGenerator::generate() {
++  Register call_target_address = Z_R1_scratch,
++           tmp = Z_R0_scratch;
++
++  VMStorage shuffle_reg = _abi._scratch1;
++
++  JavaCallingConvention in_conv;
++  NativeCallingConvention out_conv(_input_registers);
++  ArgumentShuffle arg_shuffle(_signature, _num_args, _signature, _num_args, &in_conv, &out_conv, shuffle_reg);
++
++#ifndef PRODUCT
++  LogTarget(Trace, foreign, downcall) lt;
++  if (lt.is_enabled()) {
++    ResourceMark rm;
++    LogStream ls(lt);
++    arg_shuffle.print_on(&ls);
++  }
++#endif
++
++  assert(_abi._shadow_space_bytes == frame::z_abi_160_size, "expected space according to ABI");
++  int allocated_frame_size = _abi._shadow_space_bytes;
++  allocated_frame_size += arg_shuffle.out_arg_bytes();
++
++  assert(!_needs_return_buffer, "unexpected needs_return_buffer");
++  RegSpiller out_reg_spiller(_output_registers);
++  int spill_offset = allocated_frame_size;
++  allocated_frame_size += BytesPerWord;
++
++  StubLocations locs;
++  locs.set(StubLocations::TARGET_ADDRESS, _abi._scratch2);
++
++  if (_captured_state_mask != 0) {
++    __ block_comment("{ _captured_state_mask is set");
++    locs.set_frame_data(StubLocations::CAPTURED_STATE_BUFFER, allocated_frame_size);
++    allocated_frame_size += BytesPerWord;
++    __ block_comment("} _captured_state_mask is set");
++  }
++
++  allocated_frame_size = align_up(allocated_frame_size, StackAlignmentInBytes);
++  _frame_size_slots = allocated_frame_size >> LogBytesPerInt;
++
++  _oop_maps  = _needs_transition ? new OopMapSet() : nullptr;
++  address start = __ pc();
++
++  __ save_return_pc();
++  __ push_frame(allocated_frame_size, Z_R11); // Create a new frame for the wrapper.
++
++  _frame_complete = __ pc() - start;  // frame build complete.
++
++  if (_needs_transition) {
++    __ block_comment("{ thread java2native");
++    __ get_PC(Z_R1_scratch);
++    address the_pc = __ pc();
++    __ set_last_Java_frame(Z_SP, Z_R1_scratch);
++
++    OopMap* map = new OopMap(_frame_size_slots, 0);
++    _oop_maps->add_gc_map(the_pc - start, map);
++
++    // State transition
++    __ set_thread_state(_thread_in_native);
++    __ block_comment("} thread java2native");
++  }
++  __ block_comment("{ argument shuffle");
++  arg_shuffle.generate(_masm, shuffle_reg, frame::z_jit_out_preserve_size, _abi._shadow_space_bytes, locs);
++  __ block_comment("} argument shuffle");
++
++  __ call(as_Register(locs.get(StubLocations::TARGET_ADDRESS)));
++
++  //////////////////////////////////////////////////////////////////////////////
++
++  if (_captured_state_mask != 0) {
++    __ block_comment("{ save thread local");
++
++      out_reg_spiller.generate_spill(_masm, spill_offset);
++
++    __ load_const_optimized(call_target_address, CAST_FROM_FN_PTR(uint64_t, DowncallLinker::capture_state));
++    __ z_lg(Z_ARG1, Address(Z_SP, locs.data_offset(StubLocations::CAPTURED_STATE_BUFFER)));
++    __ load_const_optimized(Z_ARG2, _captured_state_mask);
++    __ call(call_target_address);
++
++      out_reg_spiller.generate_fill(_masm, spill_offset);
++
++    __ block_comment("} save thread local");
++  }
++
++  //////////////////////////////////////////////////////////////////////////////
++
++  Label L_after_safepoint_poll;
++  Label L_safepoint_poll_slow_path;
++  Label L_reguard;
++  Label L_after_reguard;
++
++  if (_needs_transition) {
++    __ block_comment("{ thread native2java");
++    __ set_thread_state(_thread_in_native_trans);
++
++    if (!UseSystemMemoryBarrier) {
++      __ z_fence(); // Order state change wrt. safepoint poll.
++    }
++
++    __ safepoint_poll(L_safepoint_poll_slow_path, tmp);
++
++    __ load_and_test_int(tmp, Address(Z_thread, JavaThread::suspend_flags_offset()));
++    __ z_brne(L_safepoint_poll_slow_path);
++
++    __ bind(L_after_safepoint_poll);
++
++    // change thread state
++    __ set_thread_state(_thread_in_Java);
++
++    __ block_comment("reguard stack check");
++    __ z_cli(Address(Z_thread, JavaThread::stack_guard_state_offset() + in_ByteSize(sizeof(StackOverflow::StackGuardState) - 1)),
++        StackOverflow::stack_guard_yellow_reserved_disabled);
++    __ z_bre(L_reguard);
++    __ bind(L_after_reguard);
++
++    __ reset_last_Java_frame();
++    __ block_comment("} thread native2java");
++  }
++
++  __ pop_frame();
++  __ restore_return_pc();             // This is the way back to the caller.
++  __ z_br(Z_R14);
++
++  //////////////////////////////////////////////////////////////////////////////
++
++  if (_needs_transition) {
++    __ block_comment("{ L_safepoint_poll_slow_path");
++    __ bind(L_safepoint_poll_slow_path);
++
++      // Need to save the native result registers around any runtime calls.
++      out_reg_spiller.generate_spill(_masm, spill_offset);
++
++    __ load_const_optimized(call_target_address, CAST_FROM_FN_PTR(uint64_t, JavaThread::check_special_condition_for_native_trans));
++    __ z_lgr(Z_ARG1, Z_thread);
++    __ call(call_target_address);
++
++      out_reg_spiller.generate_fill(_masm, spill_offset);
++
++    __ z_bru(L_after_safepoint_poll);
++    __ block_comment("} L_safepoint_poll_slow_path");
++
++    //////////////////////////////////////////////////////////////////////////////
++    __ block_comment("{ L_reguard");
++    __ bind(L_reguard);
++
++      // Need to save the native result registers around any runtime calls.
++      out_reg_spiller.generate_spill(_masm, spill_offset);
++
++    __ load_const_optimized(call_target_address, CAST_FROM_FN_PTR(uint64_t, SharedRuntime::reguard_yellow_pages));
++    __ call(call_target_address);
++
++      out_reg_spiller.generate_fill(_masm, spill_offset);
++
++    __ z_bru(L_after_reguard);
++
++    __ block_comment("} L_reguard");
++  }
++
++  //////////////////////////////////////////////////////////////////////////////
++
++  __ flush();
+ }
+diff --git a/src/hotspot/cpu/s390/foreignGlobals_s390.cpp b/src/hotspot/cpu/s390/foreignGlobals_s390.cpp
+index d3a318536bd..9796ab4ffe4 100644
+--- a/src/hotspot/cpu/s390/foreignGlobals_s390.cpp
++++ b/src/hotspot/cpu/s390/foreignGlobals_s390.cpp
+@@ -23,34 +23,209 @@
+  */
+ 
+ #include "precompiled.hpp"
+-#include "code/vmreg.hpp"
++#include "asm/macroAssembler.inline.hpp"
++#include "code/vmreg.inline.hpp"
++#include "runtime/jniHandles.hpp"
++#include "runtime/jniHandles.inline.hpp"
++#include "oops/typeArrayOop.inline.hpp"
++#include "oops/oopCast.inline.hpp"
+ #include "prims/foreignGlobals.hpp"
+-#include "utilities/debug.hpp"
++#include "prims/foreignGlobals.inline.hpp"
++#include "prims/vmstorage.hpp"
++#include "utilities/formatBuffer.hpp"
+ 
+-class MacroAssembler;
++#define __ masm->
++
++bool ABIDescriptor::is_volatile_reg(Register reg) const {
++  return _integer_volatile_registers.contains(reg);
++}
++
++bool ABIDescriptor::is_volatile_reg(FloatRegister reg) const {
++  return _float_argument_registers.contains(reg)
++          || _float_additional_volatile_registers.contains(reg);
++}
+ 
+ bool ForeignGlobals::is_foreign_linker_supported() {
+-  return false;
++  return true;
+ }
+ 
+ const ABIDescriptor ForeignGlobals::parse_abi_descriptor(jobject jabi) {
+-  Unimplemented();
+-  return {};
++  oop abi_oop = JNIHandles::resolve_non_null(jabi);
++  ABIDescriptor abi;
++
++  objArrayOop inputStorage = jdk_internal_foreign_abi_ABIDescriptor::inputStorage(abi_oop);
++  parse_register_array(inputStorage, StorageType::INTEGER, abi._integer_argument_registers, as_Register);
++  parse_register_array(inputStorage, StorageType::FLOAT, abi._float_argument_registers, as_FloatRegister);
++
++  objArrayOop outputStorage = jdk_internal_foreign_abi_ABIDescriptor::outputStorage(abi_oop);
++  parse_register_array(outputStorage, StorageType::INTEGER, abi._integer_return_registers, as_Register);
++  parse_register_array(outputStorage, StorageType::FLOAT, abi._float_return_registers, as_FloatRegister);
++
++  objArrayOop volatileStorage = jdk_internal_foreign_abi_ABIDescriptor::volatileStorage(abi_oop);
++  parse_register_array(volatileStorage, StorageType::INTEGER, abi._integer_volatile_registers, as_Register);
++  parse_register_array(volatileStorage, StorageType::FLOAT, abi._float_additional_volatile_registers, as_FloatRegister);
++
++  abi._stack_alignment_bytes = jdk_internal_foreign_abi_ABIDescriptor::stackAlignment(abi_oop);
++  abi._shadow_space_bytes = jdk_internal_foreign_abi_ABIDescriptor::shadowSpace(abi_oop);
++
++  abi._scratch1 = parse_vmstorage(jdk_internal_foreign_abi_ABIDescriptor::scratch1(abi_oop));
++  abi._scratch2 = parse_vmstorage(jdk_internal_foreign_abi_ABIDescriptor::scratch2(abi_oop));
++
++  return abi;
+ }
+ 
+ int RegSpiller::pd_reg_size(VMStorage reg) {
+-  Unimplemented();
+-  return -1;
++  if (reg.type() == StorageType::INTEGER || reg.type() == StorageType::FLOAT) {
++    return 8;
++  }
++  return 0; // stack and BAD
+ }
+ 
+ void RegSpiller::pd_store_reg(MacroAssembler* masm, int offset, VMStorage reg) {
+-  Unimplemented();
++  if (reg.type() == StorageType::INTEGER) {
++    __ reg2mem_opt(as_Register(reg), Address(Z_SP, offset), true);
++  } else if (reg.type() == StorageType::FLOAT) {
++    __ freg2mem_opt(as_FloatRegister(reg), Address(Z_SP, offset), true);
++  } else {
++    // stack and BAD
++  }
+ }
+ 
+ void RegSpiller::pd_load_reg(MacroAssembler* masm, int offset, VMStorage reg) {
+-  Unimplemented();
++  if (reg.type() == StorageType::INTEGER) {
++    __ mem2reg_opt(as_Register(reg), Address(Z_SP, offset), true);
++  } else if (reg.type() == StorageType::FLOAT) {
++    __ mem2freg_opt(as_FloatRegister(reg), Address(Z_SP, offset), true);
++  } else {
++    // stack and BAD
++  }
++}
++
++static int reg2offset(VMStorage vms, int stk_bias) {
++  assert(!vms.is_reg(), "wrong usage");
++  return vms.index_or_offset() + stk_bias;
++}
++
++static void move_reg(MacroAssembler* masm, int out_stk_bias,
++                       VMStorage from_reg, VMStorage to_reg) {
++  int out_bias = 0;
++  switch (to_reg.type()) {
++    case StorageType::INTEGER:
++      if (to_reg.segment_mask() == REG64_MASK && from_reg.segment_mask() == REG32_MASK ) {
++        // see CCallingConventionRequiresIntsAsLongs
++        __ z_lgfr(as_Register(to_reg), as_Register(from_reg));
++      } else {
++        __ lgr_if_needed(as_Register(to_reg), as_Register(from_reg));
++      }
++      break;
++    case StorageType::STACK:
++      out_bias = out_stk_bias;  //fallthrough
++    case StorageType::FRAME_DATA: {
++      // Integer types always get a 64 bit slot in C.
++      if (from_reg.segment_mask() == REG32_MASK) {
++        // see CCallingConventionRequiresIntsAsLongs
++        __ z_lgfr(as_Register(from_reg), as_Register(from_reg));
++      }
++      switch (to_reg.stack_size()) {
++        case 8: __ reg2mem_opt(as_Register(from_reg), Address(Z_SP, reg2offset(to_reg, out_bias)), true); break;
++        case 4: __ reg2mem_opt(as_Register(from_reg), Address(Z_SP, reg2offset(to_reg, out_bias)), false); break;
++        default: ShouldNotReachHere();
++      }
++    } break;
++    default: ShouldNotReachHere();
++  }
++}
++
++static void move_float(MacroAssembler* masm, int out_stk_bias,
++                       VMStorage from_reg, VMStorage to_reg) {
++  switch (to_reg.type()) {
++    case StorageType::FLOAT:
++      if (from_reg.segment_mask() == REG64_MASK)
++        __ move_freg_if_needed(as_FloatRegister(to_reg), T_DOUBLE, as_FloatRegister(from_reg), T_DOUBLE);
++      else
++        __ move_freg_if_needed(as_FloatRegister(to_reg), T_FLOAT, as_FloatRegister(from_reg), T_FLOAT);
++      break;
++    case StorageType::STACK:
++      if (from_reg.segment_mask() == REG64_MASK) {
++        assert(to_reg.stack_size() == 8, "size should match");
++        __ freg2mem_opt(as_FloatRegister(from_reg), Address(Z_SP, reg2offset(to_reg, out_stk_bias)), true);
++      } else {
++        assert(to_reg.stack_size() == 4, "size should match");
++        __ freg2mem_opt(as_FloatRegister(from_reg), Address(Z_SP, reg2offset(to_reg, out_stk_bias)), false);
++      }
++      break;
++    default: ShouldNotReachHere();
++  }
++}
++
++static void move_stack(MacroAssembler* masm, Register tmp_reg, int in_stk_bias, int out_stk_bias,
++                       VMStorage from_reg, VMStorage to_reg) {
++  int out_bias = 0;
++  Address from_addr(Z_R11, reg2offset(from_reg, in_stk_bias));
++  switch (to_reg.type()) {
++    case StorageType::INTEGER:
++      switch (from_reg.stack_size()) {
++        case 8: __ mem2reg_opt(as_Register(to_reg), from_addr, true);break;
++        case 4: __ mem2reg_opt(as_Register(to_reg), from_addr, false);break;
++        default: ShouldNotReachHere();
++      }
++      break;
++    case StorageType::FLOAT:
++      switch (from_reg.stack_size()) {
++        case 8: __ mem2freg_opt(as_FloatRegister(to_reg), from_addr, true);break;
++        case 4: __ mem2freg_opt(as_FloatRegister(to_reg), from_addr, false);break;
++        default: ShouldNotReachHere();
++      }
++      break;
++    case StorageType::STACK:
++      out_bias = out_stk_bias; // fallthrough
++    case StorageType::FRAME_DATA: {
++      switch (from_reg.stack_size()) {
++        case 8: __ mem2reg_opt(tmp_reg, from_addr, true); break;
++        case 4: if (to_reg.stack_size() == 8) {
++                  __ mem2reg_signed_opt(tmp_reg, from_addr);
++                } else {
++                  __ mem2reg_opt(tmp_reg, from_addr, false);
++                }
++                break;
++        default: ShouldNotReachHere();
++      }
++      switch (to_reg.stack_size()) {
++        case 8: __ reg2mem_opt(tmp_reg, Address (Z_SP, reg2offset(to_reg, out_bias)), true); break;
++        case 4: __ reg2mem_opt(tmp_reg, Address (Z_SP, reg2offset(to_reg, out_bias)), false); break;
++        default: ShouldNotReachHere();
++      }
++    } break;
++    default: ShouldNotReachHere();
++  }
+ }
+ 
+ void ArgumentShuffle::pd_generate(MacroAssembler* masm, VMStorage tmp, int in_stk_bias, int out_stk_bias, const StubLocations& locs) const {
+-  Unimplemented();
++  Register tmp_reg = as_Register(tmp);
++  for (int i = 0; i < _moves.length(); i++) {
++    Move move = _moves.at(i);
++    VMStorage from_reg = move.from;
++    VMStorage to_reg   = move.to;
++
++    // replace any placeholders
++    if (from_reg.type() == StorageType::PLACEHOLDER) {
++      from_reg = locs.get(from_reg);
++    }
++    if (to_reg.type() == StorageType::PLACEHOLDER) {
++      to_reg = locs.get(to_reg);
++    }
++
++    switch (from_reg.type()) {
++      case StorageType::INTEGER:
++        move_reg(masm, out_stk_bias, from_reg, to_reg);
++        break;
++      case StorageType::FLOAT:
++        move_float(masm, out_stk_bias, from_reg, to_reg);
++        break;
++      case StorageType::STACK:
++        move_stack(masm, tmp_reg, in_stk_bias, out_stk_bias, from_reg, to_reg);
++        break;
++      default: ShouldNotReachHere();
++    }
++  }
+ }
+diff --git a/src/hotspot/cpu/s390/foreignGlobals_s390.hpp b/src/hotspot/cpu/s390/foreignGlobals_s390.hpp
+index 8b86a2b06a6..4ff3b3e40b4 100644
+--- a/src/hotspot/cpu/s390/foreignGlobals_s390.hpp
++++ b/src/hotspot/cpu/s390/foreignGlobals_s390.hpp
+@@ -24,6 +24,23 @@
+ #ifndef CPU_S390_VM_FOREIGN_GLOBALS_S390_HPP
+ #define CPU_S390_VM_FOREIGN_GLOBALS_S390_HPP
+ 
+-class ABIDescriptor {};
++struct ABIDescriptor {
++  GrowableArray<Register> _integer_argument_registers;
++  GrowableArray<Register> _integer_return_registers;
++  GrowableArray<FloatRegister> _float_argument_registers;
++  GrowableArray<FloatRegister> _float_return_registers;
++
++  GrowableArray<Register> _integer_volatile_registers;
++  GrowableArray<FloatRegister> _float_additional_volatile_registers;
++
++  int32_t _stack_alignment_bytes;
++  int32_t _shadow_space_bytes;
++
++  VMStorage _scratch1;
++  VMStorage _scratch2;
++
++  bool is_volatile_reg(Register reg) const;
++  bool is_volatile_reg(FloatRegister reg) const;
++};
+ 
+ #endif // CPU_S390_VM_FOREIGN_GLOBALS_S390_HPP
+diff --git a/src/hotspot/cpu/s390/frame_s390.cpp b/src/hotspot/cpu/s390/frame_s390.cpp
+index 23547fa6617..ac24e43f00c 100644
+--- a/src/hotspot/cpu/s390/frame_s390.cpp
++++ b/src/hotspot/cpu/s390/frame_s390.cpp
+@@ -218,13 +218,32 @@ frame frame::sender_for_entry_frame(RegisterMap *map) const {
+ }
+ 
+ UpcallStub::FrameData* UpcallStub::frame_data_for_frame(const frame& frame) const {
+-  ShouldNotCallThis();
+-  return nullptr;
++  assert(frame.is_upcall_stub_frame(), "wrong frame");
++  // need unextended_sp here, since normal sp is wrong for interpreter callees
++  return reinterpret_cast<UpcallStub::FrameData*>(
++    reinterpret_cast<address>(frame.unextended_sp()) + in_bytes(_frame_data_offset));
+ }
+ 
+ bool frame::upcall_stub_frame_is_first() const {
+-  ShouldNotCallThis();
+-  return false;
++  assert(is_upcall_stub_frame(), "must be optimized entry frame");
++  UpcallStub* blob = _cb->as_upcall_stub();
++  JavaFrameAnchor* jfa = blob->jfa_for_frame(*this);
++  return jfa->last_Java_sp() == nullptr;
++}
++
++frame frame::sender_for_upcall_stub_frame(RegisterMap* map) const {
++  assert(map != nullptr, "map must be set");
++  UpcallStub* blob = _cb->as_upcall_stub();
++  // Java frame called from C; skip all C frames and return top C
++  // frame of that chunk as the sender
++  JavaFrameAnchor* jfa = blob->jfa_for_frame(*this);
++  assert(!upcall_stub_frame_is_first(), "must have a frame anchor to go back to");
++  assert(jfa->last_Java_sp() > sp(), "must be above this frame on stack");
++  map->clear();
++  assert(map->include_argument_oops(), "should be set by clear");
++  frame fr(jfa->last_Java_sp(), jfa->last_Java_pc());
++
++  return fr;
+ }
+ 
+ frame frame::sender_for_interpreter_frame(RegisterMap *map) const {
+diff --git a/src/hotspot/cpu/s390/frame_s390.inline.hpp b/src/hotspot/cpu/s390/frame_s390.inline.hpp
+index dfa68940bac..c188618653d 100644
+--- a/src/hotspot/cpu/s390/frame_s390.inline.hpp
++++ b/src/hotspot/cpu/s390/frame_s390.inline.hpp
+@@ -352,12 +352,10 @@ inline frame frame::sender(RegisterMap* map) const {
+   // update it accordingly.
+   map->set_include_argument_oops(false);
+ 
+-  if (is_entry_frame()) {
+-    return sender_for_entry_frame(map);
+-  }
+-  if (is_interpreted_frame()) {
+-    return sender_for_interpreter_frame(map);
+-  }
++  if (is_entry_frame())       return sender_for_entry_frame(map);
++  if (is_upcall_stub_frame()) return sender_for_upcall_stub_frame(map);
++  if (is_interpreted_frame()) return sender_for_interpreter_frame(map);
++
+   assert(_cb == CodeCache::find_blob(pc()),"Must be the same");
+   if (_cb != nullptr) return sender_for_compiled_frame(map);
+ 
+diff --git a/src/hotspot/cpu/s390/globalDefinitions_s390.hpp b/src/hotspot/cpu/s390/globalDefinitions_s390.hpp
+index 99906bb369e..2232215a587 100644
+--- a/src/hotspot/cpu/s390/globalDefinitions_s390.hpp
++++ b/src/hotspot/cpu/s390/globalDefinitions_s390.hpp
+@@ -28,7 +28,7 @@
+ 
+ #define ShortenBranches true
+ 
+-const int StackAlignmentInBytes = 16;
++const int StackAlignmentInBytes = 8;
+ 
+ #define SUPPORTS_NATIVE_CX8
+ 
+diff --git a/src/hotspot/cpu/s390/methodHandles_s390.cpp b/src/hotspot/cpu/s390/methodHandles_s390.cpp
+index 6392ba45a6c..ef8722f2499 100644
+--- a/src/hotspot/cpu/s390/methodHandles_s390.cpp
++++ b/src/hotspot/cpu/s390/methodHandles_s390.cpp
+@@ -349,7 +349,16 @@ address MethodHandles::generate_method_handle_interpreter_entry(MacroAssembler*
+ 
+ void MethodHandles::jump_to_native_invoker(MacroAssembler* _masm, Register nep_reg, Register temp_target) {
+   BLOCK_COMMENT("jump_to_native_invoker {");
+-  __ should_not_reach_here();
++  assert(nep_reg != noreg, "required register");
++
++  // Load the invoker, as NEP -> .invoker
++  __ verify_oop(nep_reg);
++
++  __ z_lg(temp_target, Address(nep_reg,
++        NONZERO(jdk_internal_foreign_abi_NativeEntryPoint::downcall_stub_address_offset_in_bytes())));
++
++  __ z_br(temp_target);
++
+   BLOCK_COMMENT("} jump_to_native_invoker");
+ }
+ 
+diff --git a/src/hotspot/cpu/s390/upcallLinker_s390.cpp b/src/hotspot/cpu/s390/upcallLinker_s390.cpp
+index 3e1fb04218b..b748ec547cc 100644
+--- a/src/hotspot/cpu/s390/upcallLinker_s390.cpp
++++ b/src/hotspot/cpu/s390/upcallLinker_s390.cpp
+@@ -22,15 +22,287 @@
+  */
+ 
+ #include "precompiled.hpp"
++#include "asm/macroAssembler.inline.hpp"
++#include "logging/logStream.hpp"
++#include "memory/resourceArea.hpp"
+ #include "prims/upcallLinker.hpp"
+-#include "utilities/debug.hpp"
++#include "runtime/sharedRuntime.hpp"
++#include "runtime/signature.hpp"
++#include "runtime/stubRoutines.hpp"
++#include "utilities/formatBuffer.hpp"
++#include "utilities/globalDefinitions.hpp"
+ 
++#define __ _masm->
++
++// for callee saved regs, according to the caller's ABI
++static int compute_reg_save_area_size(const ABIDescriptor& abi) {
++  int size = 0;
++  for (int i = 0; i < Register::number_of_registers; i++) {
++    Register reg = as_Register(i);
++    // Z_SP saved/restored by prologue/epilogue
++    if (reg == Z_SP) continue;
++    if (!abi.is_volatile_reg(reg)) {
++      size += 8; // bytes
++    }
++  }
++
++  for (int i = 0; i < FloatRegister::number_of_registers; i++) {
++    FloatRegister reg = as_FloatRegister(i);
++    if (!abi.is_volatile_reg(reg)) {
++      size += 8; // bytes
++    }
++  }
++
++  return size;
++}
++
++static void preserve_callee_saved_registers(MacroAssembler* _masm, const ABIDescriptor& abi, int reg_save_area_offset) {
++  // 1. iterate all registers in the architecture
++  //     - check if they are volatile or not for the given abi
++  //     - if NOT, we need to save it here
++
++  int offset = reg_save_area_offset;
++
++  __ block_comment("{ preserve_callee_saved_regs ");
++  for (int i = 0; i < Register::number_of_registers; i++) {
++    Register reg = as_Register(i);
++    // Z_SP saved/restored by prologue/epilogue
++    if (reg == Z_SP) continue;
++    if (!abi.is_volatile_reg(reg)) {
++      __ z_stg(reg, Address(Z_SP, offset));
++      offset += 8;
++    }
++  }
++
++  for (int i = 0; i < FloatRegister::number_of_registers; i++) {
++    FloatRegister reg = as_FloatRegister(i);
++    if (!abi.is_volatile_reg(reg)) {
++      __ z_std(reg, Address(Z_SP, offset));
++      offset += 8;
++    }
++  }
++
++  __ block_comment("} preserve_callee_saved_regs ");
++}
++
++static void restore_callee_saved_registers(MacroAssembler* _masm, const ABIDescriptor& abi, int reg_save_area_offset) {
++  // 1. iterate all registers in the architecture
++  //     - check if they are volatile or not for the given abi
++  //     - if NOT, we need to restore it here
++
++  int offset = reg_save_area_offset;
++
++  __ block_comment("{ restore_callee_saved_regs ");
++  for (int i = 0; i < Register::number_of_registers; i++) {
++    Register reg = as_Register(i);
++    // Z_SP saved/restored by prologue/epilogue
++    if (reg == Z_SP) continue;
++    if (!abi.is_volatile_reg(reg)) {
++      __ z_lg(reg, Address(Z_SP, offset));
++      offset += 8;
++    }
++  }
++
++  for (int i = 0; i < FloatRegister::number_of_registers; i++) {
++    FloatRegister reg = as_FloatRegister(i);
++    if (!abi.is_volatile_reg(reg)) {
++      __ z_ld(reg, Address(Z_SP, offset));
++      offset += 8;
++    }
++  }
++
++  __ block_comment("} restore_callee_saved_regs ");
++}
++
++static const int upcall_stub_code_base_size = 1024; // depends on GC (resolve_jobject)
++static const int upcall_stub_size_per_arg = 16; // arg save & restore + move
+ address UpcallLinker::make_upcall_stub(jobject receiver, Method* entry,
+                                        BasicType* in_sig_bt, int total_in_args,
+                                        BasicType* out_sig_bt, int total_out_args,
+                                        BasicType ret_type,
+                                        jobject jabi, jobject jconv,
+                                        bool needs_return_buffer, int ret_buf_size) {
+-  ShouldNotCallThis();
+-  return nullptr;
++  ResourceMark rm;
++  const ABIDescriptor abi = ForeignGlobals::parse_abi_descriptor(jabi);
++  const CallRegs call_regs = ForeignGlobals::parse_call_regs(jconv);
++  int code_size = upcall_stub_code_base_size + (total_in_args * upcall_stub_size_per_arg);
++  CodeBuffer buffer("upcall_stub", code_size, /* locs_size = */ 0);
++
++  Register call_target_address = Z_R1_scratch;
++
++  VMStorage shuffle_reg = abi._scratch1;
++  JavaCallingConvention out_conv;
++  NativeCallingConvention in_conv(call_regs._arg_regs);
++  ArgumentShuffle arg_shuffle(in_sig_bt, total_in_args, out_sig_bt, total_out_args, &in_conv, &out_conv, shuffle_reg);
++
++  // The Java call uses the JIT ABI, but we also call C.
++  int out_arg_area = MAX2(frame::z_jit_out_preserve_size + arg_shuffle.out_arg_bytes(), (int)frame::z_abi_160_size);
++
++#ifndef PRODUCT
++  LogTarget(Trace, foreign, upcall) lt;
++  if (lt.is_enabled()) {
++    ResourceMark rm;
++    LogStream ls(lt);
++    arg_shuffle.print_on(&ls);
++  }
++#endif
++
++
++  int reg_save_area_size = compute_reg_save_area_size(abi);
++  RegSpiller arg_spiller(call_regs._arg_regs);
++  RegSpiller result_spiller(call_regs._ret_regs);
++
++  int res_save_area_offset  = out_arg_area;
++  int arg_save_area_offset  = res_save_area_offset  + result_spiller.spill_size_bytes();
++  int reg_save_area_offset  = arg_save_area_offset  + arg_spiller.spill_size_bytes();
++  int frame_data_offset     = reg_save_area_offset  + reg_save_area_size;
++  int frame_bottom_offset   = frame_data_offset     + sizeof(UpcallStub::FrameData);
++
++  int frame_size = align_up(frame_bottom_offset, StackAlignmentInBytes);
++  StubLocations locs;
++
++  // The space we have allocated will look like:
++  //
++  //
++  // FP-> |                     |
++  //      |---------------------| = frame_bottom_offset = frame_size
++  //      |                     |
++  //      | FrameData           |
++  //      |---------------------| = frame_data_offset
++  //      |                     |
++  //      | reg_save_area       |
++  //      |---------------------| = reg_save_are_offset
++  //      |                     |
++  //      | arg_save_area       |
++  //      |---------------------| = arg_save_are_offset
++  //      |                     |
++  //      | res_save_area       |
++  //      |---------------------| = res_save_are_offset
++  //      |                     |
++  // SP-> | out_arg_area        |   needs to be at end for shadow space
++  //
++  //
++
++  //////////////////////////////////////////////////////////////////////////////
++
++  MacroAssembler* _masm = new MacroAssembler(&buffer);
++  address start = __ pc();
++
++  __ save_return_pc();
++  assert((abi._stack_alignment_bytes % StackAlignmentInBytes) == 0, "must be 8 byte aligned");
++  // allocate frame (frame_size is also aligned, so stack is still aligned)
++  __ push_frame(frame_size);
++
++  // we have to always spill args since we need to do a call to get the thread
++  // (and maybe attach it).
++  arg_spiller.generate_spill(_masm, arg_save_area_offset);
++  // Java methods won't preserve them, so save them here:
++  preserve_callee_saved_registers(_masm, abi, reg_save_area_offset);
++
++  __ block_comment("{ on_entry");
++  __ load_const_optimized(call_target_address, CAST_FROM_FN_PTR(uint64_t, UpcallLinker::on_entry));
++  __ z_aghik(Z_ARG1, Z_SP, frame_data_offset);
++  __ call(call_target_address);
++  __ z_lgr(Z_thread, Z_RET);
++  __ block_comment("} on_entry");
++
++  arg_spiller.generate_fill(_masm, arg_save_area_offset);
++  __ block_comment("{ argument shuffle");
++  arg_shuffle.generate(_masm, shuffle_reg, abi._shadow_space_bytes, frame::z_jit_out_preserve_size, locs);
++  __ block_comment("} argument shuffle");
++
++  __ block_comment("{ receiver ");
++  __ load_const_optimized(Z_ARG1, (intptr_t)receiver);
++  __ resolve_jobject(Z_ARG1, Z_tmp_1, Z_tmp_2);
++  __ block_comment("} receiver ");
++
++  __ load_const_optimized(Z_method, (intptr_t)entry);
++  __ z_stg(Z_method, Address(Z_thread, in_bytes(JavaThread::callee_target_offset())));
++
++  __ z_lg(call_target_address, Address(Z_method, in_bytes(Method::from_compiled_offset())));
++  __ call(call_target_address);
++
++  // return value shuffle
++  assert(!needs_return_buffer, "unexpected needs_return_buffer");
++  // CallArranger can pick a return type that goes in the same reg for both CCs.
++  if (call_regs._ret_regs.length() > 0) { // 0 or 1
++    VMStorage ret_reg = call_regs._ret_regs.at(0);
++    // Check if the return reg is as expected.
++    switch (ret_type) {
++      case T_BOOLEAN:
++      case T_BYTE:
++      case T_SHORT:
++      case T_CHAR:
++      case T_INT:
++        __ z_lgfr(Z_RET, Z_RET); // Clear garbage in high half.
++                                 // fallthrough
++      case T_LONG:
++        assert(as_Register(ret_reg) == Z_RET, "unexpected result register");
++        break;
++      case T_FLOAT:
++      case T_DOUBLE:
++        assert(as_FloatRegister(ret_reg) == Z_FRET, "unexpected result register");
++        break;
++      default:
++        fatal("unexpected return type: %s", type2name(ret_type));
++    }
++  }
++
++  result_spiller.generate_spill(_masm, res_save_area_offset);
++
++  __ block_comment("{ on_exit");
++  __ load_const_optimized(call_target_address, CAST_FROM_FN_PTR(uint64_t, UpcallLinker::on_exit));
++  __ z_aghik(Z_ARG1, Z_SP, frame_data_offset);
++  __ call(call_target_address);
++  __ block_comment("} on_exit");
++
++  restore_callee_saved_registers(_masm, abi, reg_save_area_offset);
++
++  result_spiller.generate_fill(_masm, res_save_area_offset);
++
++  __ pop_frame();
++  __ restore_return_pc();
++  __ z_br(Z_R14);
++
++  //////////////////////////////////////////////////////////////////////////////
++
++  __ block_comment("{ exception handler");
++
++  intptr_t exception_handler_offset = __ pc() - start;
++
++  // Native caller has no idea how to handle exceptions,
++  // so we just crash here. Up to callee to catch exceptions.
++  __ verify_oop(Z_ARG1);
++  __ load_const_optimized(call_target_address, CAST_FROM_FN_PTR(uint64_t, UpcallLinker::handle_uncaught_exception));
++  __ call_c(call_target_address);
++  __ should_not_reach_here();
++
++  __ block_comment("} exception handler");
++
++  _masm->flush();
++
++#ifndef PRODUCT
++  stringStream ss;
++  ss.print("upcall_stub_%s", entry->signature()->as_C_string());
++  const char* name = _masm->code_string(ss.as_string());
++#else // PRODUCT
++  const char* name = "upcall_stub";
++#endif // PRODUCT
++
++  buffer.log_section_sizes(name);
++  UpcallStub* blob
++    = UpcallStub::create(name,
++                         &buffer,
++                         exception_handler_offset,
++                         receiver,
++                         in_ByteSize(frame_data_offset));
++#ifndef PRODUCT
++  if (lt.is_enabled()) {
++    ResourceMark rm;
++    LogStream ls(lt);
++    blob->print_on(&ls);
++  }
++#endif
++
++  return blob->code_begin();
+ }
+diff --git a/src/hotspot/cpu/s390/vmstorage_s390.hpp b/src/hotspot/cpu/s390/vmstorage_s390.hpp
+index 192159adc4c..6a595670920 100644
+--- a/src/hotspot/cpu/s390/vmstorage_s390.hpp
++++ b/src/hotspot/cpu/s390/vmstorage_s390.hpp
+@@ -29,24 +29,79 @@
+ #include "asm/register.hpp"
+ 
+ enum class StorageType : int8_t {
+-  STACK = 0,
+-  PLACEHOLDER = 1,
+-// special locations used only by native code
+-  FRAME_DATA = PLACEHOLDER + 1,
++  INTEGER = 0,
++  FLOAT = 1,
++  STACK = 2,
++  PLACEHOLDER = 3,
++  // special locations used only by native code
++  FRAME_DATA = 4,
+   INVALID = -1
+ };
+ 
+ // need to define this before constructing VMStorage (below)
+ constexpr inline bool VMStorage::is_reg(StorageType type) {
+-   return false;
++  return type == StorageType::INTEGER || type == StorageType::FLOAT;
+ }
+ constexpr inline StorageType VMStorage::stack_type() { return StorageType::STACK; }
+ constexpr inline StorageType VMStorage::placeholder_type() { return StorageType::PLACEHOLDER; }
+ constexpr inline StorageType VMStorage::frame_data_type() { return StorageType::FRAME_DATA; }
+ 
++// Needs to be consistent with S390Architecture.java.
++constexpr uint16_t REG32_MASK = 0b0000000000000001;
++constexpr uint16_t REG64_MASK = 0b0000000000000011;
++
++inline Register as_Register(VMStorage vms) {
++  assert(vms.type() == StorageType::INTEGER, "not the right type");
++  return ::as_Register(vms.index());
++}
++
++inline FloatRegister as_FloatRegister(VMStorage vms) {
++  assert(vms.type() == StorageType::FLOAT, "not the right type");
++  return ::as_FloatRegister(vms.index());
++}
++
++inline VMStorage as_VMStorage(Register reg, uint16_t segment_mask = REG64_MASK) {
++  return VMStorage::reg_storage(StorageType::INTEGER, segment_mask, reg->encoding());
++}
++
++inline VMStorage as_VMStorage(FloatRegister reg, uint16_t segment_mask = REG64_MASK) {
++  return VMStorage::reg_storage(StorageType::FLOAT, segment_mask, reg->encoding());
++}
++
+ inline VMStorage as_VMStorage(VMReg reg, BasicType bt) {
++  if (reg->is_Register()) {
++    uint16_t segment_mask = 0;
++    switch (bt) {
++      case T_BOOLEAN:
++      case T_CHAR   :
++      case T_BYTE   :
++      case T_SHORT  :
++      case T_INT    : segment_mask = REG32_MASK; break;
++      default       : segment_mask = REG64_MASK; break;
++    }
++    return as_VMStorage(reg->as_Register(), segment_mask);
++  } else if (reg->is_FloatRegister()) {
++    // FP regs always use double format. However, we need the correct format for loads /stores.
++    return as_VMStorage(reg->as_FloatRegister(), (bt == T_FLOAT) ? REG32_MASK : REG64_MASK);
++  } else if (reg->is_stack()) {
++    uint16_t size = 0;
++    switch (bt) {
++      case T_BOOLEAN:
++      case T_CHAR   :
++      case T_BYTE   :
++      case T_SHORT  :
++      case T_INT    :
++      case T_FLOAT  : size = 4; break;
++      default       : size = 8; break;
++    }
++    return VMStorage(StorageType::STACK, size,
++        checked_cast<uint16_t>(reg->reg2stack() * VMRegImpl::stack_slot_size));
++  } else if (!reg->is_valid()) {
++    return VMStorage::invalid();
++  }
++
+   ShouldNotReachHere();
+   return VMStorage::invalid();
+ }
+ 
+-#endif // CPU_S390_VMSTORAGE_S390_INLINE_HPP
+\ No newline at end of file
++#endif // CPU_S390_VMSTORAGE_S390_INLINE_HPP
+diff --git a/src/java.base/share/classes/jdk/internal/foreign/CABI.java b/src/java.base/share/classes/jdk/internal/foreign/CABI.java
+index eee4ae67457..d376a196333 100644
+--- a/src/java.base/share/classes/jdk/internal/foreign/CABI.java
++++ b/src/java.base/share/classes/jdk/internal/foreign/CABI.java
+@@ -41,6 +41,7 @@ public enum CABI {
+     WIN_AARCH_64,
+     LINUX_PPC_64_LE,
+     LINUX_RISCV_64,
++    LINUX_S390,
+     FALLBACK,
+     UNSUPPORTED;
+ 
+@@ -81,7 +82,11 @@ public enum CABI {
+                 if (OperatingSystem.isLinux()) {
+                     return LINUX_RISCV_64;
+                 }
+-            }
++            } else if (arch.equals("s390x")) {
++                if (OperatingSystem.isLinux()) {
++                    return LINUX_S390;
++                }
++        }
+         } else if (FallbackLinker.isSupported()) {
+             return FALLBACK; // fallback linker
+         }
+diff --git a/src/java.base/share/classes/jdk/internal/foreign/abi/AbstractLinker.java b/src/java.base/share/classes/jdk/internal/foreign/abi/AbstractLinker.java
+index b5eb1029ff5..8a322cdcf7a 100644
+--- a/src/java.base/share/classes/jdk/internal/foreign/abi/AbstractLinker.java
++++ b/src/java.base/share/classes/jdk/internal/foreign/abi/AbstractLinker.java
+@@ -32,6 +32,7 @@ import jdk.internal.foreign.abi.aarch64.windows.WindowsAArch64Linker;
+ import jdk.internal.foreign.abi.fallback.FallbackLinker;
+ import jdk.internal.foreign.abi.ppc64.linux.LinuxPPC64leLinker;
+ import jdk.internal.foreign.abi.riscv64.linux.LinuxRISCV64Linker;
++import jdk.internal.foreign.abi.s390.linux.LinuxS390Linker;
+ import jdk.internal.foreign.abi.x64.sysv.SysVx64Linker;
+ import jdk.internal.foreign.abi.x64.windows.Windowsx64Linker;
+ import jdk.internal.foreign.layout.AbstractLayout;
+@@ -60,7 +61,8 @@ import java.util.Set;
+ public abstract sealed class AbstractLinker implements Linker permits LinuxAArch64Linker, MacOsAArch64Linker,
+                                                                       SysVx64Linker, WindowsAArch64Linker,
+                                                                       Windowsx64Linker, LinuxPPC64leLinker,
+-                                                                      LinuxRISCV64Linker, FallbackLinker {
++                                                                      LinuxRISCV64Linker, LinuxS390Linker,
++                                                                      FallbackLinker {
+ 
+     public interface UpcallStubFactory {
+         MemorySegment makeStub(MethodHandle target, Arena arena);
+diff --git a/src/java.base/share/classes/jdk/internal/foreign/abi/SharedUtils.java b/src/java.base/share/classes/jdk/internal/foreign/abi/SharedUtils.java
+index 1e417245543..92d10a1dbdf 100644
+--- a/src/java.base/share/classes/jdk/internal/foreign/abi/SharedUtils.java
++++ b/src/java.base/share/classes/jdk/internal/foreign/abi/SharedUtils.java
+@@ -35,6 +35,7 @@ import jdk.internal.foreign.abi.aarch64.windows.WindowsAArch64Linker;
+ import jdk.internal.foreign.abi.fallback.FallbackLinker;
+ import jdk.internal.foreign.abi.ppc64.linux.LinuxPPC64leLinker;
+ import jdk.internal.foreign.abi.riscv64.linux.LinuxRISCV64Linker;
++import jdk.internal.foreign.abi.s390.linux.LinuxS390Linker;
+ import jdk.internal.foreign.abi.x64.sysv.SysVx64Linker;
+ import jdk.internal.foreign.abi.x64.windows.Windowsx64Linker;
+ import jdk.internal.vm.annotation.ForceInline;
+@@ -242,6 +243,7 @@ public final class SharedUtils {
+             case WIN_AARCH_64 -> WindowsAArch64Linker.getInstance();
+             case LINUX_PPC_64_LE -> LinuxPPC64leLinker.getInstance();
+             case LINUX_RISCV_64 -> LinuxRISCV64Linker.getInstance();
++            case LINUX_S390 -> LinuxS390Linker.getInstance();
+             case FALLBACK -> FallbackLinker.getInstance();
+             case UNSUPPORTED -> throw new UnsupportedOperationException("Platform does not support native linker");
+         };
+diff --git a/src/java.base/share/classes/jdk/internal/foreign/abi/s390/S390Architecture.java b/src/java.base/share/classes/jdk/internal/foreign/abi/s390/S390Architecture.java
+new file mode 100644
+index 00000000000..bbafef2f3dc
+--- /dev/null
++++ b/src/java.base/share/classes/jdk/internal/foreign/abi/s390/S390Architecture.java
+@@ -0,0 +1,151 @@
++/*
++ * Copyright (c) 2020, 2023, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2023 IBM Corp. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++package jdk.internal.foreign.abi.s390;
++
++import jdk.internal.foreign.abi.ABIDescriptor;
++import jdk.internal.foreign.abi.Architecture;
++import jdk.internal.foreign.abi.StubLocations;
++import jdk.internal.foreign.abi.VMStorage;
++
++public final class S390Architecture implements Architecture {
++    public static final Architecture INSTANCE = new S390Architecture();
++
++    // Needs to be consistent with vmstorage_s390.hpp.
++    public static final short REG32_MASK = 0b0000_0000_0000_0001;
++    public static final short REG64_MASK = 0b0000_0000_0000_0011;
++
++    private static final int INTEGER_REG_SIZE = 8;
++    private static final int FLOAT_REG_SIZE = 8;
++    private static final int STACK_SLOT_SIZE = 8;
++
++    // Suppresses default constructor, ensuring non-instantiability.
++    private S390Architecture() {
++    }
++
++    @Override
++    public boolean isStackType(int cls) {
++        return cls == StorageType.STACK;
++    }
++
++    @Override
++    public int typeSize(int cls) {
++        switch (cls) {
++            case StorageType.INTEGER:
++                return INTEGER_REG_SIZE;
++            case StorageType.FLOAT:
++                return FLOAT_REG_SIZE;
++                // STACK is deliberately omitted
++        }
++
++        throw new IllegalArgumentException("Invalid Storage Class: " + cls);
++    }
++
++    public interface StorageType {
++        byte INTEGER = 0;
++        byte FLOAT = 1;
++        byte STACK = 2;
++        byte PLACEHOLDER = 3;
++    }
++
++    public static class Regs { // break circular dependency
++        public static final VMStorage r0 = integerRegister(0);
++        public static final VMStorage r1 = integerRegister(1);
++        public static final VMStorage r2 = integerRegister(2);
++        public static final VMStorage r3 = integerRegister(3);
++        public static final VMStorage r4 = integerRegister(4);
++        public static final VMStorage r5 = integerRegister(5);
++        public static final VMStorage r6 = integerRegister(6);
++        public static final VMStorage r7 = integerRegister(7);
++        public static final VMStorage r8 = integerRegister(8);
++        public static final VMStorage r9 = integerRegister(9);
++        public static final VMStorage r10 = integerRegister(10);
++        public static final VMStorage r11 = integerRegister(11);
++        public static final VMStorage r12 = integerRegister(12);
++        public static final VMStorage r13 = integerRegister(13);
++        public static final VMStorage r14 = integerRegister(14);
++        public static final VMStorage r15 = integerRegister(15);
++
++        public static final VMStorage f0 = floatRegister(0);
++        public static final VMStorage f1 = floatRegister(1);
++        public static final VMStorage f2 = floatRegister(2);
++        public static final VMStorage f3 = floatRegister(3);
++        public static final VMStorage f4 = floatRegister(4);
++        public static final VMStorage f5 = floatRegister(5);
++        public static final VMStorage f6 = floatRegister(6);
++        public static final VMStorage f7 = floatRegister(7);
++        public static final VMStorage f8 = floatRegister(8);
++        public static final VMStorage f9 = floatRegister(9);
++        public static final VMStorage f10 = floatRegister(10);
++        public static final VMStorage f11 = floatRegister(11);
++        public static final VMStorage f12 = floatRegister(12);
++        public static final VMStorage f13 = floatRegister(13);
++        public static final VMStorage f14 = floatRegister(14);
++        public static final VMStorage f15 = floatRegister(15);
++    }
++
++    private static VMStorage integerRegister(int index) {
++        return new VMStorage(StorageType.INTEGER, REG64_MASK, index, "r" + index);
++    }
++
++    private static VMStorage floatRegister(int index) {
++        return new VMStorage(StorageType.FLOAT, REG64_MASK, index, "f" + index);
++    }
++
++    public static VMStorage stackStorage(short size, int byteOffset) {
++        return new VMStorage(StorageType.STACK, size, byteOffset);
++    }
++
++    public static ABIDescriptor abiFor(VMStorage[] inputIntRegs,
++                                       VMStorage[] inputFloatRegs,
++                                       VMStorage[] outputIntRegs,
++                                       VMStorage[] outputFloatRegs,
++                                       VMStorage[] volatileIntRegs,
++                                       VMStorage[] volatileFloatRegs,
++                                       int stackAlignment,
++                                       int shadowSpace,
++                                       VMStorage scratch1, VMStorage scratch2) {
++        return new ABIDescriptor(
++            INSTANCE,
++            new VMStorage[][] {
++                inputIntRegs,
++                inputFloatRegs,
++            },
++            new VMStorage[][] {
++                outputIntRegs,
++                outputFloatRegs,
++            },
++            new VMStorage[][] {
++                volatileIntRegs,
++                volatileFloatRegs,
++            },
++            stackAlignment,
++            shadowSpace,
++            scratch1, scratch2,
++            StubLocations.TARGET_ADDRESS.storage(StorageType.PLACEHOLDER),
++            StubLocations.RETURN_BUFFER.storage(StorageType.PLACEHOLDER),
++            StubLocations.CAPTURED_STATE_BUFFER.storage(StorageType.PLACEHOLDER));
++    }
++}
+diff --git a/src/java.base/share/classes/jdk/internal/foreign/abi/s390/linux/LinuxS390CallArranger.java b/src/java.base/share/classes/jdk/internal/foreign/abi/s390/linux/LinuxS390CallArranger.java
+new file mode 100644
+index 00000000000..84392e45089
+--- /dev/null
++++ b/src/java.base/share/classes/jdk/internal/foreign/abi/s390/linux/LinuxS390CallArranger.java
+@@ -0,0 +1,311 @@
++/*
++ * Copyright (c) 2022, 2023, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2023 IBM Corp. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++package jdk.internal.foreign.abi.s390.linux;
++
++import java.lang.foreign.AddressLayout;
++import java.lang.foreign.FunctionDescriptor;
++import java.lang.foreign.GroupLayout;
++import java.lang.foreign.MemoryLayout;
++import java.lang.foreign.MemorySegment;
++import jdk.internal.foreign.abi.ABIDescriptor;
++import jdk.internal.foreign.abi.AbstractLinker.UpcallStubFactory;
++import jdk.internal.foreign.abi.Binding;
++import jdk.internal.foreign.abi.CallingSequence;
++import jdk.internal.foreign.abi.CallingSequenceBuilder;
++import jdk.internal.foreign.abi.DowncallLinker;
++import jdk.internal.foreign.abi.LinkerOptions;
++import jdk.internal.foreign.abi.UpcallLinker;
++import jdk.internal.foreign.abi.SharedUtils;
++import jdk.internal.foreign.abi.VMStorage;
++import jdk.internal.foreign.Utils;
++
++import java.lang.foreign.ValueLayout;
++import java.lang.invoke.MethodHandle;
++import java.lang.invoke.MethodType;
++import java.util.List;
++import java.util.Map;
++import java.util.Optional;
++
++import static jdk.internal.foreign.abi.s390.linux.TypeClass.*;
++import static jdk.internal.foreign.abi.s390.S390Architecture.*;
++import static jdk.internal.foreign.abi.s390.S390Architecture.Regs.*;
++
++/**
++ * For the S390 C ABI specifically, this class uses CallingSequenceBuilder
++ * to translate a C FunctionDescriptor into a CallingSequence, which can then be turned into a MethodHandle.
++ *
++ * This includes taking care of synthetic arguments like pointers to return buffers for 'in-memory' returns.
++ */
++public class LinuxS390CallArranger {
++
++    private static final int STACK_SLOT_SIZE = 8;
++    public static final int MAX_REGISTER_ARGUMENTS = 5;
++    public static final int MAX_FLOAT_REGISTER_ARGUMENTS = 4;
++
++    private static final ABIDescriptor CLinux = abiFor(
++            new VMStorage[] { r2, r3, r4, r5, r6, }, // GP input
++            new VMStorage[] { f0, f2, f4, f6 }, // FP input
++            new VMStorage[] { r2, }, // GP output
++            new VMStorage[] { f0, }, // FP output
++            new VMStorage[] { r0, r1, r2, r3, r4, r5, r14 }, // volatile GP
++            new VMStorage[] { f1, f3, f5, f7 }, // volatile FP (excluding argument registers)
++            8, // Stack is always 8 byte aligned on S390
++            160, // ABI header
++            r0, r1 // scratch reg r0 & r1
++            );
++
++    public record Bindings(CallingSequence callingSequence, boolean isInMemoryReturn) {}
++
++    public static Bindings getBindings(MethodType mt, FunctionDescriptor cDesc, boolean forUpcall) {
++        return getBindings(mt, cDesc, forUpcall, LinkerOptions.empty());
++    }
++
++    public static Bindings getBindings(MethodType mt, FunctionDescriptor cDesc, boolean forUpcall, LinkerOptions options) {
++        CallingSequenceBuilder csb = new CallingSequenceBuilder(CLinux, forUpcall, options);
++
++        BindingCalculator argCalc = forUpcall ? new BoxBindingCalculator(true) : new UnboxBindingCalculator(true);
++        BindingCalculator retCalc = forUpcall ? new UnboxBindingCalculator(false) : new BoxBindingCalculator(false);
++
++        boolean returnInMemory = isInMemoryReturn(cDesc.returnLayout());
++        if (returnInMemory) {
++            Class<?> carrier = MemorySegment.class;
++            MemoryLayout layout =SharedUtils.C_POINTER;
++            csb.addArgumentBindings(carrier, layout, argCalc.getBindings(carrier, layout));
++        } else if (cDesc.returnLayout().isPresent()) {
++            Class<?> carrier = mt.returnType();
++            MemoryLayout layout = cDesc.returnLayout().get();
++            csb.setReturnBindings(carrier, layout, retCalc.getBindings(carrier, layout));
++        }
++
++        for (int i = 0; i < mt.parameterCount(); i++) {
++            Class<?> carrier = mt.parameterType(i);
++            MemoryLayout layout = cDesc.argumentLayouts().get(i);
++            csb.addArgumentBindings(carrier, layout, argCalc.getBindings(carrier, layout));
++        }
++
++        return new Bindings(csb.build(), returnInMemory);
++    }
++
++    public static MethodHandle arrangeDowncall(MethodType mt, FunctionDescriptor cDesc, LinkerOptions options) {
++        Bindings bindings = getBindings(mt, cDesc, false, options);
++
++        MethodHandle handle = new DowncallLinker(CLinux, bindings.callingSequence).getBoundMethodHandle();
++
++        if (bindings.isInMemoryReturn) {
++            handle = SharedUtils.adaptDowncallForIMR(handle, cDesc, bindings.callingSequence);
++        }
++
++        return handle;
++    }
++
++    public static UpcallStubFactory arrangeUpcall(MethodType mt, FunctionDescriptor cDesc, LinkerOptions options) {
++        Bindings bindings = getBindings(mt, cDesc, true, options);
++
++        final boolean dropReturn = true; /* drop return, since we don't have bindings for it */
++        return SharedUtils.arrangeUpcallHelper(mt, bindings.isInMemoryReturn, dropReturn, CLinux,
++                bindings.callingSequence);
++    }
++
++    private static boolean isInMemoryReturn(Optional<MemoryLayout> returnLayout) {
++        return returnLayout
++            .filter(layout -> layout instanceof GroupLayout)
++            .isPresent();
++    }
++
++    static class StorageCalculator {
++        private final boolean forArguments;
++
++        private final int[] nRegs = new int[] { 0, 0 };
++        private long stackOffset = 0;
++
++        public StorageCalculator(boolean forArguments) {
++            this.forArguments = forArguments;
++        }
++
++        VMStorage stackAlloc(long size, long alignment) {
++            long alignedStackOffset = Utils.alignUp(stackOffset, alignment);
++
++            short encodedSize = (short) size;
++            assert (encodedSize & 0xFFFF) == size;
++
++            VMStorage storage = stackStorage(encodedSize, (int) alignedStackOffset);
++            stackOffset = alignedStackOffset + size;
++            return storage;
++        }
++
++        VMStorage regAlloc(int type) {
++            int gpRegCnt = (type == StorageType.INTEGER) ? 1 : 0;
++            int fpRegCnt = (type == StorageType.FLOAT) ? 1 : 0;
++
++            // Use stack if not enough registers available.
++            if ((type == StorageType.FLOAT && (nRegs[StorageType.FLOAT] + fpRegCnt) > MAX_FLOAT_REGISTER_ARGUMENTS)
++                    || (type == StorageType.INTEGER && (nRegs[StorageType.INTEGER] + gpRegCnt) > MAX_REGISTER_ARGUMENTS)) return null;
++
++            VMStorage[] source = (forArguments ? CLinux.inputStorage : CLinux.outputStorage)[type];
++            VMStorage result = source[nRegs[type]];
++
++            nRegs[StorageType.INTEGER] += gpRegCnt;
++            nRegs[StorageType.FLOAT] += fpRegCnt;
++            return result;
++
++        }
++        VMStorage getStorage(int type, boolean is32Bit) {
++            VMStorage reg = regAlloc(type);
++            if (reg != null) {
++                if (is32Bit) {
++                    reg = new VMStorage(reg.type(), REG32_MASK, reg.indexOrOffset());
++                }
++                return reg;
++            }
++            VMStorage stack;
++            if (is32Bit) {
++                stackAlloc(4, STACK_SLOT_SIZE); // Skip first half of stack slot.
++                stack = stackAlloc(4, 4);
++            } else
++                stack = stackAlloc(8, STACK_SLOT_SIZE);
++
++            return stack;
++        }
++    }
++
++    abstract static class BindingCalculator {
++        protected final StorageCalculator storageCalculator;
++
++        protected BindingCalculator(boolean forArguments) {
++            this.storageCalculator = new LinuxS390CallArranger.StorageCalculator(forArguments);
++        }
++
++        abstract List<Binding> getBindings(Class<?> carrier, MemoryLayout layout);
++    }
++
++    // Compute recipe for transferring arguments / return values to C from Java.
++    static class UnboxBindingCalculator extends BindingCalculator {
++        UnboxBindingCalculator(boolean forArguments) {
++            super(forArguments);
++        }
++
++        @Override
++        List<Binding> getBindings(Class<?> carrier, MemoryLayout layout) {
++            TypeClass argumentClass = TypeClass.classifyLayout(layout);
++            Binding.Builder bindings = Binding.builder();
++            switch (argumentClass) {
++                case STRUCT_REGISTER -> {
++                    assert carrier == MemorySegment.class;
++                    VMStorage storage = storageCalculator.getStorage(StorageType.INTEGER, false);
++                    Class<?> type = SharedUtils.primitiveCarrierForSize(layout.byteSize(), false);
++                    bindings.bufferLoad(0, type)
++                            .vmStore(storage, type);
++                }
++                case STRUCT_SFA -> {
++                    assert carrier == MemorySegment.class;
++                    VMStorage storage = storageCalculator.getStorage(StorageType.FLOAT, layout.byteSize() == 4);
++                    Class<?> type = SharedUtils.primitiveCarrierForSize(layout.byteSize(), true);
++                    bindings.bufferLoad(0, type)
++                            .vmStore(storage, type);
++                }
++                case STRUCT_REFERENCE -> {
++                    assert carrier == MemorySegment.class;
++                    bindings.copy(layout)
++                            .unboxAddress();
++                    VMStorage storage = storageCalculator.getStorage(StorageType.INTEGER, false);
++                    bindings.vmStore(storage, long.class);
++                }
++                case POINTER -> {
++                    VMStorage storage = storageCalculator.getStorage(StorageType.INTEGER, false);
++                    bindings.unboxAddress()
++                            .vmStore(storage, long.class);
++                }
++                case INTEGER -> {
++                    // ABI requires all int types to get extended to 64 bit.
++                    VMStorage storage = storageCalculator.getStorage(StorageType.INTEGER, false);
++                    bindings.vmStore(storage, carrier);
++                }
++                case FLOAT -> {
++                    VMStorage storage = storageCalculator.getStorage(StorageType.FLOAT, carrier == float.class);
++                    bindings.vmStore(storage, carrier);
++                }
++                default -> throw new UnsupportedOperationException("Unhandled class " + argumentClass);
++            }
++            return bindings.build();
++        }
++    }
++
++    // Compute recipe for transferring arguments / return values from C to Java.
++    static class BoxBindingCalculator extends BindingCalculator {
++        BoxBindingCalculator(boolean forArguments) {
++            super(forArguments);
++        }
++
++        @Override
++        List<Binding> getBindings(Class<?> carrier, MemoryLayout layout) {
++            TypeClass argumentClass = TypeClass.classifyLayout(layout);
++            Binding.Builder bindings = Binding.builder();
++            switch (argumentClass) {
++                case STRUCT_REGISTER -> {
++                    assert carrier == MemorySegment.class;
++                    bindings.allocate(layout)
++                            .dup();
++                    VMStorage storage = storageCalculator.getStorage(StorageType.INTEGER, false);
++                    Class<?> type = SharedUtils.primitiveCarrierForSize(layout.byteSize(), false);
++                    bindings.vmLoad(storage, type)
++                            .bufferStore(0, type);
++                }
++                case STRUCT_SFA -> {
++                    assert carrier == MemorySegment.class;
++                    bindings.allocate(layout)
++                            .dup();
++                    VMStorage storage = storageCalculator.getStorage(StorageType.FLOAT, layout.byteSize() == 4);
++                    Class<?> type = SharedUtils.primitiveCarrierForSize(layout.byteSize(), true);
++                    bindings.vmLoad(storage, type)
++                            .bufferStore(0, type);
++                }
++                case STRUCT_REFERENCE -> {
++                    assert carrier == MemorySegment.class;
++                    VMStorage storage = storageCalculator.getStorage(StorageType.INTEGER, false);
++                    bindings.vmLoad(storage, long.class)
++                            .boxAddress(layout);
++                }
++                case POINTER -> {
++                    AddressLayout addressLayout = (AddressLayout) layout;
++                    VMStorage storage = storageCalculator.getStorage(StorageType.INTEGER, false);
++                    bindings.vmLoad(storage, long.class)
++                            .boxAddressRaw(Utils.pointeeByteSize(addressLayout), Utils.pointeeByteAlign(addressLayout));
++                }
++                case INTEGER -> {
++                    // We could use carrier != long.class for BoxBindingCalculator, but C always uses 64 bit slots.
++                    VMStorage storage = storageCalculator.getStorage(StorageType.INTEGER, false);
++                    bindings.vmLoad(storage, carrier);
++                }
++                case FLOAT -> {
++                    VMStorage storage = storageCalculator.getStorage(StorageType.FLOAT, carrier == float.class);
++                    bindings.vmLoad(storage, carrier);
++                }
++                default -> throw new UnsupportedOperationException("Unhandled class " + argumentClass);
++            }
++            return bindings.build();
++        }
++    }
++}
+diff --git a/src/java.base/share/classes/jdk/internal/foreign/abi/s390/linux/LinuxS390Linker.java b/src/java.base/share/classes/jdk/internal/foreign/abi/s390/linux/LinuxS390Linker.java
+new file mode 100644
+index 00000000000..ac004b9e1e0
+--- /dev/null
++++ b/src/java.base/share/classes/jdk/internal/foreign/abi/s390/linux/LinuxS390Linker.java
+@@ -0,0 +1,64 @@
++/*
++ * Copyright (c) 2022, 2023, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2023 IBM Corp. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++package jdk.internal.foreign.abi.s390.linux;
++
++import jdk.internal.foreign.abi.AbstractLinker;
++import jdk.internal.foreign.abi.LinkerOptions;
++
++import java.lang.foreign.FunctionDescriptor;
++import java.lang.invoke.MethodHandle;
++import java.lang.invoke.MethodType;
++import java.nio.ByteOrder;
++
++public final class LinuxS390Linker extends AbstractLinker {
++
++    public static LinuxS390Linker getInstance() {
++        final class Holder {
++            private static final LinuxS390Linker INSTANCE = new LinuxS390Linker();
++        }
++
++        return Holder.INSTANCE;
++    }
++
++    private LinuxS390Linker() {
++        // Ensure there is only one instance
++    }
++
++    @Override
++    protected MethodHandle arrangeDowncall(MethodType inferredMethodType, FunctionDescriptor function, LinkerOptions options) {
++        return LinuxS390CallArranger.arrangeDowncall(inferredMethodType, function, options);
++    }
++
++    @Override
++    protected UpcallStubFactory arrangeUpcall(MethodType targetType, FunctionDescriptor function, LinkerOptions options) {
++        return LinuxS390CallArranger.arrangeUpcall(targetType, function, options);
++    }
++
++    @Override
++    protected ByteOrder linkerByteOrder() {
++        return ByteOrder.BIG_ENDIAN;
++    }
++}
+diff --git a/src/java.base/share/classes/jdk/internal/foreign/abi/s390/linux/TypeClass.java b/src/java.base/share/classes/jdk/internal/foreign/abi/s390/linux/TypeClass.java
+new file mode 100644
+index 00000000000..095cb2c08a8
+--- /dev/null
++++ b/src/java.base/share/classes/jdk/internal/foreign/abi/s390/linux/TypeClass.java
+@@ -0,0 +1,126 @@
++/*
++ * Copyright (c) 2022, 2023, Oracle and/or its affiliates. All rights reserved.
++ * Copyright (c) 2023 IBM Corp. All rights reserved.
++ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
++ *
++ * This code is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License version 2 only, as
++ * published by the Free Software Foundation.  Oracle designates this
++ * particular file as subject to the "Classpath" exception as provided
++ * by Oracle in the LICENSE file that accompanied this code.
++ *
++ * This code is distributed in the hope that it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * version 2 for more details (a copy is included in the LICENSE file that
++ * accompanied this code).
++ *
++ * You should have received a copy of the GNU General Public License version
++ * 2 along with this work; if not, write to the Free Software Foundation,
++ * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
++ * or visit www.oracle.com if you need additional information or have any
++ * questions.
++ */
++package jdk.internal.foreign.abi.s390.linux;
++
++import java.lang.foreign.GroupLayout;
++import java.lang.foreign.MemoryLayout;
++import java.lang.foreign.MemorySegment;
++import java.lang.foreign.SequenceLayout;
++import java.lang.foreign.ValueLayout;
++import java.util.List;
++import java.util.ArrayList;
++
++public enum TypeClass {
++    STRUCT_REGISTER,
++    STRUCT_SFA, // Single Float Aggregate
++    STRUCT_REFERENCE,
++    POINTER,
++    INTEGER,
++    FLOAT;
++
++    private static TypeClass classifyValueType(ValueLayout type) {
++        Class<?> carrier = type.carrier();
++        if (carrier == boolean.class || carrier == byte.class || carrier == char.class ||
++                carrier == short.class || carrier == int.class || carrier == long.class) {
++            return INTEGER;
++        } else if (carrier == float.class || carrier == double.class) {
++            return FLOAT;
++        } else if (carrier == MemorySegment.class) {
++            return POINTER;
++        } else {
++            throw new IllegalStateException("Cannot get here: " + carrier.getName());
++        }
++    }
++
++    private static boolean isRegisterAggregate(MemoryLayout type) {
++        long byteSize = type.byteSize();
++        if (byteSize > 8 || byteSize == 3 || byteSize == 5 || byteSize == 6 || byteSize == 7)
++            return false;
++        return true;
++    }
++
++    static List<MemoryLayout> scalarLayouts(GroupLayout gl) {
++        List<MemoryLayout> out = new ArrayList<>();
++        scalarLayoutsInternal(out, gl);
++        return out;
++    }
++
++    private static void scalarLayoutsInternal(List<MemoryLayout> out, GroupLayout gl) {
++        for (MemoryLayout member : gl.memberLayouts()) {
++            if (member instanceof GroupLayout memberGl) {
++                scalarLayoutsInternal(out, memberGl);
++            } else if (member instanceof SequenceLayout memberSl) {
++                for (long i = 0; i < memberSl.elementCount(); i++) {
++                    out.add(memberSl.elementLayout());
++                }
++            } else {
++                // padding or value layouts
++                out.add(member);
++            }
++        }
++    }
++
++    static boolean isSingleFloatAggregate(MemoryLayout type) {
++        List<MemoryLayout> scalarLayouts = scalarLayouts((GroupLayout) type);
++
++        final int numElements = scalarLayouts.size();
++        if (numElements > 1 || numElements == 0)
++            return false;
++
++        MemoryLayout baseType = scalarLayouts.get(0);
++
++        if (!(baseType instanceof ValueLayout))
++            return false;
++
++        TypeClass baseArgClass = classifyValueType((ValueLayout) baseType);
++        if (baseArgClass != FLOAT)
++            return false;
++
++        return true;
++    }
++
++    private static TypeClass classifyStructType(MemoryLayout layout) {
++
++        if (!isRegisterAggregate(layout)) {
++            return TypeClass.STRUCT_REFERENCE;
++        }
++
++        if (isSingleFloatAggregate(layout)) {
++            return TypeClass.STRUCT_SFA;
++        }
++        return TypeClass.STRUCT_REGISTER;
++    }
++
++    public static TypeClass classifyLayout(MemoryLayout type) {
++        if (type instanceof ValueLayout) {
++            return classifyValueType((ValueLayout) type);
++        } else if (type instanceof GroupLayout) {
++            return classifyStructType(type);
++        } else {
++            throw new IllegalArgumentException("Unsupported layout: " + type);
++        }
++    }
++}
+diff --git a/test/jdk/java/foreign/TestClassLoaderFindNative.java b/test/jdk/java/foreign/TestClassLoaderFindNative.java
+index 3f5fec0c195..44ec8732ed4 100644
+--- a/test/jdk/java/foreign/TestClassLoaderFindNative.java
++++ b/test/jdk/java/foreign/TestClassLoaderFindNative.java
+@@ -31,9 +31,10 @@
+ import java.lang.foreign.Arena;
+ import java.lang.foreign.MemorySegment;
+ import java.lang.foreign.SymbolLookup;
++import java.nio.ByteOrder;
+ import org.testng.annotations.Test;
+ 
+-import static java.lang.foreign.ValueLayout.JAVA_BYTE;
++import static java.lang.foreign.ValueLayout.JAVA_INT;
+ import static org.testng.Assert.*;
+ 
+ // FYI this test is run on 64-bit platforms only for now,
+@@ -58,8 +59,8 @@ public class TestClassLoaderFindNative {
+ 
+     @Test
+     public void testVariableSymbolLookup() {
+-        MemorySegment segment = SymbolLookup.loaderLookup().find("c").get().reinterpret(1);
+-        assertEquals(segment.get(JAVA_BYTE, 0), 42);
++        MemorySegment segment = SymbolLookup.loaderLookup().find("c").get().reinterpret(4);
++        assertEquals(segment.get(JAVA_INT, 0), 42);
+     }
+ 
+     @Test
+diff --git a/test/jdk/java/foreign/TestIllegalLink.java b/test/jdk/java/foreign/TestIllegalLink.java
+index 677f0bce62f..5d8277a5d4c 100644
+--- a/test/jdk/java/foreign/TestIllegalLink.java
++++ b/test/jdk/java/foreign/TestIllegalLink.java
+@@ -54,6 +54,7 @@ import static org.testng.Assert.fail;
+ public class TestIllegalLink extends NativeTestHelper {
+ 
+     private static final boolean IS_SYSV = CABI.current() == CABI.SYS_V;
++    private static final boolean IS_LE = ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN;
+ 
+     private static final MemorySegment DUMMY_TARGET = MemorySegment.ofAddress(1);
+     private static final MethodHandle DUMMY_TARGET_MH = MethodHandles.empty(MethodType.methodType(void.class));
+@@ -113,27 +114,27 @@ public class TestIllegalLink extends NativeTestHelper {
+             {
+                     FunctionDescriptor.of(MemoryLayout.sequenceLayout(2, C_INT)),
+                     NO_OPTIONS,
+-                    "Unsupported layout: [2:i4]"
++                    IS_LE ? "Unsupported layout: [2:i4]" : "Unsupported layout: [2:I4]"
+             },
+             {
+                     FunctionDescriptor.ofVoid(MemoryLayout.sequenceLayout(2, C_INT)),
+                     NO_OPTIONS,
+-                    "Unsupported layout: [2:i4]"
++                    IS_LE ? "Unsupported layout: [2:i4]" : "Unsupported layout: [2:I4]"
+             },
+             {
+                     FunctionDescriptor.ofVoid(C_INT.withByteAlignment(2)),
+                     NO_OPTIONS,
+-                    "Unsupported layout: 2%i4"
++                    IS_LE ? "Unsupported layout: 2%i4" : "Unsupported layout: 2%I4"
+             },
+             {
+                     FunctionDescriptor.ofVoid(C_POINTER.withByteAlignment(2)),
+                     NO_OPTIONS,
+-                    "Unsupported layout: 2%a8"
++                    IS_LE ? "Unsupported layout: 2%a8" : "Unsupported layout: 2%A8"
+             },
+             {
+                     FunctionDescriptor.ofVoid(ValueLayout.JAVA_CHAR.withByteAlignment(4)),
+                     NO_OPTIONS,
+-                    "Unsupported layout: 4%c2"
++                    IS_LE ? "Unsupported layout: 4%c2" : "Unsupported layout: 4%C2"
+             },
+             {
+                     FunctionDescriptor.ofVoid(MemoryLayout.structLayout(
+@@ -142,7 +143,7 @@ public class TestIllegalLink extends NativeTestHelper {
+                             C_INT.withName("z").withByteAlignment(1)
+                             ).withByteAlignment(1)),
+                     NO_OPTIONS,
+-                    "Unsupported layout: 1%s2"
++                    IS_LE ? "Unsupported layout: 1%s2" : "Unsupported layout: 1%S2"
+             },
+             {
+                     FunctionDescriptor.ofVoid(MemoryLayout.structLayout(
+@@ -152,7 +153,7 @@ public class TestIllegalLink extends NativeTestHelper {
+                                 C_INT.withName("z").withByteAlignment(1)
+                             ))),
+                     NO_OPTIONS,
+-                    "Unsupported layout: 1%s2"
++                    IS_LE ? "Unsupported layout: 1%s2" : "Unsupported layout: 1%S2"
+             },
+             {
+                     FunctionDescriptor.ofVoid(MemoryLayout.structLayout(
+@@ -160,7 +161,7 @@ public class TestIllegalLink extends NativeTestHelper {
+                                 C_INT.withByteAlignment(1)
+                             ))),
+                     NO_OPTIONS,
+-                    "Unsupported layout: 1%i4"
++                    IS_LE ? "Unsupported layout: 1%i4" : "Unsupported layout: 1%I4"
+             },
+             {
+                     FunctionDescriptor.ofVoid(MemoryLayout.structLayout(
+@@ -173,17 +174,17 @@ public class TestIllegalLink extends NativeTestHelper {
+             {
+                     FunctionDescriptor.of(C_INT.withOrder(nonNativeOrder())),
+                     NO_OPTIONS,
+-                    "Unsupported layout: I4"
++                    IS_LE ? "Unsupported layout: I4" : "Unsupported layout: i4"
+             },
+             {
+                     FunctionDescriptor.of(MemoryLayout.structLayout(C_INT.withOrder(nonNativeOrder()))),
+                     NO_OPTIONS,
+-                    "Unsupported layout: I4"
++                    IS_LE ? "Unsupported layout: I4" : "Unsupported layout: i4"
+             },
+             {
+                     FunctionDescriptor.of(MemoryLayout.structLayout(MemoryLayout.sequenceLayout(C_INT.withOrder(nonNativeOrder())))),
+                     NO_OPTIONS,
+-                    "Unsupported layout: I4"
++                    IS_LE ? "Unsupported layout: I4" : "Unsupported layout: i4"
+             },
+             {
+                     FunctionDescriptor.ofVoid(MemoryLayout.structLayout(
+@@ -227,5 +228,4 @@ public class TestIllegalLink extends NativeTestHelper {
+                 ? ByteOrder.BIG_ENDIAN
+                 : ByteOrder.LITTLE_ENDIAN;
+     }
+-
+ }
+diff --git a/test/jdk/java/foreign/callarranger/platform/PlatformLayouts.java b/test/jdk/java/foreign/callarranger/platform/PlatformLayouts.java
+index 1646063fb08..97856075bef 100644
+--- a/test/jdk/java/foreign/callarranger/platform/PlatformLayouts.java
++++ b/test/jdk/java/foreign/callarranger/platform/PlatformLayouts.java
+@@ -305,5 +305,4 @@ public final class PlatformLayouts {
+         public static final AddressLayout C_POINTER = SharedUtils.C_POINTER;
+ 
+     }
+-
+ }
