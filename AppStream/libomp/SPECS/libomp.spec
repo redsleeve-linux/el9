@@ -21,7 +21,8 @@
 
 %global libomp_srcdir openmp-%{libomp_version}%{?rc_ver:rc%{rc_ver}}.src
 
-%global toolchain clang
+%global toolchain gcc
+%global _lto_cflags %{nil}
 
 # Opt out of https://fedoraproject.org/wiki/Changes/fno-omit-frame-pointer
 # https://bugzilla.redhat.com/show_bug.cgi?id=2158587
@@ -35,7 +36,7 @@
 
 Name: libomp
 Version: %{libomp_version}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
-Release: 1%{?dist}
+Release: 1%{?dist}.redsleeve
 Summary: OpenMP runtime for clang
 
 License: Apache-2.0 WITH LLVM-exception OR NCSA
@@ -119,8 +120,8 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %files
 %license LICENSE.TXT
 %{_libdir}/libomp.so
-%{_libdir}/libompd.so
 %ifnarch %{arm}
+%{_libdir}/libompd.so
 %{_libdir}/libarcher.so
 %endif
 %ifnarch %{ix86} %{arm}
@@ -158,6 +159,9 @@ rm -rf %{buildroot}%{_libdir}/libarcher_static.a
 %endif
 
 %changelog
+* Sat Jan 04 2025 Jacco Ligthart <jacco@redsleeve.org> - 18.1.8-1.redsleeve
+- disabled libompd.so for arm
+
 * Wed Jul 17 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.8-1
 - Update to 18.1.8
 
