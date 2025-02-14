@@ -118,7 +118,7 @@ Summary: The Linux kernel
 %global signmodules 1
 
 # Compress modules only for architectures that build modules
-%ifarch noarch %{arm}
+%ifarch noarch
 %global zipmodules 0
 %else
 %global zipmodules 1
@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 503.21.1
+%define pkgrelease 503.23.2
 %define kversion 5
-%define tarfile_release 5.14.0-503.21.1.el9_5
+%define tarfile_release 5.14.0-503.23.2.el9_5
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 503.21.1%{?buildid}%{?dist}
+%define specrelease 503.23.2%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-503.21.1.el9_5
+%define kabiversion 5.14.0-503.23.2.el9_5
 
 #
 # End of genspec.sh variables
@@ -185,7 +185,6 @@ Summary: The Linux kernel
 # should not be exported to RPM provides
 %global __provides_exclude_from ^%{_libexecdir}/kselftests
 
-%define _with_kabidupchk 1
 %define _with_kabidupchk 1
 # The following build options are enabled by default, but may become disabled
 # by later architecture-specific checks. These can also be disabled by using
@@ -535,7 +534,7 @@ Summary: The Linux kernel
 %define kernel_mflags KALLSYMS_EXTRA_PASS=1
 # we only build headers/perf/tools on the base arm arches
 # just like we used to only build them on i386 for x86
-%ifnarch armv7hl armv6hl
+%ifnarch armv7hl
 %define with_headers 0
 %define with_cross_headers 0
 %endif
@@ -549,11 +548,6 @@ Summary: The Linux kernel
 %define hdrarch arm64
 %define make_target vmlinuz.efi
 %define kernel_image arch/arm64/boot/vmlinuz.efi
-%endif
-
-%ifarch %{arm}
-%define asmarch arm
-%define hdrarch arm
 %endif
 
 # Should make listnewconfig fail if there's config options
@@ -635,7 +629,7 @@ Name: kernel
 License: ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-2-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR CDDL-1.0) AND ((GPL-2.0-only WITH Linux-syscall-note) OR Linux-OpenIB) AND ((GPL-2.0-only WITH Linux-syscall-note) OR MIT) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR MIT) AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSD-3-Clause-Clear AND GFDL-1.1-no-invariants-or-later AND GPL-1.0-or-later AND (GPL-1.0-or-later OR BSD-3-Clause) AND (GPL-1.0-or-later WITH Linux-syscall-note) AND GPL-2.0-only AND (GPL-2.0-only OR Apache-2.0) AND (GPL-2.0-only OR BSD-2-Clause) AND (GPL-2.0-only OR BSD-3-Clause) AND (GPL-2.0-only OR CDDL-1.0) AND (GPL-2.0-only OR GFDL-1.1-no-invariants-or-later) AND (GPL-2.0-only OR GFDL-1.2-no-invariants-only) AND (GPL-2.0-only WITH Linux-syscall-note) AND GPL-2.0-or-later AND (GPL-2.0-or-later OR BSD-2-Clause) AND (GPL-2.0-or-later OR BSD-3-Clause) AND (GPL-2.0-or-later OR CC-BY-4.0) AND (GPL-2.0-or-later WITH GCC-exception-2.0) AND (GPL-2.0-or-later WITH Linux-syscall-note) AND ISC AND LGPL-2.0-or-later AND (LGPL-2.0-or-later OR BSD-2-Clause) AND (LGPL-2.0-or-later WITH Linux-syscall-note) AND LGPL-2.1-only AND (LGPL-2.1-only OR BSD-2-Clause) AND (LGPL-2.1-only WITH Linux-syscall-note) AND LGPL-2.1-or-later AND (LGPL-2.1-or-later WITH Linux-syscall-note) AND (Linux-OpenIB OR GPL-2.0-only) AND (Linux-OpenIB OR GPL-2.0-only OR BSD-2-Clause) AND Linux-man-pages-copyleft AND MIT AND (MIT OR GPL-2.0-only) AND (MIT OR GPL-2.0-or-later) AND (MIT OR LGPL-2.1-only) AND (MPL-1.1 OR GPL-2.0-only) AND (X11 OR GPL-2.0-only) AND (X11 OR GPL-2.0-or-later) AND Zlib
 URL: https://www.kernel.org/
 Version: %{specversion}
-Release: %{pkg_release}.redsleeve
+Release: %{pkg_release}
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
 # SET %%nobuildarches (ABOVE) INSTEAD
 %if 0%{?fedora}
@@ -659,7 +653,7 @@ BuildRequires: kmod, bash, coreutils, tar, git-core, which
 BuildRequires: bzip2, xz, findutils, gzip, m4, perl-interpreter, perl-Carp, perl-devel, perl-generators, make, diffutils, gawk, %compression
 BuildRequires: gcc, binutils, redhat-rpm-config, hmaccalc, bison, flex, gcc-c++
 BuildRequires: net-tools, hostname, bc, elfutils-devel
-#BuildRequires: dwarves
+BuildRequires: dwarves
 BuildRequires: python3-devel
 BuildRequires: gcc-plugin-devel
 BuildRequires: kernel-rpm-macros >= 185-9
@@ -2683,7 +2677,7 @@ BuildKernel %make_target %kernel_image %{use_vdso} rt
 BuildKernel %make_target %kernel_image %{_use_vdso}
 %endif
 
-%ifnarch noarch i686 %{arm}
+%ifnarch noarch i686
 %if !%{with_debug} && !%{with_zfcpdump} && !%{with_pae} && !%{with_up} && !%{with_arm64_64k} && !%{with_realtime}
 # If only building the user space tools, then initialize the build environment
 # and some variables so that the various userspace tools can be built.
@@ -3800,12 +3794,62 @@ fi
 #
 #
 %changelog
-* Tue Jan 21 2025 Jacco Ligthart <jacco@redsleeve.org> 5.14.0-503.21.1.redsleeve
-- added flags for armv6
-
-* Wed Jan 08 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.21.1
+* Tue Feb 11 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.23.2
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Fri Feb 07 2025 Scott Weaver <scweaver@redhat.com> [5.14.0-503.23.2.el9_5]
+- media: uvcvideo: Skip parsing frames of type UVC_VS_UNDEFINED in uvc_parse_format (CKI Backport Bot) [RHEL-78075 RHEL-69574] {CVE-2024-53104}
+
+* Mon Jan 20 2025 Chao YE <cye@redhat.com> [5.14.0-503.23.1.el9_5]
+- printk: nbcon: Fix illegal RCU usage on thread wakeup (Derek Barbosa) [RHEL-73036]
+
+* Wed Jan 15 2025 Chao YE <cye@redhat.com> [5.14.0-503.22.1.el9_5]
+- [s390] zcore: WRITE is "data source", not destination... (CKI Backport Bot) [RHEL-63078]
+- arm64/sve: Discard stale CPU state when handling SVE traps (Mark Salter) [RHEL-72218] {CVE-2024-50275}
+- bpf: Use raw_spinlock_t in ringbuf (Luis Claudio R. Goncalves) [RHEL-68992 RHEL-20608]
+- rh_messages.h: un-unmaintain hfi1 (CKI Backport Bot) [RHEL-71322]
+- scsi: lpfc: Validate hdwq pointers before dereferencing in reset/errata paths (Dick Kennedy) [RHEL-66055 RHEL-53595]
+- scsi: lpfc: Handle mailbox timeouts in lpfc_get_sfp_info (Dick Kennedy) [RHEL-66055 RHEL-53595]
+- ASoC: SOF: ipc4-topology: Preserve the DMA Link ID for ChainDMA on unprepare (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: Only handle dai_config with HW_PARAMS for ChainDMA (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: Use single token list for the copiers (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: Use correct queue_id for requesting input pin format (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: Adjust the params based on DAI formats (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: Improve readability of sof_ipc4_prepare_dai_copier() (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology/pcm: Rename sof_ipc4_copier_is_single_format() (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: Print out the channel count in sof_ipc4_dbg_audio_format (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: support tdm slot number query (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc3-topology: support tdm slot number query (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: sof-audio: add sof_dai_get_tdm_slots function (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: sof-audio: rename dai clock setting query function (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: Add support for NHLT with 16-bit only DMIC blob (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: Correct DAI copier config and NHLT blob request (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: Allow selective update in sof_ipc4_update_hw_params (Jaroslav Kysela) [RHEL-62030]
+- ASoC: SOF: ipc4-topology: remove shadowed variable (Jaroslav Kysela) [RHEL-62030]
+- Revert "ixgbe: Manual AN-37 for troublesome link partners for X550 SFI" (Ivan Vecera) [RHEL-65624]
+- KVM: SVM: Propagate error from snp_guest_req_init() to userspace (Bandan Das) [RHEL-68361 RHEL-65840]
+- KVM: SEV: Provide support for SNP_EXTENDED_GUEST_REQUEST NAE event (Bandan Das) [RHEL-68361 RHEL-65840]
+- x86/sev: Move sev_guest.h into common SEV header (Bandan Das) [RHEL-68361 RHEL-65840]
+- KVM: SEV: Provide support for SNP_GUEST_REQUEST NAE event (Bandan Das) [RHEL-68361 RHEL-65840]
+- i40e: fix race condition by adding filter's intermediate sync state (CKI Backport Bot) [RHEL-69809] {CVE-2024-53088}
+- ice: fix truesize operations for PAGE_SIZE >= 8192 (CKI Backport Bot) [RHEL-70660 RHEL-37905]
+- ice: fix ICE_LAST_OFFSET formula (CKI Backport Bot) [RHEL-70660 RHEL-37905]
+- ice: fix page reuse when PAGE_SIZE is over 8k (CKI Backport Bot) [RHEL-70660 RHEL-37905]
+- nvme-fabrics: handle zero MAXCMD without closing the connection (Maurizio Lombardi) [RHEL-72970]
+- selftests: netfilter: add test case for recent mismatch bug (Florian Westphal) [RHEL-71357 RHEL-60554]
+- netfilter: nf_tables: unconditionally flush pending work before notifier (Florian Westphal) [RHEL-71357 RHEL-60554]
+- netfilter: nft_set_pipapo_avx2: disable softinterrupts (Florian Westphal) [RHEL-71357 RHEL-60554]
+- netfilter: nf_set_pipapo: fix initial map fill (Florian Westphal) [RHEL-71357 RHEL-60554]
+- netfilter: nf_tables: store new sets in dedicated list (Florian Westphal) [RHEL-71357 RHEL-60554]
+- netfilter: nft_socket: Fix a NULL vs IS_ERR() bug in nft_socket_cgroup_subtree_level() (Florian Westphal) [RHEL-71357 RHEL-60554]
+- netfilter: nft_socket: make cgroupsv2 matching work with namespaces (Florian Westphal) [RHEL-71357 RHEL-60554]
+- netfilter: nft_socket: fix sk refcount leaks (Florian Westphal) [RHEL-71357 RHEL-60554]
+- tcp: Fix use-after-free of nreq in reqsk_timer_handler(). (Guillaume Nault) [RHEL-70541 RHEL-70449]
+- tcp/dccp: Don't use timer_pending() in reqsk_queue_unlink(). (Guillaume Nault) [RHEL-66329 RHEL-66328] {CVE-2024-50154}
+- rcu: Use system_unbound_wq to avoid disturbing isolated CPUs (Waiman Long) [RHEL-61329 RHEL-50220]
+- scsi: storvsc: Do not flag MAINTENANCE_IN return of SRB_STATUS_DATA_OVERRUN as an error (Cathy Avery) [RHEL-71393 RHEL-9848]
+- scsi: storvsc: Handle additional SRB status values (Cathy Avery) [RHEL-71393 RHEL-9848]
 
 * Thu Dec 19 2024 Lucas Zampieri <lzampier@redhat.com> [5.14.0-503.21.1.el9_5]
 - mlxsw: spectrum_ipip: Fix memory leak when changing remote IPv6 address (CKI Backport Bot) [RHEL-66899] {CVE-2024-50252}
