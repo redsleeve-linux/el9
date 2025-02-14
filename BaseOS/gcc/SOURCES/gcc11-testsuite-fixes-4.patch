@@ -1,0 +1,38 @@
+commit 181f40f5cf8510a16191e4768dadbe2cb7a5c095
+Author: Jakub Jelinek <jakub@redhat.com>
+Date:   Wed Jul 24 18:00:05 2024 +0200
+
+    testsuite: Fix up pr116034.c test for big/pdp endian [PR116061]
+    
+    Didn't notice the memmove is into an int variable, so the test
+    was still failing on big endian.
+    
+    2024-07-24  Jakub Jelinek  <jakub@redhat.com>
+    
+            PR tree-optimization/116034
+            PR testsuite/116061
+            * gcc.dg/pr116034.c (g): Change type from int to unsigned short.
+            (foo): Guard memmove call on __SIZEOF_SHORT__ == 2.
+    
+    (cherry picked from commit 69e69847e21a8d951ab5f09fd3421449564dba31)
+
+diff --git a/gcc/testsuite/gcc.dg/pr116034.c b/gcc/testsuite/gcc.dg/pr116034.c
+index 9a31de03424..955b4c9e86b 100644
+--- a/gcc/testsuite/gcc.dg/pr116034.c
++++ b/gcc/testsuite/gcc.dg/pr116034.c
+@@ -2,12 +2,13 @@
+ /* { dg-do run } */
+ /* { dg-options "-O1 -fno-strict-aliasing" } */
+ 
+-int g;
++unsigned short int g;
+ 
+ static inline int
+ foo (_Complex unsigned short c)
+ {
+-  __builtin_memmove (&g, 1 + (char *) &c, 2);
++  if (__SIZEOF_SHORT__ == 2)
++    __builtin_memmove (&g, 1 + (char *) &c, 2);
+   return g;
+ }
+ 

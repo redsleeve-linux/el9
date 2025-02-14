@@ -4,7 +4,7 @@
 %global gcc_major 11
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 2
+%global gcc_release 5
 %global nvptx_tools_gitrev 5f6f343a302d620b0868edab376c00b15741e39e
 %global newlib_cygwin_gitrev 50e2a63b04bdd018484605fbb954fd1bd5147fa0
 %global _unpackaged_files_terminate_build 0
@@ -128,7 +128,7 @@
 Summary:              Various compilers (C, C++, Objective-C, ...)
 Name:                 gcc
 Version:              %{gcc_version}
-Release:              %{gcc_release}%{?dist}.redsleeve
+Release:              %{gcc_release}%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License:              GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -150,7 +150,7 @@ Source0:              gcc-%{version}-%{DATE}.tar.xz
 Source1:              nvptx-tools-%{nvptx_tools_gitrev}.tar.xz
 # The source for nvptx-newlib package was pulled from upstream's vcs.  Use the
 # following commands to generate the tarball:
-# git clone git://sourceware.org/git/newlib-cygwin.git newlib-cygwin-dir.tmp
+# git clone https://sourceware.org/git/newlib-cygwin.git newlib-cygwin-dir.tmp
 # git --git-dir=newlib-cygwin-dir.tmp/.git archive --prefix=newlib-cygwin-%%{newlib_cygwin_gitrev}/ %%{newlib_cygwin_gitrev} ":(exclude)newlib/libc/sys/linux/include/rpc/*.[hx]" | xz -9e > newlib-cygwin-%%{newlib_cygwin_gitrev}.tar.xz
 # rm -rf newlib-cygwin-dir.tmp
 Source2:              newlib-cygwin-%{newlib_cygwin_gitrev}.tar.xz
@@ -298,6 +298,7 @@ Patch35:              gcc11-testsuite-aarch64-add-fno-stack-protector.patch
 Patch36:              gcc11-libgfortran-flush.patch
 Patch37:              gcc11-pr113960.patch
 Patch38:              gcc11-pr105157.patch
+Patch39:              gcc11-testsuite-fixes-4.patch
 
 Patch100:             gcc11-fortran-fdec-duplicates.patch
 Patch101:             gcc11-fortran-flogical-as-integer.patch
@@ -901,6 +902,7 @@ mark them as cross compiled.
 %patch36 -p1 -b .libgfortran-flush~
 %patch37 -p1 -b .pr113960~
 %patch38 -p1 -b .pr105157~
+%patch39 -p1 -b .testsuite4~
 
 %if 0%{?rhel} >= 9
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -1204,9 +1206,6 @@ CONFIGURE_OPTS_NATIVE="\
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
 %endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
-%endif
 %ifarch mips mipsel
 	--with-arch=mips32r2 --with-fp-32=xx \
 %endif
@@ -1425,6 +1424,9 @@ then
     CONFIG_ARGS="$CONFIG_ARGS --without-annocheck"
     CONFIG_ARGS="$CONFIG_ARGS --without-tests"
     CONFIG_ARGS="$CONFIG_ARGS --disable-rpath"
+    CONFIG_ARGS="$CONFIG_ARGS --without-debuginfod"
+    CONFIG_ARGS="$CONFIG_ARGS --without-clang-plugin"
+    CONFIG_ARGS="$CONFIG_ARGS --without-llvm-plugin"
 
     comp_dir="%{_builddir}/gcc-%{version}-%{DATE}/obj-%{gcc_target_platform}/gcc/"
     ccompiler="%{_builddir}/gcc-%{version}-%{DATE}/obj-%{gcc_target_platform}/gcc/xgcc -B $comp_dir"
@@ -3597,8 +3599,14 @@ end
 %endif
 
 %changelog
-* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org> 11.5.0-2.redsleeve
-- added config options for armv6hl
+* Fri Feb  7 2025 Marek Polacek <polacek@redhat.com> 11.5.0-5
+- rebuild for CVE-2020-11023 (RHEL-78373)
+
+* Mon Jan 27 2025 Marek Polacek <polacek@redhat.com> 11.5.0-4
+- revert the PR middle-end/57245 patch (RHEL-76359)
+
+* Tue Jan 21 2025 Marek Polacek <polacek@redhat.com> 11.5.0-3
+- honor -frounding-math in real truncation (PR middle-end/57245, RHEL-73749)
 
 * Mon Jul 22 2024 Marek Polacek <polacek@redhat.com> 11.5.0-2
 - fix TARGET_CPU_DEFAULT (PR target/105157, RHEL-50037)
