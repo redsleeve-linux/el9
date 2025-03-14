@@ -1,14 +1,60 @@
-From a7c467ead48a3fbc5e215c5f0a8779f558f01169 Mon Sep 17 00:00:00 2001
+From 7cc9fbbc480fc029c506b58fe74728ea016fdfa4 Mon Sep 17 00:00:00 2001
 From: Jacco Ligthart <jacco@redsleeve.org>
-Date: Sat, 23 Nov 2024 16:37:53 +0100
+Date: Fri, 14 Mar 2025 17:22:01 +0100
 Subject: [PATCH] removed valgrind
 
 ---
- SPECS/systemd.spec | 7 +++++--
- 1 file changed, 5 insertions(+), 2 deletions(-)
+ SOURCES/arm32-patch-for-disable-service.patch | 38 +++++++++++++++++++
+ SPECS/systemd.spec                            | 10 ++++-
+ 2 files changed, 46 insertions(+), 2 deletions(-)
+ create mode 100644 SOURCES/arm32-patch-for-disable-service.patch
 
+diff --git a/SOURCES/arm32-patch-for-disable-service.patch b/SOURCES/arm32-patch-for-disable-service.patch
+new file mode 100644
+index 0000000..c52183c
+--- /dev/null
++++ b/SOURCES/arm32-patch-for-disable-service.patch
+@@ -0,0 +1,38 @@
++From c63bfd0884cf20e48befbee49d41f667660a8802 Mon Sep 17 00:00:00 2001
++From: Frantisek Sumsal <frantisek@sumsal.cz>
++Date: Fri, 3 Mar 2023 12:17:27 +0100
++Subject: [PATCH] systemctl: explicitly cast the constants to uint64_t
++
++Otherwise under certain conditions `va_arg()` might get garbage instead
++of the expected value, i.e.:
++
++$ sudo build-o0/systemctl disable asdfasfaf
++sd_bus_message_appendv: Got uint64_t: 0
++Failed to disable unit: Unit file asdfasfaf.service does not exist.
++
++$ sudo build-o1/systemctl disable asdfasfaf
++sd_bus_message_appendv: Got uint64_t: 7954875719681572864
++Failed to disable unit: Invalid argument
++
++(reproduced on an armv7hl machine)
++
++Resolves: #26568
++Follow-up to: bf1bea43f15
++Related issue: https://github.com/systemd/systemd/pull/14470#discussion_r362893735
++---
++ src/systemctl/systemctl-enable.c | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++diff --git a/src/systemctl/systemctl-enable.c b/src/systemctl/systemctl-enable.c
++index 4ebe5888ac699..a9c6f3a742c98 100644
++--- a/src/systemctl/systemctl-enable.c
+++++ b/src/systemctl/systemctl-enable.c
++@@ -211,7 +211,7 @@ int verb_enable(int argc, char *argv[], void *userdata) {
++ 
++                 if (send_runtime) {
++                         if (streq(method, "DisableUnitFilesWithFlagsAndInstallInfo"))
++-                                r = sd_bus_message_append(m, "t", arg_runtime ? UNIT_FILE_RUNTIME : 0);
+++                                r = sd_bus_message_append(m, "t", arg_runtime ? (uint64_t) UNIT_FILE_RUNTIME : UINT64_C(0));
++                         else
++                                 r = sd_bus_message_append(m, "b", arg_runtime);
++                         if (r < 0)
 diff --git a/SPECS/systemd.spec b/SPECS/systemd.spec
-index cd15c57..76b5fdf 100644
+index cd15c57..de79802 100644
 --- a/SPECS/systemd.spec
 +++ b/SPECS/systemd.spec
 @@ -25,7 +25,7 @@
@@ -16,11 +62,20 @@ index cd15c57..76b5fdf 100644
  Url: https://systemd.io
  Version: 252
 -Release: 46%{?dist}.2.0.1
-+Release: 46%{?dist}.2.0.1.redsleeve
++Release: 46%{?dist}.2.0.2.redsleeve
  # For a breakdown of the licensing, see README
  License: LGPLv2+ and MIT and GPLv2+
  Summary: System and Service Manager
-@@ -1188,7 +1188,7 @@ BuildRequires: libseccomp-devel
+@@ -1132,6 +1132,8 @@ Patch1040: 1040-efi-don-t-pull-kernel-cmdline-from-SMBIOS-in-a-confi.patch
+ Patch1041: 1041-Fix-detection-of-TDX-confidential-VM-on-Azure-platfo.patch
+ Patch1042: 1042-ukify-Skip-test-on-architectures-without-UEFI.patch
+ 
++Patch2000: arm32-patch-for-disable-service.patch
++
+ # Downstream-only patches (9000–9999)
+ 
+ %ifarch %{ix86} x86_64 aarch64
+@@ -1188,7 +1190,7 @@ BuildRequires: libseccomp-devel
  BuildRequires: meson >= 0.43
  BuildRequires: gettext
  # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
@@ -29,12 +84,13 @@ index cd15c57..76b5fdf 100644
  BuildRequires: pkgconfig(bash-completion)
  BuildRequires: pkgconfig(tss2-esys)
  BuildRequires: pkgconfig(tss2-rc)
-@@ -2028,6 +2028,9 @@ systemd-hwdb update &>/dev/null || :
+@@ -2028,6 +2030,10 @@ systemd-hwdb update &>/dev/null || :
  %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
  
  %changelog
-+* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org> - 252-46.0.1.redsleeve
++* Fri Feb 28 2025 Jacco Ligthart <jacco@redsleeve.org> - 252-46.0.2.redsleeve
 +- removed valgrind
++- added a patch form upstrem to de able to disable services.
 +
  * Sat Nov 16 2024 Release Engineering <releng@rockylinux.org> - 252-46.0.1
  - Set support URL to the wiki

@@ -25,7 +25,7 @@
 Name: systemd
 Url: https://systemd.io
 Version: 252
-Release: 46%{?dist}.2.0.1.redsleeve
+Release: 46%{?dist}.2.0.2.redsleeve
 # For a breakdown of the licensing, see README
 License: LGPLv2+ and MIT and GPLv2+
 Summary: System and Service Manager
@@ -1132,6 +1132,8 @@ Patch1040: 1040-efi-don-t-pull-kernel-cmdline-from-SMBIOS-in-a-confi.patch
 Patch1041: 1041-Fix-detection-of-TDX-confidential-VM-on-Azure-platfo.patch
 Patch1042: 1042-ukify-Skip-test-on-architectures-without-UEFI.patch
 
+Patch2000: arm32-patch-for-disable-service.patch
+
 # Downstream-only patches (9000–9999)
 
 %ifarch %{ix86} x86_64 aarch64
@@ -2028,8 +2030,9 @@ systemd-hwdb update &>/dev/null || :
 %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
 
 %changelog
-* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org> - 252-46.0.1.redsleeve
+* Fri Feb 28 2025 Jacco Ligthart <jacco@redsleeve.org> - 252-46.0.2.redsleeve
 - removed valgrind
+- added a patch form upstrem to de able to disable services.
 
 * Sat Nov 16 2024 Release Engineering <releng@rockylinux.org> - 252-46.0.1
 - Set support URL to the wiki
