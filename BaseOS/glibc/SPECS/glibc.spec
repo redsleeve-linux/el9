@@ -157,7 +157,7 @@ end \
 Summary: The GNU libc libraries
 Name: glibc
 Version: %{glibcversion}
-Release: 125%{?dist}.1.redsleeve
+Release: 125%{?dist}.3
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -198,8 +198,6 @@ Source11: parse-SUPPORTED.py
 # Include in the source RPM for reference.
 Source12: ChangeLog.old
 Source13: nscd-sysusers.conf
-
-Source1000: glibc-arm-dl-tunables.list
 
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
@@ -873,6 +871,17 @@ Patch632: glibc-RHEL-46979-3.patch
 Patch633: glibc-RHEL-46979-4.patch
 Patch634: glibc-RHEL-49489-3.patch
 Patch635: glibc-RHEL-49489-4.patch
+Patch636: glibc-RHEL-69003.patch
+Patch637: glibc-RHEL-78939-1.patch
+Patch638: glibc-RHEL-78939-2.patch
+Patch639: glibc-RHEL-78939-3.patch
+Patch640: glibc-RHEL-78939-4.patch
+Patch641: glibc-RHEL-78939-5.patch
+Patch642: glibc-RHEL-78939-6.patch
+Patch643: glibc-RHEL-78939-7.patch
+Patch644: glibc-RHEL-78939-8.patch
+Patch645: glibc-RHEL-78939-9.patch
+Patch646: glibc-RHEL-78939-10.patch
 
 ##############################################################################
 # Continued list of core "glibc" package information:
@@ -1694,10 +1703,6 @@ that can be installed across architectures.
 ##############################################################################
 %prep
 %autosetup -n %{glibcsrcdir} -p1
-
-%ifarch %{arm}
-cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
-%endif
 
 ##############################################################################
 # %%prep - Additional prep required...
@@ -3036,8 +3041,11 @@ update_gconv_modules_cache ()
 %endif
 
 %changelog
-* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org> - 2.34-125.1.redsleeve
-- add dl-tunables.list for arm
+* Thu Feb 13 2025 Carlos O'Donell <carlos@redhat.com> - 2.34-125.3
+- Fix missed wakeup in POSIX thread condition variables (RHEL-78939)
+
+* Fri Dec  6 2024 DJ Delorie <dj@redhat.com> - 2.34-125.2
+- add GB18030-2022 charmap and tests (RHEL-69003)
 
 * Fri Sep 27 2024 Florian Weimer <fweimer@redhat.com> - 2.34-125.1
 - Remove some unused ppc64le string functions (RHEL-49489)
