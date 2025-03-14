@@ -118,7 +118,7 @@ Summary: The Linux kernel
 %global signmodules 1
 
 # Compress modules only for architectures that build modules
-%ifarch noarch
+%ifarch noarch %{arm}
 %global zipmodules 0
 %else
 %global zipmodules 1
@@ -534,7 +534,7 @@ Summary: The Linux kernel
 %define kernel_mflags KALLSYMS_EXTRA_PASS=1
 # we only build headers/perf/tools on the base arm arches
 # just like we used to only build them on i386 for x86
-%ifnarch armv7hl
+%ifnarch armv7hl armv6hl
 %define with_headers 0
 %define with_cross_headers 0
 %endif
@@ -548,6 +548,11 @@ Summary: The Linux kernel
 %define hdrarch arm64
 %define make_target vmlinuz.efi
 %define kernel_image arch/arm64/boot/vmlinuz.efi
+%endif
+
+%ifarch %{arm}
+%define asmarch arm
+%define hdrarch arm
 %endif
 
 # Should make listnewconfig fail if there's config options
@@ -629,7 +634,7 @@ Name: kernel
 License: ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-2-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR CDDL-1.0) AND ((GPL-2.0-only WITH Linux-syscall-note) OR Linux-OpenIB) AND ((GPL-2.0-only WITH Linux-syscall-note) OR MIT) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR MIT) AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSD-3-Clause-Clear AND GFDL-1.1-no-invariants-or-later AND GPL-1.0-or-later AND (GPL-1.0-or-later OR BSD-3-Clause) AND (GPL-1.0-or-later WITH Linux-syscall-note) AND GPL-2.0-only AND (GPL-2.0-only OR Apache-2.0) AND (GPL-2.0-only OR BSD-2-Clause) AND (GPL-2.0-only OR BSD-3-Clause) AND (GPL-2.0-only OR CDDL-1.0) AND (GPL-2.0-only OR GFDL-1.1-no-invariants-or-later) AND (GPL-2.0-only OR GFDL-1.2-no-invariants-only) AND (GPL-2.0-only WITH Linux-syscall-note) AND GPL-2.0-or-later AND (GPL-2.0-or-later OR BSD-2-Clause) AND (GPL-2.0-or-later OR BSD-3-Clause) AND (GPL-2.0-or-later OR CC-BY-4.0) AND (GPL-2.0-or-later WITH GCC-exception-2.0) AND (GPL-2.0-or-later WITH Linux-syscall-note) AND ISC AND LGPL-2.0-or-later AND (LGPL-2.0-or-later OR BSD-2-Clause) AND (LGPL-2.0-or-later WITH Linux-syscall-note) AND LGPL-2.1-only AND (LGPL-2.1-only OR BSD-2-Clause) AND (LGPL-2.1-only WITH Linux-syscall-note) AND LGPL-2.1-or-later AND (LGPL-2.1-or-later WITH Linux-syscall-note) AND (Linux-OpenIB OR GPL-2.0-only) AND (Linux-OpenIB OR GPL-2.0-only OR BSD-2-Clause) AND Linux-man-pages-copyleft AND MIT AND (MIT OR GPL-2.0-only) AND (MIT OR GPL-2.0-or-later) AND (MIT OR LGPL-2.1-only) AND (MPL-1.1 OR GPL-2.0-only) AND (X11 OR GPL-2.0-only) AND (X11 OR GPL-2.0-or-later) AND Zlib
 URL: https://www.kernel.org/
 Version: %{specversion}
-Release: %{pkg_release}
+Release: %{pkg_release}.redsleeve
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
 # SET %%nobuildarches (ABOVE) INSTEAD
 %if 0%{?fedora}
@@ -653,7 +658,7 @@ BuildRequires: kmod, bash, coreutils, tar, git-core, which
 BuildRequires: bzip2, xz, findutils, gzip, m4, perl-interpreter, perl-Carp, perl-devel, perl-generators, make, diffutils, gawk, %compression
 BuildRequires: gcc, binutils, redhat-rpm-config, hmaccalc, bison, flex, gcc-c++
 BuildRequires: net-tools, hostname, bc, elfutils-devel
-BuildRequires: dwarves
+#BuildRequires: dwarves
 BuildRequires: python3-devel
 BuildRequires: gcc-plugin-devel
 BuildRequires: kernel-rpm-macros >= 185-9
@@ -2677,7 +2682,7 @@ BuildKernel %make_target %kernel_image %{use_vdso} rt
 BuildKernel %make_target %kernel_image %{_use_vdso}
 %endif
 
-%ifnarch noarch i686
+%ifnarch noarch i686 %{arm}
 %if !%{with_debug} && !%{with_zfcpdump} && !%{with_pae} && !%{with_up} && !%{with_arm64_64k} && !%{with_realtime}
 # If only building the user space tools, then initialize the build environment
 # and some variables so that the various userspace tools can be built.
@@ -3794,6 +3799,9 @@ fi
 #
 #
 %changelog
+* Fri Feb 14 2025 Jacco Ligthart <jacco@redsleeve.org> 5.14.0-503.23.2.redsleeve
+- added flags for armv6
+
 * Tue Feb 11 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-503.23.2
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
