@@ -1,0 +1,28 @@
+Fix md5 in FIPS mode
+
+OpenSSL 3.0.0+ does not support EVP_MD_CTX_FLAG_NON_FIPS_ALLOW any longer.
+In OpenSSL 1.1.1 the non FIPS allowed flag is context specific, while
+in 3.0.0+ it is a different EVP_MD provider.
+
+Resolves: rhbz#2050541
+
+diff -up mariadb-10.5.13-downstream_modified/mysys_ssl/my_md5.cc.fips mariadb-10.5.13-downstream_modified/mysys_ssl/my_md5.cc
+--- mariadb-10.5.13-downstream_modified/mysys_ssl/my_md5.cc.fips	2022-02-07 16:36:47.255131576 +0100
++++ mariadb-10.5.13-downstream_modified/mysys_ssl/my_md5.cc	2022-02-07 22:57:32.391002916 +0100
+@@ -52,12 +52,15 @@ static void md5_result(EVP_MD_CTX *conte
+ 
+ static void md5_init(EVP_MD_CTX *context)
+ {
++  EVP_MD *md5;
++  md5 = EVP_MD_fetch(NULL, "MD5", "fips=no");
+   EVP_MD_CTX_init(context);
+ #ifdef EVP_MD_CTX_FLAG_NON_FIPS_ALLOW
+   /* Ok to ignore FIPS: MD5 is not used for crypto here */
+   EVP_MD_CTX_set_flags(context, EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
+ #endif
+-  EVP_DigestInit_ex(context, EVP_md5(), NULL);
++  EVP_DigestInit_ex(context, md5, NULL);
++  EVP_MD_free(md5);
+ }
+ 
+ static void md5_input(EVP_MD_CTX *context, const uchar *buf, unsigned len)
