@@ -1,0 +1,454 @@
+commit 349670f8093d920d4d683472c88029f6901f7ae7
+Author: Maciej W. Rozycki <macro@redhat.com>
+Date:   Thu Nov 7 06:14:24 2024 +0000
+
+    stdio-common: Add tests for formatted vasprintf output specifiers
+    
+    Wire vasprintf into test infrastructure for formatted printf output
+    specifiers.
+    
+    Owing to mtrace logging these tests take amounts of time to complete
+    similar to those of corresponding asprintf tests, so set timeouts for
+    the tests accordingly, with a global default for all the vasprintf
+    tests, and then individual higher settings for double and long double
+    tests each.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index fd34891ea439c684..2675d7741fe496d4 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -23,7 +23,7 @@ subdir	:= stdio-common
+ include ../Makeconfig
+ 
+ # List of markers for printf family function tests.
+-xprintf-funcs := p as d f s sn v
++xprintf-funcs := p as d f s sn v vas
+ 
+ # List of data types and formats for individual per-conversion printf tests.
+ fmt-convs := double ldouble
+diff --git a/stdio-common/tst-printf-format-vas-c.c b/stdio-common/tst-printf-format-vas-c.c
+new file mode 100644
+index 0000000000000000..f8cf814c8c3bc293
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-c.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for the 'c' conversion.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-c.c"
+diff --git a/stdio-common/tst-printf-format-vas-char.c b/stdio-common/tst-printf-format-vas-char.c
+new file mode 100644
+index 0000000000000000..39c6e73977f3f32f
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-char.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for signed char conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-char.c"
+diff --git a/stdio-common/tst-printf-format-vas-double.c b/stdio-common/tst-printf-format-vas-double.c
+new file mode 100644
+index 0000000000000000..25a21bb0adc2726f
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-double.c
+@@ -0,0 +1,22 @@
++/* Test for formatted 'vasprintf' output for double conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#define TIMEOUT (DEFAULT_TIMEOUT * 32)
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-double.c"
+diff --git a/stdio-common/tst-printf-format-vas-int.c b/stdio-common/tst-printf-format-vas-int.c
+new file mode 100644
+index 0000000000000000..9cd70c8fcbae1c03
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-int.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-int.c"
+diff --git a/stdio-common/tst-printf-format-vas-ldouble.c b/stdio-common/tst-printf-format-vas-ldouble.c
+new file mode 100644
+index 0000000000000000..60c3933fab1b9216
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-ldouble.c
+@@ -0,0 +1,22 @@
++/* Test for formatted 'vasprintf' output for long double conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#define TIMEOUT (DEFAULT_TIMEOUT * 128)
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-ldouble.c"
+diff --git a/stdio-common/tst-printf-format-vas-llong.c b/stdio-common/tst-printf-format-vas-llong.c
+new file mode 100644
+index 0000000000000000..5d5322b8b9dfe0a4
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-llong.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for long long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-llong.c"
+diff --git a/stdio-common/tst-printf-format-vas-long.c b/stdio-common/tst-printf-format-vas-long.c
+new file mode 100644
+index 0000000000000000..d9651053f8f14dcd
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-long.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-long.c"
+diff --git a/stdio-common/tst-printf-format-vas-s.c b/stdio-common/tst-printf-format-vas-s.c
+new file mode 100644
+index 0000000000000000..6d74ab83e3038b44
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-s.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for the 's' conversion.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-s.c"
+diff --git a/stdio-common/tst-printf-format-vas-short.c b/stdio-common/tst-printf-format-vas-short.c
+new file mode 100644
+index 0000000000000000..a6d76a97055fbb89
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-short.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for short int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-short.c"
+diff --git a/stdio-common/tst-printf-format-vas-uchar.c b/stdio-common/tst-printf-format-vas-uchar.c
+new file mode 100644
+index 0000000000000000..c3dee11b7d8092d9
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-uchar.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for unsigned char conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-uchar.c"
+diff --git a/stdio-common/tst-printf-format-vas-uint.c b/stdio-common/tst-printf-format-vas-uint.c
+new file mode 100644
+index 0000000000000000..e56e89374db69c3f
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-uint.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for unsigned int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-uint.c"
+diff --git a/stdio-common/tst-printf-format-vas-ullong.c b/stdio-common/tst-printf-format-vas-ullong.c
+new file mode 100644
+index 0000000000000000..05691bc3181c6d18
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-ullong.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for unsigned long long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-ullong.c"
+diff --git a/stdio-common/tst-printf-format-vas-ulong.c b/stdio-common/tst-printf-format-vas-ulong.c
+new file mode 100644
+index 0000000000000000..767d9cb6a6ac64a2
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-ulong.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for unsigned long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-ulong.c"
+diff --git a/stdio-common/tst-printf-format-vas-ushort.c b/stdio-common/tst-printf-format-vas-ushort.c
+new file mode 100644
+index 0000000000000000..284d79f75364504f
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas-ushort.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'vasprintf' output for unsigned short int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-vas.h"
++#include "tst-printf-format-skeleton-ushort.c"
+diff --git a/stdio-common/tst-printf-format-vas.h b/stdio-common/tst-printf-format-vas.h
+new file mode 100644
+index 0000000000000000..3e38e729ec97ceed
+--- /dev/null
++++ b/stdio-common/tst-printf-format-vas.h
+@@ -0,0 +1,50 @@
++/* Test feature wrapper for formatted 'vasprintf' output.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++static int
++printf_under_test (const char *restrict fmt, ...)
++{
++  va_list ap;
++  int result;
++  char *str;
++
++  va_start (ap, fmt);
++  result = vasprintf (&str, fmt, ap);
++  va_end (ap);
++  if (result < 0)
++    {
++      perror ("vasprintf");
++      goto out;
++    }
++  if (fwrite (str, sizeof (*str), result, stdout) != result)
++    {
++      perror ("fwrite");
++      result = -1;
++    }
++  free (str);
++out:
++  return result;
++}
++
++#ifndef TIMEOUT
++# define TIMEOUT (DEFAULT_TIMEOUT * 12)
++#endif

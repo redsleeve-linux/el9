@@ -1,0 +1,223 @@
+Partial backport (without ABI changes, using libc_nonshared.a instead)
+of:
+
+commit 74d463c50bb1096efef47022405c7db33f83fb5a
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Mar 12 10:16:31 2025 +0100
+
+    Linux: Add the pthread_gettid_np function (bug 27880)
+
+    Current Bionic has this function, with enhanced error checking
+    (the undefined case terminates the process).
+
+    Reviewed-by: Joseph Myers <josmyers@redhat.com>
+
+Conflicts:
+	sysdeps/unix/sysv/linux/*/libc.abilist
+	  (not backported)
+	nptl/Versions
+	  (not backported)
+
+The alternate libc_nonshared.a implementation relies on the UAPI
+encoding of pthread_getcpuclockid, and avoids a TCB layout
+dependency.
+
+diff --git a/manual/process.texi b/manual/process.texi
+index 9307379194c6f666..8535363546520d62 100644
+--- a/manual/process.texi
++++ b/manual/process.texi
+@@ -238,6 +238,24 @@ especially regarding reuse of the IDs of threads which have exited.
+ This function is specific to Linux.
+ @end deftypefun
+ 
++@deftypefun pid_t pthread_gettid_np (pthread_t @var{thread})
++@standards{Linux, pthread.h}
++@safety{@prelim{}@mtsafe{}@assafe{}@acsafe{}}
++This function returns the same value that @code{gettid} would return if
++executed on the running thread @var{thread}.
++
++If @var{thread} is no longer running but it is joinable, it is
++unspecified whether this function returns @minus{}1, or if it returns
++the thread ID of the thread while it was running.  If @var{thread} is
++not running and is not joinable, the behavior is undefined.
++
++@strong{Portability Note:} Linux thread IDs can be reused rather quickly,
++so this function differs from the @code{pthread_getunique_np} function
++found on other systems.
++
++This function is specific to Linux.
++@end deftypefun
++
+ @node Creating a Process
+ @section Creating a Process
+ 
+diff --git a/nptl/Makefile b/nptl/Makefile
+index d03846c2e04afa2f..cac75eb8f5b68320 100644
+--- a/nptl/Makefile
++++ b/nptl/Makefile
+@@ -118,6 +118,7 @@ routines = \
+   pthread_getname \
+   pthread_getschedparam \
+   pthread_getspecific \
++  pthread_gettid_np \
+   pthread_join \
+   pthread_join_common \
+   pthread_key_create \
+@@ -203,6 +204,10 @@ routines = \
+   vars \
+   # routines
+ 
++static-only-routines += \
++  pthread_gettid_np \
++  # static-only-routines
++
+ libpthread-routines = libpthread-compat
+ libpthread-shared-only-routines = libpthread-compat
+ 
+@@ -314,6 +319,7 @@ tests = \
+   tst-pthread-timedlock-lockloop \
+   tst-pthread_exit-nothreads \
+   tst-pthread_exit-nothreads-static \
++  tst-pthread_gettid_np \
+   tst-robust-fork \
+   tst-robustpi1 \
+   tst-robustpi2 \
+diff --git a/nptl/pthread_gettid_np.c b/nptl/pthread_gettid_np.c
+new file mode 100644
+index 0000000000000000..b602eb7a30bf42a5
+--- /dev/null
++++ b/nptl/pthread_gettid_np.c
+@@ -0,0 +1,32 @@
++/* Get the Linux TID from a pthread_t handle.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; see the file COPYING.LIB.  If
++   not, see <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <pthreadP.h>
++
++pid_t
++attribute_hidden
++pthread_gettid_np (pthread_t threadid)
++{
++  clockid_t clock;
++  if (pthread_getcpuclockid (threadid, &clock) != 0)
++    return -1;
++  /* Reverse the clock ID encoding to obtain the TID.  This is part of
++     the kernel/userspace interface, so it is stable ABI.  */
++  return ~(clock >> 3);
++}
+diff --git a/nptl/tst-pthread_gettid_np.c b/nptl/tst-pthread_gettid_np.c
+new file mode 100644
+index 0000000000000000..6a98d864e222b9f5
+--- /dev/null
++++ b/nptl/tst-pthread_gettid_np.c
+@@ -0,0 +1,79 @@
++/* Test for pthread_gettid_np.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; see the file COPYING.LIB.  If
++   not, see <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <pthread.h>
++#include <sched.h>
++#include <signal.h>
++#include <support/check.h>
++#include <support/xthread.h>
++#include <unistd.h>
++
++static pthread_barrier_t barrier;
++
++static pid_t thread_tid;
++
++static void *
++thread_func (void *ignored)
++{
++  thread_tid = gettid ();
++  TEST_VERIFY (thread_tid != getpid ());
++  TEST_COMPARE (thread_tid, pthread_gettid_np (pthread_self ()));
++  xpthread_barrier_wait (&barrier);
++  /* The main thread calls pthread_gettid_np here.  */
++  xpthread_barrier_wait (&barrier);
++  return NULL;
++}
++
++static int
++do_test (void)
++{
++  TEST_COMPARE (pthread_gettid_np (pthread_self ()), getpid ());
++  TEST_COMPARE (pthread_gettid_np (pthread_self ()), gettid ());
++
++  xpthread_barrier_init (&barrier, NULL, 2);
++
++  pthread_t thr = xpthread_create (NULL, thread_func, NULL);
++  xpthread_barrier_wait (&barrier);
++  TEST_COMPARE (thread_tid, pthread_gettid_np (thr));
++  xpthread_barrier_wait (&barrier);
++
++  while (true)
++    {
++      /* Check if the kernel thread is still running.  */
++      if (tgkill (getpid (), thread_tid, 0))
++        {
++          TEST_COMPARE (errno, ESRCH);
++          break;
++        }
++
++      pid_t tid = pthread_gettid_np (thr);
++      if (tid != thread_tid)
++        {
++          TEST_COMPARE (tid, -1);
++          break;
++        }
++      TEST_COMPARE (sched_yield (), 0);
++    }
++
++  TEST_VERIFY (xpthread_join (thr) == NULL);
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/sysdeps/nptl/pthread.h b/sysdeps/nptl/pthread.h
+index 43146e91c9d9579b..b8bd9213da5c9bc0 100644
+--- a/sysdeps/nptl/pthread.h
++++ b/sysdeps/nptl/pthread.h
+@@ -1317,6 +1317,11 @@ extern int pthread_getcpuclockid (pthread_t __thread_id,
+      __THROW __nonnull ((2));
+ #endif
+ 
++#ifdef __USE_GNU
++/* Return the Linux TID for THREAD_ID.  Returns -1 on failure.  */
++extern pid_t pthread_gettid_np (pthread_t __thread_id);
++#endif
++
+ 
+ /* Install handlers to be called when a new process is created with FORK.
+    The PREPARE handler is called in the parent process just before performing

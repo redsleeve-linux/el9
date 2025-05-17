@@ -1,0 +1,785 @@
+From 026a84a54d3b6c23b999b793e2a6f8ecd211e3b8 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Fr=C3=A9d=C3=A9ric=20B=C3=A9rat?= <fberat@redhat.com>
+Date: Thu, 1 Jun 2023 12:40:05 -0400
+Subject: [PATCH] tests: replace write by xwrite
+Content-type: text/plain; charset=UTF-8
+
+Using write without cheks leads to warn unused result when __wur is
+enabled.
+
+Reviewed-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+---
+ dirent/tst-fdopendir.c        |  4 +++-
+ io/tst-faccessat.c            |  3 ++-
+ io/tst-fchmodat.c             |  3 ++-
+ io/tst-fchownat.c             |  3 ++-
+ io/tst-fstatat.c              |  3 ++-
+ io/tst-futimesat.c            |  3 ++-
+ io/tst-linkat.c               |  3 ++-
+ io/tst-openat.c               |  3 ++-
+ io/tst-renameat.c             |  3 ++-
+ io/tst-symlinkat.c            |  3 ++-
+ io/tst-unlinkat.c             |  3 ++-
+ libio/bug-ungetc.c            |  4 +++-
+ libio/bug-ungetc3.c           |  4 +++-
+ libio/bug-ungetc4.c           |  4 +++-
+ libio/bug-wfflush.c           |  4 +++-
+ libio/bug-wsetpos.c           |  4 +++-
+ nptl/tst-stackguard1.c        |  4 +++-
+ nptl/tst-tls3.c               |  2 ++
+ nptl/tst-tls3mod.c            |  5 +++--
+ rt/tst-cpuclock2.c            |  4 +++-
+ rt/tst-cputimer1.c            |  4 +++-
+ rt/tst-cputimer2.c            |  4 +++-
+ rt/tst-cputimer3.c            |  4 +++-
+ support/test-container.c      |  8 ++++----
+ sysdeps/pthread/tst-cond18.c  |  4 +++-
+ sysdeps/pthread/tst-flock1.c  |  3 ++-
+ sysdeps/pthread/tst-flock2.c  |  3 ++-
+ sysdeps/pthread/tst-key1.c    | 11 ++++++-----
+ sysdeps/pthread/tst-signal1.c |  3 ++-
+ sysdeps/pthread/tst-signal2.c |  3 ++-
+ sysdeps/pthread/tst-timer.c   |  3 ++-
+ time/tst-cpuclock1.c          |  4 +++-
+ 32 files changed, 84 insertions(+), 39 deletions(-)
+
+diff --git a/dirent/tst-fdopendir.c b/dirent/tst-fdopendir.c
+index 6321af1daa..2c9520574d 100644
+--- a/dirent/tst-fdopendir.c
++++ b/dirent/tst-fdopendir.c
+@@ -7,6 +7,8 @@
+ #include <string.h>
+ #include <sys/stat.h>
+ 
++#include <support/xunistd.h>
++
+ #ifndef O_NOATIME
+ # define O_NOATIME	0
+ #endif
+@@ -22,7 +24,7 @@ do_test (void)
+       return 1;
+     }
+ 
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+   close (fd);
+ 
+   struct stat64 st;
+diff --git a/io/tst-faccessat.c b/io/tst-faccessat.c
+index 7bdeed008c..b90954e318 100644
+--- a/io/tst-faccessat.c
++++ b/io/tst-faccessat.c
+@@ -8,6 +8,7 @@
+ #include <unistd.h>
+ #include <sys/stat.h>
+ 
++#include <support/xunistd.h>
+ 
+ static void prepare (void);
+ #define PREPARE(argc, argv) prepare ()
+@@ -96,7 +97,7 @@ do_test (void)
+       puts ("file creation failed");
+       return 1;
+     }
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+   puts ("file created");
+ 
+   /* Before closing the file, try using this file descriptor to open
+diff --git a/io/tst-fchmodat.c b/io/tst-fchmodat.c
+index 7d4a8717ff..83003e2f21 100644
+--- a/io/tst-fchmodat.c
++++ b/io/tst-fchmodat.c
+@@ -8,6 +8,7 @@
+ #include <unistd.h>
+ #include <sys/stat.h>
+ 
++#include <support/xunistd.h>
+ 
+ static void prepare (void);
+ #define PREPARE(argc, argv) prepare ()
+@@ -98,7 +99,7 @@ do_test (void)
+       puts ("file creation failed");
+       return 1;
+     }
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+   puts ("file created");
+ 
+   struct stat64 st1;
+diff --git a/io/tst-fchownat.c b/io/tst-fchownat.c
+index e8adf6229f..c0b87cda8f 100644
+--- a/io/tst-fchownat.c
++++ b/io/tst-fchownat.c
+@@ -6,6 +6,7 @@
+ #include <unistd.h>
+ #include <sys/stat.h>
+ 
++#include <support/xunistd.h>
+ 
+ static void prepare (void);
+ #define PREPARE(argc, argv) prepare ()
+@@ -106,7 +107,7 @@ do_test (void)
+       puts ("file creation failed");
+       return 1;
+     }
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+   puts ("file created");
+ 
+   struct stat64 st1;
+diff --git a/io/tst-fstatat.c b/io/tst-fstatat.c
+index 4766bb2e71..6a60024b63 100644
+--- a/io/tst-fstatat.c
++++ b/io/tst-fstatat.c
+@@ -6,6 +6,7 @@
+ #include <unistd.h>
+ #include <sys/stat.h>
+ 
++#include <support/xunistd.h>
+ 
+ static void prepare (void);
+ #define PREPARE(argc, argv) prepare ()
+@@ -94,7 +95,7 @@ do_test (void)
+       puts ("file creation failed");
+       return 1;
+     }
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+   puts ("file created");
+ 
+   struct stat64 st1;
+diff --git a/io/tst-futimesat.c b/io/tst-futimesat.c
+index 3d41721f42..b7ef386e06 100644
+--- a/io/tst-futimesat.c
++++ b/io/tst-futimesat.c
+@@ -28,6 +28,7 @@
+ 
+ #include <support/test-driver.h>
+ #include <support/temp_file.h>
++#include <support/xunistd.h>
+ 
+ #ifndef struct_stat
+ # define struct_stat struct stat64
+@@ -114,7 +115,7 @@ do_test (void)
+       puts ("file creation failed");
+       return 1;
+     }
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+   puts ("file created");
+ 
+   struct_stat st1;
+diff --git a/io/tst-linkat.c b/io/tst-linkat.c
+index 97445b7954..6b22a01c88 100644
+--- a/io/tst-linkat.c
++++ b/io/tst-linkat.c
+@@ -6,6 +6,7 @@
+ #include <unistd.h>
+ #include <sys/stat.h>
+ 
++#include <support/xunistd.h>
+ 
+ static void prepare (void);
+ #define PREPARE(argc, argv) prepare ()
+@@ -94,7 +95,7 @@ do_test (void)
+       puts ("file creation failed");
+       return 1;
+     }
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+   puts ("file created");
+ 
+   struct stat64 st1;
+diff --git a/io/tst-openat.c b/io/tst-openat.c
+index 741b8d0ad2..2ce89e3db1 100644
+--- a/io/tst-openat.c
++++ b/io/tst-openat.c
+@@ -6,6 +6,7 @@
+ #include <string.h>
+ #include <unistd.h>
+ 
++#include <support/xunistd.h>
+ 
+ static void prepare (void);
+ #define PREPARE(argc, argv) prepare ()
+@@ -94,7 +95,7 @@ do_test (void)
+       puts ("file creation failed");
+       return 1;
+     }
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+ 
+   /* Before closing the file, try using this file descriptor to open
+      another file.  This must fail.  */
+diff --git a/io/tst-renameat.c b/io/tst-renameat.c
+index 435302b52b..0b9da5fd6d 100644
+--- a/io/tst-renameat.c
++++ b/io/tst-renameat.c
+@@ -6,6 +6,7 @@
+ #include <unistd.h>
+ #include <sys/stat.h>
+ 
++#include <support/xunistd.h>
+ 
+ static void prepare (void);
+ #define PREPARE(argc, argv) prepare ()
+@@ -94,7 +95,7 @@ do_test (void)
+       puts ("file creation failed");
+       return 1;
+     }
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+   puts ("file created");
+ 
+   struct stat64 st1;
+diff --git a/io/tst-symlinkat.c b/io/tst-symlinkat.c
+index 214a8e348e..4a34994df7 100644
+--- a/io/tst-symlinkat.c
++++ b/io/tst-symlinkat.c
+@@ -6,6 +6,7 @@
+ #include <unistd.h>
+ #include <sys/stat.h>
+ 
++#include <support/xunistd.h>
+ 
+ static void prepare (void);
+ #define PREPARE(argc, argv) prepare ()
+@@ -94,7 +95,7 @@ do_test (void)
+       puts ("file creation failed");
+       return 1;
+     }
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+   puts ("file created");
+ 
+   struct stat64 st1;
+diff --git a/io/tst-unlinkat.c b/io/tst-unlinkat.c
+index e21d56f9f7..21a2dbaf57 100644
+--- a/io/tst-unlinkat.c
++++ b/io/tst-unlinkat.c
+@@ -6,6 +6,7 @@
+ #include <string.h>
+ #include <unistd.h>
+ 
++#include <support/xunistd.h>
+ 
+ static void prepare (void);
+ #define PREPARE(argc, argv) prepare ()
+@@ -94,7 +95,7 @@ do_test (void)
+       puts ("file creation failed");
+       return 1;
+     }
+-  write (fd, "hello", 5);
++  xwrite (fd, "hello", 5);
+   close (fd);
+   puts ("file created");
+ 
+diff --git a/libio/bug-ungetc.c b/libio/bug-ungetc.c
+index 51940b68f5..4ea2d14ed6 100644
+--- a/libio/bug-ungetc.c
++++ b/libio/bug-ungetc.c
+@@ -2,6 +2,8 @@
+ 
+ #include <stdio.h>
+ 
++#include <support/xunistd.h>
++
+ static void do_prepare (void);
+ #define PREPARE(argc, argv) do_prepare ()
+ static int do_test (void);
+@@ -20,7 +22,7 @@ do_prepare (void)
+       printf ("cannot create temporary file: %m\n");
+       exit (1);
+     }
+-  write (fd, pattern, sizeof (pattern));
++  xwrite (fd, pattern, sizeof (pattern));
+   close (fd);
+ }
+ 
+diff --git a/libio/bug-ungetc3.c b/libio/bug-ungetc3.c
+index 0c83c1161e..6100d7a936 100644
+--- a/libio/bug-ungetc3.c
++++ b/libio/bug-ungetc3.c
+@@ -2,6 +2,8 @@
+ 
+ #include <stdio.h>
+ 
++#include <support/xunistd.h>
++
+ static void do_prepare (void);
+ #define PREPARE(argc, argv) do_prepare ()
+ static int do_test (void);
+@@ -20,7 +22,7 @@ do_prepare (void)
+       printf ("cannot create temporary file: %m\n");
+       exit (1);
+     }
+-  write (fd, pattern, sizeof (pattern));
++  xwrite (fd, pattern, sizeof (pattern));
+   close (fd);
+ }
+ 
+diff --git a/libio/bug-ungetc4.c b/libio/bug-ungetc4.c
+index 0bd02a570d..8a05def686 100644
+--- a/libio/bug-ungetc4.c
++++ b/libio/bug-ungetc4.c
+@@ -19,6 +19,8 @@
+ 
+ #include <stdio.h>
+ 
++#include <support/xunistd.h>
++
+ static void do_prepare (void);
+ #define PREPARE(argc, argv) do_prepare ()
+ static int do_test (void);
+@@ -37,7 +39,7 @@ do_prepare (void)
+       printf ("cannot create temporary file: %m\n");
+       exit (1);
+     }
+-  write (fd, pattern, sizeof (pattern) - 1);
++  xwrite (fd, pattern, sizeof (pattern) - 1);
+   close (fd);
+ }
+ 
+diff --git a/libio/bug-wfflush.c b/libio/bug-wfflush.c
+index a8fd61e997..d1b9d8e9de 100644
+--- a/libio/bug-wfflush.c
++++ b/libio/bug-wfflush.c
+@@ -3,6 +3,8 @@
+ #include <stdio.h>
+ #include <wchar.h>
+ 
++#include <support/xunistd.h>
++
+ static void do_prepare (void);
+ #define PREPARE(argc, argv) do_prepare ()
+ static int do_test (void);
+@@ -20,7 +22,7 @@ do_prepare (void)
+       printf ("cannot create temporary file: %m\n");
+       exit (1);
+     }
+-  write (fd, "1!", 2);
++  xwrite (fd, "1!", 2);
+   close (fd);
+ }
+ 
+diff --git a/libio/bug-wsetpos.c b/libio/bug-wsetpos.c
+index ccb22a4b62..0fc373ba49 100644
+--- a/libio/bug-wsetpos.c
++++ b/libio/bug-wsetpos.c
+@@ -4,6 +4,8 @@
+ #include <stdio.h>
+ #include <wchar.h>
+ 
++#include <support/xunistd.h>
++
+ static void do_prepare (void);
+ #define PREPARE(argc, argv) do_prepare ()
+ static int do_test (void);
+@@ -22,7 +24,7 @@ do_prepare (void)
+       printf ("cannot create temporary file: %m\n");
+       exit (1);
+     }
+-  write (fd, pattern, sizeof (pattern));
++  xwrite (fd, pattern, sizeof (pattern));
+   close (fd);
+ }
+ 
+diff --git a/nptl/tst-stackguard1.c b/nptl/tst-stackguard1.c
+index b9cf6844de..4ac57157e9 100644
+--- a/nptl/tst-stackguard1.c
++++ b/nptl/tst-stackguard1.c
+@@ -28,6 +28,8 @@
+ #include <tls.h>
+ #include <unistd.h>
+ 
++#include <support/xunistd.h>
++
+ static const char *command;
+ static bool child;
+ static uintptr_t stack_chk_guard_copy;
+@@ -97,7 +99,7 @@ do_test (void)
+ 	else if (ret != NULL)
+ 	  return 1;
+ 
+-      write (2, &stack_chk_guard_copy, sizeof (stack_chk_guard_copy));
++      xwrite (2, &stack_chk_guard_copy, sizeof (stack_chk_guard_copy));
+       return 0;
+     }
+ 
+diff --git a/nptl/tst-tls3.c b/nptl/tst-tls3.c
+index b1a40c624a..33d94c8cc5 100644
+--- a/nptl/tst-tls3.c
++++ b/nptl/tst-tls3.c
+@@ -27,6 +27,8 @@
+ #include <unistd.h>
+ #include <pthreaddef.h>
+ 
++#include <support/xunistd.h>
++
+ #define THE_SIG SIGUSR1
+ 
+ /* The stack size can be overriden.  With a sufficiently large stack
+diff --git a/nptl/tst-tls3mod.c b/nptl/tst-tls3mod.c
+index c6e8910b1e..345a48e1c7 100644
+--- a/nptl/tst-tls3mod.c
++++ b/nptl/tst-tls3mod.c
+@@ -26,6 +26,7 @@
+ #include <pthreaddef.h>
+ #include <descr.h>
+ 
++#include <support/xunistd.h>
+ 
+ extern pthread_barrier_t b;
+ 
+@@ -44,7 +45,7 @@ handler (int sig)
+ {
+   if (sig != THE_SIG)
+     {
+-      write (STDOUT_FILENO, "wrong signal\n", 13);
++      xwrite (STDOUT_FILENO, "wrong signal\n", 13);
+       _exit (1);
+     }
+ 
+@@ -52,7 +53,7 @@ handler (int sig)
+ 
+   if (sem_post (&s) != 0)
+     {
+-      write (STDOUT_FILENO, "sem_post failed\n", 16);
++      xwrite (STDOUT_FILENO, "sem_post failed\n", 16);
+       _exit (1);
+     }
+ }
+diff --git a/rt/tst-cpuclock2.c b/rt/tst-cpuclock2.c
+index e4584d8791..8afd34ed9c 100644
+--- a/rt/tst-cpuclock2.c
++++ b/rt/tst-cpuclock2.c
+@@ -37,6 +37,8 @@ do_test ()
+ #include <errno.h>
+ #include <pthread.h>
+ 
++#include <support/xunistd.h>
++
+ static pthread_barrier_t barrier;
+ 
+ /* This function is intended to rack up both user and system time.  */
+@@ -55,7 +57,7 @@ chew_cpu (void *arg)
+       for (int i = 0; i < 100; ++i)
+ 	for (size_t j = 0; j < sizeof buf; ++j)
+ 	  buf[j] = 0xbb;
+-      write (nullfd, (char *) buf, sizeof buf);
++      xwrite (nullfd, (char *) buf, sizeof buf);
+       close (nullfd);
+     }
+ 
+diff --git a/rt/tst-cputimer1.c b/rt/tst-cputimer1.c
+index 8f5dd76cf2..18d8b195a2 100644
+--- a/rt/tst-cputimer1.c
++++ b/rt/tst-cputimer1.c
+@@ -11,6 +11,8 @@
+ #include <time.h>
+ #include <pthread.h>
+ 
++#include <support/xunistd.h>
++
+ #define TEST_CLOCK CLOCK_PROCESS_CPUTIME_ID
+ #define TEST_CLOCK_MISSING(clock) \
+   (setup_test () ? "process CPU clock timer support" : NULL)
+@@ -29,7 +31,7 @@ chew_cpu (void *arg)
+       for (int i = 0; i < 100; ++i)
+ 	for (size_t j = 0; j < sizeof buf; ++j)
+ 	  buf[j] = 0xbb;
+-      write (nullfd, (char *) buf, sizeof buf);
++      xwrite (nullfd, (char *) buf, sizeof buf);
+       close (nullfd);
+     }
+ 
+diff --git a/rt/tst-cputimer2.c b/rt/tst-cputimer2.c
+index 397d7998c0..a5700d4bac 100644
+--- a/rt/tst-cputimer2.c
++++ b/rt/tst-cputimer2.c
+@@ -12,6 +12,8 @@
+ #include <time.h>
+ #include <pthread.h>
+ 
++#include <support/xunistd.h>
++
+ static clockid_t worker_thread_clock;
+ 
+ #define TEST_CLOCK worker_thread_clock
+@@ -32,7 +34,7 @@ chew_cpu (void *arg)
+       for (int i = 0; i < 100; ++i)
+ 	for (size_t j = 0; j < sizeof buf; ++j)
+ 	  buf[j] = 0xbb;
+-      write (nullfd, (char *) buf, sizeof buf);
++      xwrite (nullfd, (char *) buf, sizeof buf);
+       close (nullfd);
+     }
+ 
+diff --git a/rt/tst-cputimer3.c b/rt/tst-cputimer3.c
+index 056766a377..786de93a02 100644
+--- a/rt/tst-cputimer3.c
++++ b/rt/tst-cputimer3.c
+@@ -13,6 +13,8 @@
+ #include <signal.h>
+ #include <sys/wait.h>
+ 
++#include <support/xunistd.h>
++
+ static clockid_t child_clock;
+ 
+ #define TEST_CLOCK child_clock
+@@ -33,7 +35,7 @@ chew_cpu (void)
+       for (int i = 0; i < 100; ++i)
+ 	for (size_t j = 0; j < sizeof buf; ++j)
+ 	  buf[j] = 0xbb;
+-      write (nullfd, (char *) buf, sizeof buf);
++      xwrite (nullfd, (char *) buf, sizeof buf);
+       close (nullfd);
+       if (getppid () == 1)
+ 	_exit (2);
+diff --git a/support/test-container.c b/support/test-container.c
+index e68f16eecf..d4ca41fe7c 100644
+--- a/support/test-container.c
++++ b/support/test-container.c
+@@ -1177,7 +1177,7 @@ main (int argc, char **argv)
+       int status;
+ 
+       /* Send the child's "outside" pid to it.  */
+-      write (pipes[1], &child, sizeof(child));
++      xwrite (pipes[1], &child, sizeof(child));
+       close (pipes[0]);
+       close (pipes[1]);
+ 
+@@ -1246,7 +1246,7 @@ main (int argc, char **argv)
+ 
+       sprintf (tmp, "%lld %lld 1\n",
+ 	       (long long) (be_su ? 0 : original_uid), (long long) original_uid);
+-      write (UMAP, tmp, strlen (tmp));
++      xwrite (UMAP, tmp, strlen (tmp));
+       xclose (UMAP);
+ 
+       /* We must disable setgroups () before we can map our groups, else we
+@@ -1255,7 +1255,7 @@ main (int argc, char **argv)
+       if (GMAP >= 0)
+ 	{
+ 	  /* We support kernels old enough to not have this.  */
+-	  write (GMAP, "deny\n", 5);
++	  xwrite (GMAP, "deny\n", 5);
+ 	  xclose (GMAP);
+ 	}
+ 
+@@ -1267,7 +1267,7 @@ main (int argc, char **argv)
+ 
+       sprintf (tmp, "%lld %lld 1\n",
+ 	       (long long) (be_su ? 0 : original_gid), (long long) original_gid);
+-      write (GMAP, tmp, strlen (tmp));
++      xwrite (GMAP, tmp, strlen (tmp));
+       xclose (GMAP);
+     }
+ 
+diff --git a/sysdeps/pthread/tst-cond18.c b/sysdeps/pthread/tst-cond18.c
+index edac4fa4ff..ffae356c04 100644
+--- a/sysdeps/pthread/tst-cond18.c
++++ b/sysdeps/pthread/tst-cond18.c
+@@ -25,6 +25,8 @@
+ #include <stdio.h>
+ #include <unistd.h>
+ 
++#include <support/xunistd.h>
++
+ pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
+ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+ bool exiting;
+@@ -41,7 +43,7 @@ tf (void *id)
+       while (!exiting)
+ 	{
+ 	  if ((spins++ % 1000) == 0)
+-	    write (fd, ".", 1);
++	    xwrite (fd, ".", 1);
+ 	  pthread_mutex_unlock (&lock);
+ 
+ 	  pthread_mutex_lock (&lock);
+diff --git a/sysdeps/pthread/tst-flock1.c b/sysdeps/pthread/tst-flock1.c
+index 7eef9070ab..9de148afd3 100644
+--- a/sysdeps/pthread/tst-flock1.c
++++ b/sysdeps/pthread/tst-flock1.c
+@@ -22,6 +22,7 @@
+ #include <unistd.h>
+ #include <sys/file.h>
+ 
++#include <support/xunistd.h>
+ 
+ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+ 
+@@ -57,7 +58,7 @@ do_test (void)
+ 
+   unlink (tmp);
+ 
+-  write (fd, "foobar xyzzy", 12);
++  xwrite (fd, "foobar xyzzy", 12);
+ 
+   if (flock (fd, LOCK_EX | LOCK_NB) != 0)
+     {
+diff --git a/sysdeps/pthread/tst-flock2.c b/sysdeps/pthread/tst-flock2.c
+index 8762e93b52..952b79e5db 100644
+--- a/sysdeps/pthread/tst-flock2.c
++++ b/sysdeps/pthread/tst-flock2.c
+@@ -25,6 +25,7 @@
+ #include <sys/mman.h>
+ #include <sys/wait.h>
+ 
++#include <support/xunistd.h>
+ 
+ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+ static pthread_mutex_t lock2 = PTHREAD_MUTEX_INITIALIZER;
+@@ -71,7 +72,7 @@ do_test (void)
+ 
+   int i;
+   for (i = 0; i < 20; ++i)
+-    write (fd, "foobar xyzzy", 12);
++    xwrite (fd, "foobar xyzzy", 12);
+ 
+   pthread_barrier_t *b;
+   b = mmap (NULL, sizeof (pthread_barrier_t), PROT_READ | PROT_WRITE,
+diff --git a/sysdeps/pthread/tst-key1.c b/sysdeps/pthread/tst-key1.c
+index 933edafef8..60245c4e47 100644
+--- a/sysdeps/pthread/tst-key1.c
++++ b/sysdeps/pthread/tst-key1.c
+@@ -22,6 +22,7 @@
+ #include <stdlib.h>
+ #include <unistd.h>
+ 
++#include <support/xunistd.h>
+ 
+ static int do_test (void);
+ 
+@@ -52,7 +53,7 @@ do_test (void)
+ 
+ 	if (pthread_setspecific (keys[i], (const void *) (i + 100l)) != 0)
+ 	  {
+-	    write (2, "setspecific failed\n", 19);
++	    xwrite (2, "setspecific failed\n", 19);
+ 	    _exit (1);
+ 	  }
+       }
+@@ -61,13 +62,13 @@ do_test (void)
+     {
+       if (pthread_getspecific (keys[i]) != (void *) (i + 100l))
+ 	{
+-	  write (2, "getspecific failed\n", 19);
++	  xwrite (2, "getspecific failed\n", 19);
+ 	  _exit (1);
+ 	}
+ 
+       if (pthread_key_delete (keys[i]) != 0)
+ 	{
+-	  write (2, "key_delete failed\n", 18);
++	  xwrite (2, "key_delete failed\n", 18);
+ 	  _exit (1);
+ 	}
+     }
+@@ -75,13 +76,13 @@ do_test (void)
+   /* Now it must be once again possible to allocate keys.  */
+   if (pthread_key_create (&keys[0], NULL) != 0)
+     {
+-      write (2, "2nd key_create failed\n", 22);
++      xwrite (2, "2nd key_create failed\n", 22);
+       _exit (1);
+     }
+ 
+   if (pthread_key_delete (keys[0]) != 0)
+     {
+-      write (2, "2nd key_delete failed\n", 22);
++      xwrite (2, "2nd key_delete failed\n", 22);
+       _exit (1);
+     }
+ 
+diff --git a/sysdeps/pthread/tst-signal1.c b/sysdeps/pthread/tst-signal1.c
+index d1073e8459..d1082027ca 100644
+--- a/sysdeps/pthread/tst-signal1.c
++++ b/sysdeps/pthread/tst-signal1.c
+@@ -26,6 +26,7 @@
+ #include <sys/mman.h>
+ #include <sys/wait.h>
+ 
++#include <support/xunistd.h>
+ 
+ static sigset_t ss;
+ static pthread_barrier_t *b;
+@@ -106,7 +107,7 @@ do_test (void)
+ 
+   int i;
+   for (i = 0; i < 20; ++i)
+-    write (fd, "foobar xyzzy", 12);
++    xwrite (fd, "foobar xyzzy", 12);
+ 
+   b = mmap (NULL, sizeof (pthread_barrier_t), PROT_READ | PROT_WRITE,
+ 	    MAP_SHARED, fd, 0);
+diff --git a/sysdeps/pthread/tst-signal2.c b/sysdeps/pthread/tst-signal2.c
+index dfe7d9f64a..15b7747877 100644
+--- a/sysdeps/pthread/tst-signal2.c
++++ b/sysdeps/pthread/tst-signal2.c
+@@ -26,6 +26,7 @@
+ #include <sys/wait.h>
+ #include <string.h>
+ 
++#include <support/xunistd.h>
+ 
+ static sigset_t ss;
+ static pthread_barrier_t *b;
+@@ -112,7 +113,7 @@ do_test (void)
+ 
+   int i;
+   for (i = 0; i < 20; ++i)
+-    write (fd, "foobar xyzzy", 12);
++    xwrite (fd, "foobar xyzzy", 12);
+ 
+   b = mmap (NULL, sizeof (pthread_barrier_t), PROT_READ | PROT_WRITE,
+ 	    MAP_SHARED, fd, 0);
+diff --git a/sysdeps/pthread/tst-timer.c b/sysdeps/pthread/tst-timer.c
+index 47472ab8e1..4cfe0b67dc 100644
+--- a/sysdeps/pthread/tst-timer.c
++++ b/sysdeps/pthread/tst-timer.c
+@@ -25,6 +25,7 @@
+ #include <stdlib.h>
+ #include <stdint.h>
+ 
++#include <support/xunistd.h>
+ 
+ static void
+ notify_func1 (union sigval sigval)
+@@ -45,7 +46,7 @@ signal_func (int sig)
+ {
+   static const char text[] = "signal_func\n";
+   signal (sig, signal_func);
+-  write (STDOUT_FILENO, text, sizeof text - 1);
++  xwrite (STDOUT_FILENO, text, sizeof text - 1);
+ }
+ 
+ static void
+diff --git a/time/tst-cpuclock1.c b/time/tst-cpuclock1.c
+index 6f2e70a58a..6a793e06df 100644
+--- a/time/tst-cpuclock1.c
++++ b/time/tst-cpuclock1.c
+@@ -27,6 +27,8 @@
+ #include <stdint.h>
+ #include <sys/wait.h>
+ 
++#include <support/xunistd.h>
++
+ /* This function is intended to rack up both user and system time.  */
+ static void
+ chew_cpu (void)
+@@ -41,7 +43,7 @@ chew_cpu (void)
+       for (int i = 0; i < 100; ++i)
+ 	for (size_t j = 0; j < sizeof buf; ++j)
+ 	  buf[j] = 0xbb;
+-      write (nullfd, (char *) buf, sizeof buf);
++      xwrite (nullfd, (char *) buf, sizeof buf);
+       close (nullfd);
+       if (getppid () == 1)
+ 	_exit (2);
+-- 
+2.43.5
+

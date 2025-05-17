@@ -1,0 +1,451 @@
+Partial backport (without ABI changes, using libc_nonshared.a instead)
+of:
+
+commit 21571ca0d70302909cf72707b2a7736cf12190a0
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Sep 11 10:05:08 2024 +0200
+
+    Linux: Add the sched_setattr and sched_getattr functions
+    
+    And struct sched_attr.
+    
+    In sysdeps/unix/sysv/linux/bits/sched.h, the hack that defines
+    sched_param around the inclusion of <linux/sched/types.h> is quite
+    ugly, but the definition of struct sched_param has already been
+    dropped by the kernel, so there is nothing else we can do and maintain
+    compatibility of <sched.h> with a wide range of kernel header
+    versions.  (An alternative would involve introducing a separate header
+    for this functionality, but this seems unnecessary.)
+    
+    The existing sched_* functions that change scheduler parameters
+    are already incompatible with PTHREAD_PRIO_PROTECT mutexes, so
+    there is no harm in adding more functionality in this area.
+    
+    The documentation mostly defers to the Linux manual pages.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+Conflicts:
+	sysdeps/unix/sysv/linux/Makefile
+	  (variables not sorted downstream, libc_nonshared.a
+	  integration downstream)
+	sysdeps/unix/sysv/linux/Versions
+	  (not backported)
+	sysdeps/unix/sysv/linux/*/libc.abilist
+	  (not backported)
+
+The implementation uses the syscall function, not <sysdep.h>,
+to avoid implicit TCB layout dependencies.  Such dependencies
+could happen if the system call macros use information in the
+TCB to select the way the kernel is entered.
+
+
+diff --git a/manual/resource.texi b/manual/resource.texi
+index 37462abc9e467690..bddff67d3d1e414e 100644
+--- a/manual/resource.texi
++++ b/manual/resource.texi
+@@ -478,6 +478,7 @@ POSIX syntax had in mind.
+ * Absolute Priority::               The first tier of priority.  Posix
+ * Realtime Scheduling::             Scheduling among the process nobility
+ * Basic Scheduling Functions::      Get/set scheduling policy, priority
++* Extensible Scheduling::           Parameterized scheduling policies.
+ * Traditional Scheduling::          Scheduling among the vulgar masses
+ * CPU Affinity::                    Limiting execution to certain CPUs
+ @end menu
+@@ -952,6 +953,120 @@ function, so there are no specific @code{errno} values.
+ 
+ @end deftypefun
+ 
++@node Extensible Scheduling
++@subsection Extensible Scheduling
++@cindex scheduling, extensible
++
++The type @code{struct sched_attr} and the functions @code{sched_setattr}
++and @code{sched_getattr} are used to implement scheduling policies with
++multiple parameters (not just priority and niceness).
++
++It is expected that these interfaces will be compatible with all future
++scheduling policies.
++
++For additional information about scheduling policies, consult consult
++the manual pages @manpageurl{sched,7} and @manpageurl{sched_setattr,2}.
++@xref{Linux Kernel}.
++
++@strong{Note:} Calling the @code{sched_setattr} function is incompatible
++with support for @code{PTHREAD_PRIO_PROTECT} mutexes.
++
++@deftp {Data Type} {struct sched_attr}
++@standards{Linux, sched.h}
++The @code{sched_attr} structure describes a parameterized scheduling policy.
++
++@strong{Portability note:} In the future, additional fields can be added
++to @code{struct sched_attr} at the end, so that the size of this data
++type changes.  Do not use it in places where this matters, such as
++structure fields in installed header files, where such a change could
++impact the application binary interface (ABI).
++
++The following generic fields are available.
++
++@table @code
++@item size
++The actually used size of the data structure.  See the description of
++the functions @code{sched_setattr} and @code{sched_getattr} below how this
++field is used to support extension of @code{struct sched_attr} with
++more fields.
++
++@item sched_policy
++The scheduling policy.  This field determines which fields in the
++structure are used, and how the @code{sched_flags} field is interpreted.
++
++@item sched_flags
++Scheduling flags associated with the scheduling policy.
++@end table
++
++In addition to the generic fields, policy-specific fields are available.
++For additional information, consult the manual page
++@manpageurl{sched_setattr,2}.  @xref{Linux Kernel}.
++@end deftp
++
++@deftypefun int sched_setaddr (pid_t @var{tid}, struct sched_attr *@var{attr}, unsigned int flags)
++@standards{Linux, sched.h}
++@safety{@mtsafe{}@assafe{}@acsafe{}}
++This functions applies the scheduling policy described by
++@code{*@var{attr}} to the thread @var{tid} (the value zero denotes the
++current thread).
++
++It is recommended to initialize unused fields to zero, either using
++@code{memset}, or using a structure initializer.  The
++@code{@var{attr->size}} field should be set to @code{sizeof (struct
++sched_attr)}, to inform the kernel of the structure version in use.
++
++The @var{flags} argument must be zero.  Other values may become
++available in the future.
++
++On failure, @code{sched_setattr} returns @math{-1} and sets
++@code{errno}.  The following errors are related the way
++extensibility is handled.
++@table @code
++@item E2BIG
++A field in @code{*@var{attr}} has a non-zero value, but is unknown to
++the kernel.  The application could try to apply a modified policy, where
++more fields are zero.
++
++@item EINVAL
++The policy in @code{@var{attr}->sched_policy} is unknown to the kernel,
++or flags are set in @code{@var{attr}->sched_flags} that the kernel does
++not know how to interpret.  The application could try with fewer flags
++set, or a different scheduling policy.
++
++This error also occurs if @var{attr} is @code{NULL} or @var{flags} is
++not zero.
++
++@item EPERM
++The current thread is not sufficiently privileged to assign the policy,
++either because access to the policy is restricted in general, or because
++the current thread does not have the rights to change the scheduling
++policy of the thread @var{tid}.
++@end table
++
++Other error codes depend on the scheduling policy.
++@end deftypefun
++
++@deftypefun int sched_getaddr (pid_t @var{tid}, struct sched_attr *@var{attr}, unsigned int size, unsigned int flags)
++@standards{Linux, sched.h}
++@safety{@mtsafe{}@assafe{}@acsafe{}}
++This function obtains the scheduling policy of the thread @var{tid}
++(zero denotes the current thread) and store it in @code{*@var{attr}},
++which must have space for at least @var{size} bytes.
++
++The @var{flags} argument must be zero.  Other values may become
++available in the future.
++
++Upon success, @code{@var{attr}->size} contains the size of the structure
++version used by the kernel.  Fields with offsets greater or equal to
++@code{@var{attr}->size} are not updated by the kernel.  To obtain
++predictable values for unknown fields, use @code{memset} to set
++all @var{size} bytes to zero prior to calling @code{sched_getattr}.
++
++On failure, @code{sched_getattr} returns @math{-1} and sets @code{errno}.
++If @code{errno} is @code{E2BIG}, this means that the buffer is not large
++large enough, and the application could retry with a larger buffer.
++@end deftypefun
++
+ @node Traditional Scheduling
+ @subsection Traditional Scheduling
+ @cindex scheduling, traditional
+diff --git a/sysdeps/unix/sysv/linux/Makefile b/sysdeps/unix/sysv/linux/Makefile
+index 08b4e7765c07f6a3..d6381fe846c905d6 100644
+--- a/sysdeps/unix/sysv/linux/Makefile
++++ b/sysdeps/unix/sysv/linux/Makefile
+@@ -66,7 +66,16 @@ sysdep_routines += adjtimex clone umount umount2 readahead sysctl \
+ 		   fxstatat fxstatat64 \
+ 		   xmknod xmknodat convert_scm_timestamps \
+ 		   closefrom_fallback \
+-		   clone3 clone-internal
++		   clone3 clone-internal \
++  sched_getattr \
++  sched_setattr \
++  # sysdep_routines
++
++# The implementations go into libc_nonshared.a, to preserve ABI.
++static-only-routines += \
++  sched_getattr \
++  sched_setattr \
++  # static-only-routines
+ 
+ CFLAGS-gethostid.c = -fexceptions
+ CFLAGS-tee.c = -fexceptions -fasynchronous-unwind-tables
+@@ -128,6 +137,7 @@ tests += tst-clone tst-clone2 tst-clone3 tst-fanotify tst-personality \
+   tst-fdopendir-o_path \
+   tst-linux-mremap1 \
+   tst-sched-affinity-inheritance \
++  tst-sched_setattr \
+   # tests
+ 
+ # Test for the symbol version of fcntl that was replaced in glibc 2.28.
+diff --git a/sysdeps/unix/sysv/linux/bits/sched.h b/sysdeps/unix/sysv/linux/bits/sched.h
+index cd450fdfe510f397..5e0f70a69181bc26 100644
+--- a/sysdeps/unix/sysv/linux/bits/sched.h
++++ b/sysdeps/unix/sysv/linux/bits/sched.h
+@@ -34,10 +34,39 @@
+ # define SCHED_IDLE		5
+ # define SCHED_DEADLINE		6
+ 
++/* Flags that can be used in policy values.  */
+ # define SCHED_RESET_ON_FORK	0x40000000
+-#endif
+ 
+-#ifdef __USE_GNU
++/* Use "" to work around incorrect macro expansion of the
++   __has_include argument (GCC PR 80005).  */
++# ifdef __has_include
++#  if __has_include ("linux/sched/types.h")
++/* Some older Linux versions defined sched_param in <linux/sched/types.h>.  */
++#   define sched_param __glibc_mask_sched_param
++#   include <linux/sched/types.h>
++#   undef sched_param
++#  endif
++# endif
++# ifndef SCHED_ATTR_SIZE_VER0
++#  include <linux/types.h>
++#  define SCHED_ATTR_SIZE_VER0 48
++#  define SCHED_ATTR_SIZE_VER1 56
++struct sched_attr
++{
++  __u32 size;
++  __u32 sched_policy;
++  __u64 sched_flags;
++  __s32 sched_nice;
++  __u32 sched_priority;
++  __u64 sched_runtime;
++  __u64 sched_deadline;
++  __u64 sched_period;
++  __u32 sched_util_min;
++  __u32 sched_util_max;
++  /* Additional fields may be added at the end.  */
++};
++# endif /* !SCHED_ATTR_SIZE_VER0 */
++
+ /* Cloning flags.  */
+ # define CSIGNAL       0x000000ff /* Signal mask to be sent at exit.  */
+ # define CLONE_VM      0x00000100 /* Set if VM shared between processes.  */
+@@ -93,6 +122,17 @@ extern int getcpu (unsigned int *, unsigned int *) __THROW;
+ 
+ /* Switch process to namespace of type NSTYPE indicated by FD.  */
+ extern int setns (int __fd, int __nstype) __THROW;
++
++/* Apply the scheduling attributes from *ATTR to the process or thread TID.  */
++int sched_setattr (pid_t tid, struct sched_attr *attr, unsigned int flags)
++  __THROW __nonnull ((2));
++
++/* Obtain the scheduling attributes of the process or thread TID and
++   store it in *ATTR.  */
++int sched_getattr (pid_t tid, struct sched_attr *attr, unsigned int size,
++		   unsigned int flags)
++  __THROW __nonnull ((2)) __attr_access ((__write_only__, 2, 3));
++
+ #endif
+ 
+ __END_DECLS
+diff --git a/sysdeps/unix/sysv/linux/sched_getattr.c b/sysdeps/unix/sysv/linux/sched_getattr.c
+new file mode 100644
+index 0000000000000000..64f0b70514f2b143
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/sched_getattr.c
+@@ -0,0 +1,30 @@
++/* Reading scheduling policy and attributes.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <sched.h>
++#include <sysdep.h>
++#include <unistd.h>
++
++int
++attribute_hidden
++sched_getattr (pid_t pid, struct sched_attr *attr, unsigned int size,
++               unsigned int flags)
++{
++  /* Use the syscall function for compatibility with libc_nonshared.a.  */
++  return syscall (__NR_sched_getattr, pid, attr, size, flags);
++}
+diff --git a/sysdeps/unix/sysv/linux/sched_setattr.c b/sysdeps/unix/sysv/linux/sched_setattr.c
+new file mode 100644
+index 0000000000000000..2a24a734e8d5125b
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/sched_setattr.c
+@@ -0,0 +1,29 @@
++/* Setting scheduling policy and attributes.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <sched.h>
++#include <sysdep.h>
++#include <unistd.h>
++
++int
++attribute_hidden
++sched_setattr (pid_t pid, struct sched_attr *attr, unsigned int flags)
++{
++  /* Use the syscall function for compatibility with libc_nonshared.a.  */
++  return syscall (__NR_sched_setattr, pid, attr, flags);
++}
+diff --git a/sysdeps/unix/sysv/linux/tst-sched_setattr.c b/sysdeps/unix/sysv/linux/tst-sched_setattr.c
+new file mode 100644
+index 0000000000000000..a6288a1a7cc2d01b
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/tst-sched_setattr.c
+@@ -0,0 +1,105 @@
++/* Tests for sched_setattr and sched_getattr.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <sched.h>
++
++#include <errno.h>
++#include <stddef.h>
++#include <string.h>
++#include <support/check.h>
++#include <sys/resource.h>
++#include <unistd.h>
++
++/* Padding struct to detect unexpected writes.   */
++union
++{
++  struct sched_attr attr;
++  /* Hopefully the kernel will never need as much.  */
++  unsigned char padding[4096];
++} u;
++
++static void
++check_unused (void)
++{
++  TEST_VERIFY (u.attr.size < sizeof (u));
++  for (unsigned int i = u.attr.size; i < sizeof (u); ++i)
++    TEST_COMPARE (u.padding[i], 0xcc);
++}
++
++static int
++do_test (void)
++{
++  TEST_VERIFY (sizeof (struct sched_attr) < sizeof (u));
++
++  /* Check that reading and re-applying the current policy works.  */
++  memset (&u, 0xcc, sizeof (u));
++  /* Compiler barrier to bypass write access attribute.  */
++  volatile unsigned int size = sizeof (u);
++  TEST_COMPARE (sched_getattr (0, (struct sched_attr *) &u, size, 0), 0);
++  check_unused ();
++  TEST_COMPARE (sched_setattr (0, &u.attr, 0), 0); /* Apply unchanged.  */
++
++  /* Try to switch to the SCHED_OTHER policy.   */
++  memset (&u, 0, sizeof (u));
++  u.attr.size = sizeof (u); /* With padding, kernel should accept zeroes.  */
++  u.attr.sched_policy = SCHED_OTHER; /* Should be the default.  */
++  {
++    errno = 0;
++    int prio = getpriority (PRIO_PROCESS, 0);
++    if (errno != 0)
++      prio = 0;
++    u.attr.sched_nice = prio;
++  }
++  TEST_COMPARE (sched_setattr (0, &u.attr, 0), 0);
++
++  /* Non-zero values not known to the kernel result in an E2BIG error.  */
++  memset (&u, 0, sizeof (u));
++  TEST_COMPARE (sched_getattr (0, (struct sched_attr *) &u, size, 0), 0);
++  u.padding[u.attr.size] = 0xcc;
++  u.attr.size = sizeof (u);
++  errno = 0;
++  TEST_COMPARE (sched_setattr (0, &u.attr, 0), -1);
++  TEST_COMPARE (errno, E2BIG);
++
++  memset (&u, 0xcc, sizeof (u));
++  TEST_COMPARE (sched_getattr (0, (struct sched_attr *) &u, size, 0), 0);
++  TEST_COMPARE (u.attr.sched_policy, SCHED_OTHER);
++  check_unused ();
++
++  /* Raise the niceless level to 19 and observe its effect.  */
++  TEST_COMPARE (nice (19), 19);
++  TEST_COMPARE (sched_getattr (0, &u.attr, sizeof (u.attr), 0), 0);
++  TEST_COMPARE (u.attr.sched_policy, SCHED_OTHER);
++  TEST_COMPARE (u.attr.sched_nice, 19);
++  check_unused ();
++
++  /* Invalid buffer arguments result in EINVAL (not EFAULT).  */
++  {
++    errno = 0;
++    void *volatile null_pointer = NULL; /* compiler barrier.  */
++    TEST_COMPARE (sched_setattr (0, null_pointer, 0), -1);
++    TEST_COMPARE (errno, EINVAL);
++    errno = 0;
++    TEST_COMPARE (sched_getattr (0, null_pointer, size, 0), -1);
++    TEST_COMPARE (errno, EINVAL);
++  }
++
++  return 0;
++}
++
++#include <support/test-driver.c>

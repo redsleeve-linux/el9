@@ -1,0 +1,86 @@
+commit e44ca1c085b3bd41266c882ea1cb0fd436231635
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Thu Sep 5 20:08:10 2024 +0000
+
+    Fix freopen handling of ,ccs= (bug 23675)
+    
+    As reported in bug 23675 and shown up in the recently added tests of
+    different cases of freopen (relevant part of the test currently
+    conditioned under #if 0 to avoid a failure resulting from this bug),
+    freopen wrongly forces the stream to unoriented even when a mode with
+    ,ccs= is specified, though such a mode is supposed to result in a
+    wide-oriented stream.  Move the clearing of _mode to before the actual
+    reopening occurs, so that the main fopen implementation can leave a
+    wide-oriented stream in the ,ccs= case.
+    
+    Tested for x86_64.
+
+diff --git a/libio/freopen.c b/libio/freopen.c
+index 03f8961a61b12e80..d71a4cfffdc35280 100644
+--- a/libio/freopen.c
++++ b/libio/freopen.c
+@@ -66,6 +66,7 @@ freopen (const char *filename, const char *mode, FILE *fp)
+       fp->_flags2 &= ~(_IO_FLAGS2_MMAP
+ 		       | _IO_FLAGS2_NOTCANCEL
+ 		       | _IO_FLAGS2_CLOEXEC);
++      fp->_mode = 0;
+       result = _IO_old_file_fopen (fp, gfilename, mode);
+     }
+   else
+@@ -78,6 +79,7 @@ freopen (const char *filename, const char *mode, FILE *fp)
+       fp->_flags2 &= ~(_IO_FLAGS2_MMAP
+ 		       | _IO_FLAGS2_NOTCANCEL
+ 		       | _IO_FLAGS2_CLOEXEC);
++      fp->_mode = 0;
+       result = _IO_file_fopen (fp, gfilename, mode, 1);
+       if (result != NULL)
+ 	result = __fopen_maybe_mmap (result);
+@@ -85,9 +87,6 @@ freopen (const char *filename, const char *mode, FILE *fp)
+   fp->_flags2 &= ~_IO_FLAGS2_NOCLOSE;
+   if (result != NULL)
+     {
+-      /* unbound stream orientation */
+-      result->_mode = 0;
+-
+       if (fd != -1 && _IO_fileno (result) != fd)
+ 	{
+ 	  /* At this point we have both file descriptors already allocated,
+diff --git a/libio/freopen64.c b/libio/freopen64.c
+index abcbd80a5bd92e69..64af2c5f7c80a3e9 100644
+--- a/libio/freopen64.c
++++ b/libio/freopen64.c
+@@ -59,15 +59,13 @@ freopen64 (const char *filename, const char *mode, FILE *fp)
+   fp->_flags2 &= ~(_IO_FLAGS2_MMAP
+ 		   | _IO_FLAGS2_NOTCANCEL
+ 		   | _IO_FLAGS2_CLOEXEC);
++  fp->_mode = 0;
+   result = _IO_file_fopen (fp, gfilename, mode, 0);
+   fp->_flags2 &= ~_IO_FLAGS2_NOCLOSE;
+   if (result != NULL)
+     result = __fopen_maybe_mmap (result);
+   if (result != NULL)
+     {
+-      /* unbound stream orientation */
+-      result->_mode = 0;
+-
+       if (fd != -1 && _IO_fileno (result) != fd)
+ 	{
+ 	  /* At this point we have both file descriptors already allocated,
+diff --git a/stdio-common/tst-freopen2-main.c b/stdio-common/tst-freopen2-main.c
+index 5dad41c76b02e6de..74c3125fca697fe3 100644
+--- a/stdio-common/tst-freopen2-main.c
++++ b/stdio-common/tst-freopen2-main.c
+@@ -386,13 +386,8 @@ do_test (void)
+   fp = xfopen (file2, "w,ccs=iso-8859-1");
+   ret = fputws (L"\xc0\xc1", fp);
+   TEST_VERIFY (ret >= 0);
+-#if 0 /* Doesn't work (bug 23675).  */
+   fp = FREOPEN (file1, "r,ccs=utf-8", fp);
+   TEST_VERIFY_EXIT (fp != NULL);
+-#else /* Works instead.  */
+-  xfclose (fp);
+-  fp = xfopen (file1, "r,ccs=utf-8");
+-#endif
+   wc = fgetwc (fp);
+   TEST_COMPARE (wc, (wint_t) 0xc0);
+   wc = fgetwc (fp);

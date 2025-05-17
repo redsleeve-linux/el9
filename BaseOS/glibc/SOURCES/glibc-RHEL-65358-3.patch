@@ -1,0 +1,131 @@
+commit af130d27099651e0d27b2cf2cfb44dafd6fe8a26
+Author: Andreas Schwab <schwab@suse.de>
+Date:   Tue Jan 30 10:16:00 2018 +0100
+
+    Always do locking when accessing streams (bug 15142, bug 14697)
+    
+    Now that abort no longer calls fflush there is no reason to avoid locking
+    the stdio streams anywhere.  This fixes a conformance issue and potential
+    heap corruption during exit.
+
+diff --git a/libio/genops.c b/libio/genops.c
+index b964c50657d7fbe9..a82c1b96767e14e0 100644
+--- a/libio/genops.c
++++ b/libio/genops.c
+@@ -683,7 +683,7 @@ _IO_adjust_column (unsigned start, const char *line, int count)
+ libc_hidden_def (_IO_adjust_column)
+ 
+ int
+-_IO_flush_all_lockp (int do_lock)
++_IO_flush_all (void)
+ {
+   int result = 0;
+   FILE *fp;
+@@ -696,8 +696,7 @@ _IO_flush_all_lockp (int do_lock)
+   for (fp = (FILE *) _IO_list_all; fp != NULL; fp = fp->_chain)
+     {
+       run_fp = fp;
+-      if (do_lock)
+-	_IO_flockfile (fp);
++      _IO_flockfile (fp);
+ 
+       if (((fp->_mode <= 0 && fp->_IO_write_ptr > fp->_IO_write_base)
+ 	   || (_IO_vtable_offset (fp) == 0
+@@ -707,8 +706,7 @@ _IO_flush_all_lockp (int do_lock)
+ 	  && _IO_OVERFLOW (fp, EOF) == EOF)
+ 	result = EOF;
+ 
+-      if (do_lock)
+-	_IO_funlockfile (fp);
++      _IO_funlockfile (fp);
+       run_fp = NULL;
+     }
+ 
+@@ -719,14 +717,6 @@ _IO_flush_all_lockp (int do_lock)
+ 
+   return result;
+ }
+-
+-
+-int
+-_IO_flush_all (void)
+-{
+-  /* We want locking.  */
+-  return _IO_flush_all_lockp (1);
+-}
+ libc_hidden_def (_IO_flush_all)
+ 
+ void
+@@ -792,6 +782,9 @@ _IO_unbuffer_all (void)
+     {
+       int legacy = 0;
+ 
++      run_fp = fp;
++      _IO_flockfile (fp);
++
+ #if SHLIB_COMPAT (libc, GLIBC_2_0, GLIBC_2_1)
+       if (__glibc_unlikely (_IO_vtable_offset (fp) != 0))
+ 	legacy = 1;
+@@ -807,18 +800,6 @@ _IO_unbuffer_all (void)
+ 	  /* Iff stream is un-orientated, it wasn't used. */
+ 	  && (legacy || fp->_mode != 0))
+ 	{
+-#ifdef _IO_MTSAFE_IO
+-	  int cnt;
+-#define MAXTRIES 2
+-	  for (cnt = 0; cnt < MAXTRIES; ++cnt)
+-	    if (fp->_lock == NULL || _IO_lock_trylock (*fp->_lock) == 0)
+-	      break;
+-	    else
+-	      /* Give the other thread time to finish up its use of the
+-		 stream.  */
+-	      __sched_yield ();
+-#endif
+-
+ 	  if (! legacy && ! dealloc_buffers && !(fp->_flags & _IO_USER_BUF))
+ 	    {
+ 	      fp->_flags |= _IO_USER_BUF;
+@@ -832,17 +813,15 @@ _IO_unbuffer_all (void)
+ 
+ 	  if (! legacy && fp->_mode > 0)
+ 	    _IO_wsetb (fp, NULL, NULL, 0);
+-
+-#ifdef _IO_MTSAFE_IO
+-	  if (cnt < MAXTRIES && fp->_lock != NULL)
+-	    _IO_lock_unlock (*fp->_lock);
+-#endif
+ 	}
+ 
+       /* Make sure that never again the wide char functions can be
+ 	 used.  */
+       if (! legacy)
+ 	fp->_mode = -1;
++
++      _IO_funlockfile (fp);
++      run_fp = NULL;
+     }
+ 
+ #ifdef _IO_MTSAFE_IO
+@@ -868,9 +847,7 @@ libc_freeres_fn (buffer_free)
+ int
+ _IO_cleanup (void)
+ {
+-  /* We do *not* want locking.  Some threads might use streams but
+-     that is their problem, we flush them underneath them.  */
+-  int result = _IO_flush_all_lockp (0);
++  int result = _IO_flush_all ();
+ 
+   /* We currently don't have a reliable mechanism for making sure that
+      C++ static destructors are executed in the correct order.
+diff --git a/libio/libioP.h b/libio/libioP.h
+index 811e9c919bbc2ce1..fbe58fc10fb694d0 100644
+--- a/libio/libioP.h
++++ b/libio/libioP.h
+@@ -488,7 +488,6 @@ extern int _IO_new_do_write (FILE *, const char *, size_t);
+ extern int _IO_old_do_write (FILE *, const char *, size_t);
+ extern int _IO_wdo_write (FILE *, const wchar_t *, size_t);
+ libc_hidden_proto (_IO_wdo_write)
+-extern int _IO_flush_all_lockp (int);
+ extern int _IO_flush_all (void);
+ libc_hidden_proto (_IO_flush_all)
+ extern int _IO_cleanup (void);

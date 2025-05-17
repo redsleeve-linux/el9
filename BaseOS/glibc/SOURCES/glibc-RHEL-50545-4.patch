@@ -1,0 +1,91 @@
+From 921690512946d73bf66a8c495baff31316e4489f Mon Sep 17 00:00:00 2001
+From: Florian Weimer <fweimer@redhat.com>
+Date: Fri, 16 Aug 2024 16:05:19 +0200
+Subject: [PATCH] support: Add the xstatx function
+Content-type: text/plain; charset=UTF-8
+
+Reviewed-by: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+
+Conflict:
+	support/Makefile
+		context
+---
+ support/Makefile  |  1 +
+ support/xstatx.c  | 32 ++++++++++++++++++++++++++++++++
+ support/xunistd.h |  2 ++
+ 3 files changed, 35 insertions(+)
+ create mode 100644 support/xstatx.c
+
+diff --git a/support/Makefile b/support/Makefile
+index aa57207bdc..5b1c96a49e 100644
+--- a/support/Makefile
++++ b/support/Makefile
+@@ -200,6 +200,7 @@ libsupport-routines = \
+   xsignal \
+   xsigstack \
+   xsocket \
++  xstatx \
+   xposix_spawn \
+   xposix_spawn_file_actions_addclose \
+   xposix_spawn_file_actions_adddup2 \
+diff --git a/support/xstatx.c b/support/xstatx.c
+new file mode 100644
+index 0000000000..621f2440f8
+--- /dev/null
++++ b/support/xstatx.c
+@@ -0,0 +1,32 @@
++/* Error-checking wrapper for statx.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xunistd.h>
++
++#include <fcntl.h>
++#include <support/check.h>
++#include <sys/stat.h>
++
++void
++xstatx (int fd, const char *path, int flags, unsigned int mask,
++        struct statx *stx)
++{
++  if (statx (fd, path, flags, mask, stx) != 0)
++    FAIL_EXIT1 ("statx (AT_FDCWD, \"%s\", 0x%x, 0x%x): %m",
++                path, (unsigned int) flags, mask);
++}
+diff --git a/support/xunistd.h b/support/xunistd.h
+index 13be9a46a3..cc74c4fad0 100644
+--- a/support/xunistd.h
++++ b/support/xunistd.h
+@@ -30,6 +30,7 @@
+ __BEGIN_DECLS
+ 
+ struct stat64;
++struct statx;
+ 
+ pid_t xfork (void);
+ pid_t xwaitpid (pid_t, int *status, int flags);
+@@ -51,6 +52,7 @@ void __REDIRECT (xstat, (const char *path, struct stat *), xstat_time64);
+ void __REDIRECT (xlstat, (const char *path, struct stat *), xlstat_time64);
+ void __REDIRECT (xfstat, (int fd, struct stat *), xfstat_time64);
+ #endif
++void xstatx (int, const char *, int, unsigned int, struct statx *);
+ void xmkdir (const char *path, mode_t);
+ void xchroot (const char *path);
+ void xunlink (const char *path);
+-- 
+2.43.5
+

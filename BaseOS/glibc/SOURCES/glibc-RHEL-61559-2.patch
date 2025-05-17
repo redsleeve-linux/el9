@@ -1,0 +1,353 @@
+commit e41aabcc93edd6c9a6acb15212b2783d8a7ec5a3
+Author: Siddhesh Poyarekar <siddhesh@sourceware.org>
+Date:   Mon Dec 16 08:14:09 2024 -0500
+
+    tests: Verify inheritance of cpu affinity
+    
+    Add a couple of tests to verify that CPU affinity set using
+    sched_setaffinity and pthread_setaffinity_np are inherited by a child
+    process and child thread.
+    
+    Signed-off-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+Conflicts:
+	sysdeps/unix/sysv/linux/Makefile
+	  (test list has not been reformatted downstream)
+
+diff --git a/nptl/Makefile b/nptl/Makefile
+index eec8563f95a42554..455703bbd763d516 100644
+--- a/nptl/Makefile
++++ b/nptl/Makefile
+@@ -305,6 +305,7 @@ tests = \
+   tst-mutexpi11 \
+   tst-mutexpi12 \
+   tst-once5 \
++  tst-pthread-affinity-inheritance \
+   tst-pthread-attr-affinity \
+   tst-pthread-attr-affinity-fail \
+   tst-pthread-attr-sigmask \
+diff --git a/nptl/tst-pthread-affinity-inheritance.c b/nptl/tst-pthread-affinity-inheritance.c
+new file mode 100644
+index 0000000000000000..c020530dd916dea1
+--- /dev/null
++++ b/nptl/tst-pthread-affinity-inheritance.c
+@@ -0,0 +1,71 @@
++/* CPU Affinity inheritance test - pthread_{gs}etaffinity_np.
++   Copyright The GNU Toolchain Authors.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* See top level comment in nptl/tst-skeleton-affinity-inheritance.c for a
++   description of this test.  */
++#include <pthread.h>
++#include <sched.h>
++#include <stdio.h>
++#include <string.h>
++#include <support/check.h>
++
++static void
++set_my_affinity (size_t size, const cpu_set_t *set)
++{
++  int ret = pthread_setaffinity_np (pthread_self (), size, set);
++
++  if (ret != 0)
++    FAIL ("pthread_setaffinity_np returned %d (%s)", ret, strerror (ret));
++}
++
++static void
++verify_my_affinity (int nproc, size_t size, const cpu_set_t *expected_set)
++{
++  cpu_set_t *set = CPU_ALLOC (nproc);
++  cpu_set_t *xor_set = CPU_ALLOC (nproc);
++
++  if (set == NULL || xor_set== NULL)
++    FAIL_EXIT1 ("verify_my_affinity: Failed to allocate cpuset: %m\n");
++
++  int ret = pthread_getaffinity_np (pthread_self (), size, set);
++  if (ret != 0)
++    FAIL ("pthread_getaffinity_np returned %d (%s)", ret, strerror (ret));
++
++  CPU_XOR_S (size, xor_set, expected_set, set);
++
++  int cpucount = CPU_COUNT_S (size, xor_set);
++
++  if (cpucount > 0)
++    {
++      FAIL ("Affinity mask not inherited, "
++	    "following %d CPUs mismatched in the expected and actual sets: ",
++	    cpucount);
++      for (int cur = 0; cur < nproc && cpucount >= 0; cur++)
++	if (CPU_ISSET_S (size, cur, xor_set))
++	  {
++	    printf ("%d ", cur);
++	    cpucount--;
++	  }
++      printf ("\n");
++    }
++
++  CPU_FREE (set);
++  CPU_FREE (xor_set);
++}
++
++#include "tst-skeleton-affinity-inheritance.c"
+diff --git a/nptl/tst-skeleton-affinity-inheritance.c b/nptl/tst-skeleton-affinity-inheritance.c
+new file mode 100644
+index 0000000000000000..6de6d9c9428a0c9d
+--- /dev/null
++++ b/nptl/tst-skeleton-affinity-inheritance.c
+@@ -0,0 +1,152 @@
++/* CPU Affinity inheritance test - common infrastructure.
++   Copyright The GNU Toolchain Authors.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* The general idea of this test is to verify that the set of CPUs assigned to
++   a task gets inherited by a child (thread or process) of that task.  This is
++   a framework that is included by specific APIs for the test, e.g.
++   sched_getaffinity/sched_setaffinity and
++   pthread_setaffinity_np/pthread_getaffinity_np.  This is a framework, actual
++   tests entry points are in nptl/tst-pthread-affinity-inheritance.c and
++   sysdeps/unix/sysv/linux/tst-sched-affinity-inheritance.c.
++
++   There are two levels to the test with two different CPU masks.  The first
++   level verifies that the affinity set on the main process is inherited by its
++   children subprocess or thread.  The second level verifies that a subprocess
++   or subthread passes on its affinity to their respective subprocess or
++   subthread.  We set a slightly different mask in both levels to ensure that
++   they're both inherited.  */
++
++#include <errno.h>
++#include <stdio.h>
++#include <support/test-driver.h>
++#include <support/xthread.h>
++#include <support/xunistd.h>
++#include <sys/sysinfo.h>
++#include <sys/wait.h>
++
++struct test_param
++{
++  int nproc;
++  cpu_set_t *set;
++  size_t size;
++  bool entry;
++};
++
++void __attribute__((noinline))
++set_cpu_mask (struct test_param *param, bool entry)
++{
++  int cpus = param->nproc;
++
++  /* Less CPUS for the first level, if that's possible.  */
++  if (entry && cpus > 1)
++    cpus--;
++
++  CPU_ZERO_S (param->size, param->set);
++  while (cpus > 0)
++    CPU_SET_S (--cpus, param->size, param->set);
++
++  if (CPU_COUNT_S (param->size, param->set) == 0)
++    FAIL_EXIT1 ("Failed to add any CPUs to the affinity set\n");
++}
++
++static void *
++child_test (void *arg)
++{
++  struct test_param *param = arg;
++
++  printf ("%d:%d        child\n", getpid (), gettid ());
++  verify_my_affinity (param->nproc, param->size, param->set);
++  return NULL;
++}
++
++void *
++do_one_test (void *arg)
++{
++  void *(*child) (void *) = NULL;
++  struct test_param *param = arg;
++  bool entry = param->entry;
++
++  if (entry)
++    {
++      printf ("%d:%d Start test run\n", getpid (), gettid ());
++      /* First level: Reenter as a subprocess and then as a subthread.  */
++      child = do_one_test;
++      set_cpu_mask (param, true);
++      set_my_affinity (param->size, param->set);
++      param->entry = false;
++    }
++  else
++    {
++      /* Verification for the first level.  */
++      verify_my_affinity (param->nproc, param->size, param->set);
++
++      /* Launch the second level test, launching CHILD_TEST as a subprocess and
++	 then as a subthread.  Use a different mask to see if it gets
++	 inherited.  */
++      child = child_test;
++      set_cpu_mask (param, false);
++      set_my_affinity (param->size, param->set);
++    }
++
++  /* Verify that a child of a thread/process inherits the affinity mask.  */
++  printf ("%d:%d%sdo_one_test: fork\n", getpid (), gettid (),
++	  entry ? " " : "    ");
++  int pid = xfork ();
++
++  if (pid == 0)
++    {
++      child (param);
++      return NULL;
++    }
++
++  xwaitpid (pid, NULL, 0);
++
++  /* Verify that a subthread of a thread/process inherits the affinity
++     mask.  */
++  printf ("%d:%d%sdo_one_test: thread\n", getpid (), gettid (),
++	  entry ? " " : "    ");
++  pthread_t t = xpthread_create (NULL, child, param);
++  xpthread_join (t);
++
++  return NULL;
++}
++
++static int
++do_test (void)
++{
++  int num_cpus = get_nprocs ();
++
++  struct test_param param =
++    {
++      .nproc = num_cpus,
++      .set = CPU_ALLOC (num_cpus),
++      .size = CPU_ALLOC_SIZE (num_cpus),
++      .entry = true,
++    };
++
++  if (param.set == NULL)
++    FAIL_EXIT1 ("error: CPU_ALLOC (%d) failed\n", num_cpus);
++
++  do_one_test (&param);
++
++  CPU_FREE (param.set);
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/sysdeps/unix/sysv/linux/Makefile b/sysdeps/unix/sysv/linux/Makefile
+index 8632bfe6eac31ff2..08b4e7765c07f6a3 100644
+--- a/sysdeps/unix/sysv/linux/Makefile
++++ b/sysdeps/unix/sysv/linux/Makefile
+@@ -127,6 +127,7 @@ tests += tst-clone tst-clone2 tst-clone3 tst-fanotify tst-personality \
+   tst-getauxval \
+   tst-fdopendir-o_path \
+   tst-linux-mremap1 \
++  tst-sched-affinity-inheritance \
+   # tests
+ 
+ # Test for the symbol version of fcntl that was replaced in glibc 2.28.
+diff --git a/sysdeps/unix/sysv/linux/tst-sched-affinity-inheritance.c b/sysdeps/unix/sysv/linux/tst-sched-affinity-inheritance.c
+new file mode 100644
+index 0000000000000000..fe0297f743d55e2f
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/tst-sched-affinity-inheritance.c
+@@ -0,0 +1,71 @@
++/* CPU Affinity inheritance test - sched_{gs}etaffinity.
++   Copyright The GNU Toolchain Authors.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* See top level comment in nptl/tst-skeleton-affinity-inheritance.c for a
++   description of this test.  */
++
++#include <sched.h>
++#include <string.h>
++#include <stdio.h>
++#include <support/check.h>
++
++static void
++set_my_affinity (size_t size, const cpu_set_t *set)
++{
++  int ret = sched_setaffinity (0, size, set);
++
++  if (ret != 0)
++    FAIL ("sched_setaffinity returned %d (%s)", ret, strerror (ret));
++}
++
++static void
++verify_my_affinity (int nproc, size_t size, const cpu_set_t *expected_set)
++{
++  cpu_set_t *set = CPU_ALLOC (nproc);
++  cpu_set_t *xor_set = CPU_ALLOC (nproc);
++
++  if (set == NULL || xor_set== NULL)
++    FAIL_EXIT1 ("verify_my_affinity: Failed to allocate cpuset: %m\n");
++
++  int ret = sched_getaffinity (0, size, set);
++  if (ret != 0)
++    FAIL ("sched_getaffinity returned %d (%s)", ret, strerror (ret));
++
++  CPU_XOR_S (size, xor_set, expected_set, set);
++
++  int cpucount = CPU_COUNT_S (size, xor_set);
++
++  if (cpucount > 0)
++    {
++      FAIL ("Affinity mask not inherited, "
++	    "following %d CPUs mismatched in the expected and actual sets:\n",
++	    cpucount);
++      for (int cur = 0; cur < nproc && cpucount >= 0; cur++)
++	if (CPU_ISSET_S (size, cur, xor_set))
++	  {
++	    printf ("%d ", cur);
++	    cpucount--;
++	  }
++      printf ("\n");
++    }
++
++  CPU_FREE (set);
++  CPU_FREE (xor_set);
++}
++
++#include <nptl/tst-skeleton-affinity-inheritance.c>

@@ -1,0 +1,76 @@
+commit 4b7cfcc3fbfab55a1bbb32a2da69c048060739d6
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Mon Nov 25 17:32:54 2024 +0100
+
+    debug: Wire up tst-longjmp_chk3
+    
+    The test was added in commit ac8cc9e300a002228eb7e660df3e7b333d9a7414
+    without all the required Makefile scaffolding.  Tweak the test
+    so that it actually builds (including with dynamic SIGSTKSZ).
+    
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+Conflicts:
+	debug/Makefile (fixup context)
+
+diff --git a/debug/Makefile b/debug/Makefile
+index 9fbc40dc69b477ca..ddae3817aef9afad 100644
+--- a/debug/Makefile
++++ b/debug/Makefile
+@@ -192,13 +192,14 @@ tests = backtrace-tst \
+ 	test-strcpy_chk \
+ 	test-stpcpy_chk \
+ 	tst-longjmp_chk2 \
++	tst-longjmp_chk3 \
+ 	tst-backtrace2 \
+ 	tst-backtrace3 \
+ 	tst-backtrace4 \
+ 	tst-backtrace5 \
+ 	tst-backtrace6 \
+ 	tst-realpath-chk \
+-	$(tests-all-chk)
++	$(tests-all-chk) \
+ 
+ ifeq ($(have-ssp),yes)
+ tests += tst-ssp-1
+diff --git a/debug/tst-longjmp_chk3.c b/debug/tst-longjmp_chk3.c
+index 4434937c597dbe10..dfdecca9ef8a1cf6 100644
+--- a/debug/tst-longjmp_chk3.c
++++ b/debug/tst-longjmp_chk3.c
+@@ -18,9 +18,12 @@
+ 
+ #include <setjmp.h>
+ #include <signal.h>
++#include <stdio.h>
+ #include <string.h>
+ 
+-static char buf[SIGSTKSZ * 4];
++#include <support/support.h>
++
++static char *buf;
+ static jmp_buf jb;
+ 
+ static void
+@@ -49,8 +52,10 @@ do_test (void)
+   set_fortify_handler (handler);
+ 
+   /* Create a valid signal stack and enable it.  */
++  size_t bufsize = SIGSTKSZ * 4;
++  buf = xmalloc (bufsize);
+   ss.ss_sp = buf;
+-  ss.ss_size = sizeof (buf);
++  ss.ss_size = bufsize;
+   ss.ss_flags = 0;
+   if (sigaltstack (&ss, NULL) < 0)
+     {
+@@ -65,8 +70,8 @@ do_test (void)
+ 
+   /* Shrink the signal stack so the jmpbuf is now invalid.
+      We adjust the start & end to handle stacks that grow up & down.  */
+-  ss.ss_sp = buf + sizeof (buf) / 2;
+-  ss.ss_size = sizeof (buf) / 4;
++  ss.ss_sp = buf + bufsize / 2;
++  ss.ss_size = bufsize / 4;
+   if (sigaltstack (&ss, NULL) < 0)
+     {
+       printf ("second sigaltstack failed: %m\n");

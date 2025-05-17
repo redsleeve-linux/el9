@@ -1,0 +1,147 @@
+commit 64f62c47e9c350f353336f2df6714e1d48ec50d8
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Wed Sep 4 13:21:23 2024 +0000
+
+    Do not set errno for overflowing NaN payload in strtod/nan (bug 32045)
+    
+    As reported in bug 32045, it's incorrect for strtod/nan functions to
+    set errno based on overflowing payload (strtod should only set errno
+    for overflow / underflow of its actual result, and potentially if
+    nothing in the string can be parsed as a number at all; nan should be
+    a pure function that never sets it).  Save and restore errno around
+    the internal strtoull call and add associated test coverage.
+    
+    Tested for x86_64.
+
+diff --git a/math/Makefile b/math/Makefile
+index 2edb044d9d590de1..a3c44def8acae93b 100644
+--- a/math/Makefile
++++ b/math/Makefile
+@@ -452,6 +452,7 @@ CFLAGS-test-flt-eval-method.c += -fexcess-precision=standard
+ CFLAGS-test-fe-snans-always-signal.c += -fsignaling-nans
+ 
+ CFLAGS-test-nan-const.c += -fno-builtin
++CFLAGS-test-nan-payload.c += -fno-builtin
+ 
+ include ../Rules
+ 
+diff --git a/math/test-nan-payload.c b/math/test-nan-payload.c
+index 0ee5432d40a3f997..5f54bf26b6163816 100644
+--- a/math/test-nan-payload.c
++++ b/math/test-nan-payload.c
+@@ -18,6 +18,7 @@
+ 
+ #define _LIBC_TEST 1
+ #define __STDC_WANT_IEC_60559_TYPES_EXT__
++#include <errno.h>
+ #include <float.h>
+ #include <math.h>
+ #include <stdio.h>
+@@ -82,6 +83,26 @@
+     }							\
+   while (0)
+ 
++#define CLEAR_ERRNO				\
++  do						\
++    {						\
++      errno = 12345;				\
++    }						\
++  while (0)
++
++#define CHECK_ERRNO(TYPE, A)				\
++  do							\
++    {							\
++      if (errno == 12345)				\
++	puts ("PASS: " #TYPE " " #A " errno");		\
++      else						\
++	{						\
++	  puts ("FAIL: " #TYPE " " #A " errno");	\
++	  result = 1;					\
++	}						\
++    }							\
++  while (0)
++
+ /* Cannot test payloads by memcmp for formats where NaNs have padding
+    bits.  */
+ #define CAN_TEST_EQ(MANT_DIG) ((MANT_DIG) != 64 && (MANT_DIG) != 106)
+@@ -89,26 +110,58 @@
+ #define RUN_TESTS(TYPE, SFUNC, FUNC, PLFUNC, MANT_DIG)	\
+   do							\
+     {							\
++     CLEAR_ERRNO;					\
+      TYPE n123 = WRAP_NAN (FUNC, "123");		\
++     CHECK_ERRNO (TYPE, n123);				\
+      CHECK_IS_NAN (TYPE, n123);				\
++     CLEAR_ERRNO;					\
+      TYPE s123 = WRAP_STRTO (SFUNC, "NAN(123)");	\
++     CHECK_ERRNO (TYPE, s123);				\
+      CHECK_IS_NAN (TYPE, s123);				\
++     CLEAR_ERRNO;					\
+      TYPE n456 = WRAP_NAN (FUNC, "456");		\
++     CHECK_ERRNO (TYPE, n456);				\
+      CHECK_IS_NAN (TYPE, n456);				\
++     CLEAR_ERRNO;					\
+      TYPE s456 = WRAP_STRTO (SFUNC, "NAN(456)");	\
++     CHECK_ERRNO (TYPE, s456);				\
+      CHECK_IS_NAN (TYPE, s456);				\
++     CLEAR_ERRNO;					\
+      TYPE nh123 = WRAP_NAN (FUNC, "0x123");		\
++     CHECK_ERRNO (TYPE, nh123);				\
+      CHECK_IS_NAN (TYPE, nh123);			\
++     CLEAR_ERRNO;					\
+      TYPE sh123 = WRAP_STRTO (SFUNC, "NAN(0x123)");	\
++     CHECK_ERRNO (TYPE, sh123);				\
+      CHECK_IS_NAN (TYPE, sh123);			\
++     CLEAR_ERRNO;					\
+      TYPE n123x = WRAP_NAN (FUNC, "123)");		\
++     CHECK_ERRNO (TYPE, n123x);				\
+      CHECK_IS_NAN (TYPE, n123x);			\
++     CLEAR_ERRNO;					\
+      TYPE nemp = WRAP_NAN (FUNC, "");			\
++     CHECK_ERRNO (TYPE, nemp);				\
+      CHECK_IS_NAN (TYPE, nemp);				\
++     CLEAR_ERRNO;					\
+      TYPE semp = WRAP_STRTO (SFUNC, "NAN()");		\
++     CHECK_ERRNO (TYPE, semp);				\
+      CHECK_IS_NAN (TYPE, semp);				\
++     CLEAR_ERRNO;					\
+      TYPE sx = WRAP_STRTO (SFUNC, "NAN");		\
++     CHECK_ERRNO (TYPE, sx);				\
+      CHECK_IS_NAN (TYPE, sx);				\
++     CLEAR_ERRNO;					\
++     TYPE novf = WRAP_NAN (FUNC, "9999999999"		\
++			   "99999999999999999999"	\
++			   "9999999999");		\
++     CHECK_ERRNO (TYPE, novf);				\
++     CHECK_IS_NAN (TYPE, novf);				\
++     CLEAR_ERRNO;					\
++     TYPE sovf = WRAP_STRTO (SFUNC, "NAN(9999999999"	\
++			     "99999999999999999999"	\
++			     "9999999999)");		\
++     CHECK_ERRNO (TYPE, sovf);				\
++     CHECK_IS_NAN (TYPE, sovf);				\
+      if (CAN_TEST_EQ (MANT_DIG))			\
+        CHECK_SAME_NAN (TYPE, n123, s123);		\
+      CHECK_PAYLOAD (TYPE, PLFUNC, n123, 123);		\
+diff --git a/stdlib/strtod_nan_main.c b/stdlib/strtod_nan_main.c
+index ba81355d1c0dbeda..8d7d43818bdba79a 100644
+--- a/stdlib/strtod_nan_main.c
++++ b/stdlib/strtod_nan_main.c
+@@ -16,6 +16,7 @@
+    License along with the GNU C Library; if not, see
+    <https://www.gnu.org/licenses/>.  */
+ 
++#include <errno.h>
+ #include <ieee754.h>
+ #include <locale.h>
+ #include <math.h>
+@@ -50,7 +51,9 @@ STRTOD_NAN (const STRING_TYPE *str, STRING_TYPE **endptr, STRING_TYPE endc)
+   STRING_TYPE *endp;
+   unsigned long long int mant;
+ 
++  int save_errno = errno;
+   mant = STRTOULL (str, &endp, 0);
++  __set_errno (save_errno);
+   if (endp == cp)
+     SET_NAN_PAYLOAD (retval, mant);
+ 

@@ -1,0 +1,79 @@
+commit d5a3ca4061f7adc59196fa58e34eacebbebcbcfe
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Sep 19 15:40:05 2024 +0200
+
+    Implement run-built-tests=no for make xcheck, always build xtests
+    
+    Previously, the second occurrence of the xtests target
+    expected all xtests to run (as the result of specifying
+    $(xtests)), but these tests have not been run due to
+    the the first xtests target is set up for run-built-tests=no:
+    it only runs tests in $(xtests-special).  Consequently,
+    xtests are reported as UNSUPPORTED with “make xcheck
+    run-built-tests=no”.  The xtests were not built, either.
+    
+    After this change always, xtests are built regardless
+    of the $(run-built-tests) variable (except for xtests listed
+    in $(tests-unsupported)).  To fix the UNSUPPORTED issue,
+    introduce xtests-expected and use that manage test
+    expectations in the second xtests target.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+Conflicts:
+	Rules
+	  (Missing malloc hugetlb support downstream)
+
+diff --git a/Rules b/Rules
+index b1137afe71fbfe59..0516f4762c69bbe0 100644
+--- a/Rules
++++ b/Rules
+@@ -146,37 +146,42 @@ endif
+ others: $(py-const)
+ 
+ ifeq ($(run-built-tests),no)
++# The $(xtests) dependency ensures that xtests are always built.
+ tests: $(addprefix $(objpfx),$(filter-out $(tests-unsupported), \
+-                                          $(tests) $(tests-internal) \
++                                          $(tests) $(tests-internal) $(xtests) \
+ 					  $(tests-container)) \
+ 			     $(test-srcs)) $(tests-special) \
+ 			     $(tests-printers-programs)
+ xtests: tests $(xtests-special)
+-else
++else # $(run-built-tests) != no
++# The $(xtests) dependency ensures that xtests are always built.
+ tests: $(tests:%=$(objpfx)%.out) $(tests-internal:%=$(objpfx)%.out) \
++       $(addprefix $(objpfx),$(filter-out $(tests-unsupported), $(xtests))) \
+        $(tests-container:%=$(objpfx)%.out) \
+        $(tests-mcheck:%=$(objpfx)%-mcheck.out) \
+        $(tests-malloc-check:%=$(objpfx)%-malloc-check.out) \
+        $(tests-special) $(tests-printers-out)
+ xtests: tests $(xtests:%=$(objpfx)%.out) $(xtests-special)
+-endif
++endif # $(run-built-tests) != no
+ 
+ tests-special-notdir = $(patsubst $(objpfx)%, %, $(tests-special))
+ xtests-special-notdir = $(patsubst $(objpfx)%, %, $(xtests-special))
+ ifeq ($(run-built-tests),no)
+ tests-expected =
+-else
++xtests-expected =
++else # $(run-built-tests) != no
+ tests-expected = $(tests) $(tests-internal) $(tests-printers) \
+ 	$(tests-container) $(tests-malloc-check:%=%-malloc-check) \
+ 	$(tests-mcheck:%=%-mcheck)
+-endif
++xtests-expected = $(xtests)
++endif # $(run-built-tests) != no
+ tests:
+ 	$(..)scripts/merge-test-results.sh -s $(objpfx) $(subdir) \
+ 	  $(sort $(tests-expected) $(tests-special-notdir:.out=)) \
+ 	  > $(objpfx)subdir-tests.sum
+ xtests:
+ 	$(..)scripts/merge-test-results.sh -s $(objpfx) $(subdir) \
+-	  $(sort $(xtests) $(xtests-special-notdir:.out=)) \
++	  $(sort $(xtests-expected) $(xtests-special-notdir:.out=)) \
+ 	  > $(objpfx)subdir-xtests.sum
+ 
+ ifeq ($(build-programs),yes)

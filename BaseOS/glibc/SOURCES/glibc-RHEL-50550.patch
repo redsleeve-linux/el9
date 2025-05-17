@@ -1,0 +1,89 @@
+commit 70d083630563831e7069ad412cd3ab0b33638e92
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Dec 19 20:56:44 2024 +0100
+
+    Linux: Accept null arguments for utimensat pathname
+    
+    This matches kernel behavior.  With this change, it is possible
+    to use utimensat as a replacement for the futimens interface,
+    similar to what glibc does internally.
+    
+    Reviewed-by: Paul Eggert <eggert@cs.ucla.edu>
+
+diff --git a/io/sys/stat.h b/io/sys/stat.h
+index f7874ec5baa60022..93cf8e02744f29a6 100644
+--- a/io/sys/stat.h
++++ b/io/sys/stat.h
+@@ -433,13 +433,13 @@ extern int mkfifoat (int __fd, const char *__path, __mode_t __mode)
+ extern int utimensat (int __fd, const char *__path,
+ 		      const struct timespec __times[2],
+ 		      int __flags)
+-     __THROW __nonnull ((2));
++     __THROW;
+ # else
+ #  ifdef __REDIRECT_NTH
+ extern int __REDIRECT_NTH (utimensat, (int fd, const char *__path,
+                                        const struct timespec __times[2],
+                                        int flags),
+-                           __utimensat64) __nonnull ((2));
++                           __utimensat64);
+ #  else
+ #   define utimensat __utimensat64
+ #  endif
+diff --git a/io/tst-utimensat.c b/io/tst-utimensat.c
+index 425cc9c58b1d218c..17dfa2c96251493d 100644
+--- a/io/tst-utimensat.c
++++ b/io/tst-utimensat.c
+@@ -39,6 +39,38 @@ test_utimesat_helper (const char *testfile, int fd, const char *testlink,
+     TEST_COMPARE (st.stx_mtime.tv_sec, ts[1].tv_sec);
+   }
+ 
++  /* Alter the timestamp using a NULL path.  */
++  {
++    struct timespec ts1[2] = {ts[0], ts[1]};
++    ts1[0].tv_sec ^= 1;
++    ts1[1].tv_sec ^= 1;
++
++    TEST_VERIFY_EXIT (utimensat (fd, NULL, ts1, 0) == 0);
++
++    struct statx st;
++    xstatx (fd, "", AT_EMPTY_PATH, STATX_BASIC_STATS, &st);
++
++    /* Check if seconds for atime match */
++    TEST_COMPARE (st.stx_atime.tv_sec, ts[0].tv_sec ^ 1);
++
++    /* Check if seconds for mtime match */
++    TEST_COMPARE (st.stx_mtime.tv_sec, ts[1].tv_sec ^ 1);
++  }
++
++  /* And switch it back using a NULL path.  */
++  {
++    TEST_VERIFY_EXIT (utimensat (fd, NULL, ts, 0) == 0);
++
++    struct statx st;
++    xstatx (fd, "", AT_EMPTY_PATH, STATX_BASIC_STATS, &st);
++
++    /* Check if seconds for atime match */
++    TEST_COMPARE (st.stx_atime.tv_sec, ts[0].tv_sec);
++
++    /* Check if seconds for mtime match */
++    TEST_COMPARE (st.stx_mtime.tv_sec, ts[1].tv_sec);
++  }
++
+   {
+     struct statx stfile_orig;
+     xstatx (AT_FDCWD, testfile, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS,
+diff --git a/sysdeps/unix/sysv/linux/utimensat.c b/sysdeps/unix/sysv/linux/utimensat.c
+index e9061d23239212ad..c173c73ac0699529 100644
+--- a/sysdeps/unix/sysv/linux/utimensat.c
++++ b/sysdeps/unix/sysv/linux/utimensat.c
+@@ -75,9 +75,6 @@ int
+ __utimensat64 (int fd, const char *file, const struct __timespec64 tsp64[2],
+                int flags)
+ {
+-  if (file == NULL)
+-    return INLINE_SYSCALL_ERROR_RETURN_VALUE (EINVAL);
+-
+   return __utimensat64_helper (fd, file, &tsp64[0], flags);
+ }
+ 

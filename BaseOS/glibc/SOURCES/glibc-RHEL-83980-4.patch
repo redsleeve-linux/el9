@@ -1,0 +1,70 @@
+Downstream-only patch to restore internal GLIBC_PRIVATE ABI change due
+to glibc-RHEL-80538-3.patch.  Adding an entry to rtld_global_ro struct
+changes offsets.  This patch corrects that.
+
+diff --git a/debug/readonly-area.c b/debug/readonly-area.c
+index 0648121846cdd5d1..86e3e9b9c3b03958 100644
+--- a/debug/readonly-area.c
++++ b/debug/readonly-area.c
+@@ -21,7 +21,7 @@
+ enum readonly_error_type
+ __readonly_area (const void *ptr, size_t size)
+ {
+-  switch (GLRO(dl_readonly_area (ptr, size)))
++  switch (_dl_readonly_area (ptr, size))
+     {
+     case dl_readonly_area_rdonly:
+       return readonly_noerror;
+diff --git a/elf/Versions b/elf/Versions
+index 4b8b155d8e2bef70..17834c7d1c371e1d 100644
+--- a/elf/Versions
++++ b/elf/Versions
+@@ -70,5 +70,8 @@ ld {
+ 
+     # Set value of a tunable.
+     __tunable_get_val;
++
++    # Check if an address range within a loaded ELF object is read-only.
++    _dl_readonly_area;
+   }
+ }
+diff --git a/elf/rtld.c b/elf/rtld.c
+index d421750734e113e6..d02ecc834c9a4d43 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -381,9 +381,8 @@ struct rtld_global_ro _rtld_global_ro attribute_relro =
+     ._dl_error_free = _dl_error_free,
+     ._dl_tls_get_addr_soft = _dl_tls_get_addr_soft,
+ #ifdef HAVE_DL_DISCOVER_OSVERSION
+-    ._dl_discover_osversion = _dl_discover_osversion,
++    ._dl_discover_osversion = _dl_discover_osversion
+ #endif
+-    ._dl_readonly_area = _dl_readonly_area,
+   };
+ /* If we would use strong_alias here the compiler would see a
+    non-hidden definition.  This would undo the effect of the previous
+diff --git a/sysdeps/generic/ldsodefs.h b/sysdeps/generic/ldsodefs.h
+index 15c21491a291d1ae..537d1293c7b5543b 100644
+--- a/sysdeps/generic/ldsodefs.h
++++ b/sysdeps/generic/ldsodefs.h
+@@ -717,10 +717,6 @@ struct rtld_global_ro
+   int (*_dl_discover_osversion) (void);
+ #endif
+ 
+-  /* Implementation of _dl_readonly_area, used in fortify routines to check
+-     if memory area is within a read-only ELF segment.  */
+-  enum dl_readonly_area_error_type (*_dl_readonly_area) (const void *, size_t);
+-
+   /* Dynamic linker operations used after static dlopen.  */
+   const struct dlfcn_hook *_dl_dlfcn_hook;
+ 
+@@ -1338,8 +1334,7 @@ extern struct link_map *_dl_find_dso_for_object (const ElfW(Addr) addr);
+ rtld_hidden_proto (_dl_find_dso_for_object)
+ 
+ extern enum dl_readonly_area_error_type _dl_readonly_area (const void *ptr,
+-							   size_t size)
+-     attribute_hidden;
++							   size_t size);
+ 
+ /* Initialization which is normally done by the dynamic linker.  */
+ extern void _dl_non_dynamic_init (void)

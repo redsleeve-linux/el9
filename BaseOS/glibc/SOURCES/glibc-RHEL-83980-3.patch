@@ -1,0 +1,722 @@
+commit ed6a68bac7cd056abda9008019c71b167f0362dc
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Fri Mar 14 16:09:57 2025 -0300
+
+    debug: Improve '%n' fortify detection (BZ 30932)
+    
+    The 7bb8045ec0 path made the '%n' fortify check ignore EMFILE errors
+    while trying to open /proc/self/maps, and this added a security
+    issue where EMFILE can be attacker-controlled thus making it
+    ineffective for some cases.
+    
+    The EMFILE failure is reinstated but with a different error
+    message.  Also, to improve the false positive of the hardening for
+    the cases where no new files can be opened, the
+    _dl_readonly_area now uses  _dl_find_object to check if the
+    memory area is within a writable ELF segment.  The procfs method is
+    still used as fallback.
+    
+    Checked on x86_64-linux-gnu and i686-linux-gnu.
+    Reviewed-by: Arjun Shankar <arjun@redhat.com>
+
+Changes:
+	elf/dl-readonly-area.c: Adjust for missing _dl_find_object; use
+	_dl_find_dso_for_object instead.
+
+Conflicts:
+
+	Makeconfig: rpath-dirs list difference.
+
+	debug/Makefile: Usual test difference, missing no-fortify-source
+
+	elf/Makefile: Usual test difference.
+
+	elf/rtld.c: rtld_global_ro struct field difference.
+
+	stdio-common/vfprintf-internal.c: Adjust for missing changes:
+	1. e88b9f0e5cc50cab57a299dc7efe1a4eb385161d:
+	  "stdio-common: Convert vfprintf and related functions to buffers"
+	2. 5442ea7ffe79dfef3b89e21f46211cc42d347210:
+	  "vfprintf: Move argument processing into vfprintf-process-arg.c"
+
+	stdio-common/vfprintf-process-arg.c: Missing file.  Changes folded
+	into stdio-common/vfprintf-internal.c.
+
+diff --git a/Makeconfig b/Makeconfig
+index 89a2881b1ef605e4..ee79d7be396d1c08 100644
+--- a/Makeconfig
++++ b/Makeconfig
+@@ -609,7 +609,7 @@ link-libc-printers-tests = $(link-libc-rpath) \
+ 			   $(link-libc-tests-after-rpath-link)
+ 
+ # This is how to find at build-time things that will be installed there.
+-rpath-dirs = math elf dlfcn nss nis rt resolv mathvec support
++rpath-dirs = math elf dlfcn nss nis rt resolv mathvec support debug
+ rpath-link = \
+ $(common-objdir):$(subst $(empty) ,:,$(patsubst ../$(subdir),.,$(rpath-dirs:%=$(common-objpfx)%)))
+ else  # build-static
+diff --git a/debug/Makefile b/debug/Makefile
+index cb93ed80da57f2cc..63395fc626610a53 100644
+--- a/debug/Makefile
++++ b/debug/Makefile
+@@ -51,6 +51,7 @@ routines  = backtrace backtracesyms backtracesymsfd noophooks \
+ 	    fdelt_chk poll_chk ppoll_chk \
+ 	    explicit_bzero_chk \
+ 	    stack_chk_fail fortify_fail \
++	    readonly-area-fallback \
+ 	    $(static-only-routines)
+ static-only-routines := stack_chk_fail_local
+ 
+@@ -111,6 +112,12 @@ CFLAGS-tst-longjmp_chk3.c += -fexceptions -fasynchronous-unwind-tables
+ CPPFLAGS-tst-longjmp_chk3.c += -D_FORTIFY_SOURCE=1
+ CPPFLAGS-tst-realpath-chk.c += -D_FORTIFY_SOURCE=2
+ CFLAGS-tst-sprintf-fortify-rdonly.c += -D_FORTIFY_SOURCE=2
++CFLAGS-tst-sprintf-fortify-rdonly-mod.c += -D_FORTIFY_SOURCE=2
++CFLAGS-tst-sprintf-fortify-rdonly-dlopen.c += -D_FORTIFY_SOURCE=2
++
++$(objpfx)tst-sprintf-fortify-rdonly: \
++	$(objpfx)tst-sprintf-fortify-rdonly-mod.so \
++	$(objpfx)tst-sprintf-fortify-rdonly-dlopen.so
+ 
+ # _FORTIFY_SOURCE tests.
+ # Auto-generate tests for _FORTIFY_SOURCE for different levels, compilers and
+@@ -208,6 +215,11 @@ tests = backtrace-tst \
+ 	tst-sprintf-fortify-unchecked \
+ 	$(tests-all-chk) \
+ 
++modules-names += \
++  tst-sprintf-fortify-rdonly-dlopen \
++  tst-sprintf-fortify-rdonly-mod \
++  # modules-names
++
+ ifeq ($(have-ssp),yes)
+ tests += tst-ssp-1
+ endif
+diff --git a/debug/readonly-area.c b/debug/readonly-area.c
+index 06302212b15e5262..0648121846cdd5d1 100644
+--- a/debug/readonly-area.c
++++ b/debug/readonly-area.c
+@@ -16,18 +16,19 @@
+    <https://www.gnu.org/licenses/>.  */
+ 
+ #include <stdlib.h>
++#include <ldsodefs.h>
+ 
+-/* Return 1 if the whole area PTR .. PTR+SIZE is not writable.
+-   Return -1 if it is writable.  */
+-
+-int
++enum readonly_error_type
+ __readonly_area (const void *ptr, size_t size)
+ {
+-  /* We cannot determine in general whether memory is writable or not.
+-     This must be handled in a system-dependent manner.  to not
+-     unconditionally break code we need to return here a positive
+-     answer.  This disables this security measure but that is the
+-     price people have to pay for using systems without a real
+-     implementation of this interface.  */
+-  return 1;
++  switch (GLRO(dl_readonly_area (ptr, size)))
++    {
++    case dl_readonly_area_rdonly:
++      return readonly_noerror;
++    case dl_readonly_area_writable:
++      return readonly_area_writable;
++    default:
++      break;
++    }
++  return __readonly_area_fallback (ptr, size);
+ }
+diff --git a/debug/tst-sprintf-fortify-rdonly-dlopen.c b/debug/tst-sprintf-fortify-rdonly-dlopen.c
+new file mode 100644
+index 0000000000000000..7da3f51f16421f79
+--- /dev/null
++++ b/debug/tst-sprintf-fortify-rdonly-dlopen.c
+@@ -0,0 +1 @@
++#include "tst-sprintf-fortify-rdonly-mod.c"
+diff --git a/debug/tst-sprintf-fortify-rdonly-mod.c b/debug/tst-sprintf-fortify-rdonly-mod.c
+new file mode 100644
+index 0000000000000000..3655f27b321eb381
+--- /dev/null
++++ b/debug/tst-sprintf-fortify-rdonly-mod.c
+@@ -0,0 +1,56 @@
++/* Testcase for BZ 30932.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++
++static const char *str2 = "F";
++static char writeable_format[10] = "%s";
++static char relro_format[10] __attribute__ ((section (".data.rel.ro"))) =
++  "%s%n%s%n";
++
++void
++init_writable (void)
++{
++  strcpy (writeable_format + 2, "%n%s%n");
++}
++
++int
++sprintf_writable (int *n1, int *n2)
++{
++  char buf[128];
++  return sprintf (buf, writeable_format, str2, n1, str2, n2);
++}
++
++int
++sprintf_relro (int *n1, int *n2)
++{
++  char buf[128];
++  return sprintf (buf, relro_format, str2, n1, str2, n2);
++}
++
++int
++sprintf_writable_malloc (int *n1, int *n2)
++{
++  char buf[128];
++  char *buf2_malloc = strdup (writeable_format);
++  if (buf2_malloc == NULL)
++    abort ();
++  return sprintf (buf, buf2_malloc, str2, n1, str2, n2);
++}
+diff --git a/debug/tst-sprintf-fortify-rdonly.c b/debug/tst-sprintf-fortify-rdonly.c
+index 78dece9102d7dfd3..d47a0b1600a35e84 100644
+--- a/debug/tst-sprintf-fortify-rdonly.c
++++ b/debug/tst-sprintf-fortify-rdonly.c
+@@ -27,16 +27,64 @@
+ #include <support/check.h>
+ #include <support/support.h>
+ #include <support/temp_file.h>
++#include <support/xdlfcn.h>
+ 
+-jmp_buf chk_fail_buf;
+-bool chk_fail_ok;
++static sigjmp_buf chk_fail_buf;
++static volatile int ret;
++static bool chk_fail_ok;
+ 
+-const char *str2 = "F";
+-char buf2[10] = "%s";
++static void
++handler (int sig)
++{
++  if (chk_fail_ok)
++    {
++      chk_fail_ok = false;
++      longjmp (chk_fail_buf, 1);
++    }
++  else
++    _exit (127);
++}
++
++#define FORTIFY_FAIL \
++  do { printf ("Failure on line %d\n", __LINE__); ret = 1; } while (0)
++#define CHK_FAIL_START \
++  chk_fail_ok = true;				\
++  if (! sigsetjmp (chk_fail_buf, 1))		\
++    {
++#define CHK_FAIL_END \
++      chk_fail_ok = false;			\
++      FORTIFY_FAIL;				\
++    }
++
++static const char *str2 = "F";
++static char writeable_format[10] = "%s";
++static char relro_format[10] __attribute__ ((section (".data.rel.ro"))) =
++ "%s%n%s%n";
++
++extern void init_writable (void);
++extern int sprintf_writable (int *, int *);
++extern int sprintf_relro (int *, int *);
++extern int sprintf_writable_malloc (int *, int *);
++
++#define str(__x) # __x
++void (*init_writable_dlopen)(void);
++int (*sprintf_writable_dlopen)(int *, int *);
++int (*sprintf_rdonly_dlopen)(int *, int *);
++int (*sprintf_writable_malloc_dlopen)(int *, int *);
+ 
+ static int
+ do_test (void)
+ {
++  set_fortify_handler (handler);
++
++  {
++    void *h = xdlopen ("tst-sprintf-fortify-rdonly-dlopen.so", RTLD_NOW);
++    init_writable_dlopen = xdlsym (h, str(init_writable));
++    sprintf_writable_dlopen = xdlsym (h, str(sprintf_writable));
++    sprintf_rdonly_dlopen = xdlsym (h, str(sprintf_relro));
++    sprintf_writable_malloc_dlopen = xdlsym (h, str(sprintf_writable_malloc));
++  }
++
+   struct rlimit rl;
+   int max_fd = 24;
+ 
+@@ -63,20 +111,94 @@ do_test (void)
+     }
+   TEST_VERIFY_EXIT (nfiles != 0);
+ 
+-  /* When the format string is writable and contains %n,
+-     with -D_FORTIFY_SOURCE=2 it causes __chk_fail.  However, if libc can not
+-     open procfs to check if the input format string in within a writable
+-     memory segment, the fortify version can not perform the check.  */
+-  char buf[128];
+-  int n1;
+-  int n2;
+-
+-  strcpy (buf2 + 2, "%n%s%n");
+-  if (sprintf (buf, buf2, str2, &n1, str2, &n2) != 2
+-      || n1 != 1 || n2 != 2)
+-    FAIL_EXIT1 ("sprintf failed: %s %d %d", buf, n1, n2);
+-
+-  return 0;
++  strcpy (writeable_format + 2, "%n%s%n");
++  init_writable ();
++  init_writable_dlopen ();
++
++  /* writeable_format is at a writable part of .bss segment, so libc should be
++     able to check it without resorting to procfs.  */
++  {
++    char buf[128];
++    int n1;
++    int n2;
++    CHK_FAIL_START
++    sprintf (buf, writeable_format, str2, &n1, str2, &n2);
++    CHK_FAIL_END
++  }
++
++  /* Same as before, but from an library.  */
++  {
++    int n1;
++    int n2;
++    CHK_FAIL_START
++    sprintf_writable (&n1, &n2);
++    CHK_FAIL_END
++  }
++
++  {
++    int n1;
++    int n2;
++    CHK_FAIL_START
++    sprintf_writable_dlopen (&n1, &n2);
++    CHK_FAIL_END
++  }
++
++  /* relro_format is at a readonly part of .bss segment, so '%n' in format input
++     should not trigger a fortify failure.  */
++  {
++    char buf[128];
++    int n1;
++    int n2;
++    if (sprintf (buf, relro_format, str2, &n1, str2, &n2) != 2
++	|| n1 != 1 || n2 != 2)
++      FAIL_EXIT1 ("sprintf failed: %s %d %d", buf, n1, n2);
++  }
++
++  /* Same as before, but from an library.  */
++  {
++    int n1;
++    int n2;
++    if (sprintf_relro (&n1, &n2) != 2 || n1 != 1 || n2 != 2)
++      FAIL_EXIT1 ("sprintf failed: %d %d", n1, n2);
++  }
++
++  {
++    int n1;
++    int n2;
++    if (sprintf_rdonly_dlopen (&n1, &n2) != 2 || n1 != 1 || n2 != 2)
++      FAIL_EXIT1 ("sprintf failed: %d %d", n1, n2);
++  }
++
++  /* However if the format string is placed on a writable memory not covered
++     by ELF segments, libc needs to resort to procfs.  */
++  {
++    char buf[128];
++    int n1;
++    int n2;
++    char *buf2_malloc = xstrdup (writeable_format);
++    CHK_FAIL_START
++    sprintf (buf, buf2_malloc, str2, &n1, str2, &n2);
++    CHK_FAIL_END
++  }
++
++  /* Same as before, but from an library.  */
++  {
++    int n1;
++    int n2;
++    CHK_FAIL_START
++    sprintf_writable_malloc (&n1, &n2);
++    CHK_FAIL_END
++  }
++
++  {
++    int n1;
++    int n2;
++    CHK_FAIL_START
++    sprintf_writable_malloc_dlopen (&n1, &n2);
++    CHK_FAIL_END
++  }
++
++  return ret;
+ }
+ 
+ #include <support/test-driver.c>
+diff --git a/elf/Makefile b/elf/Makefile
+index ec0d67b1549823ad..46a800a4559e0e46 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -68,6 +68,7 @@ dl-routines = \
+   dl-origin \
+   dl-printf \
+   dl-profile \
++  dl-readonly-area \
+   dl-reloc \
+   dl-rseq-symbols \
+   dl-runtime \
+diff --git a/elf/dl-readonly-area.c b/elf/dl-readonly-area.c
+new file mode 100644
+index 0000000000000000..570b99b11527db13
+--- /dev/null
++++ b/elf/dl-readonly-area.c
+@@ -0,0 +1,91 @@
++/* Check if range is within a read-only from a loaded ELF object.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <ldsodefs.h>
++
++static bool
++check_relro (const struct link_map *l, uintptr_t start, uintptr_t end)
++{
++  if (l->l_relro_addr != 0)
++    {
++      uintptr_t relro_start = ALIGN_DOWN (l->l_addr + l->l_relro_addr,
++					  GLRO(dl_pagesize));
++      uintptr_t relro_end = ALIGN_DOWN (l->l_addr + l->l_relro_addr
++					+ l->l_relro_size,
++					GLRO(dl_pagesize));
++      /* RELRO is caved out from a RW segment, so the next range is either
++	 RW or nonexistent.  */
++      return relro_start <= start && end <= relro_end
++	? dl_readonly_area_rdonly : dl_readonly_area_writable;
++
++    }
++  return dl_readonly_area_writable;
++}
++
++enum dl_readonly_area_error_type
++_dl_readonly_area (const void *ptr, size_t size)
++{
++  /* Protect against concurrent loads and unloads.  */
++  __rtld_lock_lock_recursive (GL(dl_load_lock));
++
++  const struct link_map *l = _dl_find_dso_for_object ((ElfW(Addr)) ptr);
++
++  __rtld_lock_unlock_recursive (GL(dl_load_lock));
++
++  if (l == NULL)
++    return dl_readonly_area_not_found;
++
++  uintptr_t ptr_start = (uintptr_t) ptr;
++  uintptr_t ptr_end = ptr_start + size;
++
++  for (const ElfW(Phdr) *ph = l->l_phdr; ph < &l->l_phdr[l->l_phnum]; ++ph)
++    if (ph->p_type == PT_LOAD)
++      {
++	/* For segments with alignment larger than the page size,
++	   _dl_map_segment allocates additional space that is mark as
++	   PROT_NONE (so we can ignore).  */
++	uintptr_t from = l->l_addr
++	  + ALIGN_DOWN (ph->p_vaddr, GLRO(dl_pagesize));
++	uintptr_t to = l->l_addr
++	  + ALIGN_UP (ph->p_vaddr + ph->p_filesz, GLRO(dl_pagesize));
++
++	/* Found an entry that at least partially covers the area.  */
++	if (from < ptr_end && to > ptr_start)
++	  {
++	    if (ph->p_flags & PF_W)
++	      return check_relro (l, ptr_start, ptr_end);
++
++	    if ((ph->p_flags & PF_R) == 0)
++	      return dl_readonly_area_writable;
++
++	    if (from <= ptr_start && to >= ptr_end)
++	      return dl_readonly_area_rdonly;
++	    else if (from <= ptr_start)
++	      size -= to - ptr_start;
++	    else if (to >= ptr_end)
++	      size -= ptr_end - from;
++	    else
++	      size -= to - from;
++
++	    if (size == 0)
++	      break;
++	  }
++      }
++
++  return size == 0 ? dl_readonly_area_rdonly : dl_readonly_area_not_found;
++}
+diff --git a/elf/rtld.c b/elf/rtld.c
+index d02ecc834c9a4d43..d421750734e113e6 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -381,8 +381,9 @@ struct rtld_global_ro _rtld_global_ro attribute_relro =
+     ._dl_error_free = _dl_error_free,
+     ._dl_tls_get_addr_soft = _dl_tls_get_addr_soft,
+ #ifdef HAVE_DL_DISCOVER_OSVERSION
+-    ._dl_discover_osversion = _dl_discover_osversion
++    ._dl_discover_osversion = _dl_discover_osversion,
+ #endif
++    ._dl_readonly_area = _dl_readonly_area,
+   };
+ /* If we would use strong_alias here the compiler would see a
+    non-hidden definition.  This would undo the effect of the previous
+diff --git a/include/stdlib.h b/include/stdlib.h
+index 1c6f70b0820ced97..22c9fb65c3074765 100644
+--- a/include/stdlib.h
++++ b/include/stdlib.h
+@@ -314,6 +314,21 @@ struct abort_msg_s
+ extern struct abort_msg_s *__abort_msg;
+ libc_hidden_proto (__abort_msg)
+ 
++enum readonly_error_type
++{
++  readonly_noerror,
++  readonly_area_writable,
++  readonly_procfs_inaccessible,
++  readonly_procfs_open_fail,
++};
++
++extern enum readonly_error_type __readonly_area (const void *ptr,
++						 size_t size)
++     attribute_hidden;
++extern enum readonly_error_type __readonly_area_fallback (const void *ptr,
++							  size_t size)
++     attribute_hidden;
++
+ # if IS_IN (rtld)
+ extern __typeof (unsetenv) unsetenv attribute_hidden;
+ extern __typeof (__strtoul_internal) __strtoul_internal attribute_hidden;
+diff --git a/stdio-common/vfprintf-internal.c b/stdio-common/vfprintf-internal.c
+index 53d93b2f07ecb261..bb1b800a126fd47b 100644
+--- a/stdio-common/vfprintf-internal.c
++++ b/stdio-common/vfprintf-internal.c
+@@ -1048,16 +1048,25 @@ static const uint8_t jump_table[] =
+     LABEL (form_number):						      \
+       if ((mode_flags & PRINTF_FORTIFY) != 0)				      \
+ 	{								      \
+-	  if (! readonly_format)					      \
+-	    {								      \
+-	      extern int __readonly_area (const void *, size_t)		      \
+-		attribute_hidden;					      \
+-	      readonly_format						      \
+-		= __readonly_area (format, ((STR_LEN (format) + 1)	      \
+-					    * sizeof (CHAR_T)));	      \
+-	    }								      \
+-	  if (readonly_format < 0)					      \
+-	    __libc_fatal ("*** %n in writable segment detected ***\n");	      \
++	  if (readonly_format == readonly_noerror)			      \
++	    readonly_format = __readonly_area (format, ((STR_LEN (format) + 1)\
++							* sizeof (CHAR_T)));  \
++	  switch (readonly_format)					      \
++	  {								      \
++	  case readonly_area_writable:					      \
++	    __libc_fatal ("*** %n in writable segments detected ***\n");      \
++	  /* The format is not within ELF segments and opening /proc/self/maps\
++	     failed because there are too many files.  */		      \
++	  case readonly_procfs_open_fail:				      \
++	    __libc_fatal ("*** procfs could not open ***\n");		      \
++	  /* The /proc/self/maps can not be opened either because it is not   \
++	     available or the process does not have the right permission.     \
++             Since it should not be attacker-controlled we can avoid	      \
++             failure.  */						      \
++	  case readonly_procfs_inaccessible:				      \
++	  case readonly_noerror:					      \
++	    break;							      \
++	  }								      \
+ 	}								      \
+       /* Answer the count of characters written.  */			      \
+       if (fspec == NULL)						      \
+@@ -1299,7 +1308,8 @@ static int buffered_vfprintf (FILE *stream, const CHAR_T *fmt, va_list,
+ 
+ /* Handle positional format specifiers.  */
+ static int printf_positional (FILE *s,
+-			      const CHAR_T *format, int readonly_format,
++			      const CHAR_T *format,
++			      enum readonly_error_type readonly_format,
+ 			      va_list ap, va_list *ap_savep, int done,
+ 			      int nspecs_done, const UCHAR_T *lead_str_end,
+ 			      CHAR_T *work_buffer, int save_errno,
+@@ -1350,9 +1360,7 @@ vfprintf (FILE *s, const CHAR_T *format, va_list ap, unsigned int mode_flags)
+   /* For the %m format we may need the current `errno' value.  */
+   int save_errno = errno;
+ 
+-  /* 1 if format is in read-only memory, -1 if it is in writable memory,
+-     0 if unknown.  */
+-  int readonly_format = 0;
++  enum readonly_error_type readonly_format = readonly_noerror;
+ 
+   /* Orient the stream.  */
+ #ifdef ORIENT
+@@ -1693,7 +1701,8 @@ do_positional:
+ }
+ 
+ static int
+-printf_positional (FILE *s, const CHAR_T *format, int readonly_format,
++printf_positional (FILE *s, const CHAR_T *format,
++		   enum readonly_error_type readonly_format,
+ 		   va_list ap, va_list *ap_savep, int done, int nspecs_done,
+ 		   const UCHAR_T *lead_str_end,
+ 		   CHAR_T *work_buffer, int save_errno,
+diff --git a/sysdeps/generic/ldsodefs.h b/sysdeps/generic/ldsodefs.h
+index 1c9ce3e57d59da9a..15c21491a291d1ae 100644
+--- a/sysdeps/generic/ldsodefs.h
++++ b/sysdeps/generic/ldsodefs.h
+@@ -283,6 +283,12 @@ struct audit_ifaces
+   struct audit_ifaces *next;
+ };
+ 
++enum dl_readonly_area_error_type
++{
++  dl_readonly_area_rdonly,
++  dl_readonly_area_writable,
++  dl_readonly_area_not_found,
++};
+ 
+ /* Test whether given NAME matches any of the names of the given object.  */
+ extern int _dl_name_match_p (const char *__name, const struct link_map *__map)
+@@ -711,6 +717,10 @@ struct rtld_global_ro
+   int (*_dl_discover_osversion) (void);
+ #endif
+ 
++  /* Implementation of _dl_readonly_area, used in fortify routines to check
++     if memory area is within a read-only ELF segment.  */
++  enum dl_readonly_area_error_type (*_dl_readonly_area) (const void *, size_t);
++
+   /* Dynamic linker operations used after static dlopen.  */
+   const struct dlfcn_hook *_dl_dlfcn_hook;
+ 
+@@ -1327,6 +1337,10 @@ extern void _dl_show_scope (struct link_map *new, int from)
+ extern struct link_map *_dl_find_dso_for_object (const ElfW(Addr) addr);
+ rtld_hidden_proto (_dl_find_dso_for_object)
+ 
++extern enum dl_readonly_area_error_type _dl_readonly_area (const void *ptr,
++							   size_t size)
++     attribute_hidden;
++
+ /* Initialization which is normally done by the dynamic linker.  */
+ extern void _dl_non_dynamic_init (void)
+      attribute_hidden;
+diff --git a/sysdeps/mach/readonly-area.c b/sysdeps/mach/readonly-area-fallback.c
+similarity index 90%
+rename from sysdeps/mach/readonly-area.c
+rename to sysdeps/mach/readonly-area-fallback.c
+index 537af6de8ecc217e..14fedc0e1ac078d4 100644
+--- a/sysdeps/mach/readonly-area.c
++++ b/sysdeps/mach/readonly-area-fallback.c
+@@ -20,11 +20,8 @@
+ #include <stdint.h>
+ #include <mach.h>
+ 
+-/* Return 1 if the whole area PTR .. PTR+SIZE is not writable.
+-   Return -1 if it is writable.  */
+-
+-int
+-__readonly_area (const char *ptr, size_t size)
++enum readonly_error_type
++__readonly_area_fallback (const void *ptr, size_t size)
+ {
+   vm_address_t region_address = (uintptr_t) ptr;
+   vm_size_t region_length = size;
+@@ -46,11 +43,11 @@ __readonly_area (const char *ptr, size_t size)
+ 	continue;
+ 
+       if (protection & VM_PROT_WRITE)
+-	return -1;
++	return readonly_area_writable;
+ 
+       if (region_address - (uintptr_t) ptr >= size)
+ 	break;
+     }
+ 
+-  return 1;
++  return readonly_noerror;
+ }
+diff --git a/sysdeps/unix/sysv/linux/readonly-area.c b/sysdeps/unix/sysv/linux/readonly-area-fallback.c
+similarity index 84%
+rename from sysdeps/unix/sysv/linux/readonly-area.c
+rename to sysdeps/unix/sysv/linux/readonly-area-fallback.c
+index 1f0d2e2749b159c9..b1d207106b3e16b8 100644
+--- a/sysdeps/unix/sysv/linux/readonly-area.c
++++ b/sysdeps/unix/sysv/linux/readonly-area-fallback.c
+@@ -23,11 +23,8 @@
+ #include <string.h>
+ #include "libio/libioP.h"
+ 
+-/* Return 1 if the whole area PTR .. PTR+SIZE is not writable.
+-   Return -1 if it is writable.  */
+-
+-int
+-__readonly_area (const char *ptr, size_t size)
++enum readonly_error_type
++__readonly_area_fallback (const void *ptr, size_t size)
+ {
+   const void *ptr_end = ptr + size;
+ 
+@@ -42,11 +39,11 @@ __readonly_area (const char *ptr, size_t size)
+ 	     to the /proc filesystem if it is set[ug]id.  There has
+ 	     been no willingness to change this in the kernel so
+ 	     far.  */
+-	  || errno == EACCES
+-	  /* Process has reached the maximum number of open files.  */
+-	  || errno == EMFILE)
+-	return 1;
+-      return -1;
++	  || errno == EACCES)
++	return readonly_procfs_inaccessible;
++      /* Process has reached the maximum number of open files or another
++	 unusual error.  */
++      return readonly_procfs_open_fail;
+     }
+ 
+   /* We need no locking.  */
+@@ -98,7 +95,5 @@ __readonly_area (const char *ptr, size_t size)
+   fclose (fp);
+   free (line);
+ 
+-  /* If the whole area between ptr and ptr_end is covered by read-only
+-     VMAs, return 1.  Otherwise return -1.  */
+-  return size == 0 ? 1 : -1;
++  return size == 0 ? readonly_noerror : readonly_area_writable;
+ }

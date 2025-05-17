@@ -1,0 +1,405 @@
+From ae5062201d7e9d18fe88bff4bc71088374c394fb Mon Sep 17 00:00:00 2001
+From: Siddhesh Poyarekar <siddhesh@sourceware.org>
+Date: Thu, 7 Nov 2024 11:16:04 -0500
+Subject: ungetc: Guarantee single char pushback
+
+The C standard requires that ungetc guarantees at least one pushback,
+but the malloc call to allocate the pushback buffer could fail, thus
+violating that requirement.  Fix this by adding a single byte pushback
+buffer in the FILE struct that the pushback can fall back to if malloc
+fails.
+
+The side-effect is that if the initial malloc fails and the 1-byte
+fallback buffer is used, future resizing (if it succeeds) will be
+2-bytes, 4-bytes and so on, which is suboptimal but it's after a malloc
+failure, so maybe even desirable.
+
+A future optimization here could be to have the pushback code use the
+single byte buffer first and only fall back to malloc for subsequent
+calls.
+
+Signed-off-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+Reviewed-by: Maciej W. Rozycki <macro@redhat.com>
+
+Conflicts:
+	libio/bits/types/struct_FILE.h
+	libio/fileops.c
+	libio/genops.c
+	libio/libioP.h
+	libio/oldfileops.c
+	libio/wfileops.c
+	stdio-common/Makefile
+		Copyright year conflicts in all files
+		Rebase for altered context and line numbers
+
+diff -rupN a/libio/bits/types/struct_FILE.h b/libio/bits/types/struct_FILE.h
+--- a/libio/bits/types/struct_FILE.h	2021-08-01 21:33:43.000000000 -0400
++++ b/libio/bits/types/struct_FILE.h	2024-12-19 00:34:04.289351714 -0500
+@@ -1,4 +1,5 @@
+ /* Copyright (C) 1991-2021 Free Software Foundation, Inc.
++   Copyright The GNU Toolchain Authors.
+    This file is part of the GNU C Library.
+ 
+    The GNU C Library is free software; you can redistribute it and/or
+@@ -70,7 +71,9 @@ struct _IO_FILE
+   struct _IO_FILE *_chain;
+ 
+   int _fileno;
+-  int _flags2;
++  int _flags2:24;
++  /* Fallback buffer to use when malloc fails to allocate one.  */
++  char _short_backupbuf[1];
+   __off_t _old_offset; /* This used to be _offset but it's too small.  */
+ 
+   /* 1+column number of pbase(); 0 is unknown. */
+diff -rupN a/libio/fileops.c b/libio/fileops.c
+--- a/libio/fileops.c	2021-08-01 21:33:43.000000000 -0400
++++ b/libio/fileops.c	2024-12-19 00:34:04.294351763 -0500
+@@ -1,4 +1,5 @@
+ /* Copyright (C) 1993-2021 Free Software Foundation, Inc.
++   Copyright The GNU Toolchain Authors.
+    This file is part of the GNU C Library.
+    Written by Per Bothner <bothner@cygnus.com>.
+ 
+@@ -480,7 +481,7 @@ _IO_new_file_underflow (FILE *fp)
+       /* Maybe we already have a push back pointer.  */
+       if (fp->_IO_save_base != NULL)
+ 	{
+-	  free (fp->_IO_save_base);
++	  _IO_free_backup_buf (fp, fp->_IO_save_base);
+ 	  fp->_flags &= ~_IO_IN_BACKUP;
+ 	}
+       _IO_doallocbuf (fp);
+@@ -932,7 +933,7 @@ _IO_new_file_seekoff (FILE *fp, off64_t
+       /* It could be that we already have a pushback buffer.  */
+       if (fp->_IO_read_base != NULL)
+ 	{
+-	  free (fp->_IO_read_base);
++	  _IO_free_backup_buf (fp, fp->_IO_read_base);
+ 	  fp->_flags &= ~_IO_IN_BACKUP;
+ 	}
+       _IO_doallocbuf (fp);
+@@ -1282,7 +1283,7 @@ _IO_file_xsgetn (FILE *fp, void *data, s
+       /* Maybe we already have a push back pointer.  */
+       if (fp->_IO_save_base != NULL)
+ 	{
+-	  free (fp->_IO_save_base);
++	  _IO_free_backup_buf (fp, fp->_IO_save_base);
+ 	  fp->_flags &= ~_IO_IN_BACKUP;
+ 	}
+       _IO_doallocbuf (fp);
+diff -rupN a/libio/genops.c b/libio/genops.c
+--- a/libio/genops.c	2024-12-18 23:17:35.150703172 -0500
++++ b/libio/genops.c	2024-12-19 00:34:04.300351821 -0500
+@@ -1,4 +1,5 @@
+ /* Copyright (C) 1993-2021 Free Software Foundation, Inc.
++   Copyright The GNU Toolchain Authors.
+    This file is part of the GNU C Library.
+ 
+    The GNU C Library is free software; you can redistribute it and/or
+@@ -187,7 +188,7 @@ _IO_free_backup_area (FILE *fp)
+ {
+   if (_IO_in_backup (fp))
+     _IO_switch_to_main_get_area (fp);  /* Just in case. */
+-  free (fp->_IO_save_base);
++  _IO_free_backup_buf (fp, fp->_IO_save_base);
+   fp->_IO_save_base = NULL;
+   fp->_IO_save_end = NULL;
+   fp->_IO_backup_base = NULL;
+@@ -235,7 +236,7 @@ save_for_backup (FILE *fp, char *end_p)
+ 	memcpy (new_buffer + avail,
+ 		fp->_IO_read_base + least_mark,
+ 		needed_size);
+-      free (fp->_IO_save_base);
++      _IO_free_backup_buf (fp, fp->_IO_save_base);
+       fp->_IO_save_base = new_buffer;
+       fp->_IO_save_end = new_buffer + avail + needed_size;
+     }
+@@ -611,7 +612,7 @@ _IO_default_finish (FILE *fp, int dummy)
+ 
+   if (fp->_IO_save_base)
+     {
+-      free (fp->_IO_save_base);
++      _IO_free_backup_buf (fp, fp->_IO_save_base);
+       fp->_IO_save_base = NULL;
+     }
+ 
+@@ -996,11 +997,14 @@ _IO_default_pbackfail (FILE *fp, int c)
+ 	  else if (!_IO_have_backup (fp))
+ 	    {
+ 	      /* No backup buffer: allocate one. */
+-	      /* Use nshort buffer, if unused? (probably not)  FIXME */
+ 	      int backup_size = 128;
+ 	      char *bbuf = (char *) malloc (backup_size);
+ 	      if (bbuf == NULL)
+-		return EOF;
++		{
++		  /* Guarantee a 1-char pushback.  */
++		  bbuf = fp->_short_backupbuf;
++		  backup_size = 1;
++		}
+ 	      fp->_IO_save_base = bbuf;
+ 	      fp->_IO_save_end = fp->_IO_save_base + backup_size;
+ 	      fp->_IO_backup_base = fp->_IO_save_end;
+@@ -1020,7 +1024,7 @@ _IO_default_pbackfail (FILE *fp, int c)
+ 	    return EOF;
+ 	  memcpy (new_buf + (new_size - old_size), fp->_IO_read_base,
+ 		  old_size);
+-	  free (fp->_IO_read_base);
++	  _IO_free_backup_buf (fp, fp->_IO_read_base);
+ 	  _IO_setg (fp, new_buf, new_buf + (new_size - old_size),
+ 		    new_buf + new_size);
+ 	  fp->_IO_backup_base = fp->_IO_read_ptr;
+diff -rupN a/libio/libioP.h b/libio/libioP.h
+--- a/libio/libioP.h	2024-12-18 23:17:36.823719449 -0500
++++ b/libio/libioP.h	2024-12-19 00:34:04.305351870 -0500
+@@ -1,4 +1,5 @@
+ /* Copyright (C) 1993-2021 Free Software Foundation, Inc.
++   Copyright The GNU Toolchain Authors.
+    This file is part of the GNU C Library.
+ 
+    The GNU C Library is free software; you can redistribute it and/or
+@@ -809,30 +810,30 @@ extern int _IO_vscanf (const char *, va_
+ #  define FILEBUF_LITERAL(CHAIN, FLAGS, FD, WDP) \
+        { _IO_MAGIC+_IO_LINKED+_IO_IS_FILEBUF+FLAGS, \
+ 	 NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, \
+-	 NULL, NULL, (FILE *) CHAIN, FD, \
+-	 0, _IO_pos_BAD, 0, 0, { 0 }, &_IO_stdfile_##FD##_lock }
++	 NULL, NULL, (FILE *) CHAIN, FD, 0, { 0 }, \
++	 _IO_pos_BAD, 0, 0, { 0 }, &_IO_stdfile_##FD##_lock }
+ # else
+ #  define FILEBUF_LITERAL(CHAIN, FLAGS, FD, WDP) \
+        { _IO_MAGIC+_IO_LINKED+_IO_IS_FILEBUF+FLAGS, \
+ 	 NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, \
+-	 NULL, NULL, (FILE *) CHAIN, FD, \
+-	 0, _IO_pos_BAD, 0, 0, { 0 }, &_IO_stdfile_##FD##_lock, _IO_pos_BAD,\
+-	 NULL, WDP, NULL }
++	 NULL, NULL, (FILE *) CHAIN, FD, 0, { 0 }, \
++	 _IO_pos_BAD, 0, 0, { 0 }, &_IO_stdfile_##FD##_lock, \
++	 _IO_pos_BAD, NULL, WDP, NULL }
+ # endif
+ #else
+ # ifdef _IO_USE_OLD_IO_FILE
+ #  define FILEBUF_LITERAL(CHAIN, FLAGS, FD, WDP) \
+        { _IO_MAGIC+_IO_LINKED+_IO_IS_FILEBUF+FLAGS, \
+ 	 NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, \
+-	 NULL, NULL, (FILE *) CHAIN, FD, \
+-	 0, _IO_pos_BAD }
++	 NULL, NULL, (FILE *) CHAIN, FD, 0, { 0 }, \
++	 _IO_pos_BAD }
+ # else
+ #  define FILEBUF_LITERAL(CHAIN, FLAGS, FD, WDP) \
+        { _IO_MAGIC+_IO_LINKED+_IO_IS_FILEBUF+FLAGS, \
+ 	 NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, \
+-	 NULL, NULL, (FILE *) CHAIN, FD, \
+-	 0, _IO_pos_BAD, 0, 0, { 0 }, NULL, _IO_pos_BAD, \
+-	 NULL, WDP, NULL }
++	 NULL, NULL, (FILE *) CHAIN, FD, 0, { 0 }, \
++	 _IO_pos_BAD, 0, 0, { 0 }, NULL, \
++	 _IO_pos_BAD, NULL, WDP, NULL }
+ # endif
+ #endif
+ 
+@@ -951,6 +952,15 @@ IO_validate_vtable (const struct _IO_jum
+   return vtable;
+ }
+ 
++/* In case of an allocation failure, we resort to using the fixed buffer
++   _SHORT_BACKUPBUF.  Free PTR unless it points to that buffer.  */
++static __always_inline void
++_IO_free_backup_buf (FILE *fp, char *ptr)
++{
++  if (ptr != fp->_short_backupbuf)
++    free (ptr);
++}
++
+ /* Character set conversion.  */
+ 
+ enum __codecvt_result
+diff -rupN a/libio/oldfileops.c b/libio/oldfileops.c
+--- a/libio/oldfileops.c	2021-08-01 21:33:43.000000000 -0400
++++ b/libio/oldfileops.c	2024-12-19 00:34:04.311351928 -0500
+@@ -1,4 +1,5 @@
+ /* Copyright (C) 1993-2021 Free Software Foundation, Inc.
++   Copyright The GNU Toolchain Authors.
+    This file is part of the GNU C Library.
+    Written by Per Bothner <bothner@cygnus.com>.
+ 
+@@ -310,7 +311,7 @@ _IO_old_file_underflow (FILE *fp)
+       /* Maybe we already have a push back pointer.  */
+       if (fp->_IO_save_base != NULL)
+ 	{
+-	  free (fp->_IO_save_base);
++	  _IO_free_backup_buf (fp, fp->_IO_save_base);
+ 	  fp->_flags &= ~_IO_IN_BACKUP;
+ 	}
+       _IO_doallocbuf (fp);
+@@ -463,7 +464,7 @@ _IO_old_file_seekoff (FILE *fp, off64_t
+       /* It could be that we already have a pushback buffer.  */
+       if (fp->_IO_read_base != NULL)
+ 	{
+-	  free (fp->_IO_read_base);
++	  _IO_free_backup_buf (fp, fp->_IO_read_base);
+ 	  fp->_flags &= ~_IO_IN_BACKUP;
+ 	}
+       _IO_doallocbuf (fp);
+diff -rupN a/libio/wfileops.c b/libio/wfileops.c
+--- a/libio/wfileops.c	2024-12-18 23:17:34.277694679 -0500
++++ b/libio/wfileops.c	2024-12-19 00:34:04.316351977 -0500
+@@ -1,4 +1,5 @@
+ /* Copyright (C) 1993-2021 Free Software Foundation, Inc.
++   Copyright The GNU Toolchain Authors.
+    This file is part of the GNU C Library.
+    Written by Ulrich Drepper <drepper@cygnus.com>.
+    Based on the single byte version by Per Bothner <bothner@cygnus.com>.
+@@ -177,7 +178,7 @@ _IO_wfile_underflow (FILE *fp)
+       /* Maybe we already have a push back pointer.  */
+       if (fp->_IO_save_base != NULL)
+ 	{
+-	  free (fp->_IO_save_base);
++	  _IO_free_backup_buf (fp, fp->_IO_save_base);
+ 	  fp->_flags &= ~_IO_IN_BACKUP;
+ 	}
+       _IO_doallocbuf (fp);
+diff -rupN a/stdio-common/Makefile b/stdio-common/Makefile
+--- a/stdio-common/Makefile	2024-12-18 23:17:36.527716569 -0500
++++ b/stdio-common/Makefile	2024-12-19 00:34:04.320352016 -0500
+@@ -1,4 +1,5 @@
+ # Copyright (C) 1991-2021 Free Software Foundation, Inc.
++# Copyright The GNU Toolchain Authors.
+ # This file is part of the GNU C Library.
+ 
+ # The GNU C Library is free software; you can redistribute it and/or
+@@ -242,6 +243,7 @@ tests := \
+   tst-tmpnam \
+   tst-ungetc \
+   tst-ungetc-leak \
++  tst-ungetc-nomem \
+   tst-unlockedio \
+   tst-vfprintf-mbs-prec \
+   tst-vfprintf-user-type \
+diff -rupN a/stdio-common/tst-ungetc-nomem.c b/stdio-common/tst-ungetc-nomem.c
+--- a/stdio-common/tst-ungetc-nomem.c	1969-12-31 19:00:00.000000000 -0500
++++ b/stdio-common/tst-ungetc-nomem.c	2024-12-19 00:34:04.324352055 -0500
+@@ -0,0 +1,121 @@
++/* Test ungetc behavior with malloc failures.
++   Copyright The GNU Toolchain Authors.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <dlfcn.h>
++#include <stdio.h>
++#include <string.h>
++#include <support/check.h>
++#include <support/support.h>
++#include <support/temp_file.h>
++#include <support/xstdio.h>
++
++static volatile bool fail = false;
++
++/* Induce a malloc failure whenever FAIL is set; we use the __LIBC_MALLOC entry
++   point to avoid the other alternative, which is RTLD_NEXT.  */
++void *
++malloc (size_t sz)
++{
++  if (fail)
++    return NULL;
++
++  static void *(*real_malloc) (size_t);
++
++  if (real_malloc == NULL)
++    real_malloc = dlsym (RTLD_NEXT, "malloc");
++
++  return real_malloc (sz);
++}
++
++static int
++do_test (void)
++{
++  char *filename = NULL;
++  struct stat props = {};
++  size_t bufsz = 0;
++
++  create_temp_file ("tst-ungetc-nomem.", &filename);
++  if (stat (filename, &props) != 0)
++    FAIL_EXIT1 ("Could not get file status: %m\n");
++
++  FILE *fp = fopen (filename, "w");
++
++  /* The libio buffer sizes are the same as block size.  This is to ensure that
++     the test runs at the read underflow boundary as well.  */
++  bufsz = props.st_blksize + 2;
++
++  char *buf = xmalloc (bufsz);
++  memset (buf, 'a', bufsz);
++
++  if (fwrite (buf, sizeof (char), bufsz, fp) != bufsz)
++    FAIL_EXIT1 ("fwrite failed: %m\n");
++  xfclose (fp);
++
++  /* Begin test.  */
++  fp = xfopen (filename, "r");
++
++  while (!feof (fp))
++    {
++      /* Reset the pushback buffer state.  */
++      fseek (fp, 0, SEEK_CUR);
++
++      fail = true;
++      /* 1: First ungetc should always succeed, as the standard requires.  */
++      TEST_COMPARE (ungetc ('b', fp), 'b');
++
++      /* 2: This will result in resizing, which should fail.  */
++      TEST_COMPARE (ungetc ('c', fp), EOF);
++
++      /* 3: Now allow the resizing, which should immediately fill up the buffer
++         too, since this allocates only double the current buffer, i.e.
++         2-bytes.  */
++      fail = false;
++      TEST_COMPARE (ungetc ('d', fp), 'd');
++
++      /* 4: And fail again because this again forces an alloc, which fails.  */
++      fail = true;
++      TEST_COMPARE (ungetc ('e', fp), EOF);
++
++      /* 5: Enable allocations again so that we now get a 4-byte buffer.  Now
++         both calls should work.  */
++      fail = false;
++      TEST_COMPARE (ungetc ('f', fp), 'f');
++      fail = true;
++      TEST_COMPARE (ungetc ('g', fp), 'g');
++
++      /* Drain out the x's.  */
++      TEST_COMPARE (fgetc (fp), 'g');
++      TEST_COMPARE (fgetc (fp), 'f');
++      TEST_COMPARE (fgetc (fp), 'd');
++
++      /* Finally, drain out the first char we had pushed back, followed by one
++	 more char from the stream, if present.  */
++      TEST_COMPARE (fgetc (fp), 'b');
++      char c = fgetc (fp);
++      if (!feof (fp))
++	TEST_COMPARE (c, 'a');
++    }
++
++  /* Final sanity check before we're done.  */
++  TEST_COMPARE (ferror (fp), 0);
++  xfclose (fp);
++
++  return 0;
++}
++
++#include <support/test-driver.c>

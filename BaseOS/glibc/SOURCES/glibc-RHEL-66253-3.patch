@@ -1,0 +1,120 @@
+commit d0106b6ae26c8cc046269358a77188105c99d5e3
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Jun 4 14:37:35 2024 +0200
+
+    libio: Test for fdopen memory leak without SEEK_END support (bug 31840)
+    
+    The bug report used /dev/mem, but /proc/self/mem works as well
+    (if available).
+
+diff --git a/libio/Makefile b/libio/Makefile
+index 31e27b022c73669a..418102c4c0d8c25a 100644
+--- a/libio/Makefile
++++ b/libio/Makefile
+@@ -76,6 +76,7 @@ tests = \
+   tst-eof \
+   tst-ext \
+   tst-ext2 \
++  tst-fdopen-seek-failure \
+   tst-fgetc-after-eof \
+   tst-fgetwc \
+   tst-fgetws \
+@@ -220,6 +221,9 @@ tst_wprintf2-ARGS = "Some Text"
+ 
+ test-fmemopen-ENV = MALLOC_TRACE=$(objpfx)test-fmemopen.mtrace \
+ 		    LD_PRELOAD=$(common-objpfx)/malloc/libc_malloc_debug.so
++tst-fdopen-seek-failure-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-fdopen-seek-failure.mtrace \
++  LD_PRELOAD=$(common-objpfx)/malloc/libc_malloc_debug.so
+ tst-fopenloc-ENV = MALLOC_TRACE=$(objpfx)tst-fopenloc.mtrace \
+ 		   LD_PRELOAD=$(common-objpfx)/malloc/libc_malloc_debug.so
+ tst-bz22415-ENV = MALLOC_TRACE=$(objpfx)tst-bz22415.mtrace \
+@@ -228,6 +232,7 @@ tst-bz24228-ENV = MALLOC_TRACE=$(objpfx)tst-bz24228.mtrace \
+ 		  LD_PRELOAD=$(common-objpfx)/malloc/libc_malloc_debug.so
+ 
+ generated += test-fmemopen.mtrace test-fmemopen.check
++generated += tst-fdopen-seek-failure.mtrace tst-fdopen-seek-failure.check
+ generated += tst-fopenloc.mtrace tst-fopenloc.check
+ generated += tst-bz22415.mtrace tst-bz22415.check
+ 
+@@ -244,8 +249,12 @@ shared-only-routines = oldiofopen oldiofdopen oldiofclose oldfileops	\
+ 		       oldiofsetpos64
+ 
+ ifeq ($(run-built-tests),yes)
+-tests-special += $(objpfx)test-freopen.out $(objpfx)test-fmemopen-mem.out \
+-		 $(objpfx)tst-bz22415-mem.out
++tests-special += \
++  $(objpfx)test-fmemopen-mem.out \
++  $(objpfx)test-freopen.out \
++  $(objpfx)tst-bz22415-mem.out \
++  $(objpfx)tst-fdopen-seek-failure-mem.out \
++  # tests-special
+ ifeq (yes,$(build-shared))
+ # Run tst-fopenloc-cmp.out and tst-openloc-mem.out only if shared
+ # library is enabled since they depend on tst-fopenloc.out.
+@@ -333,6 +342,11 @@ $(objpfx)test-fmemopen-mem.out: $(objpfx)test-fmemopen.out
+ 	$(common-objpfx)malloc/mtrace $(objpfx)test-fmemopen.mtrace > $@; \
+ 	$(evaluate-test)
+ 
++$(objpfx)tst-fdopen-seek-failure-mem.out: $(objpfx)tst-fdopen-seek-failure.out
++	$(common-objpfx)malloc/mtrace \
++	  $(objpfx)tst-fdopen-seek-failure.mtrace > $@; \
++	$(evaluate-test)
++
+ $(objpfx)tst-fopenloc-mem.out: $(objpfx)tst-fopenloc.out
+ 	$(common-objpfx)malloc/mtrace $(objpfx)tst-fopenloc.mtrace > $@; \
+ 	$(evaluate-test)
+diff --git a/libio/tst-fdopen-seek-failure.c b/libio/tst-fdopen-seek-failure.c
+new file mode 100644
+index 0000000000000000..5c4d40ab34158571
+--- /dev/null
++++ b/libio/tst-fdopen-seek-failure.c
+@@ -0,0 +1,48 @@
++/* Test for fdopen memory leak without SEEK_END support (bug 31840).
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++
++#include <errno.h>
++#include <fcntl.h>
++#include <mcheck.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <support/check.h>
++#include <support/xunistd.h>
++#include <unistd.h>
++
++static int
++do_test (void)
++{
++  mtrace ();
++
++  /* This file is special because it is seekable, but only
++     with SEEK_SET, not SEEK_END.  */
++  int fd = open ("/proc/self/mem", O_RDWR);
++  if (fd < 0)
++    FAIL_UNSUPPORTED ("/proc/self/mem not found: %m");
++  FILE *fp = fdopen (fd, "a");
++  /* The fdopen call should have failed because it tried to use
++     SEEK_END.  */
++  TEST_VERIFY (fp == NULL);
++  TEST_COMPARE (errno, EINVAL);
++  xclose (fd);
++  return 0;
++}
++
++#include <support/test-driver.c>

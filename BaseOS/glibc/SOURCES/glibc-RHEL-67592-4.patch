@@ -1,0 +1,85 @@
+From 37a0933e1bf97346b45463bde0c4631be8abaa07 Mon Sep 17 00:00:00 2001
+From: DJ Delorie <dj@redhat.com>
+Date: Tue, 10 Dec 2024 16:57:21 -0500
+Subject: [PATCH] manual: make @manpageurl more specific to each output
+Content-type: text/plain; charset=UTF-8
+
+Tweak the @manpageurl macro to customize the output for
+each of html, info, and pdf output.  HTML and PDF (at
+least, these days) support clicking on the link title,
+whereas info does not.  Add text to the intro section
+explaining which man pages are normative and which
+aren't.
+
+Conflicts
+	manual/resource.texi
+		Removed; unneeded
+---
+ manual/intro.texi    | 14 +++++++++++++-
+ manual/macros.texi   | 12 ++++++++++--
+ manual/resource.texi |  3 +--
+ 3 files changed, 24 insertions(+), 5 deletions(-)
+
+diff --git a/manual/intro.texi b/manual/intro.texi
+index 879c1b38d9..d95648468d 100644
+--- a/manual/intro.texi
++++ b/manual/intro.texi
+@@ -966,13 +966,25 @@ functionality is available on commercial systems.
+ 
+ @Theglibc{} includes by reference the Linux man-pages
+ @value{man_pages_version} documentation to document the listed
+-syscalls for the Linux kernel. For reference purposes only the latest
++syscalls for the Linux kernel. For reference purposes only, the latest
+ @uref{https://www.kernel.org/doc/man-pages/,Linux man-pages Project}
+ documentation can be accessed from the
+ @uref{https://www.kernel.org,Linux kernel} website.  Where the syscall
+ has more specific documentation in this manual that more specific
+ documentation is considered authoritative.
+ 
++Throughout this manual, when we refer to a man page, for example:
++@quotation
++@manpageurl{sendmsg,2}
++@end quotation
++@noindent
++we are referring primarily to the specific version noted above (the
++``normative'' version), typically accessed by running (for example)
++@code{man 2 sendmsg} on a system with that version installed.  For
++convenience, we will also link to the online latest copy of the man
++pages, but keep in mind that version will almost always be newer than,
++and thus different than, the normative version noted above.
++
+ Additional details on the Linux system call interface can be found in
+ @xref{System Calls}.
+ 
+diff --git a/manual/macros.texi b/manual/macros.texi
+index f48dd4ec22..2003ce2678 100644
+--- a/manual/macros.texi
++++ b/manual/macros.texi
+@@ -282,14 +282,22 @@ cwd\comments\
+ @macro standardsx {element, standard, header}
+ @end macro
+ 
++@ifhtml
+ @macro manpageurl {func, sec}
+-@url{https://man7.org/linux/man-pages/man\sec\/\func\.\sec\.html}
++@url{https://man7.org/linux/man-pages/man\sec\/\func\.\sec\.html,,\func\(\sec\)}
++@xref{Linux Kernel}
+ @end macro
++@end ifhtml
++@ifnothtml
++@macro manpageurl {func, sec}
++\func\(\sec\) (Latest, online: @url{https://man7.org/linux/man-pages/man\sec\/\func\.\sec\.html})
++@xref{Linux Kernel}
++@end macro
++@end ifnothtml
+ 
+ @macro manpagefunctionstub {func,sec}
+ This documentation is a stub.  For additional information on this
+ function, consult the manual page @manpageurl{\func\,\sec\}.
+-@xref{Linux Kernel}.
+ @end macro
+ 
+ @end ifclear
+-- 
+2.43.5
+

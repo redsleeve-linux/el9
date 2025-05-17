@@ -1,0 +1,155 @@
+commit 35dc62de3d5d73a91d4ca8fa9799b510a34d170d
+Author: Aaron Merey <amerey@redhat.com>
+Date:   Thu Sep 19 09:53:23 2024 -0400
+
+    Add another test for fclose on an unopened file
+    
+    Add new file libio/tst-fclose-unopened2.c that tests whether fclose on an
+    unopened file returns EOF.
+    
+    This test differs from tst-fclose-unopened.c by ensuring the file's buffer
+    is allocated prior to double-fclose.  A comment in tst-fclose-unopened.c
+    now clarifies that it is testing a file with an unallocated buffer.
+    
+    Calling fclose on unopened files normally causes a use-after-free bug,
+    however the standard streams are an exception since they are not
+    deallocated by fclose.
+    
+    Tested for x86_64.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+diff --git a/libio/Makefile b/libio/Makefile
+index f0ecb6b775a543af..8b2d8aaae563788b 100644
+--- a/libio/Makefile
++++ b/libio/Makefile
+@@ -77,6 +77,7 @@ tests = \
+   tst-ext \
+   tst-ext2 \
+   tst-fclose-unopened \
++  tst-fclose-unopened2 \
+   tst-fdopen-seek-failure \
+   tst-fgetc-after-eof \
+   tst-fgetwc \
+@@ -220,6 +221,9 @@ LDFLAGS-tst-bz24228 = -Wl,--version-script=tst-bz24228.map
+ 
+ tst_wprintf2-ARGS = "Some Text"
+ 
++tst-fclose-unopened2-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-fclose-unopened2.mtrace \
++  LD_PRELOAD=$(common-objpfx)/malloc/libc_malloc_debug.so
+ test-fmemopen-ENV = MALLOC_TRACE=$(objpfx)test-fmemopen.mtrace \
+ 		    LD_PRELOAD=$(common-objpfx)/malloc/libc_malloc_debug.so
+ tst-fdopen-seek-failure-ENV = \
+@@ -244,6 +248,8 @@ generated += \
+   tst-bz22415.mtrace \
+   tst-bz24228.check \
+   tst-bz24228.mtrace \
++  tst-fclose-unopened2.check \
++  tst-fclose-unopened2.mtrace \
+   tst-fdopen-seek-failure.check \
+   tst-fdopen-seek-failure.mtrace \
+   tst-fopenloc.check \
+@@ -276,6 +282,7 @@ tests-special += \
+   $(objpfx)test-fmemopen-mem.out \
+   $(objpfx)tst-bz22415-mem.out \
+   $(objpfx)tst-bz24228-mem.out \
++  $(objpfx)tst-fclose-unopened2-mem.out \
+   $(objpfx)tst-fdopen-seek-failure-mem.out \
+   $(objpfx)tst-fopenloc-mem.out \
+   # tests-special
+@@ -363,6 +370,11 @@ $(objpfx)test-fmemopen-mem.out: $(objpfx)test-fmemopen.out
+ 	$(common-objpfx)malloc/mtrace $(objpfx)test-fmemopen.mtrace > $@; \
+ 	$(evaluate-test)
+ 
++$(objpfx)tst-fclose-unopened2-mem.out: $(objpfx)tst-fclose-unopened2.out
++	$(common-objpfx)malloc/mtrace \
++	  $(objpfx)tst-fclose-unopened2.mtrace > $@; \
++	$(evaluate-test)
++
+ $(objpfx)tst-fdopen-seek-failure-mem.out: $(objpfx)tst-fdopen-seek-failure.out
+ 	$(common-objpfx)malloc/mtrace \
+ 	  $(objpfx)tst-fdopen-seek-failure.mtrace > $@; \
+diff --git a/libio/tst-fclose-unopened.c b/libio/tst-fclose-unopened.c
+index 1f1cad042d8d72bf..4fed2ffdfe8cf9b4 100644
+--- a/libio/tst-fclose-unopened.c
++++ b/libio/tst-fclose-unopened.c
+@@ -19,9 +19,11 @@
+ #include <stdio.h>
+ #include <support/check.h>
+ 
+-/* Verify that fclose on an unopened file returns EOF.  This is not part
+-   of the fclose external contract but there are dependancies on this
+-   behaviour.  */
++/* Verify that fclose on an unopened file returns EOF.  This test uses
++   a file with an unallocated buffer.
++
++   This is not part of the fclose external contract but there are
++   dependencies on this behaviour.  */
+ 
+ static int
+ do_test (void)
+diff --git a/libio/tst-fclose-unopened2.c b/libio/tst-fclose-unopened2.c
+new file mode 100644
+index 0000000000000000..1e99d9dc3d561b80
+--- /dev/null
++++ b/libio/tst-fclose-unopened2.c
+@@ -0,0 +1,51 @@
++/* Test using fclose on an unopened file.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <mcheck.h>
++#include <stdio.h>
++#include <support/check.h>
++
++/* Verify that fclose on an unopened file returns EOF.  This test uses
++   a file with an allocated buffer.
++
++   This is not part of the fclose external contract but there are
++   dependencies on this behaviour.  */
++
++static int
++do_test (void)
++{
++  mtrace ();
++
++  /* Input file tst-fclose-unopened2.input has 6 bytes plus newline.  */
++  char buf[6];
++
++  /* Read from the file to ensure its internal buffer is allocated.  */
++  TEST_COMPARE (fread (buf, 1, sizeof (buf), stdin), sizeof (buf));
++
++  TEST_COMPARE (fclose (stdin), 0);
++
++  /* Attempt to close the unopened file and verify that EOF is returned.
++     Calling fclose on a file twice normally causes a use-after-free bug,
++     however the standard streams are an exception since they are not
++     deallocated by fclose.  */
++  TEST_COMPARE (fclose (stdin), EOF);
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/libio/tst-fclose-unopened2.input b/libio/tst-fclose-unopened2.input
+new file mode 100644
+index 0000000000000000..399f9ba41aff870b
+--- /dev/null
++++ b/libio/tst-fclose-unopened2.input
+@@ -0,0 +1 @@
++fclose

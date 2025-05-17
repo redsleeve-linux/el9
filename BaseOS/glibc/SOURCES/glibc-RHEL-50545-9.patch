@@ -1,0 +1,438 @@
+From 3b1d32177635023e37bec7fbfd77c3cfb2659eb1 Mon Sep 17 00:00:00 2001
+From: Florian Weimer <fweimer@redhat.com>
+Date: Fri, 30 Aug 2024 21:52:10 +0200
+Subject: [PATCH] support: Add <support/xdirent.h>
+Content-type: text/plain; charset=UTF-8
+
+Use static functions for readdir/readdir_r, so that
+-D_FILE_OFFSET_BITS=64 does not improperly redirect calls to the wrong
+implementation.
+
+Reviewed-by: DJ Delorie <dj@redhat.com>
+
+Conflicts
+	support/Makefile
+		context
+---
+ support/Makefile                  |  6 +++
+ support/support_readdir_check.c   | 30 +++++++++++
+ support/support_readdir_r_check.c | 35 +++++++++++++
+ support/tst-xdirent.c             | 76 +++++++++++++++++++++++++++
+ support/xclosedir.c               | 28 ++++++++++
+ support/xdirent.h                 | 86 +++++++++++++++++++++++++++++++
+ support/xfdopendir.c              | 30 +++++++++++
+ support/xopendir.c                | 30 +++++++++++
+ 8 files changed, 321 insertions(+)
+ create mode 100644 support/support_readdir_check.c
+ create mode 100644 support/support_readdir_r_check.c
+ create mode 100644 support/tst-xdirent.c
+ create mode 100644 support/xclosedir.c
+ create mode 100644 support/xdirent.h
+ create mode 100644 support/xfdopendir.c
+ create mode 100644 support/xopendir.c
+
+diff --git a/support/Makefile b/support/Makefile
+index 26bd3d38e4..8fb4d2c500 100644
+--- a/support/Makefile
++++ b/support/Makefile
+@@ -73,6 +73,8 @@ libsupport-routines = \
+   support_quote_blob \
+   support_quote_blob_wide \
+   support_quote_string \
++  support_readdir_check \
++  support_readdir_r_check \
+   support_record_failure \
+   support_run_diff \
+   support_select_modifies_timeout \
+@@ -112,6 +114,7 @@ libsupport-routines = \
+   xclock_settime_time64 \
+   xclone \
+   xclose \
++  xclosedir \
+   xchmod \
+   xconnect \
+   xcopy_file_range \
+@@ -120,6 +123,7 @@ libsupport-routines = \
+   xdup2 \
+   xfchmod \
+   xfclose \
++  xfdopendir \
+   xfopen \
+   xfork \
+   xftruncate \
+@@ -137,6 +141,7 @@ libsupport-routines = \
+   xmunmap \
+   xnewlocale \
+   xopen \
++  xopendir \
+   xpipe \
+   xpoll \
+   xposix_memalign \
+@@ -306,6 +311,7 @@ tests = \
+   tst-test_compare_string \
+   tst-test_compare_string_wide \
+   tst-timespec \
++  tst-xdirent \
+   tst-xreadlink \
+   tst-xsigstack \
+
+diff --git a/support/support_readdir_check.c b/support/support_readdir_check.c
+new file mode 100644
+index 0000000000..5687004276
+--- /dev/null
++++ b/support/support_readdir_check.c
+@@ -0,0 +1,30 @@
++/* Error-checking helper for xreaddir, xreaddir64.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xdirent.h>
++
++#include <support/check.h>
++
++void *
++support_readdir_check (const char *name, void *result, int saved_errno)
++{
++  if (result == NULL && errno != 0)
++    FAIL_EXIT1 ("%s: %m", name);
++  errno = saved_errno;
++  return result;
++}
+diff --git a/support/support_readdir_r_check.c b/support/support_readdir_r_check.c
+new file mode 100644
+index 0000000000..6bbb0d0b32
+--- /dev/null
++++ b/support/support_readdir_r_check.c
+@@ -0,0 +1,35 @@
++/* Error-checking helper for xreaddir_r, xreaddir64_r.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xdirent.h>
++
++#include <support/check.h>
++
++int
++support_readdir_r_check (const char *name, int result, void *buf, void *ptr)
++{
++  if (result != 0)
++    {
++      errno = result;
++      FAIL_EXIT1 ("%s: %m", name);
++    }
++  if (buf != ptr)
++    FAIL_EXIT1 ("%s: buffer pointer and returned pointer differ: %p != %p",
++                name, buf, ptr);
++  return result;
++}
+diff --git a/support/tst-xdirent.c b/support/tst-xdirent.c
+new file mode 100644
+index 0000000000..642483165a
+--- /dev/null
++++ b/support/tst-xdirent.c
+@@ -0,0 +1,76 @@
++/* Compile test for error-checking wrappers for <dirent.h>
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xdirent.h>
++
++#include <libc-diag.h>
++#include <support/check.h>
++#include <unistd.h>
++
++static int
++do_test (void)
++{
++  {
++    DIR *d = xopendir (".");
++    struct dirent *e = xreaddir (d);
++    /* Assume that the "." special entry always comes first.  */
++    TEST_COMPARE_STRING (e->d_name, ".");
++    while (xreaddir (d) != NULL)
++      ;
++    xclosedir (d);
++  }
++
++  {
++    DIR *d = xopendir (".");
++    struct dirent64 *e = xreaddir64 (d);
++    TEST_COMPARE_STRING (e->d_name, ".");
++    while (xreaddir64 (d) != NULL)
++      ;
++    xclosedir (d);
++  }
++
++  /* The functions readdir_r, readdir64_r were deprecated in glibc 2.24.  */
++  DIAG_PUSH_NEEDS_COMMENT;
++  DIAG_IGNORE_NEEDS_COMMENT (4.9, "-Wdeprecated-declarations");
++
++  {
++    DIR *d = xopendir (".");
++    struct dirent buf = { 0, };
++    TEST_VERIFY (xreaddir_r (d, &buf));
++    TEST_COMPARE_STRING (buf.d_name, ".");
++    while (xreaddir_r (d, &buf))
++      ;
++    xclosedir (d);
++  }
++
++  {
++    DIR *d = xopendir (".");
++    struct dirent64 buf = { 0, };
++    TEST_VERIFY (xreaddir64_r (d, &buf));
++    TEST_COMPARE_STRING (buf.d_name, ".");
++    while (xreaddir64_r (d, &buf))
++      ;
++    xclosedir (d);
++  }
++
++  DIAG_POP_NEEDS_COMMENT;
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/support/xclosedir.c b/support/xclosedir.c
+new file mode 100644
+index 0000000000..b490df5598
+--- /dev/null
++++ b/support/xclosedir.c
+@@ -0,0 +1,28 @@
++/* Error-checking wrapper for closedir.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xdirent.h>
++
++#include <support/check.h>
++
++void
++xclosedir (DIR *dir)
++{
++  if (closedir (dir) != 0)
++    FAIL_EXIT1 ("closedir: %m");
++}
+diff --git a/support/xdirent.h b/support/xdirent.h
+new file mode 100644
+index 0000000000..8465d70ec1
+--- /dev/null
++++ b/support/xdirent.h
+@@ -0,0 +1,86 @@
++/* Error-checking wrappers for <dirent.h>
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef SUPPORT_XDIRENT_H
++#define SUPPORT_XDIRENT_H
++
++#include <dirent.h>
++#include <errno.h>
++#include <libc-diag.h>
++#include <stdbool.h>
++#include <stddef.h>
++
++__BEGIN_DECLS
++
++DIR *xopendir (const char *path);
++DIR *xfdopendir (int fd);
++void xclosedir (DIR *);
++
++void *support_readdir_check (const char *, void *, int);
++
++static __attribute__ ((unused)) struct dirent *
++xreaddir (DIR *stream)
++{
++  int saved_errno = errno;
++  errno = 0;
++  struct dirent *result = readdir (stream);
++  return support_readdir_check ("readdir", result, saved_errno);
++}
++
++static __attribute__ ((unused)) struct dirent64 *
++xreaddir64 (DIR *stream)
++{
++  int saved_errno = errno;
++  errno = 0;
++  struct dirent64 *result = readdir64 (stream);
++  return support_readdir_check ("readdir64", result, saved_errno);
++}
++
++/* The functions readdir_r, readdir64_r were deprecated in glibc 2.24.  */
++DIAG_PUSH_NEEDS_COMMENT;
++DIAG_IGNORE_NEEDS_COMMENT (4.9, "-Wdeprecated-declarations");
++
++int support_readdir_r_check (const char *, int, void *, void *);
++
++static __attribute__ ((unused)) bool
++xreaddir_r (DIR *stream, struct dirent *buf)
++{
++  struct dirent *ptr;
++  int ret = readdir_r (stream, buf, &ptr);
++  if (ret == 0 && ptr == NULL)
++    return false;
++  support_readdir_r_check ("readdir_r", ret, buf, ptr);
++  return true;
++}
++
++static __attribute__ ((unused)) bool
++xreaddir64_r (DIR *stream, struct dirent64 *buf)
++{
++  struct dirent64 *ptr;
++  int ret = readdir64_r (stream, buf, &ptr);
++  if (ret == 0 && ptr == NULL)
++    return false;
++  support_readdir_r_check ("readdir64_r", ret, buf, ptr);
++  return true;
++}
++
++DIAG_POP_NEEDS_COMMENT;
++
++__END_DECLS
++
++#endif /* SUPPORT_XDIRENT_H */
+diff --git a/support/xfdopendir.c b/support/xfdopendir.c
+new file mode 100644
+index 0000000000..d881d28c73
+--- /dev/null
++++ b/support/xfdopendir.c
+@@ -0,0 +1,30 @@
++/* Error-checking wrapper for fdopendir.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xdirent.h>
++
++#include <support/check.h>
++
++DIR *
++xfdopendir (int fd)
++{
++  DIR *result = fdopendir (fd);
++  if (result == NULL)
++    FAIL_EXIT1 ("fdopendir (%d): %m", fd);
++  return result;
++}
+diff --git a/support/xopendir.c b/support/xopendir.c
+new file mode 100644
+index 0000000000..e4aee07fee
+--- /dev/null
++++ b/support/xopendir.c
+@@ -0,0 +1,30 @@
++/* Error-checking wrapper for opendir.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xdirent.h>
++
++#include <support/check.h>
++
++DIR *
++xopendir (const char *path)
++{
++  DIR *result = opendir (path);
++  if (result == NULL)
++    FAIL_EXIT1 ("opendir (\"%s\"): %m", path);
++  return result;
++}
+-- 
+2.43.5
+

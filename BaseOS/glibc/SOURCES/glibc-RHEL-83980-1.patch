@@ -1,0 +1,35 @@
+commit 7bb8045ec0595a031e68383849c3fbd9af134312
+Author: Volker Weißmann <volker.weissmann@gmx.de>
+Date:   Tue Oct 3 19:18:44 2023 +0200
+
+    Fix FORTIFY_SOURCE false positive
+    
+    When -D_FORTIFY_SOURCE=2 was given during compilation,
+    sprintf and similar functions will check if their
+    first argument is in read-only memory and exit with
+    *** %n in writable segment detected ***
+    otherwise. To check if the memory is read-only, glibc
+    reads frpm the file "/proc/self/maps". If opening this
+    file fails due to too many open files (EMFILE), glibc
+    will now ignore this error.
+    
+    Fixes [BZ #30932]
+    
+    Signed-off-by: Volker Weißmann <volker.weissmann@gmx.de>
+    Reviewed-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+
+diff --git a/sysdeps/unix/sysv/linux/readonly-area.c b/sysdeps/unix/sysv/linux/readonly-area.c
+index fa407d2f05e6b9aa..1f0d2e2749b159c9 100644
+--- a/sysdeps/unix/sysv/linux/readonly-area.c
++++ b/sysdeps/unix/sysv/linux/readonly-area.c
+@@ -42,7 +42,9 @@ __readonly_area (const char *ptr, size_t size)
+ 	     to the /proc filesystem if it is set[ug]id.  There has
+ 	     been no willingness to change this in the kernel so
+ 	     far.  */
+-	  || errno == EACCES)
++	  || errno == EACCES
++	  /* Process has reached the maximum number of open files.  */
++	  || errno == EMFILE)
+ 	return 1;
+       return -1;
+     }

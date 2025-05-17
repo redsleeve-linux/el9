@@ -40,20 +40,12 @@ trap cleanup 0
 
 sysroot_path="$1"
 shift
+# Resolve symbolic link, so that the activities below only alter the
+# file it points to.
+ldso_path="$(readlink -f "$sysroot_path/$1")"
+shift
 script_path="$1"
 shift
-
-# See ldso_path setting in glibc.spec.
-ldso_path=
-for ldso_candidate in `find "$sysroot_path" -maxdepth 2 \
-  -regextype posix-extended -regex '.*/ld(-.*|64|)\.so\.[0-9]+$' -type f` ; do
-    if test -z "$ldso_path" ; then
-	ldso_path="$ldso_candidate"
-    else
-	echo "error: multiple ld.so candidates: $ldso_path, $ldso_candidate"
-	exit 1
-    fi
-done
 
 # libc.so.6 always uses this name, so it is simpler to locate.
 libc_path=`find "$sysroot_path" -name libc.so.6`

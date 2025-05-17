@@ -1,0 +1,1064 @@
+commit 6cbf845fcdc76131d0e674cee454fe738b69c69d
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Sep 20 13:10:54 2024 +0200
+
+    iconv: Preserve iconv -c error exit on invalid inputs (bug 32046)
+
+    In several converters, a __GCONV_ILLEGAL_INPUT result gets overwritten
+    with __GCONV_FULL_OUTPUT.  As a result, iconv (the function) returns
+    E2BIG instead of EILSEQ.  The iconv program does not see the original
+    EILSEQ failure, does not recognize the invalid input, and may
+    incorrectly exit successfully.
+
+    To address this, a new __flags bit is used to indicate a sticky input
+    error state.  All __GCONV_ILLEGAL_INPUT results are replaced with a
+    function call that sets this new __GCONV_ENCOUNTERED_ILLEGAL_INPUT and
+    returns __GCONV_ILLEGAL_INPUT.  The iconv program checks for
+    __GCONV_ENCOUNTERED_ILLEGAL_INPUT and overrides the exit status.
+
+    The converter changes introducing __gconv_mark_illegal_input are
+    mostly mechanical, except for the res variable initialization in
+    iconvdata/iso-2022-jp.c: this error gets overwritten with __GCONV_OK
+    and other results in the following code.  If res ==
+    __GCONV_ILLEGAL_INPUT afterwards, STANDARD_TO_LOOP_ERR_HANDLER below
+    will handle it.
+
+    The __gconv_mark_illegal_input changes do not alter the errno value
+    set by the iconv function.  This is simpler to implement than
+    reviewing each __GCONV_FULL_OUTPUT result and adjust it not to
+    override a previous __GCONV_ILLEGAL_INPUT result.  Doing it that way
+    would also change some E2BIG errors in to EILSEQ errors, so it had to
+    be done conditionally (under a flag set by the iconv program only), to
+    avoid confusing buffer management in other applications.
+
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+diff -Nrup a/iconv/Makefile b/iconv/Makefile
+--- a/iconv/Makefile	2024-11-20 10:56:00.793668915 -0500
++++ b/iconv/Makefile	2024-11-20 11:21:08.986113631 -0500
+@@ -57,6 +57,10 @@ tests = \
+ 	tst-iconv-opt \
+ 	# tests
+ 
++tests-internal = \
++	tst-iconv-sticky-input-error \
++	# tests-internal
++
+ others		= iconv_prog iconvconfig
+ install-others-programs	= $(inst_bindir)/iconv
+ install-sbin	= iconvconfig
+diff -Nrup a/iconv/gconv_int.h b/iconv/gconv_int.h
+--- a/iconv/gconv_int.h	2021-08-01 21:33:43.000000000 -0400
++++ b/iconv/gconv_int.h	2024-11-20 11:11:29.577105363 -0500
+@@ -304,4 +304,34 @@ extern wint_t __gconv_btwoc_ascii (struc
+ 
+ __END_DECLS
+ 
++/* Internal extensions for <gconv.h>.  */
++
++/* Internal flags for __flags in struct __gconv_step_data.  Overlaps
++   with flags for __gconv_open.  */
++enum
++  {
++    /* The conversion encountered an illegal input character at one
++       point.  */
++    __GCONV_ENCOUNTERED_ILLEGAL_INPUT = 1U << 30,
++  };
++
++/* Mark *STEP_DATA as having seen illegal input, and return
++   __GCONV_ILLEGAL_INPUT.  */
++static inline int
++__gconv_mark_illegal_input (struct __gconv_step_data *step_data)
++{
++  step_data->__flags |= __GCONV_ENCOUNTERED_ILLEGAL_INPUT;
++  return __GCONV_ILLEGAL_INPUT;
++}
++
++/* Returns true if any of the conversion steps encountered illegal input.  */
++static _Bool __attribute__ ((unused))
++__gconv_has_illegal_input (__gconv_t cd)
++{
++  for (size_t i = 0; i < cd->__nsteps; ++i)
++    if (cd->__data[i].__flags & __GCONV_ENCOUNTERED_ILLEGAL_INPUT)
++      return true;
++  return false;
++}
++
+ #endif /* gconv_int.h */
+diff -Nrup a/iconv/gconv_simple.c b/iconv/gconv_simple.c
+--- a/iconv/gconv_simple.c	2021-08-01 21:33:43.000000000 -0400
++++ b/iconv/gconv_simple.c	2024-11-20 11:18:28.273006314 -0500
+@@ -259,7 +259,7 @@ ucs4_internal_loop (struct __gconv_step
+ 	     UCS4 does not allow such values.  */
+ 	  if (irreversible == NULL)
+ 	    /* We are transliterating, don't try to correct anything.  */
+-	    return __GCONV_ILLEGAL_INPUT;
++	    return __gconv_mark_illegal_input (step_data);
+ 
+ 	  if (flags & __GCONV_IGNORE_ERRORS)
+ 	    {
+@@ -270,7 +270,7 @@ ucs4_internal_loop (struct __gconv_step
+ 
+ 	  *inptrp = inptr;
+ 	  *outptrp = outptr;
+-	  return __GCONV_ILLEGAL_INPUT;
++	  return __gconv_mark_illegal_input (step_data);
+ 	}
+ 
+       *((uint32_t *) outptr) = inval;
+@@ -397,7 +397,7 @@ ucs4_internal_loop_single (struct __gcon
+       if (!(flags & __GCONV_IGNORE_ERRORS))
+ 	{
+ 	  *inptrp -= cnt - (state->__count & 7);
+-	  return __GCONV_ILLEGAL_INPUT;
++	  return __gconv_mark_illegal_input (step_data);
+ 	}
+     }
+   else
+@@ -629,7 +629,7 @@ ucs4le_internal_loop (struct __gconv_ste
+ 	     UCS4 does not allow such values.  */
+ 	  if (irreversible == NULL)
+ 	    /* We are transliterating, don't try to correct anything.  */
+-	    return __GCONV_ILLEGAL_INPUT;
++	    return __gconv_mark_illegal_input (step_data);
+ 
+ 	  if (flags & __GCONV_IGNORE_ERRORS)
+ 	    {
+@@ -640,7 +640,7 @@ ucs4le_internal_loop (struct __gconv_ste
+ 
+ 	  *inptrp = inptr;
+ 	  *outptrp = outptr;
+-	  return __GCONV_ILLEGAL_INPUT;
++	  return __gconv_mark_illegal_input (step_data);
+ 	}
+ 
+       *((uint32_t *) outptr) = inval;
+@@ -772,7 +772,7 @@ ucs4le_internal_loop_single (struct __gc
+ 	 represent the result.  This is a genuine bug in the input since
+ 	 UCS4 does not allow such values.  */
+       if (!(flags & __GCONV_IGNORE_ERRORS))
+-	return __GCONV_ILLEGAL_INPUT;
++	return __gconv_mark_illegal_input (step_data);
+     }
+   else
+     {
+@@ -1218,7 +1218,7 @@ ucs4le_internal_loop_single (struct __gc
+ 	   surrogates pass through, attackers could make a security	      \
+ 	   hole exploit by synthesizing any desired plane 1-16		      \
+ 	   character.  */						      \
+-	result = __GCONV_ILLEGAL_INPUT;					      \
++	result = __gconv_mark_illegal_input (step_data);		      \
+ 	if (! ignore_errors_p ())					      \
+ 	  break;							      \
+ 	inptr += 4;							      \
+@@ -1261,7 +1261,7 @@ ucs4le_internal_loop_single (struct __gc
+ 	   them.  (Catching this here is not security relevant.)  */	      \
+ 	if (! ignore_errors_p ())					      \
+ 	  {								      \
+-	    result = __GCONV_ILLEGAL_INPUT;				      \
++	    result = __gconv_mark_illegal_input (step_data);		      \
+ 	    break;							      \
+ 	  }								      \
+ 	inptr += 2;							      \
+@@ -1310,7 +1310,7 @@ ucs4le_internal_loop_single (struct __gc
+ 	   character.  */						      \
+ 	if (! ignore_errors_p ())					      \
+ 	  {								      \
+-	    result = __GCONV_ILLEGAL_INPUT;				      \
++	    result = __gconv_mark_illegal_input (step_data);		      \
+ 	    break;							      \
+ 	  }								      \
+ 	inptr += 4;							      \
+diff -Nrup a/iconv/gconv_trans.c b/iconv/gconv_trans.c
+--- a/iconv/gconv_trans.c	2021-08-01 21:33:43.000000000 -0400
++++ b/iconv/gconv_trans.c	2024-11-20 11:11:29.578105370 -0500
+@@ -234,6 +234,6 @@ __gconv_transliterate (struct __gconv_st
+     }
+ 
+   /* Haven't found a match.  */
+-  return __GCONV_ILLEGAL_INPUT;
++  return __gconv_mark_illegal_input (step_data);
+ }
+ libc_hidden_def (__gconv_transliterate)
+diff -Nrup a/iconv/iconv_prog.c b/iconv/iconv_prog.c
+--- a/iconv/iconv_prog.c	2024-11-20 10:56:00.795668928 -0500
++++ b/iconv/iconv_prog.c	2024-11-20 11:11:29.578105370 -0500
+@@ -292,6 +292,11 @@ conversions from `%s' and to `%s' are no
+ 	  }
+ 	while (++remaining < argc);
+ 
++      /* Ensure that iconv -c still exits with failure if iconv (the
++	 function) has failed with E2BIG instead of EILSEQ.  */
++      if (__gconv_has_illegal_input (cd))
++	status = EXIT_FAILURE;
++
+       /* Close the output file now.  */
+       if (output != NULL && fclose (output))
+ 	error (EXIT_FAILURE, errno, _("error while closing output file"));
+diff -Nrup a/iconv/loop.c b/iconv/loop.c
+--- a/iconv/loop.c	2024-11-20 10:56:00.242665095 -0500
++++ b/iconv/loop.c	2024-11-20 11:11:29.578105370 -0500
+@@ -194,8 +194,7 @@
+    `continue' must reach certain points.  */
+ #define STANDARD_FROM_LOOP_ERR_HANDLER(Incr) \
+   {									      \
+-    result = __GCONV_ILLEGAL_INPUT;					      \
+-									      \
++    result = __gconv_mark_illegal_input (step_data);			      \
+     if (! ignore_errors_p ())						      \
+       break;								      \
+ 									      \
+@@ -213,7 +212,7 @@
+    points.  */
+ #define STANDARD_TO_LOOP_ERR_HANDLER(Incr) \
+   {									      \
+-    result = __GCONV_ILLEGAL_INPUT;					      \
++    result = __gconv_mark_illegal_input (step_data);			      \
+ 									      \
+     if (irreversible == NULL)						      \
+       /* This means we are in call from __gconv_transliterate.  In this	      \
+diff -Nrup a/iconv/tst-iconv-sticky-input-error.c b/iconv/tst-iconv-sticky-input-error.c
+--- a/iconv/tst-iconv-sticky-input-error.c	1969-12-31 19:00:00.000000000 -0500
++++ b/iconv/tst-iconv-sticky-input-error.c	2024-11-20 11:11:29.578105370 -0500
+@@ -0,0 +1,135 @@
++/* Test __GCONV_ENCOUNTERED_ILLEGAL_INPUT, as used by iconv -c (bug 32046).
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++
++#include <array_length.h>
++#include <errno.h>
++#include <gconv_int.h>
++#include <iconv.h>
++#include <stdbool.h>
++#include <support/check.h>
++#include <support/support.h>
++#include <support/test-driver.h>
++#include <stdio.h>
++
++/* FROM is the input character set, TO the output character set.  If
++   IGNORE is true, the iconv descriptor is set up in the same way as
++   iconv -c would.  INPUT is the input string, EXPECTED_OUTPUT the
++   output.  OUTPUT_LIMIT is a byte count, specifying how many input
++   bytes are passed to the iconv function on each invocation.  */
++static void
++one_direction (const char *from, const char *to, bool ignore,
++               const char *input, const char *expected_output,
++               size_t output_limit)
++{
++  if (test_verbose)
++    {
++      char *quoted_input = support_quote_string (input);
++      char *quoted_output = support_quote_string (expected_output);
++      printf ("info: testing from=\"%s\" to=\"%s\" ignore=%d input=\"%s\""
++              " expected_output=\"%s\" output_limit=%zu\n",
++              from, to, (int) ignore, quoted_input,
++              quoted_output, output_limit);
++      free (quoted_output);
++      free (quoted_input);
++    }
++
++  __gconv_t cd;
++  if (ignore)
++    {
++      struct gconv_spec conv_spec;
++      TEST_VERIFY_EXIT (__gconv_create_spec (&conv_spec, from, to)
++                        == &conv_spec);
++      conv_spec.ignore = true;
++      cd = (iconv_t) -1;
++      TEST_COMPARE (__gconv_open (&conv_spec, &cd, 0), __GCONV_OK);
++      __gconv_destroy_spec (&conv_spec);
++    }
++  else
++    cd = iconv_open (to, from);
++  TEST_VERIFY_EXIT (cd != (iconv_t) -1);
++
++  char *input_ptr = (char *) input;
++  size_t input_len = strlen (input);
++  char output_buf[20];
++  char *output_ptr = output_buf;
++  size_t output_len;
++  do
++    {
++      output_len = array_end (output_buf) - output_ptr;
++      if (output_len > output_limit)
++        /* Limit the buffer size as requested by the caller.  */
++        output_len = output_limit;
++      TEST_VERIFY_EXIT (output_len > 0);
++      if (input_len == 0)
++        /* Trigger final flush.  */
++        input_ptr = NULL;
++      char *old_input_ptr = input_ptr;
++      size_t ret = iconv (cd, &input_ptr, &input_len,
++                          &output_ptr, &output_len);
++      if (ret == (size_t) -1)
++        {
++          if (errno != EILSEQ)
++            TEST_COMPARE (errno, E2BIG);
++        }
++
++      if (input_ptr == old_input_ptr)
++        /* Avoid endless loop if stuck on an invalid input character.  */
++        break;
++    }
++  while (input_ptr != NULL);
++
++  /* Test the sticky illegal input bit.  */
++  TEST_VERIFY (__gconv_has_illegal_input (cd));
++
++  TEST_COMPARE_BLOB (expected_output, strlen (expected_output),
++                     output_buf, output_ptr - output_buf);
++
++  TEST_COMPARE (iconv_close (cd), 0);
++}
++
++static int
++do_test (void)
++{
++  static const char charsets[][14] =
++    {
++      "ASCII",
++      "ASCII//IGNORE",
++      "UTF-8",
++      "UTF-8//IGNORE",
++    };
++
++  for (size_t from_idx = 0; from_idx < array_length (charsets); ++from_idx)
++    for (size_t to_idx = 0; to_idx < array_length (charsets); ++to_idx)
++      for (int do_ignore = 0; do_ignore < 2; ++do_ignore)
++        for (int limit = 1; limit < 5; ++limit)
++          for (int skip = 0; skip < 3; ++skip)
++            {
++              const char *expected_output;
++              if (do_ignore || strstr (charsets[to_idx], "//IGNORE") != NULL)
++                expected_output = "ABXY" + skip;
++              else
++                expected_output = "AB" + skip;
++              one_direction (charsets[from_idx], charsets[to_idx], do_ignore,
++                             "AB\xffXY" + skip, expected_output, limit);
++            }
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff -Nrup a/iconv/tst-iconv_prog-buffer.sh b/iconv/tst-iconv_prog-buffer.sh
+--- a/iconv/tst-iconv_prog-buffer.sh	2024-11-20 10:56:00.793668915 -0500
++++ b/iconv/tst-iconv_prog-buffer.sh	2024-11-20 11:11:29.578105370 -0500
+@@ -150,9 +150,8 @@ expect_exit 1 \
+ ! test -s "$tmp/err"
+ expect_files abc def
+ 
+-# FIXME: This is not correct, -c should not change the exit status.
+ cp "$tmp/out-template" "$tmp/out"
+-run_iconv -c -o "$tmp/out" \
++expect_exit 1 run_iconv -c -o "$tmp/out" \
+     "$tmp/abc" "$tmp/0xff-wrapped" "$tmp/def" 2>"$tmp/err"
+ ! test -s "$tmp/err"
+ expect_files abc xy zt def
+diff -Nrup a/iconvdata/cp932.c b/iconvdata/cp932.c
+--- a/iconvdata/cp932.c	2021-08-01 21:33:43.000000000 -0400
++++ b/iconvdata/cp932.c	2024-11-20 11:11:29.579105377 -0500
+@@ -4560,7 +4560,7 @@ static const char from_ucs4_extra[229][2
+ 	if (! ignore_errors_p ())					      \
+ 	  {								      \
+ 	    /* This is an illegal character.  */			      \
+-	    result = __GCONV_ILLEGAL_INPUT;				      \
++	    result = __gconv_mark_illegal_input (step_data);		      \
+ 	    break;							      \
+ 	  }								      \
+ 									      \
+@@ -4600,7 +4600,7 @@ static const char from_ucs4_extra[229][2
+ 	    if (! ignore_errors_p ())					      \
+ 	      {								      \
+ 		/* This is an illegal character.  */			      \
+-		result = __GCONV_ILLEGAL_INPUT;				      \
++		result = __gconv_mark_illegal_input (step_data);	      \
+ 		break;							      \
+ 	      }								      \
+ 									      \
+@@ -4635,7 +4635,7 @@ static const char from_ucs4_extra[229][2
+ 	    if (! ignore_errors_p ())					      \
+ 	      {								      \
+ 		/* This is an illegal character.  */			      \
+-		result = __GCONV_ILLEGAL_INPUT;				      \
++		result = __gconv_mark_illegal_input (step_data);	      \
+ 		break;							      \
+ 	      }								      \
+ 									      \
+diff -Nrup a/iconvdata/euc-jp-ms.c b/iconvdata/euc-jp-ms.c
+--- a/iconvdata/euc-jp-ms.c	2021-08-01 21:33:43.000000000 -0400
++++ b/iconvdata/euc-jp-ms.c	2024-11-20 11:11:29.580105384 -0500
+@@ -4660,7 +4660,7 @@ static const unsigned char from_ucs4_ext
+ 	/* This is illegal.  */						      \
+ 	if (! ignore_errors_p ())					      \
+ 	  {								      \
+-	    result = __GCONV_ILLEGAL_INPUT;				      \
++	    result = __gconv_mark_illegal_input (step_data);		      \
+ 	    break;							      \
+ 	  }								      \
+ 									      \
+@@ -4690,7 +4690,7 @@ static const unsigned char from_ucs4_ext
+ 	    /* This is an illegal character.  */			      \
+ 	    if (! ignore_errors_p ())					      \
+ 	      {								      \
+-		result = __GCONV_ILLEGAL_INPUT;				      \
++		result = __gconv_mark_illegal_input (step_data);	      \
+ 		break;							      \
+ 	      }								      \
+ 									      \
+@@ -4710,7 +4710,7 @@ static const unsigned char from_ucs4_ext
+ 		if (! ignore_errors_p ())				      \
+ 		  {							      \
+ 		    /* This is an illegal character.  */		      \
+-		    result = __GCONV_ILLEGAL_INPUT;			      \
++		    result = __gconv_mark_illegal_input (step_data);	      \
+ 		    break;						      \
+ 		  }							      \
+ 	      }								      \
+@@ -4821,7 +4821,7 @@ static const unsigned char from_ucs4_ext
+ 		if (! ignore_errors_p ())				      \
+ 		  {							      \
+ 		    /* This is an illegal character.  */		      \
+-		    result = __GCONV_ILLEGAL_INPUT;			      \
++		    result = __gconv_mark_illegal_input (step_data);	      \
+ 		    break;						      \
+ 		  }							      \
+ 									      \
+diff -Nrup a/iconvdata/gbbig5.c b/iconvdata/gbbig5.c
+--- a/iconvdata/gbbig5.c	2021-08-01 21:33:43.000000000 -0400
++++ b/iconvdata/gbbig5.c	2024-11-20 11:11:29.581105391 -0500
+@@ -4832,7 +4832,7 @@ const char __from_big5_to_gb2312 [13973]
+ 	  {								      \
+ 	    /* We do not have a mapping for this character.		      \
+ 	       If ignore errors, map it to 0xa1bc - big5 box character */     \
+-	    result = __GCONV_ILLEGAL_INPUT;				      \
++	    result = __gconv_mark_illegal_input (step_data);		      \
+ 	    if (! ignore_errors_p ())					      \
+ 	      break;							      \
+ 									      \
+@@ -4923,7 +4923,7 @@ const char __from_big5_to_gb2312 [13973]
+ 	  {								      \
+ 	    /* We do not have a mapping for this character.		      \
+ 	       If ignore errors, map it to 0xa1f5 - gb box character */       \
+-	    result = __GCONV_ILLEGAL_INPUT;				      \
++	    result = __gconv_mark_illegal_input (step_data);		      \
+ 	    if (! ignore_errors_p ())					      \
+ 	      break;							      \
+ 									      \
+diff -Nrup a/iconvdata/ibm1364.c b/iconvdata/ibm1364.c
+--- a/iconvdata/ibm1364.c	2021-08-01 21:33:43.000000000 -0400
++++ b/iconvdata/ibm1364.c	2024-11-20 11:11:29.581105391 -0500
+@@ -180,7 +180,7 @@ enum
+ 	    /* This is an illegal character.  */			      \
+ 	    if (! ignore_errors_p ())					      \
+ 	      {								      \
+-		result = __GCONV_ILLEGAL_INPUT;				      \
++		result = __gconv_mark_illegal_input (step_data);	      \
+ 		break;							      \
+ 	      }								      \
+ 	    ++*irreversible;						      \
+@@ -220,7 +220,7 @@ enum
+ 	    /* This is an illegal character.  */			      \
+ 	    if (! ignore_errors_p ())					      \
+ 	      {								      \
+-		result = __GCONV_ILLEGAL_INPUT;				      \
++		result = __gconv_mark_illegal_input (step_data);	      \
+ 		break;							      \
+ 	      }								      \
+ 	    ++*irreversible;						      \
+@@ -301,7 +301,7 @@ enum
+ 									      \
+ 	if (! ignore_errors_p ())					      \
+ 	  {								      \
+-	    result = __GCONV_ILLEGAL_INPUT;				      \
++	    result = __gconv_mark_illegal_input (step_data);		      \
+ 	    break;							      \
+ 	  }								      \
+ 	++*irreversible;						      \
+@@ -333,7 +333,7 @@ enum
+ 	    /* This is an illegal character.  */			      \
+ 	    if (! ignore_errors_p ())					      \
+ 	      {								      \
+-		result = __GCONV_ILLEGAL_INPUT;				      \
++		result = __gconv_mark_illegal_input (step_data);	      \
+ 		break;							      \
+ 	      }								      \
+ 	    ++*irreversible;						      \
+diff -Nrup a/iconvdata/iso646.c b/iconvdata/iso646.c
+--- a/iconvdata/iso646.c	2021-08-01 21:33:43.000000000 -0400
++++ b/iconvdata/iso646.c	2024-11-20 11:11:29.581105391 -0500
+@@ -314,7 +314,7 @@ gconv_end (struct __gconv_step *data)
+ 	  ch = 0xf9;							      \
+ 	else if (var == JP_OCR_B)					      \
+ 	  /* Illegal character.  */					      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	else if (var == YU)						      \
+ 	  ch = 0x17e;							      \
+ 	else if (var == HU)						      \
+@@ -388,7 +388,7 @@ gconv_end (struct __gconv_step *data)
+ 	  ch = 0xec;							      \
+ 	else if (var == JP_OCR_B)					      \
+ 	  /* Illegal character.  */					      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	else if (var == YU)						      \
+ 	  ch = 0x10d;							      \
+ 	else if (var == HU)						      \
+@@ -404,7 +404,7 @@ gconv_end (struct __gconv_step *data)
+ 	break;								      \
+       case 0x80 ... 0xff:						      \
+ 	/* Illegal character.  */					      \
+-	failure = __GCONV_ILLEGAL_INPUT;				      \
++	failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       }									      \
+ 									      \
+@@ -441,17 +441,17 @@ gconv_end (struct __gconv_step *data)
+       case 0x23:							      \
+ 	if (var == GB || var == ES || var == IT || var == FR || var == FR1    \
+ 	    || var == NO2)						      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0x24:							      \
+ 	if (var == CN || var == HU || var == CU || var == SE || var == SE2)   \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0x40:							      \
+ 	if (var == CA || var == CA2 || var == DE || var == ES || var == ES2   \
+ 	    || var == IT || var == YU || var == HU || var == FR || var == FR1 \
+ 	    || var == PT || var == PT2 || var == SE2)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0x5b:							      \
+ 	if (var == CA || var == CA2 || var == DE || var == DK || var == ES    \
+@@ -459,7 +459,7 @@ gconv_end (struct __gconv_step *data)
+ 	    || var == HU || var == FR || var == FR1 || var == NO	      \
+ 	    || var == NO2 || var == PT || var == PT2 || var == SE	      \
+ 	    || var == SE2)						      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	else if (var == CU)						      \
+ 	  ch = 0x7d;							      \
+ 	break;								      \
+@@ -469,7 +469,7 @@ gconv_end (struct __gconv_step *data)
+ 	    || var == YU || var == KR || var == HU || var == CU || var == FR  \
+ 	    || var == FR1 || var == NO || var == NO2 || var == PT	      \
+ 	    || var == PT2 || var == SE || var == SE2)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0x5d:							      \
+ 	if (var == CA || var == CA2 || var == DE || var == DK || var == ES    \
+@@ -477,17 +477,17 @@ gconv_end (struct __gconv_step *data)
+ 	    || var == HU || var == FR || var == FR1 || var == NO	      \
+ 	    || var == NO2 || var == PT || var == PT2 || var == SE	      \
+ 	    || var == SE2)						      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0x5e:							      \
+ 	if (var == CA || var == CA2 || var == ES2 || var == YU || var == CU   \
+ 	    || var == SE2)						      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0x60:							      \
+ 	if (var == CA || var == CA2 || var == IT || var == JP_OCR_B	      \
+ 	    || var == YU || var == HU || var == FR || var == SE2)	      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0x7b:							      \
+ 	if (var == CA || var == CA2 || var == DE || var == DK || var == ES    \
+@@ -495,14 +495,14 @@ gconv_end (struct __gconv_step *data)
+ 	    || var == CU || var == FR || var == FR1 || var == NO	      \
+ 	    || var == NO2 || var == PT || var == PT2 || var == SE	      \
+ 	    || var == SE2)						      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0x7c:							      \
+ 	if (var == CA || var == CA2 || var == DE || var == DK || var == ES    \
+ 	    || var == ES2 || var == IT || var == YU || var == HU || var == CU \
+ 	    || var == FR || var == FR1 || var == NO || var == PT	      \
+ 	    || var == PT2 || var == SE || var == SE2)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	else if (var == NO2)						      \
+ 	  ch = 0x7e;							      \
+ 	break;								      \
+@@ -511,7 +511,7 @@ gconv_end (struct __gconv_step *data)
+ 	    || var == ES2 || var == IT || var == YU || var == HU || var == CU \
+ 	    || var == FR || var == FR1 || var == NO || var == NO2	      \
+ 	    || var == PT || var == PT2 || var == SE || var == SE2)	      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0x7e:							      \
+ 	if (var == GB || var == CA || var == CA2 || var == DE || var == ES2   \
+@@ -519,21 +519,21 @@ gconv_end (struct __gconv_step *data)
+ 	    || var == YU || var == HU || var == CU || var == FR || var == FR1 \
+ 	    || var == NO || var == NO2 || var == PT || var == SE	      \
+ 	    || var == SE2)						      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xa1:							      \
+ 	if (var != ES && var != ES2 && var != CU)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5b;							      \
+ 	break;								      \
+       case 0xa3:							      \
+ 	if (var != GB && var != ES && var != IT && var != FR && var != FR1)   \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x23;							      \
+ 	break;								      \
+       case 0xa4:							      \
+ 	if (var != HU && var != CU && var != SE && var != SE2)		      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x24;							      \
+ 	break;								      \
+       case 0xa5:							      \
+@@ -542,7 +542,7 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == JP || var == JP_OCR_B)				      \
+ 	  ch = 0x5c;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xa7:							      \
+ 	if (var == DE || var == ES || var == IT || var == PT)		      \
+@@ -552,11 +552,11 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == NO2)						      \
+ 	  ch = 0x23;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xa8:							      \
+ 	if (var != ES2 && var != CU && var != FR && var != FR1)		      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7e;							      \
+ 	break;								      \
+       case 0xb0:							      \
+@@ -567,7 +567,7 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == PT)						      \
+ 	  ch = 0x7e;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xb4:							      \
+ 	if (var == ES2 || var == CU)					      \
+@@ -575,11 +575,11 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == PT2)						      \
+ 	  ch = 0x40;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xb5:							      \
+ 	if (var != FR)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x60;							      \
+ 	break;								      \
+       case 0xbf:							      \
+@@ -588,31 +588,31 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == ES2 || var == CU)				      \
+ 	  ch = 0x5e;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xc1:							      \
+ 	if (var != HU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x40;							      \
+ 	break;								      \
+       case 0xc3:							      \
+ 	if (var != PT && var != PT2)					      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5b;							      \
+ 	break;								      \
+       case 0xc4:							      \
+ 	if (var != DE && var != SE && var != SE2)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5b;							      \
+ 	break;								      \
+       case 0xc5:							      \
+ 	if (var != DK && var != NO && var != NO2 && var != SE && var != SE2)  \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5d;							      \
+ 	break;								      \
+       case 0xc6:							      \
+ 	if (var != DK && var != NO && var != NO2)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5b;							      \
+ 	break;								      \
+       case 0xc7:							      \
+@@ -621,7 +621,7 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == PT || var == PT2)				      \
+ 	  ch = 0x5c;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xc9:							      \
+ 	if (var == CA2)							      \
+@@ -631,26 +631,26 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == SE2)						      \
+ 	  ch = 0x40;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xd1:							      \
+ 	if (var != ES && var != ES2 && var != CU)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5c;							      \
+ 	break;								      \
+       case 0xd5:							      \
+ 	if (var != PT && var != PT2)					      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5d;							      \
+ 	break;								      \
+       case 0xd6:							      \
+ 	if (var != DE && var != HU && var != SE && var != SE2)		      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5c;							      \
+ 	break;								      \
+       case 0xd8:							      \
+ 	if (var != DK && var != NO && var != NO2)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5c;							      \
+ 	break;								      \
+       case 0xdc:							      \
+@@ -659,11 +659,11 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == SE2)						      \
+ 	  ch = 0x5e;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xdf:							      \
+ 	if (var != DE)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7e;							      \
+ 	break;								      \
+       case 0xe0:							      \
+@@ -672,36 +672,36 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == IT)						      \
+ 	  ch = 0x7b;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xe1:							      \
+ 	if (var != HU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x60;							      \
+ 	break;								      \
+       case 0xe2:							      \
+ 	if (var != CA && var != CA2)					      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5b;							      \
+ 	break;								      \
+       case 0xe3:							      \
+ 	if (var != PT && var != PT2)					      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7b;							      \
+ 	break;								      \
+       case 0xe4:							      \
+ 	if (var != DE && var != SE && var != SE2)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7b;							      \
+ 	break;								      \
+       case 0xe5:							      \
+ 	if (var != DK && var != NO && var != NO2 && var != SE && var != SE2)  \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7d;							      \
+ 	break;								      \
+       case 0xe6:							      \
+ 	if (var != DK && var != NO && var != NO2)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7b;							      \
+ 	break;								      \
+       case 0xe7:							      \
+@@ -712,11 +712,11 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == PT || var == PT2)				      \
+ 	  ch = 0x7c;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xe8:							      \
+ 	if (var != CA && var != CA2 && var != IT && var != FR && var != FR1)  \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7d;							      \
+ 	break;								      \
+       case 0xe9:							      \
+@@ -727,51 +727,51 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == SE2)						      \
+ 	  ch = 0x60;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xea:							      \
+ 	if (var != CA && var != CA2)					      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5d;							      \
+ 	break;								      \
+       case 0xec:							      \
+ 	if (var != IT)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7e;							      \
+ 	break;								      \
+       case 0xee:							      \
+ 	if (var != CA)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5e;							      \
+ 	break;								      \
+       case 0xf1:							      \
+ 	if (var != ES && var != ES2 && var != CU)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7c;							      \
+ 	break;								      \
+       case 0xf2:							      \
+ 	if (var != IT)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7c;							      \
+ 	break;								      \
+       case 0xf4:							      \
+ 	if (var != CA && var != CA2)					      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x60;							      \
+ 	break;								      \
+       case 0xf5:							      \
+ 	if (var != PT && var != PT2)					      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7d;							      \
+ 	break;								      \
+       case 0xf6:							      \
+ 	if (var != DE && var != HU && var != SE && var != SE2)		      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7c;							      \
+ 	break;								      \
+       case 0xf8:							      \
+ 	if (var != DK && var != NO && var != NO2)			      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7c;							      \
+ 	break;								      \
+       case 0xf9:							      \
+@@ -780,11 +780,11 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == IT)						      \
+ 	  ch = 0x60;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0xfb:							      \
+ 	if (var != CA && var != CA2)					      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7e;							      \
+ 	break;								      \
+       case 0xfc:							      \
+@@ -793,93 +793,93 @@ gconv_end (struct __gconv_step *data)
+ 	else if (var == SE2)						      \
+ 	  ch = 0x7e;							      \
+ 	else								      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	break;								      \
+       case 0x160:							      \
+ 	if (var != YU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5b;							      \
+ 	break;								      \
+       case 0x106:							      \
+ 	if (var != YU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5d;							      \
+ 	break;								      \
+       case 0x107:							      \
+ 	if (var != YU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7d;							      \
+ 	break;								      \
+       case 0x10c:							      \
+ 	if (var != YU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5e;							      \
+ 	break;								      \
+       case 0x10d:							      \
+ 	if (var != YU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7e;							      \
+ 	break;								      \
+       case 0x110:							      \
+ 	if (var != YU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5c;							      \
+ 	break;								      \
+       case 0x111:							      \
+ 	if (var != YU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7c;							      \
+ 	break;								      \
+       case 0x161:							      \
+ 	if (var != YU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7b;							      \
+ 	break;								      \
+       case 0x17d:							      \
+ 	if (var != YU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x40;							      \
+ 	break;								      \
+       case 0x17e:							      \
+ 	if (var != YU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x60;							      \
+ 	break;								      \
+       case 0x2dd:							      \
+ 	if (var != HU)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7e;							      \
+ 	break;								      \
+       case 0x2022:							      \
+ 	if (var != ES2)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x40;							      \
+ 	break;								      \
+       case 0x203e:							      \
+ 	if (var != GB && var != CN && var != JP && var != NO && var != SE)    \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x7e;							      \
+ 	break;								      \
+       case 0x20a9:							      \
+ 	if (var != KR)							      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5c;							      \
+ 	break;								      \
+       case 0x2329:							      \
+ 	if (var != JP_OCR_B)						      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5b;							      \
+ 	break;								      \
+       case 0x232a:							      \
+ 	if (var != JP_OCR_B)						      \
+-	  failure = __GCONV_ILLEGAL_INPUT;				      \
++	  failure = __gconv_mark_illegal_input (step_data);		      \
+ 	ch = 0x5d;							      \
+ 	break;								      \
+       default:								      \
+ 	if (__glibc_unlikely (ch > 0x7f))				      \
+ 	  {								      \
+ 	    UNICODE_TAG_HANDLER (ch, 4);				      \
+-	    failure = __GCONV_ILLEGAL_INPUT;				      \
++	    failure = __gconv_mark_illegal_input (step_data);		      \
+ 	  }								      \
+ 	break;								      \
+       }									      \
+diff -Nrup a/iconvdata/unicode.c b/iconvdata/unicode.c
+--- a/iconvdata/unicode.c	2021-08-01 21:33:43.000000000 -0400
++++ b/iconvdata/unicode.c	2024-11-20 11:11:29.582105398 -0500
+@@ -164,7 +164,7 @@ gconv_end (struct __gconv_step *data)
+ 	   surrogates pass through, attackers could make a security	      \
+ 	   hole exploit by synthesizing any desired plane 1-16		      \
+ 	   character.  */						      \
+-	result = __GCONV_ILLEGAL_INPUT;					      \
++	result = __gconv_mark_illegal_input (step_data);		      \
+ 	if (! ignore_errors_p ())					      \
+ 	  break;							      \
+ 	inptr += 4;							      \
+diff -Nrup a/iconvdata/utf-16.c b/iconvdata/utf-16.c
+--- a/iconvdata/utf-16.c	2021-08-01 21:33:43.000000000 -0400
++++ b/iconvdata/utf-16.c	2024-11-20 11:11:29.582105398 -0500
+@@ -207,7 +207,7 @@ gconv_end (struct __gconv_step *data)
+ 	   We must catch this.  If we let surrogates pass through,	      \
+ 	   attackers could make a security hole exploit by		      \
+ 	   synthesizing any desired plane 1-16 character.  */		      \
+-	result = __GCONV_ILLEGAL_INPUT;					      \
++	result = __gconv_mark_illegal_input (step_data);		      \
+ 	if (! ignore_errors_p ())					      \
+ 	  break;							      \
+ 	inptr += 4;							      \
+diff -Nrup a/iconvdata/utf-32.c b/iconvdata/utf-32.c
+--- a/iconvdata/utf-32.c	2021-08-01 21:33:43.000000000 -0400
++++ b/iconvdata/utf-32.c	2024-11-20 11:11:29.582105398 -0500
+@@ -207,7 +207,7 @@ gconv_end (struct __gconv_step *data)
+ 	   We must catch this.  If we let surrogates pass through,	      \
+ 	   attackers could make a security hole exploit by		      \
+ 	   generating "irregular UTF-32" sequences.  */			      \
+-	result = __GCONV_ILLEGAL_INPUT;					      \
++	result = __gconv_mark_illegal_input (step_data);		      \
+ 	if (! ignore_errors_p ())					      \
+ 	  break;							      \
+ 	inptr += 4;							      \

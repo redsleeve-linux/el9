@@ -1,0 +1,28 @@
+commit b2c3ee3724900975deaf5eae57640bb0c2d7315e
+Author: Andreas Schwab <schwab@suse.de>
+Date:   Tue Jun 4 11:01:11 2024 +0200
+
+    Remove memory leak in fdopen (bug 31840)
+    
+    Deallocate the memory for the FILE structure when seeking to the end fails
+    in append mode.
+    
+    Fixes: ea33158c96 ("Fix offset caching for streams and use it for ftell (BZ #16680)")
+
+diff --git a/libio/iofdopen.c b/libio/iofdopen.c
+index 498791b2872f4b93..e3596fa4c91644b7 100644
+--- a/libio/iofdopen.c
++++ b/libio/iofdopen.c
+@@ -156,7 +156,11 @@ _IO_new_fdopen (int fd, const char *mode)
+     {
+       off64_t new_pos = _IO_SYSSEEK (&new_f->fp.file, 0, _IO_seek_end);
+       if (new_pos == _IO_pos_BAD && errno != ESPIPE)
+-	return NULL;
++	{
++	  _IO_un_link (&new_f->fp);
++	  free (new_f);
++	  return NULL;
++	}
+     }
+   return &new_f->fp.file;
+ }

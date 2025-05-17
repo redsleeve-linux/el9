@@ -1,0 +1,34 @@
+commit c9154cad66aa0b11ede62cc9190d3485c5ef6941
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Sep 12 18:26:04 2024 +0200
+
+    support: Fix Hurd build of tst-support_readdir
+    
+    Check for the availability of the d_off member at compile time, not
+    run time.
+    
+    Fixes commit 1251e9ea49fba9f53bbf4f290f3db90c01931fa7
+    ("support: Add <support/readdir.h>").
+
+diff --git a/support/tst-support_readdir.c b/support/tst-support_readdir.c
+index c0639571c7c3f516..66be94fa802e727a 100644
+--- a/support/tst-support_readdir.c
++++ b/support/tst-support_readdir.c
+@@ -39,10 +39,13 @@ do_test (void)
+       e.d_name = NULL;
+       TEST_VERIFY (support_readdir (stream, op, &e));
+       TEST_COMPARE (e.d_ino, reference->d_ino);
+-      if (support_readdir_offset_width (op) != 0)
+-        TEST_COMPARE (e.d_off, reference->d_off);
+-      else
+-        TEST_COMPARE (e.d_off, 0);
++#ifdef _DIRENT_HAVE_D_OFF
++      TEST_VERIFY (support_readdir_offset_width (op) != 0);
++      TEST_COMPARE (e.d_off, reference->d_off);
++#else
++      TEST_COMPARE (support_readdir_offset_width (op), 0);
++      TEST_COMPARE (e.d_off, 0);
++#endif
+       TEST_COMPARE (e.d_type, reference->d_type);
+       TEST_COMPARE_STRING (e.d_name, reference->d_name);
+       free (e.d_name);

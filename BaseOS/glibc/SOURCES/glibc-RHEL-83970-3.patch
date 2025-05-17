@@ -1,0 +1,73 @@
+commit b3a6bd625ce96bcec0e5d41b9835b1367d97e548
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Mon Jan 20 09:57:09 2025 +0100
+
+    Linux: Do not check unused bytes after sched_getattr in tst-sched_setattr
+    
+    Linux 6.13 was released with a change that overwrites those bytes.
+    This means that the check_unused subtest fails.
+    
+    Update the manual accordingly.
+    
+    Tested-by: Xi Ruoyao <xry111@xry111.site>
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff --git a/manual/resource.texi b/manual/resource.texi
+index bddff67d3d1e414e..f9fba2ad9cd84c14 100644
+--- a/manual/resource.texi
++++ b/manual/resource.texi
+@@ -1058,9 +1058,9 @@ available in the future.
+ 
+ Upon success, @code{@var{attr}->size} contains the size of the structure
+ version used by the kernel.  Fields with offsets greater or equal to
+-@code{@var{attr}->size} are not updated by the kernel.  To obtain
+-predictable values for unknown fields, use @code{memset} to set
+-all @var{size} bytes to zero prior to calling @code{sched_getattr}.
++@code{@var{attr}->size} may not be overwritten by the kernel.  To obtain
++predictable values for unknown fields, use @code{memset} to set all
++@var{size} bytes to zero prior to calling @code{sched_getattr}.
+ 
+ On failure, @code{sched_getattr} returns @math{-1} and sets @code{errno}.
+ If @code{errno} is @code{E2BIG}, this means that the buffer is not large
+diff --git a/sysdeps/unix/sysv/linux/tst-sched_setattr.c b/sysdeps/unix/sysv/linux/tst-sched_setattr.c
+index fbb73c31a72de311..6b0913aebae96abe 100644
+--- a/sysdeps/unix/sysv/linux/tst-sched_setattr.c
++++ b/sysdeps/unix/sysv/linux/tst-sched_setattr.c
+@@ -33,14 +33,6 @@ union
+   unsigned char padding[4096];
+ } u;
+ 
+-static void
+-check_unused (void)
+-{
+-  TEST_VERIFY (u.attr.size < sizeof (u));
+-  for (unsigned int i = u.attr.size; i < sizeof (u); ++i)
+-    TEST_COMPARE (u.padding[i], 0xcc);
+-}
+-
+ static int
+ do_test (void)
+ {
+@@ -53,7 +45,6 @@ do_test (void)
+   /* Compiler barrier to bypass write access attribute.  */
+   volatile unsigned int size = sizeof (u);
+   TEST_COMPARE (sched_getattr (0, (struct sched_attr *) &u, size, 0), 0);
+-  check_unused ();
+   TEST_COMPARE (sched_setattr (0, &u.attr, 0), 0); /* Apply unchanged.  */
+ 
+   /* Try to switch to the SCHED_OTHER policy.   */
+@@ -81,14 +72,12 @@ do_test (void)
+   memset (&u, 0xcc, sizeof (u));
+   TEST_COMPARE (sched_getattr (0, (struct sched_attr *) &u, size, 0), 0);
+   TEST_COMPARE (u.attr.sched_policy, SCHED_OTHER);
+-  check_unused ();
+ 
+   /* Raise the niceless level to 19 and observe its effect.  */
+   TEST_COMPARE (nice (19), 19);
+   TEST_COMPARE (sched_getattr (0, &u.attr, sizeof (u.attr), 0), 0);
+   TEST_COMPARE (u.attr.sched_policy, SCHED_OTHER);
+   TEST_COMPARE (u.attr.sched_nice, 19);
+-  check_unused ();
+ 
+   /* Invalid buffer arguments result in EINVAL (not EFAULT).  */
+   {

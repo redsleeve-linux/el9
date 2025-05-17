@@ -1,0 +1,79 @@
+commit 3e4a01870ef9605ccf6475215a4b32aa86d5d206
+Author: Aaron Merey <amerey@redhat.com>
+Date:   Thu Aug 29 12:02:25 2024 -0400
+
+    Test fclose on an unopened file.
+    
+    Add new file libio/tst-fclosed-unopened.c that tests whether fclose on
+    an unopened file returns EOF.
+    
+    Calling fclose on unopened files normally causes a use-after-free bug,
+    however the standard streams are an exception since they are not
+    deallocated by fclose.
+    
+    fclose returning EOF for unopened files is not part of the external
+    contract but there are dependancies on this behaviour.  For example,
+    gnulib's close_stdout in lib/closeout.c.
+    
+    Tested for x86_64.
+    
+    Signed-off-by: Aaron Merey <amerey@redhat.com>
+
+diff --git a/libio/Makefile b/libio/Makefile
+index 2ef144268af98f34..f0ecb6b775a543af 100644
+--- a/libio/Makefile
++++ b/libio/Makefile
+@@ -76,6 +76,7 @@ tests = \
+   tst-eof \
+   tst-ext \
+   tst-ext2 \
++  tst-fclose-unopened \
+   tst-fdopen-seek-failure \
+   tst-fgetc-after-eof \
+   tst-fgetwc \
+diff --git a/libio/tst-fclose-unopened.c b/libio/tst-fclose-unopened.c
+new file mode 100644
+index 0000000000000000..1f1cad042d8d72bf
+--- /dev/null
++++ b/libio/tst-fclose-unopened.c
+@@ -0,0 +1,40 @@
++/* Test using fclose on an unopened file.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <support/check.h>
++
++/* Verify that fclose on an unopened file returns EOF.  This is not part
++   of the fclose external contract but there are dependancies on this
++   behaviour.  */
++
++static int
++do_test (void)
++{
++  TEST_COMPARE (fclose (stdin), 0);
++
++  /* Attempt to close the unopened file and verify that EOF is returned.
++     Calling fclose on a file twice normally causes a use-after-free bug,
++     however the standard streams are an exception since they are not
++     deallocated by fclose.  */
++  TEST_COMPARE (fclose (stdin), EOF);
++
++  return 0;
++}
++
++#include <support/test-driver.c>

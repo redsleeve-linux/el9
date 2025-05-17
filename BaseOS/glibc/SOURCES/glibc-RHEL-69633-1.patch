@@ -1,0 +1,87 @@
+commit f745d78e2628cd5b13ca119ae0c0e21d08ad1906
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Fri Nov 8 01:53:48 2024 +0000
+
+    Avoid uninitialized result in sem_open when file does not exist
+    
+    A static analyzer apparently reported an uninitialized use of the
+    variable result in sem_open in the case where the file is required to
+    exist but does not exist.
+    
+    The report appears to be correct; set result to SEM_FAILED in that
+    case, and add a test for it.
+    
+    Note: the test passes for me even without the sem_open fix, I guess
+    because result happens to get value SEM_FAILED (i.e. 0) when
+    uninitialized.
+    
+    Tested for x86_64.
+
+Conflicts:
+	sysdeps/pthread/Makefile (new test added)
+
+diff --git a/sysdeps/pthread/Makefile b/sysdeps/pthread/Makefile
+index 2d4cb1ac62d15f4c..de8b66bc3b6bf6ad 100644
+--- a/sysdeps/pthread/Makefile
++++ b/sysdeps/pthread/Makefile
+@@ -128,6 +128,7 @@ tests += tst-cnd-basic tst-mtx-trylock tst-cnd-broadcast \
+ 	 tst-pthread_kill-exiting \
+ 	 tst-cancel30 \
+   tst-spin5 \
++  tst-sem17 \
+   tst-sem19 \
+   tst-join16 \
+ 	 # tests
+diff --git a/sysdeps/pthread/sem_open.c b/sysdeps/pthread/sem_open.c
+index 770ab17cdbb47b83..124d95dce4186ae7 100644
+--- a/sysdeps/pthread/sem_open.c
++++ b/sysdeps/pthread/sem_open.c
+@@ -75,6 +75,7 @@ __sem_open (const char *name, int oflag, ...)
+ 	    goto try_create;
+ 
+ 	  /* Return.  errno is already set.  */
++	  result = SEM_FAILED;
+ 	}
+       else
+ 	/* Check whether we already have this semaphore mapped and
+diff --git a/sysdeps/pthread/tst-sem17.c b/sysdeps/pthread/tst-sem17.c
+new file mode 100644
+index 0000000000000000..c3f05d196f4ef17a
+--- /dev/null
++++ b/sysdeps/pthread/tst-sem17.c
+@@ -0,0 +1,35 @@
++/* Test sem_open with missing file.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <semaphore.h>
++
++#include <support/check.h>
++
++int
++do_test (void)
++{
++  sem_unlink ("/glibc-tst-sem17");
++  errno = 0;
++  sem_t *s = sem_open ("/glibc-tst-sem17", 0);
++  TEST_VERIFY (s == SEM_FAILED);
++  TEST_COMPARE (errno, ENOENT);
++  return 0;
++}
++
++#include <support/test-driver.c>

@@ -1,0 +1,1527 @@
+commit 6ae9836ed24e4dc625b452a1472f1c150f3058cf
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Fri Nov 29 16:43:56 2024 +0000
+
+    Add test of ELF hash collisions
+    
+    Add tests that the dynamic linker works correctly with symbol names
+    involving hash collisions, for both choices of hash style (and
+    --hash-style=both as well).  I note that there weren't actually any
+    previous tests using --hash-style (so tests would only cover the
+    default linker configuration in that regard).  Also test symbol
+    versions involving hash collisions.
+    
+    Tested for x86_64.
+
+Conflicts:
+	elf/Makefile (fixup context)
+
+diff --git a/elf/Makefile b/elf/Makefile
+index ff59287519433b8d..7d686ca7d190c921 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -414,6 +414,12 @@ tests += \
+   tst-glibc-hwcaps-mask \
+   tst-glibc-hwcaps-prepend \
+   tst-global1 \
++  tst-hash-collision1 \
++  tst-hash-collision1-gnu \
++  tst-hash-collision1-sysv \
++  tst-hash-collision2 \
++  tst-hash-collision2-gnu \
++  tst-hash-collision2-sysv \
+   tst-initfinilazyfail \
+   tst-initorder \
+   tst-initorder2 \
+@@ -488,6 +494,7 @@ tests-internal += \
+   tst-create_format1 \
+   tst-dl-hwcaps_split \
+   tst-dlmopen2 \
++  tst-hash-collision3 \
+   tst-ptrguard1 \
+   tst-stackguard1 \
+   tst-tls-surplus \
+@@ -770,6 +777,16 @@ modules-names = \
+   tst-filterobj-filtee \
+   tst-filterobj-flt \
+   tst-finilazyfailmod \
++  tst-hash-collision1-mod \
++  tst-hash-collision1-mod-gnu \
++  tst-hash-collision1-mod-sysv \
++  tst-hash-collision2-mod1 \
++  tst-hash-collision2-mod1-gnu \
++  tst-hash-collision2-mod1-sysv \
++  tst-hash-collision2-mod2 \
++  tst-hash-collision2-mod2-gnu \
++  tst-hash-collision2-mod2-sysv \
++  tst-hash-collision3-mod \
+   tst-initlazyfailmod \
+   tst-initorder2a \
+   tst-initorder2b \
+@@ -923,7 +940,8 @@ modules-names += \
+ 
+ # Most modules build with _ISOMAC defined, but those filtered out
+ # depend on internal headers.
+-modules-names-tests = $(filter-out ifuncmod% tst-tlsmod%,\
++modules-names-tests = $(filter-out ifuncmod% tst-tlsmod% \
++				   tst-hash-collision3-mod,\
+ 				   $(modules-names))
+ 
+ ifeq (yes,$(have-mtls-dialect-gnu2))
+@@ -2781,3 +2799,25 @@ $(objpfx)tst-dlopen-tlsreinit3.out: $(objpfx)tst-auditmod1.so
+ tst-dlopen-tlsreinit3-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
+ $(objpfx)tst-dlopen-tlsreinit4.out: $(objpfx)tst-auditmod1.so
+ tst-dlopen-tlsreinit4-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
++
++LDFLAGS-tst-hash-collision1-mod.so = -Wl,--hash-style=both
++$(objpfx)tst-hash-collision1: $(objpfx)tst-hash-collision1-mod.so
++LDFLAGS-tst-hash-collision1-mod-gnu.so = -Wl,--hash-style=gnu
++$(objpfx)tst-hash-collision1-gnu: $(objpfx)tst-hash-collision1-mod-gnu.so
++LDFLAGS-tst-hash-collision1-mod-sysv.so = -Wl,--hash-style=sysv
++$(objpfx)tst-hash-collision1-sysv: $(objpfx)tst-hash-collision1-mod-sysv.so
++LDFLAGS-tst-hash-collision2-mod1.so = -Wl,--hash-style=both
++LDFLAGS-tst-hash-collision2-mod2.so = -Wl,--hash-style=both
++$(objpfx)tst-hash-collision2: $(objpfx)tst-hash-collision2-mod1.so \
++  $(objpfx)tst-hash-collision2-mod2.so
++LDFLAGS-tst-hash-collision2-mod1-gnu.so = -Wl,--hash-style=gnu
++LDFLAGS-tst-hash-collision2-mod2-gnu.so = -Wl,--hash-style=gnu
++$(objpfx)tst-hash-collision2-gnu: $(objpfx)tst-hash-collision2-mod1-gnu.so \
++  $(objpfx)tst-hash-collision2-mod2-gnu.so
++LDFLAGS-tst-hash-collision2-mod1-sysv.so = -Wl,--hash-style=sysv
++LDFLAGS-tst-hash-collision2-mod2-sysv.so = -Wl,--hash-style=sysv
++$(objpfx)tst-hash-collision2-sysv: $(objpfx)tst-hash-collision2-mod1-sysv.so \
++  $(objpfx)tst-hash-collision2-mod2-sysv.so
++LDFLAGS-tst-hash-collision3-mod.so = \
++  -Wl,--version-script=tst-hash-collision3-mod.map
++$(objpfx)tst-hash-collision3: $(objpfx)tst-hash-collision3-mod.so
+diff --git a/elf/tst-hash-collision1-gnu.c b/elf/tst-hash-collision1-gnu.c
+new file mode 100644
+index 0000000000000000..92f0862e914a9dbe
+--- /dev/null
++++ b/elf/tst-hash-collision1-gnu.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision1.c"
+diff --git a/elf/tst-hash-collision1-mod-gnu.c b/elf/tst-hash-collision1-mod-gnu.c
+new file mode 100644
+index 0000000000000000..e4d03dd9bfd3520f
+--- /dev/null
++++ b/elf/tst-hash-collision1-mod-gnu.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision1-mod.c"
+diff --git a/elf/tst-hash-collision1-mod-sysv.c b/elf/tst-hash-collision1-mod-sysv.c
+new file mode 100644
+index 0000000000000000..e4d03dd9bfd3520f
+--- /dev/null
++++ b/elf/tst-hash-collision1-mod-sysv.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision1-mod.c"
+diff --git a/elf/tst-hash-collision1-mod.c b/elf/tst-hash-collision1-mod.c
+new file mode 100644
+index 0000000000000000..c848af8ae103f8ab
+--- /dev/null
++++ b/elf/tst-hash-collision1-mod.c
+@@ -0,0 +1,448 @@
++/* Test ELF hash collisions: shared object.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/check.h>
++
++/* Names with hash collisions for classic ELF hash.  */
++
++int
++foo (void)
++{
++  return 1;
++}
++
++int
++Hxxxynpfoo (void)
++{
++  return 2;
++}
++
++int
++HxxxynpHxxxynpfoo (void)
++{
++  return 3;
++}
++
++int
++HxxxynpHxxxynpHxxxynpfoo (void)
++{
++  return 4;
++}
++
++int
++HxxxynpHxxxynpHxxxynpHxxxynpfoo (void)
++{
++  return 5;
++}
++
++
++/* Names with hash collisions for GNU hash.  */
++
++int
++bar (void)
++{
++  return 10;
++}
++
++int
++gliinmbar (void)
++{
++  return 9;
++}
++
++int
++gliinmgliinmbar (void)
++{
++  return 8;
++}
++
++int
++gliinmgliinmgliinmbar (void)
++{
++  return 7;
++}
++
++int
++gliinmgliinmgliinmgliinmbar (void)
++{
++  return 6;
++}
++
++
++/* Names with specific hash values for each hash (see
++   tst-hash-collision1.c for details).  */
++
++int
++Hxxxynp (void)
++{
++  return 11;
++}
++
++int
++HxxxypP (void)
++{
++  return 12;
++}
++
++int
++Hxxyinp (void)
++{
++  return 13;
++}
++
++int
++HxxyipP (void)
++{
++  return 14;
++}
++
++int
++HxxykNp (void)
++{
++  return 15;
++}
++
++int
++Hxxxyoa (void)
++{
++  return 16;
++}
++
++int
++HxxxypQ (void)
++{
++  return 17;
++}
++
++int
++HxxxyqA (void)
++{
++  return 18;
++}
++
++int
++HxxxzaA (void)
++{
++  return 19;
++}
++
++int
++Hxxxz_a (void)
++{
++  return 20;
++}
++
++int
++Hxxxyob (void)
++{
++  return 21;
++}
++
++int
++HxxxypR (void)
++{
++  return 22;
++}
++
++int
++HxxxyqB (void)
++{
++  return 23;
++}
++
++int
++HxxxzaB (void)
++{
++  return 24;
++}
++
++int
++Hxxxz_b (void)
++{
++  return 25;
++}
++
++int
++glidpk (void)
++{
++  return 26;
++}
++
++int
++glidqJ (void)
++{
++  return 27;
++}
++
++int
++glieOk (void)
++{
++  return 28;
++}
++
++int
++gliePJ (void)
++{
++  return 29;
++}
++
++int
++gljCpk (void)
++{
++  return 30;
++}
++
++int
++glidpl (void)
++{
++  return 31;
++}
++
++int
++glidqK (void)
++{
++  return 32;
++}
++
++int
++glieOl (void)
++{
++  return 33;
++}
++
++int
++gliePK (void)
++{
++  return 34;
++}
++
++int
++gljCpl (void)
++{
++  return 35;
++}
++
++int
++glidpm (void)
++{
++  return 36;
++}
++
++int
++glidqL (void)
++{
++  return 37;
++}
++
++int
++glieOm (void)
++{
++  return 38;
++}
++
++int
++gliePL (void)
++{
++  return 39;
++}
++
++int
++gljCpm (void)
++{
++  return 40;
++}
++
++int
++AdfmZru (void)
++{
++  return 41;
++}
++
++int
++AdfmZsT (void)
++{
++  return 42;
++}
++
++int
++AdfmZt3 (void)
++{
++  return 43;
++}
++
++int
++Adfn9ru (void)
++{
++  return 44;
++}
++
++int
++Adfn9sT (void)
++{
++  return 45;
++}
++
++int
++AdfmZrv (void)
++{
++  return 46;
++}
++
++int
++AdfmZsU (void)
++{
++  return 47;
++}
++
++int
++AdfmZt4 (void)
++{
++  return 48;
++}
++
++int
++Adfn9rv (void)
++{
++  return 49;
++}
++
++int
++Adfn9sU (void)
++{
++  return 50;
++}
++
++int
++AdfmZrw (void)
++{
++  return 51;
++}
++
++int
++AdfmZsV (void)
++{
++  return 52;
++}
++
++int
++AdfmZt5 (void)
++{
++  return 53;
++}
++
++int
++Adfn9rw (void)
++{
++  return 54;
++}
++
++int
++Adfn9sV (void)
++{
++  return 55;
++}
++
++int
++AdfmZrx (void)
++{
++  return 56;
++}
++
++int
++AdfmZsW (void)
++{
++  return 57;
++}
++
++int
++AdfmZt6 (void)
++{
++  return 58;
++}
++
++int
++Adfn9rx (void)
++{
++  return 59;
++}
++
++int
++Adfn9sW (void)
++{
++  return 60;
++}
++
++int
++glidpi (void)
++{
++  return 61;
++}
++
++int
++glidqH (void)
++{
++  return 62;
++}
++
++int
++glieOi (void)
++{
++  return 63;
++}
++
++int
++gliePH (void)
++{
++  return 64;
++}
++
++int
++gljCpi (void)
++{
++  return 65;
++}
++
++int
++glidpj (void)
++{
++  return 66;
++}
++
++int
++glidqI (void)
++{
++  return 67;
++}
++
++int
++glieOj (void)
++{
++  return 68;
++}
++
++int
++gliePI (void)
++{
++  return 69;
++}
++
++int
++gljCpj (void)
++{
++  return 70;
++}
+diff --git a/elf/tst-hash-collision1-sysv.c b/elf/tst-hash-collision1-sysv.c
+new file mode 100644
+index 0000000000000000..92f0862e914a9dbe
+--- /dev/null
++++ b/elf/tst-hash-collision1-sysv.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision1.c"
+diff --git a/elf/tst-hash-collision1.c b/elf/tst-hash-collision1.c
+new file mode 100644
+index 0000000000000000..80ab0da8f56ca9a3
+--- /dev/null
++++ b/elf/tst-hash-collision1.c
+@@ -0,0 +1,196 @@
++/* Test ELF hash collisions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/check.h>
++
++/* Names with hash collisions for classic ELF hash.  */
++extern int foo (void);
++extern int Hxxxynpfoo (void);
++extern int HxxxynpHxxxynpfoo (void);
++extern int HxxxynpHxxxynpHxxxynpfoo (void);
++extern int HxxxynpHxxxynpHxxxynpHxxxynpfoo (void);
++
++/* Names with hash collisions for GNU hash.  */
++extern int bar (void);
++extern int gliinmbar (void);
++extern int gliinmgliinmbar (void);
++extern int gliinmgliinmgliinmbar (void);
++extern int gliinmgliinmgliinmgliinmbar (void);
++
++/* Classic ELF hash 0.  */
++extern int Hxxxynp (void);
++extern int HxxxypP (void);
++extern int Hxxyinp (void);
++extern int HxxyipP (void);
++extern int HxxykNp (void);
++
++/* Classic ELF hash 1.  */
++extern int Hxxxyoa (void);
++extern int HxxxypQ (void);
++extern int HxxxyqA (void);
++extern int HxxxzaA (void);
++extern int Hxxxz_a (void);
++
++/* Classic ELF hash 2.  */
++extern int Hxxxyob (void);
++extern int HxxxypR (void);
++extern int HxxxyqB (void);
++extern int HxxxzaB (void);
++extern int Hxxxz_b (void);
++
++/* GNU hash 0.  */
++extern int glidpk (void);
++extern int glidqJ (void);
++extern int glieOk (void);
++extern int gliePJ (void);
++extern int gljCpk (void);
++
++/* GNU hash 1.  */
++extern int glidpl (void);
++extern int glidqK (void);
++extern int glieOl (void);
++extern int gliePK (void);
++extern int gljCpl (void);
++
++/* GNU hash 2.  */
++extern int glidpm (void);
++extern int glidqL (void);
++extern int glieOm (void);
++extern int gliePL (void);
++extern int gljCpm (void);
++
++/* GNU hash 0x7ffffffe.  */
++extern int AdfmZru (void);
++extern int AdfmZsT (void);
++extern int AdfmZt3 (void);
++extern int Adfn9ru (void);
++extern int Adfn9sT (void);
++
++/* GNU hash 0x7fffffff.  */
++extern int AdfmZrv (void);
++extern int AdfmZsU (void);
++extern int AdfmZt4 (void);
++extern int Adfn9rv (void);
++extern int Adfn9sU (void);
++
++/* GNU hash 0x80000000.  */
++extern int AdfmZrw (void);
++extern int AdfmZsV (void);
++extern int AdfmZt5 (void);
++extern int Adfn9rw (void);
++extern int Adfn9sV (void);
++
++/* GNU hash 0x80000001.  */
++extern int AdfmZrx (void);
++extern int AdfmZsW (void);
++extern int AdfmZt6 (void);
++extern int Adfn9rx (void);
++extern int Adfn9sW (void);
++
++/* GNU hash 0xfffffffe.  */
++extern int glidpi (void);
++extern int glidqH (void);
++extern int glieOi (void);
++extern int gliePH (void);
++extern int gljCpi (void);
++
++/* GNU hash 0xffffffff.  */
++extern int glidpj (void);
++extern int glidqI (void);
++extern int glieOj (void);
++extern int gliePI (void);
++extern int gljCpj (void);
++
++
++int
++do_test (void)
++{
++  TEST_COMPARE (foo (), 1);
++  TEST_COMPARE (Hxxxynpfoo (), 2);
++  TEST_COMPARE (HxxxynpHxxxynpfoo (), 3);
++  TEST_COMPARE (HxxxynpHxxxynpHxxxynpfoo (), 4);
++  TEST_COMPARE (HxxxynpHxxxynpHxxxynpHxxxynpfoo (), 5);
++  TEST_COMPARE (gliinmgliinmgliinmgliinmbar (), 6);
++  TEST_COMPARE (gliinmgliinmgliinmbar (), 7);
++  TEST_COMPARE (gliinmgliinmbar (), 8);
++  TEST_COMPARE (gliinmbar (), 9);
++  TEST_COMPARE (bar (), 10);
++  TEST_COMPARE (Hxxxynp (), 11);
++  TEST_COMPARE (HxxxypP (), 12);
++  TEST_COMPARE (Hxxyinp (), 13);
++  TEST_COMPARE (HxxyipP (), 14);
++  TEST_COMPARE (HxxykNp (), 15);
++  TEST_COMPARE (Hxxxyoa (), 16);
++  TEST_COMPARE (HxxxypQ (), 17);
++  TEST_COMPARE (HxxxyqA (), 18);
++  TEST_COMPARE (HxxxzaA (), 19);
++  TEST_COMPARE (Hxxxz_a (), 20);
++  TEST_COMPARE (Hxxxyob (), 21);
++  TEST_COMPARE (HxxxypR (), 22);
++  TEST_COMPARE (HxxxyqB (), 23);
++  TEST_COMPARE (HxxxzaB (), 24);
++  TEST_COMPARE (Hxxxz_b (), 25);
++  TEST_COMPARE (glidpk (), 26);
++  TEST_COMPARE (glidqJ (), 27);
++  TEST_COMPARE (glieOk (), 28);
++  TEST_COMPARE (gliePJ (), 29);
++  TEST_COMPARE (gljCpk (), 30);
++  TEST_COMPARE (glidpl (), 31);
++  TEST_COMPARE (glidqK (), 32);
++  TEST_COMPARE (glieOl (), 33);
++  TEST_COMPARE (gliePK (), 34);
++  TEST_COMPARE (gljCpl (), 35);
++  TEST_COMPARE (glidpm (), 36);
++  TEST_COMPARE (glidqL (), 37);
++  TEST_COMPARE (glieOm (), 38);
++  TEST_COMPARE (gliePL (), 39);
++  TEST_COMPARE (gljCpm (), 40);
++  TEST_COMPARE (AdfmZru (), 41);
++  TEST_COMPARE (AdfmZsT (), 42);
++  TEST_COMPARE (AdfmZt3 (), 43);
++  TEST_COMPARE (Adfn9ru (), 44);
++  TEST_COMPARE (Adfn9sT (), 45);
++  TEST_COMPARE (AdfmZrv (), 46);
++  TEST_COMPARE (AdfmZsU (), 47);
++  TEST_COMPARE (AdfmZt4 (), 48);
++  TEST_COMPARE (Adfn9rv (), 49);
++  TEST_COMPARE (Adfn9sU (), 50);
++  TEST_COMPARE (AdfmZrw (), 51);
++  TEST_COMPARE (AdfmZsV (), 52);
++  TEST_COMPARE (AdfmZt5 (), 53);
++  TEST_COMPARE (Adfn9rw (), 54);
++  TEST_COMPARE (Adfn9sV (), 55);
++  TEST_COMPARE (AdfmZrx (), 56);
++  TEST_COMPARE (AdfmZsW (), 57);
++  TEST_COMPARE (AdfmZt6 (), 58);
++  TEST_COMPARE (Adfn9rx (), 59);
++  TEST_COMPARE (Adfn9sW (), 60);
++  TEST_COMPARE (glidpi (), 61);
++  TEST_COMPARE (glidqH (), 62);
++  TEST_COMPARE (glieOi (), 63);
++  TEST_COMPARE (gliePH (), 64);
++  TEST_COMPARE (gljCpi (), 65);
++  TEST_COMPARE (glidpj (), 66);
++  TEST_COMPARE (glidqI (), 67);
++  TEST_COMPARE (glieOj (), 68);
++  TEST_COMPARE (gliePI (), 69);
++  TEST_COMPARE (gljCpj (), 70);
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/elf/tst-hash-collision2-gnu.c b/elf/tst-hash-collision2-gnu.c
+new file mode 100644
+index 0000000000000000..92f0862e914a9dbe
+--- /dev/null
++++ b/elf/tst-hash-collision2-gnu.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision1.c"
+diff --git a/elf/tst-hash-collision2-mod1-gnu.c b/elf/tst-hash-collision2-mod1-gnu.c
+new file mode 100644
+index 0000000000000000..9aa5cc1477166c0f
+--- /dev/null
++++ b/elf/tst-hash-collision2-mod1-gnu.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision2-mod1.c"
+diff --git a/elf/tst-hash-collision2-mod1-sysv.c b/elf/tst-hash-collision2-mod1-sysv.c
+new file mode 100644
+index 0000000000000000..9aa5cc1477166c0f
+--- /dev/null
++++ b/elf/tst-hash-collision2-mod1-sysv.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision2-mod1.c"
+diff --git a/elf/tst-hash-collision2-mod1.c b/elf/tst-hash-collision2-mod1.c
+new file mode 100644
+index 0000000000000000..6adf75eb35117d69
+--- /dev/null
++++ b/elf/tst-hash-collision2-mod1.c
+@@ -0,0 +1,280 @@
++/* Test ELF hash collisions: shared object 1.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/check.h>
++
++/* Names with hash collisions for classic ELF hash.  */
++
++int
++foo (void)
++{
++  return 1;
++}
++
++int
++Hxxxynpfoo (void)
++{
++  return 2;
++}
++
++int
++HxxxynpHxxxynpfoo (void)
++{
++  return 3;
++}
++
++
++/* Names with hash collisions for GNU hash.  */
++
++int
++bar (void)
++{
++  return 10;
++}
++
++int
++gliinmbar (void)
++{
++  return 9;
++}
++
++int
++gliinmgliinmbar (void)
++{
++  return 8;
++}
++
++
++/* Names with specific hash values for each hash (see
++   tst-hash-collision1.c for details).  */
++
++int
++Hxxxynp (void)
++{
++  return 11;
++}
++
++int
++HxxxypP (void)
++{
++  return 12;
++}
++
++int
++Hxxyinp (void)
++{
++  return 13;
++}
++
++int
++Hxxxyoa (void)
++{
++  return 16;
++}
++
++int
++HxxxypQ (void)
++{
++  return 17;
++}
++
++int
++HxxxyqA (void)
++{
++  return 18;
++}
++
++int
++Hxxxyob (void)
++{
++  return 21;
++}
++
++int
++HxxxypR (void)
++{
++  return 22;
++}
++
++int
++HxxxyqB (void)
++{
++  return 23;
++}
++
++int
++glidpk (void)
++{
++  return 26;
++}
++
++int
++glidqJ (void)
++{
++  return 27;
++}
++
++int
++glieOk (void)
++{
++  return 28;
++}
++
++int
++glidpl (void)
++{
++  return 31;
++}
++
++int
++glidqK (void)
++{
++  return 32;
++}
++
++int
++glieOl (void)
++{
++  return 33;
++}
++
++int
++glidpm (void)
++{
++  return 36;
++}
++
++int
++glidqL (void)
++{
++  return 37;
++}
++
++int
++glieOm (void)
++{
++  return 38;
++}
++
++int
++AdfmZru (void)
++{
++  return 41;
++}
++
++int
++AdfmZsT (void)
++{
++  return 42;
++}
++
++int
++AdfmZt3 (void)
++{
++  return 43;
++}
++
++int
++AdfmZrv (void)
++{
++  return 46;
++}
++
++int
++AdfmZsU (void)
++{
++  return 47;
++}
++
++int
++AdfmZt4 (void)
++{
++  return 48;
++}
++
++int
++AdfmZrw (void)
++{
++  return 51;
++}
++
++int
++AdfmZsV (void)
++{
++  return 52;
++}
++
++int
++AdfmZt5 (void)
++{
++  return 53;
++}
++
++int
++AdfmZrx (void)
++{
++  return 56;
++}
++
++int
++AdfmZsW (void)
++{
++  return 57;
++}
++
++int
++AdfmZt6 (void)
++{
++  return 58;
++}
++
++int
++glidpi (void)
++{
++  return 61;
++}
++
++int
++glidqH (void)
++{
++  return 62;
++}
++
++int
++glieOi (void)
++{
++  return 63;
++}
++
++int
++glidpj (void)
++{
++  return 66;
++}
++
++int
++glidqI (void)
++{
++  return 67;
++}
++
++int
++glieOj (void)
++{
++  return 68;
++}
+diff --git a/elf/tst-hash-collision2-mod2-gnu.c b/elf/tst-hash-collision2-mod2-gnu.c
+new file mode 100644
+index 0000000000000000..39579f6736fe366d
+--- /dev/null
++++ b/elf/tst-hash-collision2-mod2-gnu.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision2-mod2.c"
+diff --git a/elf/tst-hash-collision2-mod2-sysv.c b/elf/tst-hash-collision2-mod2-sysv.c
+new file mode 100644
+index 0000000000000000..39579f6736fe366d
+--- /dev/null
++++ b/elf/tst-hash-collision2-mod2-sysv.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision2-mod2.c"
+diff --git a/elf/tst-hash-collision2-mod2.c b/elf/tst-hash-collision2-mod2.c
+new file mode 100644
+index 0000000000000000..e0bb90e60bc477b7
+--- /dev/null
++++ b/elf/tst-hash-collision2-mod2.c
+@@ -0,0 +1,196 @@
++/* Test ELF hash collisions: shared object 2.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/check.h>
++
++/* Names with hash collisions for classic ELF hash.  */
++
++int
++HxxxynpHxxxynpHxxxynpfoo (void)
++{
++  return 4;
++}
++
++int
++HxxxynpHxxxynpHxxxynpHxxxynpfoo (void)
++{
++  return 5;
++}
++
++
++/* Names with hash collisions for GNU hash.  */
++
++int
++gliinmgliinmgliinmbar (void)
++{
++  return 7;
++}
++
++int
++gliinmgliinmgliinmgliinmbar (void)
++{
++  return 6;
++}
++
++
++/* Names with specific hash values for each hash (see
++   tst-hash-collision1.c for details).  */
++
++int
++HxxyipP (void)
++{
++  return 14;
++}
++
++int
++HxxykNp (void)
++{
++  return 15;
++}
++
++int
++HxxxzaA (void)
++{
++  return 19;
++}
++
++int
++Hxxxz_a (void)
++{
++  return 20;
++}
++
++int
++HxxxzaB (void)
++{
++  return 24;
++}
++
++int
++Hxxxz_b (void)
++{
++  return 25;
++}
++
++int
++gliePJ (void)
++{
++  return 29;
++}
++
++int
++gljCpk (void)
++{
++  return 30;
++}
++
++int
++gliePK (void)
++{
++  return 34;
++}
++
++int
++gljCpl (void)
++{
++  return 35;
++}
++
++int
++gliePL (void)
++{
++  return 39;
++}
++
++int
++gljCpm (void)
++{
++  return 40;
++}
++
++int
++Adfn9ru (void)
++{
++  return 44;
++}
++
++int
++Adfn9sT (void)
++{
++  return 45;
++}
++
++int
++Adfn9rv (void)
++{
++  return 49;
++}
++
++int
++Adfn9sU (void)
++{
++  return 50;
++}
++
++int
++Adfn9rw (void)
++{
++  return 54;
++}
++
++int
++Adfn9sV (void)
++{
++  return 55;
++}
++
++int
++Adfn9rx (void)
++{
++  return 59;
++}
++
++int
++Adfn9sW (void)
++{
++  return 60;
++}
++
++int
++gliePH (void)
++{
++  return 64;
++}
++
++int
++gljCpi (void)
++{
++  return 65;
++}
++
++int
++gliePI (void)
++{
++  return 69;
++}
++
++int
++gljCpj (void)
++{
++  return 70;
++}
+diff --git a/elf/tst-hash-collision2-sysv.c b/elf/tst-hash-collision2-sysv.c
+new file mode 100644
+index 0000000000000000..92f0862e914a9dbe
+--- /dev/null
++++ b/elf/tst-hash-collision2-sysv.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision1.c"
+diff --git a/elf/tst-hash-collision2.c b/elf/tst-hash-collision2.c
+new file mode 100644
+index 0000000000000000..92f0862e914a9dbe
+--- /dev/null
++++ b/elf/tst-hash-collision2.c
+@@ -0,0 +1 @@
++#include "tst-hash-collision1.c"
+diff --git a/elf/tst-hash-collision3-mod.c b/elf/tst-hash-collision3-mod.c
+new file mode 100644
+index 0000000000000000..f24a15c7d3b78aa7
+--- /dev/null
++++ b/elf/tst-hash-collision3-mod.c
+@@ -0,0 +1,88 @@
++/* Test ELF symbol version hash collisions: shared object.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++int
++foo1 (void)
++{
++  return 1;
++}
++
++int
++foo2 (void)
++{
++  return 2;
++}
++
++int
++foo3 (void)
++{
++  return 3;
++}
++
++int
++foo4 (void)
++{
++  return 4;
++}
++
++int
++foo5 (void)
++{
++  return 5;
++}
++
++int
++bar1 (void)
++{
++  return 6;
++}
++
++int
++bar2 (void)
++{
++  return 7;
++}
++
++int
++bar3 (void)
++{
++  return 8;
++}
++
++int
++bar4 (void)
++{
++  return 9;
++}
++
++int
++bar5 (void)
++{
++  return 10;
++}
++
++symbol_version (foo1, foo, Hxxxyoa);
++symbol_version (foo2, foo, HxxxypQ);
++symbol_version (foo3, foo, HxxxyqA);
++symbol_version (foo4, foo, HxxxzaA);
++symbol_version (foo5, foo, Hxxxz_a);
++symbol_version (bar1, bar, Hxxxyob);
++symbol_version (bar2, bar, HxxxypR);
++symbol_version (bar3, bar, HxxxyqB);
++symbol_version (bar4, bar, HxxxzaB);
++symbol_version (bar5, bar, Hxxxz_b);
+diff --git a/elf/tst-hash-collision3-mod.map b/elf/tst-hash-collision3-mod.map
+new file mode 100644
+index 0000000000000000..1b7d8498309c606b
+--- /dev/null
++++ b/elf/tst-hash-collision3-mod.map
+@@ -0,0 +1,43 @@
++Base {
++  local: *;
++};
++
++Hxxxyoa {
++  global: foo;
++} Base;
++
++HxxxypQ {
++  global: foo;
++} Base;
++
++HxxxyqA {
++  global: foo;
++} Base;
++
++HxxxzaA {
++  global: foo;
++} Base;
++
++Hxxxz_a {
++  global: foo;
++} Base;
++
++Hxxxyob {
++  global: bar;
++} Base;
++
++HxxxypR {
++  global: bar;
++} Base;
++
++HxxxyqB {
++  global: bar;
++} Base;
++
++HxxxzaB {
++  global: bar;
++} Base;
++
++Hxxxz_b {
++  global: bar;
++} Base;
+diff --git a/elf/tst-hash-collision3.c b/elf/tst-hash-collision3.c
+new file mode 100644
+index 0000000000000000..309869c3f86d3859
+--- /dev/null
++++ b/elf/tst-hash-collision3.c
+@@ -0,0 +1,61 @@
++/* Test ELF symbol version hash collisions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <shlib-compat.h>
++#include <support/check.h>
++
++extern int ref_foo1 (void);
++extern int ref_foo2 (void);
++extern int ref_foo3 (void);
++extern int ref_foo4 (void);
++extern int ref_foo5 (void);
++extern int ref_bar1 (void);
++extern int ref_bar2 (void);
++extern int ref_bar3 (void);
++extern int ref_bar4 (void);
++extern int ref_bar5 (void);
++
++symbol_version_reference (ref_foo1, foo, Hxxxyoa);
++symbol_version_reference (ref_foo2, foo, HxxxypQ);
++symbol_version_reference (ref_foo3, foo, HxxxyqA);
++symbol_version_reference (ref_foo4, foo, HxxxzaA);
++symbol_version_reference (ref_foo5, foo, Hxxxz_a);
++symbol_version_reference (ref_bar1, bar, Hxxxyob);
++symbol_version_reference (ref_bar2, bar, HxxxypR);
++symbol_version_reference (ref_bar3, bar, HxxxyqB);
++symbol_version_reference (ref_bar4, bar, HxxxzaB);
++symbol_version_reference (ref_bar5, bar, Hxxxz_b);
++
++
++int
++do_test (void)
++{
++  TEST_COMPARE (ref_foo1 (), 1);
++  TEST_COMPARE (ref_foo2 (), 2);
++  TEST_COMPARE (ref_foo3 (), 3);
++  TEST_COMPARE (ref_foo4 (), 4);
++  TEST_COMPARE (ref_foo5 (), 5);
++  TEST_COMPARE (ref_bar1 (), 6);
++  TEST_COMPARE (ref_bar2 (), 7);
++  TEST_COMPARE (ref_bar3 (), 8);
++  TEST_COMPARE (ref_bar4 (), 9);
++  TEST_COMPARE (ref_bar5 (), 10);
++  return 0;
++}
++
++#include <support/test-driver.c>

@@ -1,0 +1,230 @@
+commit f6ba993e0cda0ca5554fd47b00e6a87be5fdf05e
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Thu Jul 25 15:41:44 2024 -0300
+
+    stdlib: Allow concurrent exit (BZ 31997)
+    
+    Even if C/POSIX standard states that exit is not formally thread-unsafe,
+    calling it more than once is UB.  The glibc already supports
+    it for the single-thread, and both elf/nodelete2.c and tst-rseq-disable.c
+    call exit from a DSO destructor (which is called by _dl_fini, registered
+    at program startup with __cxa_atexit).
+    
+    However, there are still race issues when it is called more than once
+    concurrently by multiple threads.  A recent Rust PR triggered this
+    issue [1], which resulted in an Austin Group ask for clarification [2].
+    Besides it, there is a discussion to make concurrent calling not UB [3],
+    wtih a defined semantic where any remaining callers block until the first
+    call to exit has finished (reentrant calls, leaving through longjmp, and
+    exceptions are still undefined).
+    
+    For glibc, at least reentrant calls are required to be supported to avoid
+    changing the current behaviour.  This requires locking using a recursive
+    lock, where any exit called by atexit() handlers resumes at the point of
+    the current handler (thus avoiding calling the current handle multiple
+    times).
+    
+    Checked on x86_64-linux-gnu and aarch64-linux-gnu.
+    
+    [1] https://github.com/rust-lang/rust/issues/126600
+    [2] https://austingroupbugs.net/view.php?id=1845
+    [3] https://www.openwall.com/lists/libc-coord/2024/07/24/4
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+diff --git a/stdlib/Makefile b/stdlib/Makefile
+index 603a330b1e8f1ba2..865d804ef2642cb5 100644
+--- a/stdlib/Makefile
++++ b/stdlib/Makefile
+@@ -93,6 +93,7 @@ tests := \
+   tst-bsearch \
+   tst-bz20544 \
+   tst-canon-bz26341 \
++  tst-concurrent-exit \
+   tst-cxa_atexit \
+   tst-environ \
+   tst-getenv-signal \
+diff --git a/stdlib/exit.c b/stdlib/exit.c
+index 546343f7d4b74773..7d536098623d47ff 100644
+--- a/stdlib/exit.c
++++ b/stdlib/exit.c
+@@ -140,9 +140,17 @@ __run_exit_handlers (int status, struct exit_function_list **listp,
+ }
+ 
+ 
++/* The lock handles concurrent exit(), even though the C/POSIX standard states
++   that calling exit() more than once is UB.  The recursive lock allows
++   atexit() handlers or destructors to call exit() itself.  In this case, the
++   handler list execution will resume at the point of the current handler.  */
++__libc_lock_define_initialized_recursive (static, __exit_lock)
++
+ void
+ exit (int status)
+ {
++  /* The exit should never return, so there is no need to unlock it.  */
++  __libc_lock_lock_recursive (__exit_lock);
+   __run_exit_handlers (status, &__exit_funcs, true, true);
+ }
+ libc_hidden_def (exit)
+diff --git a/stdlib/tst-concurrent-exit.c b/stdlib/tst-concurrent-exit.c
+new file mode 100644
+index 0000000000000000..1141130f87fde20f
+--- /dev/null
++++ b/stdlib/tst-concurrent-exit.c
+@@ -0,0 +1,157 @@
++/* Check if exit can be called concurrently by multiple threads.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <array_length.h>
++#include <stdlib.h>
++#include <support/check.h>
++#include <support/xthread.h>
++#include <stdio.h>
++#include <support/xunistd.h>
++#include <string.h>
++
++#define MAX_atexit 32
++
++static pthread_barrier_t barrier;
++
++static void *
++tf (void *closure)
++{
++  xpthread_barrier_wait (&barrier);
++  exit (0);
++
++  return NULL;
++}
++
++static const char expected[] = "00000000000000000000000003021121130211";
++static char crumbs[sizeof (expected)];
++static int next_slot = 0;
++
++static void
++exit_with_flush (int code)
++{
++  fflush (stdout);
++  /* glibc allows recursive exit, the atexit handlers execution will be
++     resumed from the where the previous exit was interrupted.  */
++  exit (code);
++}
++
++/* Take some time, so another thread potentially issue exit.  */
++#define SETUP_NANOSLEEP \
++  if (nanosleep (&(struct timespec) { .tv_sec = 0, .tv_nsec = 1000L },	\
++		 NULL) != 0)						\
++    FAIL_EXIT1 ("nanosleep: %m")
++
++static void
++fn0 (void)
++{
++  crumbs[next_slot++] = '0';
++  SETUP_NANOSLEEP;
++}
++
++static void
++fn1 (void)
++{
++  crumbs[next_slot++] = '1';
++  SETUP_NANOSLEEP;
++}
++
++static void
++fn2 (void)
++{
++  crumbs[next_slot++] = '2';
++  atexit (fn1);
++  SETUP_NANOSLEEP;
++}
++
++static void
++fn3 (void)
++{
++  crumbs[next_slot++] = '3';
++  atexit (fn2);
++  atexit (fn0);
++  SETUP_NANOSLEEP;
++}
++
++static void
++fn_final (void)
++{
++  TEST_COMPARE_STRING (crumbs, expected);
++  exit_with_flush (0);
++}
++
++_Noreturn static void
++child (void)
++{
++  enum { nthreads = 8 };
++
++  xpthread_barrier_init (&barrier, NULL, nthreads + 1);
++
++  pthread_t thr[nthreads];
++  for (int i = 0; i < nthreads; i++)
++    thr[i] = xpthread_create (NULL, tf, NULL);
++
++  xpthread_barrier_wait (&barrier);
++
++  for (int i = 0; i < nthreads; i++)
++    {
++      pthread_join (thr[i], NULL);
++      /* It should not be reached, it means that thread did not exit for
++	 some reason.  */
++      support_record_failure ();
++    }
++
++  exit (2);
++}
++
++static int
++do_test (void)
++{
++  /* Register a large number of handler that will trigger a heap allocation
++     for the handle state.  On exit, each block will be freed after the
++     handle is processed.  */
++  int slots_remaining = MAX_atexit;
++
++  /* Register this first so it can verify expected order of the rest.  */
++  atexit (fn_final); --slots_remaining;
++
++  TEST_VERIFY_EXIT (atexit (fn1) == 0); --slots_remaining;
++  TEST_VERIFY_EXIT (atexit (fn3) == 0); --slots_remaining;
++  TEST_VERIFY_EXIT (atexit (fn1) == 0); --slots_remaining;
++  TEST_VERIFY_EXIT (atexit (fn2) == 0); --slots_remaining;
++  TEST_VERIFY_EXIT (atexit (fn1) == 0); --slots_remaining;
++  TEST_VERIFY_EXIT (atexit (fn3) == 0); --slots_remaining;
++
++  while (slots_remaining > 0)
++    {
++      TEST_VERIFY_EXIT (atexit (fn0) == 0); --slots_remaining;
++    }
++
++  pid_t pid = xfork ();
++  if (pid != 0)
++    {
++      int status;
++      xwaitpid (pid, &status, 0);
++      TEST_VERIFY (WIFEXITED (status));
++    }
++  else
++    child ();
++
++  return 0;
++}
++
++#include <support/test-driver.c>

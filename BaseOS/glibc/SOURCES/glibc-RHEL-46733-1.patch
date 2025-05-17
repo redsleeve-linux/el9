@@ -1,0 +1,171 @@
+Partial backport (libio/Makefile, stdio-common/Makefile only) of:
+
+commit a7fe3e805d2ee128ac5f43b2a24201726d41cc04
+Author: Carlos O'Donell <carlos@redhat.com>
+Date:   Wed Jun 19 11:48:05 2024 -0400
+
+    Fix conditionals on mtrace-based tests (bug 31892)
+    
+    The conditionals for several mtrace-based tests in catgets, elf, libio,
+    malloc, misc, nptl, posix, and stdio-common were incorrect leading to
+    test failures when bootstrapping glibc without perl.
+    
+    The correct conditional for mtrace-based tests requires three checks:
+    first checking for run-built-tests, then build-shared, and lastly that
+    PERL is not equal to "no" (missing perl).
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+Conflicts:
+	stdio-common/Makefile
+	  (missing C2x tests tst-printf-binary, tst-printf-intn,
+	  tst-printf-oct, missing test tst-vfprintf-width-i18n
+	  in the downstream tree, but downstream backported
+	  tst-ungetc-leak-mem earlier)
+
+
+diff --git a/libio/Makefile b/libio/Makefile
+index 418102c4c0d8c25a..2ef144268af98f34 100644
+--- a/libio/Makefile
++++ b/libio/Makefile
+@@ -231,15 +231,28 @@ tst-bz22415-ENV = MALLOC_TRACE=$(objpfx)tst-bz22415.mtrace \
+ tst-bz24228-ENV = MALLOC_TRACE=$(objpfx)tst-bz24228.mtrace \
+ 		  LD_PRELOAD=$(common-objpfx)/malloc/libc_malloc_debug.so
+ 
+-generated += test-fmemopen.mtrace test-fmemopen.check
+-generated += tst-fdopen-seek-failure.mtrace tst-fdopen-seek-failure.check
+-generated += tst-fopenloc.mtrace tst-fopenloc.check
+-generated += tst-bz22415.mtrace tst-bz22415.check
+-
+ aux	:= fileops genops stdfiles stdio strops
+ 
++ifeq ($(run-built-tests),yes)
++ifeq ($(build-shared),yes)
++ifneq ($(PERL),no)
++generated += \
++  test-fmemopen.check \
++  test-fmemopen.mtrace \
++  tst-bz22415.check \
++  tst-bz22415.mtrace \
++  tst-bz24228.check \
++  tst-bz24228.mtrace \
++  tst-fdopen-seek-failure.check \
++  tst-fdopen-seek-failure.mtrace \
++  tst-fopenloc.check \
++  tst-fopenloc.mtrace \
++  # generated
++endif
++endif
++endif
++
+ ifeq ($(build-shared),yes)
+-generated += tst-bz24228.mtrace tst-bz24228.check
+ aux	+= oldfileops oldstdfiles
+ endif
+ 
+@@ -250,16 +263,23 @@ shared-only-routines = oldiofopen oldiofdopen oldiofclose oldfileops	\
+ 
+ ifeq ($(run-built-tests),yes)
+ tests-special += \
+-  $(objpfx)test-fmemopen-mem.out \
+   $(objpfx)test-freopen.out \
+-  $(objpfx)tst-bz22415-mem.out \
+-  $(objpfx)tst-fdopen-seek-failure-mem.out \
+   # tests-special
+ ifeq (yes,$(build-shared))
+ # Run tst-fopenloc-cmp.out and tst-openloc-mem.out only if shared
+ # library is enabled since they depend on tst-fopenloc.out.
+-tests-special += $(objpfx)tst-fopenloc-cmp.out $(objpfx)tst-fopenloc-mem.out \
+-		 $(objpfx)tst-bz24228-mem.out
++tests-special += $(objpfx)tst-fopenloc-cmp.out
++ifeq ($(build-shared),yes)
++ifneq ($(PERL),no)
++tests-special += \
++  $(objpfx)test-fmemopen-mem.out \
++  $(objpfx)tst-bz22415-mem.out \
++  $(objpfx)tst-bz24228-mem.out \
++  $(objpfx)tst-fdopen-seek-failure-mem.out \
++  $(objpfx)tst-fopenloc-mem.out \
++  # tests-special
++endif
++endif
+ endif
+ 
+ tests += \
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index 1eaea991dd63e20c..bc314af0617e1647 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -184,10 +184,6 @@ tests := \
+   tst-perror \
+   tst-popen \
+   tst-popen2 \
+-  tst-printf-bz18872 \
+-  tst-printf-bz25691 \
+-  tst-printf-fp-free \
+-  tst-printf-fp-leak \
+   tst-printf-round \
+   tst-printfsz \
+   tst-put-error \
+@@ -208,7 +204,6 @@ tests := \
+   tst-unlockedio \
+   tst-vfprintf-mbs-prec \
+   tst-vfprintf-user-type \
+-  tst-vfprintf-width-prec \
+   tst-vfprintf-width-prec-alloc \
+   tst-wc-printf \
+   tstdiomisc \
+@@ -217,6 +212,20 @@ tests := \
+   xbug \
+   # tests
+ 
++ifeq ($(run-built-tests),yes)
++ifeq (yes,$(build-shared))
++ifneq ($(PERL),no)
++tests += \
++  tst-printf-bz18872 \
++  tst-printf-bz25691 \
++  tst-printf-fp-free \
++  tst-printf-fp-leak \
++  tst-vfprintf-width-prec \
++  # tests
++endif
++endif
++endif
++
+ test-srcs = \
+   tst-printf \
+   tst-printfsz-islongdouble \
+@@ -225,15 +234,20 @@ test-srcs = \
+ 
+ ifeq ($(run-built-tests),yes)
+ tests-special += \
+-  $(objpfx)tst-printf-bz18872-mem.out \
+-  $(objpfx)tst-printf-bz25691-mem.out \
+-  $(objpfx)tst-printf-fp-free-mem.out \
+-  $(objpfx)tst-printf-fp-leak-mem.out \
+   $(objpfx)tst-printf.out \
+   $(objpfx)tst-printfsz-islongdouble.out \
+   $(objpfx)tst-setvbuf1-cmp.out \
+   $(objpfx)tst-unbputc.out \
+   $(objpfx)tst-ungetc-leak-mem.out \
++  # tests-special
++
++ifeq (yes,$(build-shared))
++ifneq ($(PERL),no)
++tests-special += \
++  $(objpfx)tst-printf-bz18872-mem.out \
++  $(objpfx)tst-printf-bz25691-mem.out \
++  $(objpfx)tst-printf-fp-free-mem.out \
++  $(objpfx)tst-printf-fp-leak-mem.out \
+   $(objpfx)tst-vfprintf-width-prec-mem.out \
+   # tests-special
+ 
+@@ -253,6 +267,8 @@ generated += \
+   tst-vfprintf-width-prec-mem.out \
+   tst-vfprintf-width-prec.mtrace \
+   # generated
++endif
++endif
+ endif # $(run-built-tests)
+ 
+ tests-special += $(objpfx)tst-errno-manual.out

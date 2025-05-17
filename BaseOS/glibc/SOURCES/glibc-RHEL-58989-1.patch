@@ -1,0 +1,228 @@
+commit 3d53d18fc71c5d9ef4773b8bce04d54b80181926
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Tue Mar 12 13:21:20 2024 -0300
+
+    elf: Enable TLS descriptor tests on aarch64
+    
+    The aarch64 uses 'trad' for traditional tls and 'desc' for tls
+    descriptors, but unlike other targets it defaults to 'desc'.  The
+    gnutls2 configure check does not set aarch64 as an ABI that uses
+    TLS descriptors, which then disable somes stests.
+    
+    Also rename the internal machinery fron gnu2 to tls descriptors.
+    
+    Checked on aarch64-linux-gnu.
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+
+
+Conflicts:
+	configure (regenerated)
+	configure.ac (fixed context)
+	elf/Makefile (fixed context)
+	sysdeps/arm/Makefile (fixed context)
+
+diff --git a/configure b/configure
+index afa094324cdcf96d..605309159db1e2a0 100755
+--- a/configure
++++ b/configure
+@@ -619,7 +619,7 @@ LIBGD
+ libc_cv_cc_loop_to_function
+ libc_cv_cc_submachine
+ libc_cv_cc_nofma
+-libc_cv_mtls_dialect_gnu2
++libc_cv_mtls_descriptor
+ fno_unit_at_a_time
+ libc_cv_has_glob_dat
+ libc_cv_hashstyle
+@@ -3896,6 +3896,9 @@ libc_config_ok=no
+ # whether to use such directories.
+ with_fp_cond=1
+ 
++# A preconfigure script may define another name to TLS descriptor variant
++mtls_descriptor=gnu2
++
+ if frags=`ls -d $srcdir/sysdeps/*/preconfigure 2> /dev/null`
+ then
+   { $as_echo "$as_me:${as_lineno-$LINENO}: checking for sysdeps preconfigure fragments" >&5
+@@ -6162,9 +6165,9 @@ else
+ fi
+ 
+ 
+-{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for -mtls-dialect=gnu2" >&5
+-$as_echo_n "checking for -mtls-dialect=gnu2... " >&6; }
+-if ${libc_cv_mtls_dialect_gnu2+:} false; then :
++{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for tls descriptor support" >&5
++$as_echo_n "checking for tls descriptor support... " >&6; }
++if ${libc_cv_mtls_descriptor+:} false; then :
+   $as_echo_n "(cached) " >&6
+ else
+   cat > conftest.c <<EOF
+@@ -6174,25 +6177,25 @@ void foo (void)
+   i = 10;
+ }
+ EOF
+-if { ac_try='${CC-cc} $CFLAGS $CPPFLAGS -S -fPIC -mtls-dialect=gnu2
+-		   conftest.c 1>&5'
++if { ac_try='${CC-cc} $CFLAGS $CPPFLAGS -fPIC -mtls-dialect=$mtls_descriptor -nostdlib -nostartfiles
++		   -shared conftest.c -o conftest 1>&5'
+   { { eval echo "\"\$as_me\":${as_lineno-$LINENO}: \"$ac_try\""; } >&5
+   (eval $ac_try) 2>&5
+   ac_status=$?
+   $as_echo "$as_me:${as_lineno-$LINENO}: \$? = $ac_status" >&5
+   test $ac_status = 0; }; }
+ then
+-  libc_cv_mtls_dialect_gnu2=yes
++  libc_cv_mtls_descriptor=$mtls_descriptor
+ else
+-  libc_cv_mtls_dialect_gnu2=no
++  libc_cv_mtls_descriptor=no
+ fi
+ rm -f conftest*
+ fi
+-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $libc_cv_mtls_dialect_gnu2" >&5
+-$as_echo "$libc_cv_mtls_dialect_gnu2" >&6; }
++{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $libc_cv_mtls_descriptor" >&5
++$as_echo "$libc_cv_mtls_descriptor" >&6; }
+ 
+ config_vars="$config_vars
+-have-mtls-dialect-gnu2 = $libc_cv_mtls_dialect_gnu2"
++have-mtls-descriptor = $libc_cv_mtls_descriptor"
+ 
+ { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether cc puts quotes around section names" >&5
+ $as_echo_n "checking whether cc puts quotes around section names... " >&6; }
+diff --git a/configure.ac b/configure.ac
+index 85ea64f9f5f4fd35..d18d8bdff9a7849d 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -533,6 +533,9 @@ libc_config_ok=no
+ # whether to use such directories.
+ with_fp_cond=1
+ 
++# A preconfigure script may define another name to TLS descriptor variant
++mtls_descriptor=gnu2
++
+ dnl Let sysdeps/*/preconfigure act here.
+ LIBC_PRECONFIGURE([$srcdir], [for sysdeps])
+ 
+@@ -1429,7 +1432,7 @@ else
+ fi
+ AC_SUBST(fno_unit_at_a_time)
+ 
+-AC_CACHE_CHECK([for -mtls-dialect=gnu2], libc_cv_mtls_dialect_gnu2,
++AC_CACHE_CHECK([for tls descriptor support], libc_cv_mtls_descriptor,
+ [dnl
+ cat > conftest.c <<EOF
+ __thread int i;
+@@ -1438,16 +1441,16 @@ void foo (void)
+   i = 10;
+ }
+ EOF
+-if AC_TRY_COMMAND([${CC-cc} $CFLAGS $CPPFLAGS -S -fPIC -mtls-dialect=gnu2
+-		   conftest.c 1>&AS_MESSAGE_LOG_FD])
++if AC_TRY_COMMAND([${CC-cc} $CFLAGS $CPPFLAGS -fPIC -mtls-dialect=$mtls_descriptor -nostdlib -nostartfiles
++		   -shared conftest.c -o conftest 1>&AS_MESSAGE_LOG_FD])
+ then
+-  libc_cv_mtls_dialect_gnu2=yes
++  libc_cv_mtls_descriptor=$mtls_descriptor
+ else
+-  libc_cv_mtls_dialect_gnu2=no
++  libc_cv_mtls_descriptor=no
+ fi
+ rm -f conftest*])
+-AC_SUBST(libc_cv_mtls_dialect_gnu2)
+-LIBC_CONFIG_VAR([have-mtls-dialect-gnu2], [$libc_cv_mtls_dialect_gnu2])
++AC_SUBST(libc_cv_mtls_descriptor)
++LIBC_CONFIG_VAR([have-mtls-descriptor], [$libc_cv_mtls_descriptor])
+ 
+ AC_CACHE_CHECK(whether cc puts quotes around section names,
+ 	       libc_cv_have_section_quotes,
+diff --git a/elf/Makefile b/elf/Makefile
+index 7d686ca7d190c921..65eb3b9b28183821 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -944,13 +944,13 @@ modules-names-tests = $(filter-out ifuncmod% tst-tlsmod% \
+ 				   tst-hash-collision3-mod,\
+ 				   $(modules-names))
+ 
+-ifeq (yes,$(have-mtls-dialect-gnu2))
++ifneq (no,$(have-mtls-descriptor))
+ tests += tst-gnu2-tls1
+ modules-names += tst-gnu2-tls1mod
+ $(objpfx)tst-gnu2-tls1: $(objpfx)tst-gnu2-tls1mod.so
+ tst-gnu2-tls1mod.so-no-z-defs = yes
+-CFLAGS-tst-gnu2-tls1mod.c += -mtls-dialect=gnu2
+-endif # $(have-mtls-dialect-gnu2)
++CFLAGS-tst-gnu2-tls1mod.c += -mtls-dialect=$(have-mtls-descriptor)
++endif # $(have-mtls-descriptor)
+ 
+ ifeq (yes,$(have-protected-data))
+ modules-names += tst-protected1moda tst-protected1modb
+@@ -2719,11 +2719,11 @@ $(objpfx)tst-tls-allocation-failure-static-patched.out: \
+ $(objpfx)tst-audit-tlsdesc: $(objpfx)tst-audit-tlsdesc-mod1.so \
+ 			    $(objpfx)tst-audit-tlsdesc-mod2.so \
+ 			    $(shared-thread-library)
+-ifeq (yes,$(have-mtls-dialect-gnu2))
++ifneq (no,$(have-mtls-descriptor))
+ # The test is valid for all TLS types, but we want to exercise GNU2
+ # TLS if possible.
+-CFLAGS-tst-audit-tlsdesc-mod1.c += -mtls-dialect=gnu2
+-CFLAGS-tst-audit-tlsdesc-mod2.c += -mtls-dialect=gnu2
++CFLAGS-tst-audit-tlsdesc-mod1.c += -mtls-dialect=$(have-mtls-descriptor)
++CFLAGS-tst-audit-tlsdesc-mod2.c += -mtls-dialect=$(have-mtls-descriptor)
+ endif
+ $(objpfx)tst-audit-tlsdesc-dlopen: $(shared-thread-library)
+ $(objpfx)tst-audit-tlsdesc-dlopen.out: $(objpfx)tst-audit-tlsdesc-mod1.so \
+@@ -2763,10 +2763,14 @@ $(objpfx)tst-tlsgap.out: \
+   $(objpfx)tst-tlsgap-mod0.so \
+   $(objpfx)tst-tlsgap-mod1.so \
+   $(objpfx)tst-tlsgap-mod2.so
+-ifeq (yes,$(have-mtls-dialect-gnu2))
+-CFLAGS-tst-tlsgap-mod0.c += -mtls-dialect=gnu2
+-CFLAGS-tst-tlsgap-mod1.c += -mtls-dialect=gnu2
+-CFLAGS-tst-tlsgap-mod2.c += -mtls-dialect=gnu2
++
++ifneq (no,$(have-mtls-descriptor))
++CFLAGS-tst-tlsgap-mod0.c += -mtls-dialect=$(have-mtls-descriptor)
++CFLAGS-tst-tlsgap-mod1.c += -mtls-dialect=$(have-mtls-descriptor)
++CFLAGS-tst-tlsgap-mod2.c += -mtls-dialect=$(have-mtls-descriptor)
++CFLAGS-tst-gnu2-tls2mod0.c += -mtls-dialect=$(have-mtls-descriptor)
++CFLAGS-tst-gnu2-tls2mod1.c += -mtls-dialect=$(have-mtls-descriptor)
++CFLAGS-tst-gnu2-tls2mod2.c += -mtls-dialect=$(have-mtls-descriptor)
+ endif
+ 
+ $(objpfx)tst-recursive-tls: $(objpfx)tst-recursive-tlsmallocmod.so
+diff --git a/sysdeps/aarch64/preconfigure b/sysdeps/aarch64/preconfigure
+index d9bd1f8558a079cb..19657b627bc84c4e 100644
+--- a/sysdeps/aarch64/preconfigure
++++ b/sysdeps/aarch64/preconfigure
+@@ -2,5 +2,6 @@ case "$machine" in
+ aarch64*)
+ 	base_machine=aarch64
+ 	machine=aarch64
++	mtls_descriptor=desc
+ 	;;
+ esac
+diff --git a/sysdeps/arm/Makefile b/sysdeps/arm/Makefile
+index fb4164f0d9cf71fa..efe08b15e16ccda4 100644
+--- a/sysdeps/arm/Makefile
++++ b/sysdeps/arm/Makefile
+@@ -18,15 +18,15 @@ $(objpfx)libgcc-stubs.a: $(objpfx)aeabi_unwind_cpp_pr1.os
+ lib-noranlib: $(objpfx)libgcc-stubs.a
+ 
+ ifeq ($(build-shared),yes)
+-ifeq ($(have-arm-tls-desc),yes)
++ifneq (no,$(have-mtls-descriptor))
+ tests += tst-armtlsdescloc tst-armtlsdescextnow tst-armtlsdescextlazy
+ modules-names += tst-armtlsdesclocmod
+ modules-names += tst-armtlsdescextlazymod tst-armtlsdescextnowmod
+ CPPFLAGS-tst-armtlsdescextnowmod.c += -Dstatic=
+ CPPFLAGS-tst-armtlsdescextlazymod.c += -Dstatic=
+-CFLAGS-tst-armtlsdesclocmod.c += -mtls-dialect=gnu2
+-CFLAGS-tst-armtlsdescextnowmod.c += -mtls-dialect=gnu2
+-CFLAGS-tst-armtlsdescextlazymod.c += -mtls-dialect=gnu2
++CFLAGS-tst-armtlsdesclocmod.c += -mtls-dialect=$(have-mtls-descriptor)
++CFLAGS-tst-armtlsdescextnowmod.c += -mtls-dialect=$(have-mtls-descriptor)
++CFLAGS-tst-armtlsdescextlazymod.c += -mtls-dialect=$(have-mtls-descriptor)
+ LDFLAGS-tst-armtlsdescextnowmod.so += -Wl,-z,now
+ tst-armtlsdescloc-ENV = LD_BIND_NOW=1
+ tst-armtlsdescextnow-ENV = LD_BIND_NOW=1

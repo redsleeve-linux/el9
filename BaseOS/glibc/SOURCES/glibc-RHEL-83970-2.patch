@@ -1,0 +1,143 @@
+commit c444cc1d8335243c5c4e636d6a26c472df85522c
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Sep 11 10:05:08 2024 +0200
+
+    Linux: Add missing scheduler constants to <sched.h>
+    
+    And add a test, misc/tst-sched-consts, that checks
+    consistency with <sched.h>.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+Conflicts:
+	sysdeps/unix/sysv/linux/Makefile
+	  (missing tests downstream)
+
+diff --git a/sysdeps/unix/sysv/linux/Makefile b/sysdeps/unix/sysv/linux/Makefile
+index d6381fe846c905d6..a7004f57a3f40fb1 100644
+--- a/sysdeps/unix/sysv/linux/Makefile
++++ b/sysdeps/unix/sysv/linux/Makefile
+@@ -247,6 +247,16 @@ $(objpfx)tst-mman-consts.out: ../sysdeps/unix/sysv/linux/tst-mman-consts.py
+ 	  < /dev/null > $@ 2>&1; $(evaluate-test)
+ $(objpfx)tst-mman-consts.out: $(sysdeps-linux-python-deps)
+ 
++tests-special += \
++  $(objpfx)tst-sched-consts.out \
++  # tests-special
++$(objpfx)tst-sched-consts.out: ../sysdeps/unix/sysv/linux/tst-sched-consts.py
++	$(sysdeps-linux-python) \
++	  ../sysdeps/unix/sysv/linux/tst-sched-consts.py \
++	    $(sysdeps-linux-python-cc) \
++	  < /dev/null > $@ 2>&1; $(evaluate-test)
++$(objpfx)tst-sched-consts.out: $(sysdeps-linux-python-deps)
++
+ tst-rseq-disable-ENV = GLIBC_TUNABLES=glibc.pthread.rseq=0
+ 
+ endif # $(subdir) == misc
+diff --git a/sysdeps/unix/sysv/linux/bits/sched.h b/sysdeps/unix/sysv/linux/bits/sched.h
+index 5e0f70a69181bc26..d4ac158d99e4c350 100644
+--- a/sysdeps/unix/sysv/linux/bits/sched.h
++++ b/sysdeps/unix/sysv/linux/bits/sched.h
+@@ -29,6 +29,7 @@
+ #define SCHED_FIFO		1
+ #define SCHED_RR		2
+ #ifdef __USE_GNU
++# define SCHED_NORMAL		SCHED_OTHER
+ # define SCHED_BATCH		3
+ # define SCHED_ISO		4
+ # define SCHED_IDLE		5
+@@ -37,6 +38,19 @@
+ /* Flags that can be used in policy values.  */
+ # define SCHED_RESET_ON_FORK	0x40000000
+ 
++/* Flags for the sched_flags field in struct sched_attr.   */
++#define SCHED_FLAG_RESET_ON_FORK	0x01
++#define SCHED_FLAG_RECLAIM		0x02
++#define SCHED_FLAG_DL_OVERRUN		0x04
++#define SCHED_FLAG_KEEP_POLICY		0x08
++#define SCHED_FLAG_KEEP_PARAMS		0x10
++#define SCHED_FLAG_UTIL_CLAMP_MIN	0x20
++#define SCHED_FLAG_UTIL_CLAMP_MAX	0x40
++
++/* Combinations of sched_flags fields.  */
++#define SCHED_FLAG_KEEP_ALL		0x18
++#define SCHED_FLAG_UTIL_CLAMP		0x60
++
+ /* Use "" to work around incorrect macro expansion of the
+    __has_include argument (GCC PR 80005).  */
+ # ifdef __has_include
+diff --git a/sysdeps/unix/sysv/linux/tst-sched-consts.py b/sysdeps/unix/sysv/linux/tst-sched-consts.py
+new file mode 100644
+index 0000000000000000..70071dcd974fe064
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/tst-sched-consts.py
+@@ -0,0 +1,56 @@
++#!/usr/bin/python3
++# Test that glibc's sched.h constants match the kernel's.
++# Copyright (C) 2018-2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++#
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++#
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++import argparse
++import sys
++
++import glibcextract
++import glibcsyscalls
++
++
++def main():
++    """The main entry point."""
++    parser = argparse.ArgumentParser(
++        description="Test that glibc's sched.h constants "
++        "match the kernel's.")
++    parser.add_argument('--cc', metavar='CC',
++                        help='C compiler (including options) to use')
++    args = parser.parse_args()
++    linux_version_headers = glibcsyscalls.linux_kernel_version(args.cc)
++    linux_version_glibc = (6, 10)
++    sys.exit(glibcextract.compare_macro_consts(
++        '#define _GNU_SOURCE 1\n'
++        '#include <sched.h>\n',
++        '#define _GNU_SOURCE 1\n'
++        '#include <linux/sched.h>\n'
++        '#include <linux/sched/types.h>\n',
++        args.cc,
++        'SCHED_.*',
++        # SCHED_ISO is reserved, but not implemented in the kernel.
++        # SCHED_OTHER is the standard name for SCHED_NORMAL.
++        # SCHED_FLAG_ALL will receive more and more flags, so
++        # exposing it to userspace does not seem useful.
++        'SCHED_ISO'
++        '|SCHED_OTHER'
++        '|SCHED_FLAG_ALL',
++        linux_version_glibc > linux_version_headers,
++        linux_version_headers > linux_version_glibc))
++
++if __name__ == '__main__':
++    main()
+diff --git a/sysdeps/unix/sysv/linux/tst-sched_setattr.c b/sysdeps/unix/sysv/linux/tst-sched_setattr.c
+index a6288a1a7cc2d01b..fbb73c31a72de311 100644
+--- a/sysdeps/unix/sysv/linux/tst-sched_setattr.c
++++ b/sysdeps/unix/sysv/linux/tst-sched_setattr.c
+@@ -44,6 +44,8 @@ check_unused (void)
+ static int
+ do_test (void)
+ {
++  _Static_assert (SCHED_OTHER == SCHED_NORMAL,
++                  "SCHED_OTHER, SCHED_NORMAL values");
+   TEST_VERIFY (sizeof (struct sched_attr) < sizeof (u));
+ 
+   /* Check that reading and re-applying the current policy works.  */

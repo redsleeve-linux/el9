@@ -1,0 +1,81 @@
+commit 84373ef7b72c9c8ab61ce1fdfd798777715a1a52
+Author: Frédéric Bérat <fberat@redhat.com>
+Date:   Fri Mar 7 14:42:26 2025 +0100
+
+    Prepare inet_ntop to be fortified
+    
+    Rename inet_ntop to __inet_ntop and create the inet_ntop weak alias
+    based on it in order to prepare for disabling fortification when
+    available.
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+diff --git a/include/arpa/inet.h b/include/arpa/inet.h
+index df9472ba3bc52689..d1ea13bb19d4a497 100644
+--- a/include/arpa/inet.h
++++ b/include/arpa/inet.h
+@@ -5,7 +5,9 @@
+ extern int __inet_aton_exact (const char *__cp, struct in_addr *__inp);
+ libc_hidden_proto (__inet_aton_exact)
+ 
+-libc_hidden_proto (inet_ntop)
++extern __typeof (inet_ntop) __inet_ntop;
++libc_hidden_proto (__inet_ntop)
++
+ libc_hidden_proto (inet_pton)
+ extern __typeof (inet_pton) __inet_pton;
+ libc_hidden_proto (__inet_pton)
+diff --git a/inet/getnameinfo.c b/inet/getnameinfo.c
+index 8380d8578361b289..d0c6de6ba12b6298 100644
+--- a/inet/getnameinfo.c
++++ b/inet/getnameinfo.c
+@@ -323,7 +323,7 @@ gni_host_inet_numeric (struct scratch_buffer *tmpbuf,
+   if (sa->sa_family == AF_INET6)
+     {
+       const struct sockaddr_in6 *sin6p = (const struct sockaddr_in6 *) sa;
+-      if (inet_ntop (AF_INET6, &sin6p->sin6_addr, host, hostlen) == NULL)
++      if (__inet_ntop (AF_INET6, &sin6p->sin6_addr, host, hostlen) == NULL)
+ 	return EAI_OVERFLOW;
+ 
+       uint32_t scopeid = sin6p->sin6_scope_id;
+@@ -350,7 +350,7 @@ gni_host_inet_numeric (struct scratch_buffer *tmpbuf,
+   else
+     {
+       const struct sockaddr_in *sinp = (const struct sockaddr_in *) sa;
+-      if (inet_ntop (AF_INET, &sinp->sin_addr, host, hostlen) == NULL)
++      if (__inet_ntop (AF_INET, &sinp->sin_addr, host, hostlen) == NULL)
+ 	return EAI_OVERFLOW;
+     }
+   return 0;
+diff --git a/resolv/inet_ntop.c b/resolv/inet_ntop.c
+index c4d38c0f951013e5..acf5f3cb885e2e47 100644
+--- a/resolv/inet_ntop.c
++++ b/resolv/inet_ntop.c
+@@ -42,7 +42,7 @@ static const char *inet_ntop4 (const u_char *src, char *dst, socklen_t size);
+ static const char *inet_ntop6 (const u_char *src, char *dst, socklen_t size);
+ 
+ /* char *
+- * inet_ntop(af, src, dst, size)
++ * __inet_ntop(af, src, dst, size)
+  *	convert a network format address to presentation format.
+  * return:
+  *	pointer to presentation format address (`dst'), or NULL (see errno).
+@@ -50,7 +50,7 @@ static const char *inet_ntop6 (const u_char *src, char *dst, socklen_t size);
+  *	Paul Vixie, 1996.
+  */
+ const char *
+-inet_ntop (int af, const void *src, char *dst, socklen_t size)
++__inet_ntop (int af, const void *src, char *dst, socklen_t size)
+ {
+ 	switch (af) {
+ 	case AF_INET:
+@@ -63,7 +63,8 @@ inet_ntop (int af, const void *src, char *dst, socklen_t size)
+ 	}
+ 	/* NOTREACHED */
+ }
+-libc_hidden_def (inet_ntop)
++libc_hidden_def (__inet_ntop)
++weak_alias (__inet_ntop, inet_ntop)
+ 
+ /* const char *
+  * inet_ntop4(src, dst, size)

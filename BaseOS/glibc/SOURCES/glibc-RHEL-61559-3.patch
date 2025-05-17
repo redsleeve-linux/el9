@@ -1,0 +1,103 @@
+commit 09ea1afec75ed0d41cb0da27a9df1b8c3dd56ddc
+Author: Stefan Liebler <stli@linux.ibm.com>
+Date:   Fri Jan 10 12:55:50 2025 -0500
+
+    affinity-inheritance: Overallocate CPU sets
+    
+    Some kernels on S390 appear to return a CPU affinity mask based on
+    configured processors rather than the ones online.  Overallocate the CPU
+    set to match that, but operate only on the ones online.
+    
+    Signed-off-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+    Co-authored-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+
+diff --git a/nptl/tst-pthread-affinity-inheritance.c b/nptl/tst-pthread-affinity-inheritance.c
+index c020530dd916dea1..153fc904dfe14c9d 100644
+--- a/nptl/tst-pthread-affinity-inheritance.c
++++ b/nptl/tst-pthread-affinity-inheritance.c
+@@ -34,10 +34,11 @@ set_my_affinity (size_t size, const cpu_set_t *set)
+ }
+ 
+ static void
+-verify_my_affinity (int nproc, size_t size, const cpu_set_t *expected_set)
++verify_my_affinity (int nproc, int nproc_configured, size_t size,
++		    const cpu_set_t *expected_set)
+ {
+-  cpu_set_t *set = CPU_ALLOC (nproc);
+-  cpu_set_t *xor_set = CPU_ALLOC (nproc);
++  cpu_set_t *set = CPU_ALLOC (nproc_configured);
++  cpu_set_t *xor_set = CPU_ALLOC (nproc_configured);
+ 
+   if (set == NULL || xor_set== NULL)
+     FAIL_EXIT1 ("verify_my_affinity: Failed to allocate cpuset: %m\n");
+diff --git a/nptl/tst-skeleton-affinity-inheritance.c b/nptl/tst-skeleton-affinity-inheritance.c
+index 6de6d9c9428a0c9d..926f49622990e9e4 100644
+--- a/nptl/tst-skeleton-affinity-inheritance.c
++++ b/nptl/tst-skeleton-affinity-inheritance.c
+@@ -42,6 +42,7 @@
+ struct test_param
+ {
+   int nproc;
++  int nproc_configured;
+   cpu_set_t *set;
+   size_t size;
+   bool entry;
+@@ -70,7 +71,8 @@ child_test (void *arg)
+   struct test_param *param = arg;
+ 
+   printf ("%d:%d        child\n", getpid (), gettid ());
+-  verify_my_affinity (param->nproc, param->size, param->set);
++  verify_my_affinity (param->nproc, param->nproc_configured, param->size,
++		      param->set);
+   return NULL;
+ }
+ 
+@@ -93,7 +95,8 @@ do_one_test (void *arg)
+   else
+     {
+       /* Verification for the first level.  */
+-      verify_my_affinity (param->nproc, param->size, param->set);
++      verify_my_affinity (param->nproc, param->nproc_configured, param->size,
++			  param->set);
+ 
+       /* Launch the second level test, launching CHILD_TEST as a subprocess and
+ 	 then as a subthread.  Use a different mask to see if it gets
+@@ -129,13 +132,17 @@ do_one_test (void *arg)
+ static int
+ do_test (void)
+ {
++  /* Large enough in case the kernel decides to return the larger mask.  This
++     seems to happen on some kernels for S390x.  */
++  int num_configured_cpus = get_nprocs_conf ();
+   int num_cpus = get_nprocs ();
+ 
+   struct test_param param =
+     {
+       .nproc = num_cpus,
+-      .set = CPU_ALLOC (num_cpus),
+-      .size = CPU_ALLOC_SIZE (num_cpus),
++      .nproc_configured = num_configured_cpus,
++      .set = CPU_ALLOC (num_configured_cpus),
++      .size = CPU_ALLOC_SIZE (num_configured_cpus),
+       .entry = true,
+     };
+ 
+diff --git a/sysdeps/unix/sysv/linux/tst-sched-affinity-inheritance.c b/sysdeps/unix/sysv/linux/tst-sched-affinity-inheritance.c
+index fe0297f743d55e2f..8a42d275fce35e84 100644
+--- a/sysdeps/unix/sysv/linux/tst-sched-affinity-inheritance.c
++++ b/sysdeps/unix/sysv/linux/tst-sched-affinity-inheritance.c
+@@ -34,10 +34,11 @@ set_my_affinity (size_t size, const cpu_set_t *set)
+ }
+ 
+ static void
+-verify_my_affinity (int nproc, size_t size, const cpu_set_t *expected_set)
++verify_my_affinity (int nproc, int nproc_configured, size_t size,
++		    const cpu_set_t *expected_set)
+ {
+-  cpu_set_t *set = CPU_ALLOC (nproc);
+-  cpu_set_t *xor_set = CPU_ALLOC (nproc);
++  cpu_set_t *set = CPU_ALLOC (nproc_configured);
++  cpu_set_t *xor_set = CPU_ALLOC (nproc_configured);
+ 
+   if (set == NULL || xor_set== NULL)
+     FAIL_EXIT1 ("verify_my_affinity: Failed to allocate cpuset: %m\n");

@@ -1,0 +1,214 @@
+commit 8022fc7d5119a22e9e0ac72798f649385b0e167a
+Author: Frédéric Bérat <fberat@redhat.com>
+Date:   Wed Jun 14 10:52:07 2023 +0200
+
+    tests: replace system by xsystem
+    
+    With fortification enabled, system calls return result needs to be checked,
+    has it gets the __wur macro enabled.
+    Reviewed-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+
+Conflicts:
+	nptl/tst-cancel7.c (change not relevant for this version)
+
+diff --git a/elf/tst-stackguard1.c b/elf/tst-stackguard1.c
+index 6584740d6aa26f5f..9c4a5ccde0c659a9 100644
+--- a/elf/tst-stackguard1.c
++++ b/elf/tst-stackguard1.c
+@@ -27,6 +27,8 @@
+ #include <tls.h>
+ #include <unistd.h>
+ 
++#include <support/xstdlib.h>
++
+ static const char *command;
+ static bool child;
+ static uintptr_t stack_chk_guard_copy;
+@@ -109,7 +111,8 @@ do_test (void)
+ 	  dup2 (fds[1], 2);
+ 	  close (fds[1]);
+ 
+-	  system (command);
++	  xsystem (command);
++
+ 	  exit (0);
+ 	}
+ 
+diff --git a/libio/bug-mmap-fflush.c b/libio/bug-mmap-fflush.c
+index d8aa58985aa0790c..3f99222eefa7d4c3 100644
+--- a/libio/bug-mmap-fflush.c
++++ b/libio/bug-mmap-fflush.c
+@@ -4,6 +4,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#include <support/xstdlib.h>
+ 
+ static char *fname;
+ 
+@@ -35,14 +36,16 @@ do_test (void)
+   char buffer[1024];
+ 
+   snprintf (buffer, sizeof (buffer), "echo 'From foo@bar.com' > %s", fname);
+-  system (buffer);
++  xsystem (buffer);
++
+   f = fopen (fname, "r");
+   fseek (f, 0, SEEK_END);
+   o = ftello (f);
+   fseek (f, 0, SEEK_SET);
+   fflush (f);
+   snprintf (buffer, sizeof (buffer), "echo 'From bar@baz.edu' >> %s", fname);
+-  system (buffer);
++  xsystem (buffer);
++
+   fseek (f, o, SEEK_SET);
+   if (fgets (buffer, 1024, f) == NULL)
+     exit (1);
+diff --git a/nptl/tst-cancel7.c b/nptl/tst-cancel7.c
+index 7a1870ac74b23faa..338cecc8293638b0 100644
+--- a/nptl/tst-cancel7.c
++++ b/nptl/tst-cancel7.c
+@@ -41,6 +41,7 @@ tf (void *arg)
+ 
+   strcpy (stpcpy (stpcpy (cmd, command), args), pidfilename);
+   system (cmd);
++
+   /* This call should never return.  */
+   return NULL;
+ }
+diff --git a/nptl/tst-stackguard1.c b/nptl/tst-stackguard1.c
+index cac492ec34808617..5b9d57a73327b3c8 100644
+--- a/nptl/tst-stackguard1.c
++++ b/nptl/tst-stackguard1.c
+@@ -29,6 +29,7 @@
+ #include <unistd.h>
+ 
+ #include <support/xunistd.h>
++#include <support/xstdlib.h>
+ 
+ static const char *command;
+ static bool child;
+@@ -141,7 +142,8 @@ do_test (void)
+ 	  dup2 (fds[1], 2);
+ 	  close (fds[1]);
+ 
+-	  system (command);
++	  xsystem (command);
++
+ 	  exit (0);
+ 	}
+ 
+diff --git a/nss/tst-nss-db-endpwent.c b/nss/tst-nss-db-endpwent.c
+index 5932a9800f33b717..d25033afabc01c30 100644
+--- a/nss/tst-nss-db-endpwent.c
++++ b/nss/tst-nss-db-endpwent.c
+@@ -23,6 +23,7 @@
+ 
+ #include <support/support.h>
+ #include <support/check.h>
++#include <support/xstdlib.h>
+ 
+ /* It is entirely allowed to start with a getpwent call without
+    resetting the state of the service via a call to setpwent.
+@@ -55,7 +56,7 @@ do_test (void)
+ 
+   cmd = xasprintf ("%s/makedb -o /var/db/passwd.db /var/db/passwd.in",
+ 		   support_bindir_prefix);
+-  system (cmd);
++  xsystem (cmd);
+   free (cmd);
+ 
+   try_it ();
+diff --git a/support/Makefile b/support/Makefile
+index 3b8509c88db4662a..47d5db4629b029d3 100644
+--- a/support/Makefile
++++ b/support/Makefile
+@@ -221,6 +221,7 @@ libsupport-routines = \
+   xstrndup \
+   xsymlink \
+   xsysconf \
++  xsystem \
+   xunlink \
+   xuselocale \
+   xwaitpid \
+diff --git a/support/xstdlib.h b/support/xstdlib.h
+new file mode 100644
+index 0000000000000000..db5a5b9d4fd1fa71
+--- /dev/null
++++ b/support/xstdlib.h
+@@ -0,0 +1,31 @@
++/* Error-checking wrappers for stdlib functions.
++   Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef SUPPORT_XSTDLIB_H
++#define SUPPORT_XSTDLIB_H
++
++#include <stdlib.h>
++#include <sys/cdefs.h>
++
++__BEGIN_DECLS
++
++void xsystem (const char *cmd);
++
++__END_DECLS
++
++#endif /* SUPPORT_XSTDLIB_H */
+diff --git a/support/xsystem.c b/support/xsystem.c
+new file mode 100644
+index 0000000000000000..1f558953bca8f5b2
+--- /dev/null
++++ b/support/xsystem.c
+@@ -0,0 +1,37 @@
++/* Error-checking replacement for "system".
++   Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/support.h>
++#include <support/check.h>
++
++#include <support/xstdlib.h>
++
++void
++xsystem (const char *cmd)
++{
++  int ret = system (cmd);
++
++  if (ret == 0 && cmd == NULL)
++    FAIL_EXIT1 ("Unable to spawn a shell for NULL command");
++
++  if (ret == 127)
++    FAIL_EXIT1 ("Child terminated with status 127");
++
++  if (ret < 0)
++    FAIL_EXIT1 ("system (\"%s\")", cmd);
++}

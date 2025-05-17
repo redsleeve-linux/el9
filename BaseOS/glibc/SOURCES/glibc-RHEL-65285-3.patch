@@ -1,0 +1,136 @@
+commit 2e456ccf0c34a056e3ccafac4a0c7effef14d918
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Mon Jul 8 21:14:00 2024 +0200
+
+    Linux: Make __rseq_size useful for feature detection (bug 31965)
+    
+    The __rseq_size value is now the active area of struct rseq
+    (so 20 initially), not the full struct size including padding
+    at the end (32 initially).
+    
+    Update misc/tst-rseq to print some additional diagnostics.
+    
+    Reviewed-by: Michael Jeanson <mjeanson@efficios.com>
+    Reviewed-by: Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+
+diff --git a/manual/threads.texi b/manual/threads.texi
+index 48fd562923800b34..fcf9e2bba5abd02e 100644
+--- a/manual/threads.texi
++++ b/manual/threads.texi
+@@ -1020,8 +1020,12 @@ This variable is either zero (if restartable sequence registration
+ failed or has been disabled) or the size of the restartable sequence
+ registration.  This can be different from the size of @code{struct rseq}
+ if the kernel has extended the size of the registration.  If
+-registration is successful, @code{__rseq_size} is at least 32 (the
+-initial size of @code{struct rseq}).
++registration is successful, @code{__rseq_size} is at least 20 (the
++initially active size of @code{struct rseq}).
++
++Previous versions of @theglibc{} set this to 32 even if the kernel only
++supported the initial area of 20 bytes because the value included unused
++padding at the end of the restartable sequence area.
+ @end deftypevar
+ 
+ @deftypevar {unsigned int} __rseq_flags
+diff --git a/sysdeps/nptl/dl-tls_init_tp.c b/sysdeps/nptl/dl-tls_init_tp.c
+index 039080d7110f5064..2f56281a02246a09 100644
+--- a/sysdeps/nptl/dl-tls_init_tp.c
++++ b/sysdeps/nptl/dl-tls_init_tp.c
+@@ -46,10 +46,6 @@ rtld_mutex_dummy (pthread_mutex_t *lock)
+ 
+ const unsigned int __rseq_flags;
+ 
+-/* The variables are in .data.relro but are not yet write-protected.  */
+-extern unsigned int _rseq_size attribute_hidden;
+-extern ptrdiff_t _rseq_offset attribute_hidden;
+-
+ void
+ __tls_pre_init_tp (void)
+ {
+@@ -108,9 +104,7 @@ __tls_init_tp (void)
+     do_rseq = TUNABLE_GET (rseq, int, NULL);
+ #endif
+     if (rseq_register_current_thread (pd, do_rseq))
+-      {
+-        _rseq_size = sizeof (pd->rseq_area);
+-      }
++      _rseq_size = RSEQ_AREA_SIZE_INITIAL_USED;
+ 
+ #ifdef RSEQ_SIG
+     /* This should be a compile-time constant, but the current
+diff --git a/sysdeps/unix/sysv/linux/rseq-internal.h b/sysdeps/unix/sysv/linux/rseq-internal.h
+index 9e8f99fd51a063b1..ccb16640133fa9e3 100644
+--- a/sysdeps/unix/sysv/linux/rseq-internal.h
++++ b/sysdeps/unix/sysv/linux/rseq-internal.h
+@@ -25,15 +25,34 @@
+ #include <stdio.h>
+ #include <sys/rseq.h>
+ 
++/* 32 is the initially required value for the area size.  The
++   actually used rseq size may be less (20 bytes initially).  */
++#define RSEQ_AREA_SIZE_INITIAL 32
++#define RSEQ_AREA_SIZE_INITIAL_USED 20
++
++/* The variables are in .data.relro but are not yet write-protected.  */
++extern unsigned int _rseq_size attribute_hidden;
++extern ptrdiff_t _rseq_offset attribute_hidden;
++
+ #ifdef RSEQ_SIG
+ static inline bool
+ rseq_register_current_thread (struct pthread *self, bool do_rseq)
+ {
+   if (do_rseq)
+     {
++      unsigned int size;
++#if IS_IN (rtld)
++      /* Use the hidden symbol in ld.so.  */
++      size = _rseq_size;
++#else
++      size = __rseq_size;
++#endif
++      if (size < RSEQ_AREA_SIZE_INITIAL)
++        /* The initial implementation used only 20 bytes out of 32,
++           but still expected size 32.  */
++        size = RSEQ_AREA_SIZE_INITIAL;
+       int ret = INTERNAL_SYSCALL_CALL (rseq, &self->rseq_area,
+-                                       sizeof (self->rseq_area),
+-                                       0, RSEQ_SIG);
++                                       size, 0, RSEQ_SIG);
+       if (!INTERNAL_SYSCALL_ERROR_P (ret))
+         return true;
+     }
+diff --git a/sysdeps/unix/sysv/linux/tst-rseq.c b/sysdeps/unix/sysv/linux/tst-rseq.c
+index 572c11166f8b6533..1d404db610c08fdf 100644
+--- a/sysdeps/unix/sysv/linux/tst-rseq.c
++++ b/sysdeps/unix/sysv/linux/tst-rseq.c
+@@ -29,6 +29,7 @@
+ # include <stdlib.h>
+ # include <string.h>
+ # include <syscall.h>
++# include <sys/auxv.h>
+ # include <thread_pointer.h>
+ # include <tls.h>
+ # include "tst-rseq.h"
+@@ -42,7 +43,8 @@ do_rseq_main_test (void)
+   TEST_COMPARE (__rseq_flags, 0);
+   TEST_VERIFY ((char *) __thread_pointer () + __rseq_offset
+                == (char *) &pd->rseq_area);
+-  TEST_COMPARE (__rseq_size, sizeof (pd->rseq_area));
++  /* The current implementation only supports the initial size.  */
++  TEST_COMPARE (__rseq_size, 20);
+ }
+ 
+ static void
+@@ -52,6 +54,12 @@ do_rseq_test (void)
+     {
+       FAIL_UNSUPPORTED ("kernel does not support rseq, skipping test");
+     }
++  printf ("info: __rseq_size: %u\n", __rseq_size);
++  printf ("info: __rseq_offset: %td\n", __rseq_offset);
++  printf ("info: __rseq_flags: %u\n", __rseq_flags);
++  printf ("info: getauxval (AT_RSEQ_FEATURE_SIZE): %ld\n",
++          getauxval (AT_RSEQ_FEATURE_SIZE));
++  printf ("info: getauxval (AT_RSEQ_ALIGN): %ld\n", getauxval (AT_RSEQ_ALIGN));
+   do_rseq_main_test ();
+ }
+ #else /* RSEQ_SIG */

@@ -1,0 +1,389 @@
+commit e92718552e1d17b8eccbffb88bf5bbb2235c4596
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Sat Sep 21 19:32:34 2024 +0200
+
+    Linux: Use readdir64_r for compat __old_readdir64_r (bug 32128)
+    
+    It is not necessary to do the conversion at the getdents64
+    layer for readdir64_r.  Doing it piecewise for readdir64
+    is slightly simpler and allows deleting __old_getdents64.
+    
+    This fixes bug 32128 because readdir64_r handles the length
+    check correctly.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+diff --git a/sysdeps/unix/sysv/linux/getdents64.c b/sysdeps/unix/sysv/linux/getdents64.c
+index 6323e003b30ae0e6..6f8e9147fbfb79bc 100644
+--- a/sysdeps/unix/sysv/linux/getdents64.c
++++ b/sysdeps/unix/sysv/linux/getdents64.c
+@@ -33,100 +33,3 @@ __getdents64 (int fd, void *buf, size_t nbytes)
+ }
+ libc_hidden_def (__getdents64)
+ weak_alias (__getdents64, getdents64)
+-
+-#if _DIRENT_MATCHES_DIRENT64
+-strong_alias (__getdents64, __getdents)
+-#else
+-# include <shlib-compat.h>
+-
+-# if SHLIB_COMPAT(libc, GLIBC_2_1, GLIBC_2_2)
+-#  include <olddirent.h>
+-#  include <unistd.h>
+-
+-static ssize_t
+-handle_overflow (int fd, __off64_t offset, ssize_t count)
+-{
+-  /* If this is the first entry in the buffer, we can report the
+-     error.  */
+-  if (offset == 0)
+-    {
+-      __set_errno (EOVERFLOW);
+-      return -1;
+-    }
+-
+-  /* Otherwise, seek to the overflowing entry, so that the next call
+-     will report the error, and return the data read so far.  */
+-  if (__lseek64 (fd, offset, SEEK_SET) != 0)
+-    return -1;
+-  return count;
+-}
+-
+-ssize_t
+-__old_getdents64 (int fd, char *buf, size_t nbytes)
+-{
+-  /* We do not move the individual directory entries.  This is only
+-     possible if the target type (struct __old_dirent64) is smaller
+-     than the source type.  */
+-  _Static_assert (offsetof (struct __old_dirent64, d_name)
+-		  <= offsetof (struct dirent64, d_name),
+-		  "__old_dirent64 is larger than dirent64");
+-  _Static_assert (__alignof__ (struct __old_dirent64)
+-		  <= __alignof__ (struct dirent64),
+-		  "alignment of __old_dirent64 is larger than dirent64");
+-
+-  ssize_t retval = INLINE_SYSCALL_CALL (getdents64, fd, buf, nbytes);
+-  if (retval > 0)
+-    {
+-      /* This is the marker for the first entry.  Offset 0 is reserved
+-	 for the first entry (see rewinddir).  Here, we use it as a
+-	 marker for the first entry in the buffer.  We never actually
+-	 seek to offset 0 because handle_overflow reports the error
+-	 directly, so it does not matter that the offset is incorrect
+-	 if entries have been read from the descriptor before (so that
+-	 the descriptor is not actually at offset 0).  */
+-      __off64_t previous_offset = 0;
+-
+-      char *p = buf;
+-      char *end = buf + retval;
+-      while (p < end)
+-	{
+-	  struct dirent64 *source = (struct dirent64 *) p;
+-
+-	  /* Copy out the fixed-size data.  */
+-	  __ino_t ino = source->d_ino;
+-	  __off64_t offset = source->d_off;
+-	  unsigned int reclen = source->d_reclen;
+-	  unsigned char type = source->d_type;
+-
+-	  /* Check for ino_t overflow.  */
+-	  if (__glibc_unlikely (ino != source->d_ino))
+-	    return handle_overflow (fd, previous_offset, p - buf);
+-
+-	  /* Convert to the target layout.  Use a separate struct and
+-	     memcpy to side-step aliasing issues.  */
+-	  struct __old_dirent64 result;
+-	  result.d_ino = ino;
+-	  result.d_off = offset;
+-	  result.d_reclen = reclen;
+-	  result.d_type = type;
+-
+-	  /* Write the fixed-sized part of the result to the
+-	     buffer.  */
+-	  size_t result_name_offset = offsetof (struct __old_dirent64, d_name);
+-	  memcpy (p, &result, result_name_offset);
+-
+-	  /* Adjust the position of the name if necessary.  Copy
+-	     everything until the end of the record, including the
+-	     terminating NUL byte.  */
+-	  if (result_name_offset != offsetof (struct dirent64, d_name))
+-	    memmove (p + result_name_offset, source->d_name,
+-		     reclen - offsetof (struct dirent64, d_name));
+-
+-	  p += reclen;
+-	  previous_offset = offset;
+-	}
+-     }
+-  return retval;
+-}
+-# endif /* SHLIB_COMPAT(libc, GLIBC_2_1, GLIBC_2_2)  */
+-#endif /* _DIRENT_MATCHES_DIRENT64  */
+diff --git a/sysdeps/unix/sysv/linux/olddirent.h b/sysdeps/unix/sysv/linux/olddirent.h
+index 3e672d47f5a5e421..d1a486e855e744c3 100644
+--- a/sysdeps/unix/sysv/linux/olddirent.h
++++ b/sysdeps/unix/sysv/linux/olddirent.h
+@@ -34,8 +34,6 @@ extern struct __old_dirent64 *__old_readdir64 (DIR *__dirp);
+ libc_hidden_proto (__old_readdir64);
+ extern int __old_readdir64_r (DIR *__dirp, struct __old_dirent64 *__entry,
+ 			  struct __old_dirent64 **__result);
+-extern __ssize_t __old_getdents64 (int __fd, char *__buf, size_t __nbytes)
+-	attribute_hidden;
+ int __old_scandir64 (const char * __dir,
+ 		     struct __old_dirent64 *** __namelist,
+ 		     int (*__selector) (const struct __old_dirent64 *),
+diff --git a/sysdeps/unix/sysv/linux/readdir64.c b/sysdeps/unix/sysv/linux/readdir64.c
+index 8a60504649aa54a2..c3450b083b6b64cf 100644
+--- a/sysdeps/unix/sysv/linux/readdir64.c
++++ b/sysdeps/unix/sysv/linux/readdir64.c
+@@ -26,17 +26,13 @@
+ #undef __readdir
+ #undef readdir
+ 
+-/* Read a directory entry from DIRP.  */
+-struct dirent64 *
+-__readdir64 (DIR *dirp)
++/* Read a directory entry from DIRP.  No locking.  */
++static struct dirent64 *
++__readdir64_unlocked (DIR *dirp)
+ {
+   struct dirent64 *dp;
+   int saved_errno = errno;
+ 
+-#if IS_IN (libc)
+-  __libc_lock_lock (dirp->lock);
+-#endif
+-
+   if (dirp->offset >= dirp->size)
+     {
+       /* We've emptied out our buffer.  Refill it.  */
+@@ -53,9 +49,6 @@ __readdir64 (DIR *dirp)
+ 	     do not set errno in that case, to indicate success.  */
+ 	  if (bytes == 0 || errno == ENOENT)
+ 	    __set_errno (saved_errno);
+-#if IS_IN (libc)
+-	  __libc_lock_unlock (dirp->lock);
+-#endif
+ 	  return NULL;
+ 	}
+       dirp->size = (size_t) bytes;
+@@ -68,10 +61,16 @@ __readdir64 (DIR *dirp)
+   dirp->offset += dp->d_reclen;
+   dirp->filepos = dp->d_off;
+ 
+-#if IS_IN (libc)
+-  __libc_lock_unlock (dirp->lock);
+-#endif
++  return dp;
++}
+ 
++/* Read a directory entry from DIRP.  */
++struct dirent64 *
++__readdir64 (DIR *dirp)
++{
++  __libc_lock_lock (dirp->lock);
++  struct dirent64 *dp = __readdir64_unlocked (dirp);
++  __libc_lock_unlock (dirp->lock);
+   return dp;
+ }
+ libc_hidden_def (__readdir64)
+@@ -99,45 +98,54 @@ __old_readdir64 (DIR *dirp)
+   struct __old_dirent64 *dp;
+   int saved_errno = errno;
+ 
+-#if IS_IN (libc)
+   __libc_lock_lock (dirp->lock);
+-#endif
+ 
+-  if (dirp->offset >= dirp->size)
++  while (1)
+     {
+-      /* We've emptied out our buffer.  Refill it.  */
++      errno = 0;
++      struct dirent64 *newdp = __readdir64_unlocked (dirp);
++      if (newdp == NULL)
++	{
++	  if (errno == 0 && dirp->errcode != 0)
++	    __set_errno (dirp->errcode);
++	  else if (errno == 0)
++	    __set_errno (saved_errno);
++	  dp = NULL;
++	  break;
++	}
+ 
+-      size_t maxread = dirp->allocation;
+-      ssize_t bytes;
++      /* Convert to the target layout.  Use a separate struct and
++	 memcpy to side-step aliasing issues.  */
++      struct __old_dirent64 result;
++      result.d_ino = newdp->d_ino;
++      result.d_off = newdp->d_off;
++      result.d_reclen = newdp->d_reclen;
++      result.d_type = newdp->d_type;
+ 
+-      bytes = __old_getdents64 (dirp->fd, dirp->data, maxread);
+-      if (bytes <= 0)
++      /* Check for ino_t overflow.  */
++      if (__glibc_unlikely (result.d_ino != newdp->d_ino))
+ 	{
+-	  /* Linux may fail with ENOENT on some file systems if the
+-	     directory inode is marked as dead (deleted).  POSIX
+-	     treats this as a regular end-of-directory condition, so
+-	     do not set errno in that case, to indicate success.  */
+-	  if (bytes == 0 || errno == ENOENT)
+-	    __set_errno (saved_errno);
+-#if IS_IN (libc)
+-	  __libc_lock_unlock (dirp->lock);
+-#endif
+-	  return NULL;
++	  dirp->errcode = ENAMETOOLONG;
++	  continue;
+ 	}
+-      dirp->size = (size_t) bytes;
+ 
+-      /* Reset the offset into the buffer.  */
+-      dirp->offset = 0;
+-    }
++      /* Overwrite the fixed-sized part.  */
++      dp = (struct __old_dirent64 *) newdp;
++      memcpy (dp, &result, offsetof (struct __old_dirent64, d_name));
+ 
+-  dp = (struct __old_dirent64 *) &dirp->data[dirp->offset];
+-  dirp->offset += dp->d_reclen;
+-  dirp->filepos = dp->d_off;
++      /* Move  the name.  */
++      _Static_assert (offsetof (struct __old_dirent64, d_name)
++		      <= offsetof (struct dirent64, d_name),
++		      "old struct must be smaller");
++      if (offsetof (struct __old_dirent64, d_name)
++	  != offsetof (struct dirent64, d_name))
++	memmove (dp->d_name, newdp->d_name, strlen (newdp->d_name) + 1);
+ 
+-#if IS_IN (libc)
+-  __libc_lock_unlock (dirp->lock);
+-#endif
++      __set_errno (saved_errno);
++      break;
++    }
+ 
++  __libc_lock_unlock (dirp->lock);
+   return dp;
+ }
+ libc_hidden_def (__old_readdir64)
+diff --git a/sysdeps/unix/sysv/linux/readdir64_r.c b/sysdeps/unix/sysv/linux/readdir64_r.c
+index 073a6453d1bbbd61..0c60987343b1f37f 100644
+--- a/sysdeps/unix/sysv/linux/readdir64_r.c
++++ b/sysdeps/unix/sysv/linux/readdir64_r.c
+@@ -135,91 +135,37 @@ attribute_compat_text_section
+ __old_readdir64_r (DIR *dirp, struct __old_dirent64 *entry,
+ 		   struct __old_dirent64 **result)
+ {
+-  struct __old_dirent64 *dp;
+-  size_t reclen;
+-  const int saved_errno = errno;
+-  int ret;
+-
+-  __libc_lock_lock (dirp->lock);
+-
+-  do
++  while (1)
+     {
+-      if (dirp->offset >= dirp->size)
+-	{
+-	  /* We've emptied out our buffer.  Refill it.  */
+-
+-	  size_t maxread = dirp->allocation;
+-	  ssize_t bytes;
+-
+-	  maxread = dirp->allocation;
+-
+-	  bytes = __old_getdents64 (dirp->fd, dirp->data, maxread);
+-	  if (bytes <= 0)
+-	    {
+-	      /* On some systems getdents fails with ENOENT when the
+-		 open directory has been rmdir'd already.  POSIX.1
+-		 requires that we treat this condition like normal EOF.  */
+-	      if (bytes < 0 && errno == ENOENT)
+-		{
+-		  bytes = 0;
+-		  __set_errno (saved_errno);
+-		}
+-	      if (bytes < 0)
+-		dirp->errcode = errno;
++      struct dirent64 new_entry;
++      struct dirent64 *newp;
++      int ret = __readdir64_r (dirp, &new_entry, &newp);
+ 
+-	      dp = NULL;
+-	      break;
+-	    }
+-	  dirp->size = (size_t) bytes;
+-
+-	  /* Reset the offset into the buffer.  */
+-	  dirp->offset = 0;
++      if (ret != 0)
++	return ret;
++      else if (newp == NULL)
++	{
++	  *result = NULL;
++	  return 0;
+ 	}
+-
+-      dp = (struct __old_dirent64 *) &dirp->data[dirp->offset];
+-
+-      reclen = dp->d_reclen;
+-
+-      dirp->offset += reclen;
+-
+-      dirp->filepos = dp->d_off;
+-
+-      if (reclen > offsetof (struct __old_dirent64, d_name) + NAME_MAX + 1)
++      else
+ 	{
+-	  /* The record is very long.  It could still fit into the
+-	     caller-supplied buffer if we can skip padding at the
+-	     end.  */
+-	  size_t namelen = _D_EXACT_NAMLEN (dp);
+-	  if (namelen <= NAME_MAX)
+-	    reclen = offsetof (struct __old_dirent64, d_name) + namelen + 1;
+-	  else
++	  entry->d_ino = newp->d_ino;
++	  if (entry->d_ino != newp->d_ino)
+ 	    {
+-	      /* The name is too long.  Ignore this file.  */
+-	      dirp->errcode = ENAMETOOLONG;
+-	      dp->d_ino = 0;
++	      dirp->errcode = EOVERFLOW;
+ 	      continue;
+ 	    }
++	  size_t namelen = strlen (newp->d_name);
++	  entry->d_off = newp->d_off;
++	  entry->d_reclen = (offsetof (struct __old_dirent64, d_name)
++			     + namelen + 1);
++	  entry->d_type = newp->d_type;
++	  memcpy (entry->d_name, newp->d_name, namelen + 1);
++	  *result = entry;
++	  return 0;
+ 	}
+-
+-      /* Skip deleted and ignored files.  */
+-    }
+-  while (dp->d_ino == 0);
+-
+-  if (dp != NULL)
+-    {
+-      *result = memcpy (entry, dp, reclen);
+-      entry->d_reclen = reclen;
+-      ret = 0;
+     }
+-  else
+-    {
+-      *result = NULL;
+-      ret = dirp->errcode;
+-    }
+-
+-  __libc_lock_unlock (dirp->lock);
+-
+-  return ret;
+ }
+ 
+ compat_symbol (libc, __old_readdir64_r, readdir64_r, GLIBC_2_1);

@@ -1,0 +1,459 @@
+commit b350a60b6ecd77b7ec30c7969de1df8b73642e55
+Author: Maciej W. Rozycki <macro@redhat.com>
+Date:   Thu Nov 7 06:14:24 2024 +0000
+
+    stdio-common: Add tests for formatted asprintf output specifiers
+    
+    Wire asprintf into test infrastructure for formatted printf output
+    specifiers.
+    
+    Owing to mtrace logging of lots of memory allocation calls these tests
+    take a considerable amount of time to complete, except for the character
+    conversion, taking from 00m20s for 'tst-printf-format-as-s --direct s',
+    through 01m10s and 03m53s for 'tst-printf-format-as-char --direct i' and
+    'tst-printf-format-as-double --direct f' respectively, to 19m24s for
+    'tst-printf-format-as-ldouble --direct f', all in standalone execution
+    from NFS on a RISC-V FU740@1.2GHz system and with output redirected over
+    100Mbps network via SSH.  It is with the skeleton's stub implementation
+    of dladdr(3); execution times with regular dladdr(3) are up to over
+    twice longer.
+    
+    Set timeouts for the tests accordingly then, with a global default for
+    all the asprintf tests, and then individual higher settings for double
+    and long double tests each.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index 0a45dcb4f45c0a5d..da279a969f7a8785 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -23,7 +23,7 @@ subdir	:= stdio-common
+ include ../Makeconfig
+ 
+ # List of markers for printf family function tests.
+-xprintf-funcs := p
++xprintf-funcs := p as
+ 
+ # List of data types and formats for individual per-conversion printf tests.
+ fmt-convs := double ldouble
+diff --git a/stdio-common/tst-printf-format-as-c.c b/stdio-common/tst-printf-format-as-c.c
+new file mode 100644
+index 0000000000000000..9eaf7aec73201b4d
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-c.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for the 'c' conversion.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-c.c"
+diff --git a/stdio-common/tst-printf-format-as-char.c b/stdio-common/tst-printf-format-as-char.c
+new file mode 100644
+index 0000000000000000..d9266d5760fb8808
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-char.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for signed char conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-char.c"
+diff --git a/stdio-common/tst-printf-format-as-double.c b/stdio-common/tst-printf-format-as-double.c
+new file mode 100644
+index 0000000000000000..370ce8c11bd94fe8
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-double.c
+@@ -0,0 +1,22 @@
++/* Test for formatted 'asprintf' output for double conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#define TIMEOUT (DEFAULT_TIMEOUT * 32)
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-double.c"
+diff --git a/stdio-common/tst-printf-format-as-int.c b/stdio-common/tst-printf-format-as-int.c
+new file mode 100644
+index 0000000000000000..e6e10a9769f079a4
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-int.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-int.c"
+diff --git a/stdio-common/tst-printf-format-as-ldouble.c b/stdio-common/tst-printf-format-as-ldouble.c
+new file mode 100644
+index 0000000000000000..e7f72208cec76078
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-ldouble.c
+@@ -0,0 +1,22 @@
++/* Test for formatted 'asprintf' output for long double conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#define TIMEOUT (DEFAULT_TIMEOUT * 128)
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-ldouble.c"
+diff --git a/stdio-common/tst-printf-format-as-llong.c b/stdio-common/tst-printf-format-as-llong.c
+new file mode 100644
+index 0000000000000000..beaad73c235c344e
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-llong.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for long long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-llong.c"
+diff --git a/stdio-common/tst-printf-format-as-long.c b/stdio-common/tst-printf-format-as-long.c
+new file mode 100644
+index 0000000000000000..7d968a873c3b5e29
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-long.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-long.c"
+diff --git a/stdio-common/tst-printf-format-as-s.c b/stdio-common/tst-printf-format-as-s.c
+new file mode 100644
+index 0000000000000000..baa883d5316cbf2f
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-s.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for the 's' conversion.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-s.c"
+diff --git a/stdio-common/tst-printf-format-as-short.c b/stdio-common/tst-printf-format-as-short.c
+new file mode 100644
+index 0000000000000000..8d0b078815f299a6
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-short.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for short int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-short.c"
+diff --git a/stdio-common/tst-printf-format-as-uchar.c b/stdio-common/tst-printf-format-as-uchar.c
+new file mode 100644
+index 0000000000000000..8e46254a2f32b457
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-uchar.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for unsigned char conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-uchar.c"
+diff --git a/stdio-common/tst-printf-format-as-uint.c b/stdio-common/tst-printf-format-as-uint.c
+new file mode 100644
+index 0000000000000000..8cf38d71a2f53358
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-uint.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for unsigned int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-uint.c"
+diff --git a/stdio-common/tst-printf-format-as-ullong.c b/stdio-common/tst-printf-format-as-ullong.c
+new file mode 100644
+index 0000000000000000..30b31ed8f7b36ae1
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-ullong.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for unsigned long long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-ullong.c"
+diff --git a/stdio-common/tst-printf-format-as-ulong.c b/stdio-common/tst-printf-format-as-ulong.c
+new file mode 100644
+index 0000000000000000..9b108aa2b5132686
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-ulong.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for unsigned long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-ulong.c"
+diff --git a/stdio-common/tst-printf-format-as-ushort.c b/stdio-common/tst-printf-format-as-ushort.c
+new file mode 100644
+index 0000000000000000..44b912fc38c46d28
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as-ushort.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'asprintf' output for unsigned short int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-as.h"
++#include "tst-printf-format-skeleton-ushort.c"
+diff --git a/stdio-common/tst-printf-format-as.h b/stdio-common/tst-printf-format-as.h
+new file mode 100644
+index 0000000000000000..c30d2e2c42822f24
+--- /dev/null
++++ b/stdio-common/tst-printf-format-as.h
+@@ -0,0 +1,46 @@
++/* Test feature wrapper for formatted 'asprintf' output.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <stdlib.h>
++
++#define printf_under_test(...)						\
++({									\
++  __label__ out;							\
++  int result;								\
++  char *str;								\
++									\
++  result = asprintf (&str, __VA_ARGS__);				\
++  if (result < 0)							\
++    {									\
++      perror ("asprintf");						\
++      goto out;								\
++    }									\
++  if (fwrite (str, sizeof (*str), result, stdout) != result)		\
++    {									\
++      perror ("fwrite");						\
++      result = -1;							\
++    }									\
++  free (str);								\
++out:									\
++  result;								\
++})
++
++#ifndef TIMEOUT
++# define TIMEOUT (DEFAULT_TIMEOUT * 12)
++#endif

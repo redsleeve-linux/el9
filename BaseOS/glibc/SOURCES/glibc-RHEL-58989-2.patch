@@ -1,0 +1,495 @@
+commit 9b5f2eb9fc5d3cf4b984f6002e69aac43296e922
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Thu Dec 5 09:53:47 2024 +0000
+
+    Add further test of TLS
+    
+    Add an additional test of TLS variables, with different alignment,
+    accessed from different modules.  The idea of the alignment test is
+    similar to tst-tlsalign and the same code is shared for setting up
+    test variables, but unlike the tst-tlsalign code, there are multiple
+    threads and variables are accessed from multiple objects to verify
+    that they get a consistent notion of the address of an object within a
+    thread.  Threads are repeatedly created and shut down to verify proper
+    initialization in each new thread.  The test is also repeated with TLS
+    descriptors when supported.  (However, only initial-exec TLS is
+    covered in this test.)
+    
+    Tested for x86_64.
+
+Conflicts:
+	elf/Makefile (fixup context)
+
+diff --git a/elf/Makefile b/elf/Makefile
+index 4a9c983686126adf..9d48e408de0a67a4 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -454,6 +454,8 @@ tests += \
+   tst-tls19 \
+   tst-tls20 \
+   tst-tls21 \
++  tst-tls22 \
++  tst-tls22-gnu2 \
+   tst-tls4 \
+   tst-tls5 \
+   tst-tlsalign \
+@@ -592,9 +594,15 @@ tst-tls-many-dynamic-modules-dep-bad = \
+ extra-test-objs += \
+   $(tlsmod17a-modules:=.os) \
+   $(tlsmod18a-modules:=.os) \
++  tst-tls22-mod1-vars.os \
++  tst-tls22-mod2-vars.os \
++  tst-tls22-vars.o \
+   tst-tlsalign-vars.o \
+   # extra-test-objs
+ test-extras += \
++  tst-tls22-mod1-vars \
++  tst-tls22-mod2-vars \
++  tst-tls22-vars \
+   tst-tlsalign-vars \
+   tst-tlsmod17a \
+   tst-tlsmod18a \
+@@ -840,6 +848,10 @@ modules-names = \
+   tst-tls19mod3 \
+   tst-tls20mod-bad \
+   tst-tls21mod \
++  tst-tls22-mod1 \
++  tst-tls22-mod1-gnu2 \
++  tst-tls22-mod2 \
++  tst-tls22-mod2-gnu2 \
+   tst-tlsalign-lib \
+   tst-tlsgap-mod0 \
+   tst-tlsgap-mod1 \
+@@ -2822,3 +2834,27 @@ $(objpfx)tst-hash-collision2-sysv: $(objpfx)tst-hash-collision2-mod1-sysv.so \
+ LDFLAGS-tst-hash-collision3-mod.so = \
+   -Wl,--version-script=tst-hash-collision3-mod.map
+ $(objpfx)tst-hash-collision3: $(objpfx)tst-hash-collision3-mod.so
++
++$(objpfx)tst-tls22: $(objpfx)tst-tls22-vars.o $(objpfx)tst-tls22-mod1.so \
++  $(objpfx)tst-tls22-mod2.so $(shared-thread-library)
++$(objpfx)tst-tls22-mod1.so: $(objpfx)tst-tls22-mod1.os \
++  $(objpfx)tst-tls22-mod1-vars.os $(objpfx)tst-tls22-mod2.so
++$(objpfx)tst-tls22-mod2.so: $(objpfx)tst-tls22-mod2.os \
++  $(objpfx)tst-tls22-mod2-vars.os
++$(objpfx)tst-tls22-gnu2: $(objpfx)tst-tls22-vars.o \
++  $(objpfx)tst-tls22-mod1-gnu2.so $(objpfx)tst-tls22-mod2-gnu2.so \
++  $(shared-thread-library)
++$(objpfx)tst-tls22-mod1-gnu2.so: $(objpfx)tst-tls22-mod1-gnu2.os \
++  $(objpfx)tst-tls22-mod1-vars.os $(objpfx)tst-tls22-mod2-gnu2.so
++$(objpfx)tst-tls22-mod2-gnu2.so: $(objpfx)tst-tls22-mod2-gnu2.os \
++  $(objpfx)tst-tls22-mod2-vars.os
++ifneq (no,$(have-mtls-descriptor))
++CFLAGS-tst-tls22-gnu2.c += -mtls-dialect=$(have-mtls-descriptor)
++CFLAGS-tst-tls22-mod1-gnu2.c += -mtls-dialect=$(have-mtls-descriptor)
++CFLAGS-tst-tls22-mod2-gnu2.c += -mtls-dialect=$(have-mtls-descriptor)
++endif
++# These reference symbols from the main executable.
++tst-tls22-mod1.so-no-z-defs = yes
++tst-tls22-mod1-gnu2.so-no-z-defs = yes
++tst-tls22-mod2.so-no-z-defs = yes
++tst-tls22-mod2-gnu2.so-no-z-defs = yes
+diff --git a/elf/tst-tls22-gnu2.c b/elf/tst-tls22-gnu2.c
+new file mode 100644
+index 0000000000000000..d9ce6df0b2bcc201
+--- /dev/null
++++ b/elf/tst-tls22-gnu2.c
+@@ -0,0 +1 @@
++#include <tst-tls22.c>
+diff --git a/elf/tst-tls22-mod1-gnu2.c b/elf/tst-tls22-mod1-gnu2.c
+new file mode 100644
+index 0000000000000000..0b085fe175b74962
+--- /dev/null
++++ b/elf/tst-tls22-mod1-gnu2.c
+@@ -0,0 +1 @@
++#include <tst-tls22-mod1.c>
+diff --git a/elf/tst-tls22-mod1-vars.c b/elf/tst-tls22-mod1-vars.c
+new file mode 100644
+index 0000000000000000..bdb7358287a325ee
+--- /dev/null
++++ b/elf/tst-tls22-mod1-vars.c
+@@ -0,0 +1,9 @@
++#include <tst-tls22.h>
++
++#define tdata1 mod1_tdata1
++#define tdata2 mod1_tdata2
++#define tdata3 mod1_tdata3
++#define tbss1 mod1_tbss1
++#define tbss2 mod1_tbss2
++#define tbss3 mod1_tbss3
++#include <tst-tlsalign-vars.c>
+diff --git a/elf/tst-tls22-mod1.c b/elf/tst-tls22-mod1.c
+new file mode 100644
+index 0000000000000000..3a47d7bbc6cd16c2
+--- /dev/null
++++ b/elf/tst-tls22-mod1.c
+@@ -0,0 +1,27 @@
++/* Test TLS with varied alignment and multiple modules and threads.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <tst-tls22.h>
++
++void
++test_mod1 (struct one_thread_data *data, int base_val)
++{
++  STORE_ADDRS (&data->mod1_self, mod1);
++  STORE_ADDRS (&data->exe_from_mod1, exe);
++  STORE_ADDRS (&data->mod2_from_mod1, mod2);
++}
+diff --git a/elf/tst-tls22-mod2-gnu2.c b/elf/tst-tls22-mod2-gnu2.c
+new file mode 100644
+index 0000000000000000..a5260e0616d8b595
+--- /dev/null
++++ b/elf/tst-tls22-mod2-gnu2.c
+@@ -0,0 +1 @@
++#include <tst-tls22-mod2.c>
+diff --git a/elf/tst-tls22-mod2-vars.c b/elf/tst-tls22-mod2-vars.c
+new file mode 100644
+index 0000000000000000..9ef3452bba56e829
+--- /dev/null
++++ b/elf/tst-tls22-mod2-vars.c
+@@ -0,0 +1,9 @@
++#include <tst-tls22.h>
++
++#define tdata1 mod2_tdata1
++#define tdata2 mod2_tdata2
++#define tdata3 mod2_tdata3
++#define tbss1 mod2_tbss1
++#define tbss2 mod2_tbss2
++#define tbss3 mod2_tbss3
++#include <tst-tlsalign-vars.c>
+diff --git a/elf/tst-tls22-mod2.c b/elf/tst-tls22-mod2.c
+new file mode 100644
+index 0000000000000000..5d26d592b0262b1e
+--- /dev/null
++++ b/elf/tst-tls22-mod2.c
+@@ -0,0 +1,26 @@
++/* Test TLS with varied alignment and multiple modules and threads.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <tst-tls22.h>
++
++void
++test_mod2 (struct one_thread_data *data, int base_val)
++{
++  STORE_ADDRS (&data->mod2_self, mod2);
++  STORE_ADDRS (&data->exe_from_mod2, exe);
++}
+diff --git a/elf/tst-tls22-vars.c b/elf/tst-tls22-vars.c
+new file mode 100644
+index 0000000000000000..2ad3ee7a3b6ac980
+--- /dev/null
++++ b/elf/tst-tls22-vars.c
+@@ -0,0 +1,9 @@
++#include <tst-tls22.h>
++
++#define tdata1 exe_tdata1
++#define tdata2 exe_tdata2
++#define tdata3 exe_tdata3
++#define tbss1 exe_tbss1
++#define tbss2 exe_tbss2
++#define tbss3 exe_tbss3
++#include <tst-tlsalign-vars.c>
+diff --git a/elf/tst-tls22.c b/elf/tst-tls22.c
+new file mode 100644
+index 0000000000000000..35a8cd82b22462ff
+--- /dev/null
++++ b/elf/tst-tls22.c
+@@ -0,0 +1,147 @@
++/* Test TLS with varied alignment and multiple modules and threads.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/check.h>
++#include <support/xthread.h>
++#include <tst-tls22.h>
++
++static void
++check_addrs_align (const struct obj_addrs *addrs)
++{
++  TEST_COMPARE (addrs->addr_tdata1 & (__alignof__ (int) - 1), 0);
++  TEST_COMPARE (addrs->addr_tdata2 & 0xf, 0);
++  TEST_COMPARE (addrs->addr_tdata3 & 0xfff, 0);
++  TEST_COMPARE (addrs->addr_tbss1 & (__alignof__ (int) - 1), 0);
++  TEST_COMPARE (addrs->addr_tbss2 & 0xf, 0);
++  TEST_COMPARE (addrs->addr_tbss3 & 0xfff, 0);
++}
++
++static void
++check_addrs_same (const struct obj_addrs *addrs1,
++		  const struct obj_addrs *addrs2)
++{
++  TEST_COMPARE (addrs1->addr_tdata1, addrs2->addr_tdata1);
++  TEST_COMPARE (addrs1->addr_tdata2, addrs2->addr_tdata2);
++  TEST_COMPARE (addrs1->addr_tdata3, addrs2->addr_tdata3);
++  TEST_COMPARE (addrs1->addr_tbss1, addrs2->addr_tbss1);
++  TEST_COMPARE (addrs1->addr_tbss2, addrs2->addr_tbss2);
++  TEST_COMPARE (addrs1->addr_tbss3, addrs2->addr_tbss3);
++}
++
++static void
++check_vals_before (const struct obj_values *vals)
++{
++  TEST_COMPARE (vals->val_tdata1, 1);
++  TEST_COMPARE (vals->val_tdata2, 2);
++  TEST_COMPARE (vals->val_tdata3, 4);
++  TEST_COMPARE (vals->val_tbss1, 0);
++  TEST_COMPARE (vals->val_tbss2, 0);
++  TEST_COMPARE (vals->val_tbss3, 0);
++}
++
++static void
++check_vals_after (const struct obj_values *vals, int base_val)
++{
++  TEST_COMPARE (vals->val_tdata1, base_val);
++  TEST_COMPARE (vals->val_tdata2, base_val + 1);
++  TEST_COMPARE (vals->val_tdata3, base_val + 2);
++  TEST_COMPARE (vals->val_tbss1, base_val + 3);
++  TEST_COMPARE (vals->val_tbss2, base_val + 4);
++  TEST_COMPARE (vals->val_tbss3, base_val + 5);
++}
++
++static void
++check_one_thread (const struct one_thread_data *data, int base_val)
++{
++  check_vals_before (&data->exe_before);
++  check_vals_before (&data->mod1_before);
++  check_vals_before (&data->mod2_before);
++  check_vals_after (&data->exe_after, base_val);
++  check_vals_after (&data->mod1_after, base_val);
++  check_vals_after (&data->mod2_after, base_val);
++  check_addrs_align (&data->exe_self);
++  check_addrs_same (&data->exe_self, &data->exe_from_mod1);
++  check_addrs_same (&data->exe_self, &data->exe_from_mod2);
++  check_addrs_align (&data->mod1_self);
++  check_addrs_same (&data->mod1_self, &data->mod1_from_exe);
++  check_addrs_align (&data->mod2_self);
++  check_addrs_same (&data->mod2_self, &data->mod2_from_exe);
++  check_addrs_same (&data->mod2_self, &data->mod2_from_mod1);
++}
++
++static void *
++thread_func (void *arg)
++{
++  int base_val = (int) (intptr_t) arg + 10;
++  struct one_thread_data data;
++  /* Record the addresses of variables as seen from the main
++     executable (which should be the same as seen from the other
++     modules), and their initial values.  */
++  STORE_ADDRS (&data.exe_self, exe);
++  STORE_ADDRS (&data.mod1_from_exe, mod1);
++  STORE_ADDRS (&data.mod2_from_exe, mod2);
++  STORE_VALUES (&data.exe_before, exe);
++  STORE_VALUES (&data.mod1_before, mod1);
++  STORE_VALUES (&data.mod2_before, mod2);
++  /* Overwrite the value of variables.  */
++  OVERWRITE_VALUES (exe, base_val);
++  OVERWRITE_VALUES (mod1, base_val);
++  OVERWRITE_VALUES (mod2, base_val);
++  /* Record the addresses of variables as seen from other modules.  */
++  test_mod1 (&data, base_val);
++  test_mod2 (&data, base_val);
++  /* Record the overwritten values (thus making sure that no other
++     thread running in parallel has changed this thread's values).  */
++  STORE_VALUES (&data.exe_after, exe);
++  STORE_VALUES (&data.mod1_after, mod1);
++  STORE_VALUES (&data.mod2_after, mod2);
++  /* Check all the addresses and values recorded.  */
++  check_one_thread (&data, base_val);
++  return NULL;
++}
++
++#define NUM_ITERS 50
++#define NUM_THREADS 16
++
++/* For NUM_ITERS iterations, repeatedly create NUM_THREADS threads.
++   In each thread, we determine the addresses of TLS objects (both
++   from the module defining those objects and from other modules), and
++   their initial values, and store in values that are then read back;
++   we check that each object's address is the same regardless of the
++   module in which it is determined, that alignment of objects is as
++   required, and that the values of objects are as expected.  */
++
++static int
++do_test (void)
++{
++  for (size_t i = 0; i < NUM_ITERS; i++)
++    {
++      pthread_t threads[NUM_THREADS];
++      for (size_t j = 0; j < NUM_THREADS; j++)
++	threads[j] = xpthread_create (NULL, thread_func, (void *) j);
++      /* Also run checks in the main thread, but only once because
++	 those values don't get reinitialized.  */
++      if (i == 0)
++	thread_func ((void *) NUM_THREADS);
++      for (size_t j = 0; j < NUM_THREADS; j++)
++	xpthread_join (threads[j]);
++    }
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/elf/tst-tls22.h b/elf/tst-tls22.h
+new file mode 100644
+index 0000000000000000..24b2e0a0b6af4d45
+--- /dev/null
++++ b/elf/tst-tls22.h
+@@ -0,0 +1,115 @@
++/* Test TLS with varied alignment and multiple modules and threads: header.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef TST_TLS22_H
++#define TST_TLS22_H
++
++#include <stdint.h>
++
++extern __thread int exe_tdata1 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int exe_tdata2 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int exe_tdata3 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int exe_tbss1 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int exe_tbss2 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int exe_tbss3 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod1_tdata1 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod1_tdata2 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod1_tdata3 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod1_tbss1 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod1_tbss2 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod1_tbss3 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod2_tdata1 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod2_tdata2 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod2_tdata3 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod2_tbss1 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod2_tbss2 __attribute__ ((tls_model ("initial-exec")));
++extern __thread int mod2_tbss3 __attribute__ ((tls_model ("initial-exec")));
++
++/* Structure to store the addresses of one set of TLS objects in one
++   thread, as seen by one module in the program.  */
++struct obj_addrs
++{
++  uintptr_t addr_tdata1, addr_tdata2, addr_tdata3;
++  uintptr_t addr_tbss1, addr_tbss2, addr_tbss3;
++};
++
++/* Structure to store the values of one set of TLS objects in one
++   thread.  */
++struct obj_values
++{
++  uintptr_t val_tdata1, val_tdata2, val_tdata3;
++  uintptr_t val_tbss1, val_tbss2, val_tbss3;
++};
++
++/* Structure to store all the data about TLS objects in one
++   thread.  */
++struct one_thread_data
++{
++  struct obj_addrs exe_self, exe_from_mod1, exe_from_mod2;
++  struct obj_addrs mod1_self, mod1_from_exe;
++  struct obj_addrs mod2_self, mod2_from_exe, mod2_from_mod1;
++  struct obj_values exe_before, mod1_before, mod2_before;
++  struct obj_values exe_after, mod1_after, mod2_after;
++};
++
++/* Store the addresses of variables prefixed by PFX in the structure
++   pointed to by DST.  */
++#define STORE_ADDRS(DST, PFX)				\
++  do							\
++    {							\
++      (DST)->addr_tdata1 = (uintptr_t) &PFX ## _tdata1;	\
++      (DST)->addr_tdata2 = (uintptr_t) &PFX ## _tdata2;	\
++      (DST)->addr_tdata3 = (uintptr_t) &PFX ## _tdata3;	\
++      (DST)->addr_tbss1 = (uintptr_t) &PFX ## _tbss1;	\
++      (DST)->addr_tbss2 = (uintptr_t) &PFX ## _tbss2;	\
++      (DST)->addr_tbss3 = (uintptr_t) &PFX ## _tbss3;	\
++    }							\
++  while (0)
++
++/* Store the values of variables prefixed by PFX in the structure
++   pointed to by DST.  */
++#define STORE_VALUES(DST, PFX)			\
++  do						\
++    {						\
++      (DST)->val_tdata1 = PFX ## _tdata1;	\
++      (DST)->val_tdata2 = PFX ## _tdata2;	\
++      (DST)->val_tdata3 = PFX ## _tdata3;	\
++      (DST)->val_tbss1 = PFX ## _tbss1;		\
++      (DST)->val_tbss2 = PFX ## _tbss2;		\
++      (DST)->val_tbss3 = PFX ## _tbss3;		\
++    }						\
++  while (0)
++
++/* Overwrite the values of variables prefixed by PFX with values
++   starting with VAL.  */
++#define OVERWRITE_VALUES(PFX, VAL)		\
++  do						\
++    {						\
++      PFX ## _tdata1 = (VAL);			\
++      PFX ## _tdata2 = (VAL) + 1;		\
++      PFX ## _tdata3 = (VAL) + 2;		\
++      PFX ## _tbss1 = (VAL) + 3;		\
++      PFX ## _tbss2 = (VAL) + 4;		\
++      PFX ## _tbss3 = (VAL) + 5;		\
++    }						\
++  while (0)
++
++void test_mod1 (struct one_thread_data *data, int base_val);
++void test_mod2 (struct one_thread_data *data, int base_val);
++
++#endif /* TST_TLS22_H */

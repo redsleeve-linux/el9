@@ -1,0 +1,70 @@
+commit 7fe1fde499507126f7de10ebf12fecaf77ae6602
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Mon Oct 28 22:22:26 2024 +0000
+
+    Document further requirement on mixing streams / file descriptors
+    
+    The gilbc manual has some documentation in llio.texi of requirements
+    for moving between I/O on FILE * streams and file descriptors on the
+    same open file description.
+    
+    The documentation of what must be done on a FILE * stream to move from
+    it to either a file descriptor or another FILE * for the same open
+    file description seems to match POSIX.  However, there is an
+    additional requirement in POSIX on the *second* of the two handles
+    being moved between, which is not mentioned in the glibc manual: "If
+    any previous active handle has been used by a function that explicitly
+    changed the file offset, except as required above for the first
+    handle, the application shall perform an lseek() or fseek() (as
+    appropriate to the type of handle) to an appropriate location.".
+    
+    Document this requirement on seeking in the glibc manual, limited to
+    the case that seems relevant to glibc (the new channel is a previously
+    active stream, on which the seeking previously occurred).  Note that
+    I'm not sure what the "except as required above for the first handle"
+    is meant to be about, so I haven't documented anything for it.  As far
+    as I can tell, nothing specified for moving from the first handle
+    actually list calling a seek function as one of the steps to be done.
+    (Current POSIX doesn't seem to have any relevant rationale for this
+    section.  The rationale in the 1996 edition says "In requiring the
+    seek to an appropriate location for the new handle, the application is
+    required to know what it is doing if it is passing streams with seeks
+    involved.  If the required seek is not done, the results are undefined
+    (and in fact the program probably will not work on many common
+    implementations)." - which also doesn't help in understanding the
+    purpose of "except as required above for the first handle".)
+    
+    Tested with "make info" and "make pdf".
+
+diff --git a/manual/llio.texi b/manual/llio.texi
+index 12194273801adc18..0f84a593ee92b31f 100644
+--- a/manual/llio.texi
++++ b/manual/llio.texi
+@@ -1097,6 +1097,27 @@ streams persist in other processes, their file positions become
+ undefined as a result.  To prevent this, you must clean up the streams
+ before destroying them.
+ 
++In addition to cleaning up a stream before doing I/O using another
++linked channel, additional precautions are needed to ensure a
++well-defined file position indicator in some cases.  If both the
++following conditions hold, you must set the file position indicator on
++the new channel (a stream) using a function such as @code{fseek}.
++
++@itemize @bullet
++@item
++The new linked channel is a stream that was previously active.
++
++@item
++The file position indicator was previously set on that channel (while
++it was previously active) with a function such as @code{fseek}.
++@end itemize
++
++POSIX requires such precautions in more cases: if either the old or
++the new linked channel is a stream (whether or not previously active)
++and the file position indicator was previously set on any channel
++linked to those channels with a function such as @code{fseek} or
++@code{lseek}.
++
+ @node Independent Channels
+ @subsection Independent Channels
+ @cindex independent channels

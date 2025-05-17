@@ -1,0 +1,65 @@
+commit 3bea50ccbc925d4fc5f85ec402b6154cbe770b71
+Author: Yu Chien Peter Lin <peterlin@andestech.com>
+Date:   Fri Sep 30 20:19:50 2022 +0800
+
+    support: Add xpthread_cond_signal wrapper
+    
+    Signed-off-by: Yu Chien Peter Lin <peterlin@andestech.com>
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff --git a/support/Makefile b/support/Makefile
+index 154e3a4ff03cebda..bfd8d59285524f4d 100644
+--- a/support/Makefile
++++ b/support/Makefile
+@@ -160,6 +160,7 @@ libsupport-routines = \
+   xpthread_cancel \
+   xpthread_check_return \
+   xpthread_cond_wait \
++  xpthread_cond_signal \
+   xpthread_create \
+   xpthread_detach \
+   xpthread_join \
+diff --git a/support/xpthread_cond_signal.c b/support/xpthread_cond_signal.c
+new file mode 100644
+index 0000000000000000..ed0be1a8abf8559b
+--- /dev/null
++++ b/support/xpthread_cond_signal.c
+@@ -0,0 +1,26 @@
++/* pthread_cond_signal with error checking.
++   Copyright (C) 2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xthread.h>
++
++void
++xpthread_cond_signal (pthread_cond_t *cond)
++{
++  xpthread_check_return
++    ("pthread_cond_signal", pthread_cond_signal (cond));
++}
+diff --git a/support/xthread.h b/support/xthread.h
+index a4a4ec5b1ef16fd3..1a39b1c0ddda9725 100644
+--- a/support/xthread.h
++++ b/support/xthread.h
+@@ -58,6 +58,7 @@ void xpthread_mutex_consistent (pthread_mutex_t *);
+ void xpthread_spin_lock (pthread_spinlock_t *lock);
+ void xpthread_spin_unlock (pthread_spinlock_t *lock);
+ void xpthread_cond_wait (pthread_cond_t * cond, pthread_mutex_t * mutex);
++void xpthread_cond_signal (pthread_cond_t *cond);
+ pthread_t xpthread_create (pthread_attr_t *attr,
+                            void *(*thread_func) (void *), void *closure);
+ void xpthread_detach (pthread_t thr);

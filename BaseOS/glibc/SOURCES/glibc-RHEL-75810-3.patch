@@ -1,0 +1,299 @@
+commit 12b4a1fc6ecfc278a87159164bdf1d682deb18e2
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Jan 24 10:40:28 2025 +0100
+
+    stdlib: Re-implement free (environ) compatibility kludge for setenv
+    
+    For the originally failing application (userhelper from usermode),
+    it is not actually necessary to call realloc on the environ
+    pointer.  Yes, there will be a memory leak because the application
+    assigns a heap-allocated pointer to environ that it never frees,
+    but this leak was always there: the old realloc-based setenv had
+    a hidden internal variable, last_environ, that was used in a similar
+    way to __environ_array_list.  The application is not impacted by
+    the leak anyway because the relevant operations do not happen in
+    a loop.
+    
+    The change here just uses a separte heap allocation and points
+    environ to that.  This means that if an application calls
+    free (environ) and restores the environ pointer to the value
+    at process start, and does not modify the environment further,
+    nothing bad happens.
+    
+    This change should not invalidate any previous testing that went into
+    the original getenv thread safety change, commit 7a61e7f557a97ab597d6
+    ("stdlib: Make getenv thread-safe in more cases").
+    
+    The new test cases are modeled in part on the env -i use case from
+    bug 32588 (with !DO_MALLOC && !DO_EARLY_SETENV), and the previous
+    stdlib/tst-setenv-malloc test.  The DO_MALLOC && !DO_EARLY_SETENV
+    case in the new test should approximate what userhelper from the
+    usermode package does.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+diff --git a/stdlib/Makefile b/stdlib/Makefile
+index 4cbf47d215353681..4f5de988cee07932 100644
+--- a/stdlib/Makefile
++++ b/stdlib/Makefile
+@@ -97,6 +97,10 @@ tests := \
+   tst-concurrent-quick_exit \
+   tst-cxa_atexit \
+   tst-environ \
++  tst-environ-change-1 \
++  tst-environ-change-2 \
++  tst-environ-change-3 \
++  tst-environ-change-4 \
+   tst-getenv-signal \
+   tst-getenv-thread \
+   tst-getenv-unsetenv \
+diff --git a/stdlib/setenv.c b/stdlib/setenv.c
+index e3833bc514870bf4..035a2a6ce8a95ce6 100644
+--- a/stdlib/setenv.c
++++ b/stdlib/setenv.c
+@@ -118,24 +118,21 @@ __environ_new_array (size_t required_size)
+   else
+     new_size = __environ_array_list->allocated * 2;
+ 
+-  size_t new_size_in_bytes;
+-  if (__builtin_mul_overflow (new_size, sizeof (char *),
+-			      &new_size_in_bytes)
+-      || __builtin_add_overflow (new_size_in_bytes,
+-				 offsetof (struct environ_array,
+-					   array),
+-				 &new_size_in_bytes))
++  /* Zero-initialize everything, so that getenv can only
++     observe valid or null pointers.  */
++  char **new_array = calloc (new_size, sizeof (*new_array));
++  if (new_array == NULL)
++    return NULL;
++
++  struct environ_array *target_array = malloc (sizeof (*target_array));
++  if (target_array == NULL)
+     {
+-      __set_errno (ENOMEM);
++      free (new_array);
+       return NULL;
+     }
+ 
+-  /* Zero-initialize everything, so that getenv can only
+-     observe valid or null pointers.  */
+-  struct environ_array *target_array = calloc (1, new_size_in_bytes);
+-  if (target_array == NULL)
+-    return NULL;
+   target_array->allocated = new_size;
++  target_array->array = new_array;
+   assert (new_size >= target_array->allocated);
+ 
+   /* Put it onto the list.  */
+@@ -236,7 +233,7 @@ __add_to_environ (const char *name, const char *value, const char *combined,
+ 	  ep[1] = NULL;
+ 
+ 	  /* And __environ should be repointed to our array.  */
+-	  result_environ = &target_array->array[0];
++	  result_environ = target_array->array;
+ 	}
+     }
+ 
+@@ -402,6 +399,7 @@ libc_freeres_fn (free_mem)
+   /* Clear all backing arrays.  */
+   while (__environ_array_list != NULL)
+     {
++      free (__environ_array_list->array);
+       void *ptr = __environ_array_list;
+       __environ_array_list = __environ_array_list->next;
+       free (ptr);
+diff --git a/stdlib/setenv.h b/stdlib/setenv.h
+index 036f4274aa29b722..42b86fff1008bc81 100644
+--- a/stdlib/setenv.h
++++ b/stdlib/setenv.h
+@@ -29,9 +29,18 @@
+    of environment values used before.  */
+ struct environ_array
+ {
+-  struct environ_array *next;   /* Previously used environment array.  */
++  /* The actual environment array.  Use a separate allocation (and not
++     a flexible array member) so that calls like free (environ) that
++     have been encountered in some applications do not crash
++     immediately.  With such a call, if the application restores the
++     original environ pointer at process start and does not modify the
++     environment again, a use-after-free situation only occurs during
++     __libc_freeres, which is only called during memory debugging.
++     With subsequent setenv calls, there is still heap corruption, but
++     that happened with the old realloc-based implementation, too.  */
++  char **array;
+   size_t allocated;             /* Number of allocated array elments.  */
+-  char *array[];               /* The actual environment array.  */
++  struct environ_array *next;   /* Previously used environment array.  */
+ };
+ 
+ /* After initialization, and until the user resets environ (perhaps by
+@@ -44,7 +53,7 @@ static inline bool
+ __environ_is_from_array_list (char **ep)
+ {
+   struct environ_array *eal = atomic_load_relaxed (&__environ_array_list);
+-  return eal != NULL && &eal->array[0] == ep;
++  return eal != NULL && eal->array == ep;
+ }
+ 
+ /* Counter for detecting concurrent modification in unsetenv.
+diff --git a/stdlib/tst-environ-change-1.c b/stdlib/tst-environ-change-1.c
+new file mode 100644
+index 0000000000000000..4241ad4c63ea2e33
+--- /dev/null
++++ b/stdlib/tst-environ-change-1.c
+@@ -0,0 +1,3 @@
++#define DO_EARLY_SETENV 0
++#define DO_MALLOC 0
++#include "tst-environ-change-skeleton.c"
+diff --git a/stdlib/tst-environ-change-2.c b/stdlib/tst-environ-change-2.c
+new file mode 100644
+index 0000000000000000..b20be124902125e8
+--- /dev/null
++++ b/stdlib/tst-environ-change-2.c
+@@ -0,0 +1,3 @@
++#define DO_EARLY_SETENV 0
++#define DO_MALLOC 1
++#include "tst-environ-change-skeleton.c"
+diff --git a/stdlib/tst-environ-change-3.c b/stdlib/tst-environ-change-3.c
+new file mode 100644
+index 0000000000000000..e77996a6cb0ac601
+--- /dev/null
++++ b/stdlib/tst-environ-change-3.c
+@@ -0,0 +1,3 @@
++#define DO_EARLY_SETENV 1
++#define DO_MALLOC 0
++#include "tst-environ-change-skeleton.c"
+diff --git a/stdlib/tst-environ-change-4.c b/stdlib/tst-environ-change-4.c
+new file mode 100644
+index 0000000000000000..633ef7bda84eb2a8
+--- /dev/null
++++ b/stdlib/tst-environ-change-4.c
+@@ -0,0 +1,3 @@
++#define DO_EARLY_SETENV 1
++#define DO_MALLOC 1
++#include "tst-environ-change-skeleton.c"
+diff --git a/stdlib/tst-environ-change-skeleton.c b/stdlib/tst-environ-change-skeleton.c
+new file mode 100644
+index 0000000000000000..c9b02844369207d9
+--- /dev/null
++++ b/stdlib/tst-environ-change-skeleton.c
+@@ -0,0 +1,118 @@
++/* Test deallocation of the environ pointer.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* This test is not in the scope for POSIX or any other standard, but
++   some applications assume that environ is a heap-allocated pointer
++   after a call to setenv on an empty environment.  They also try to
++   save and restore environ in an attempt to undo a temporary
++   modification of the environment array, but this does not work if
++   setenv was called before.
++
++   Before including this file, these macros need to be defined
++   to 0 or 1:
++
++   DO_EARLY_SETENV  If 1, perform a setenv call before changing environ.
++   DO_MALLOC        If 1, use a heap pointer for the empty environment.
++
++   Note that this test will produce errors under valgrind and other
++   memory tracers that call __libc_freeres because free (environ)
++   deallocates a pointer still used internally.  */
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <support/check.h>
++#include <support/support.h>
++
++static void
++check_rewritten (void)
++{
++  TEST_COMPARE_STRING (environ[0], "tst_environ_change_a=1");
++  TEST_COMPARE_STRING (environ[1], "tst_environ_change_b=2");
++  TEST_COMPARE_STRING (environ[2], NULL);
++  TEST_COMPARE_STRING (getenv ("tst_environ_change_a"), "1");
++  TEST_COMPARE_STRING (getenv ("tst_environ_change_b"), "2");
++  TEST_COMPARE_STRING (getenv ("tst_environ_change_early"), NULL);
++  TEST_COMPARE_STRING (getenv ("PATH"), NULL);
++}
++
++static int
++do_test (void)
++{
++  TEST_COMPARE_STRING (getenv ("tst_environ_change_a"), NULL);
++  TEST_COMPARE_STRING (getenv ("tst_environ_change_b"), NULL);
++  TEST_COMPARE_STRING (getenv ("tst_environ_change_early_setenv"), NULL);
++#if DO_EARLY_SETENV
++  TEST_COMPARE (setenv ("tst_environ_change_early_setenv", "1", 1), 0);
++#else
++  /* Must come back after environ reset.  */
++  char *original_path = xstrdup (getenv ("PATH"));
++#endif
++
++  char **save_environ = environ;
++#if DO_MALLOC
++  environ = xmalloc (sizeof (*environ));
++#else
++  char *environ_array[1];
++  environ = environ_array;
++#endif
++  *environ = NULL;
++  TEST_COMPARE (setenv ("tst_environ_change_a", "1", 1), 0);
++  TEST_COMPARE (setenv ("tst_environ_change_b", "2", 1), 0);
++#if !DO_EARLY_SETENV
++  /* Early setenv results in reuse of the heap-allocated environ array
++     that does not change as more pointers are added to it.  */
++  TEST_VERIFY (environ != save_environ);
++#endif
++  check_rewritten ();
++
++  bool check_environ = true;
++#if DO_MALLOC
++  /* Disable further checks if the free call clobbers the environ
++     contents.  Whether that is the case depends on the internal
++     setenv allocation policy and the heap layout.  */
++  check_environ = environ != save_environ;
++  /* Invalid: Causes internal use-after-free condition.  Yet this has
++     to be supported for compatibility with some applications. */
++  free (environ);
++#endif
++
++  environ = save_environ;
++
++#if DO_EARLY_SETENV
++  /* With an early setenv, the internal environ array was overwritten.
++     Historically, this triggered a use-after-free problem because of
++     the use of realloc internally in setenv, but it may appear as if
++     the original environment had been restored.  In the current code,
++     we can only support this if the free (environ) above call did not
++     clobber the array, otherwise getenv will see invalid pointers.
++     Due to the use-after-free, invalid pointers could be seen with
++     the old implementation as well, but the triggering conditions
++     were different.  */
++  if (check_environ)
++    check_rewritten ();
++#else
++  TEST_VERIFY (check_environ);
++  TEST_COMPARE_STRING (getenv ("PATH"), original_path);
++  TEST_COMPARE_STRING (getenv ("tst_environ_change_a"), NULL);
++  TEST_COMPARE_STRING (getenv ("tst_environ_change_b"), NULL);
++#endif
++
++  return 0;
++}
++
++#include <support/test-driver.c>

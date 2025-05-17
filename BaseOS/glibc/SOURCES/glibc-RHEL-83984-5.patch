@@ -1,0 +1,277 @@
+commit 090dfa40a5e46f7c0e4d6e8369bcbbd51267625f
+Author: Frédéric Bérat <fberat@redhat.com>
+Date:   Fri Mar 7 18:16:30 2025 +0100
+
+    Add _FORTIFY_SOURCE support for inet_ntop
+    
+    - Create the __inet_ntop_chk routine that verifies that the builtin size
+    of the destination buffer is at least as big as the size given by the
+    user.
+    - Redirect calls from inet_ntop to __inet_ntop_chk or __inet_ntop_warn
+    - Update the abilist for this new routine
+    - Update the manual to mention the new fortification
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+Conflicts:
+	debug/Makefile (New routine added to static-only-routines
+	instead of routines)
+	debug/Versions (Version not updated in the backport)
+	inet/Makefile (New headers)
+	manual/maint.texi (Not relevant in current Glibc Version)
+	*/libc.abilist (Not added in the backport)
+	inet/bits/inet-fortified-decl.h (Replace __REDIRECT_FORTIFY_NTH
+	with __REDIRECT_NTH)
+	inet/bits/inet-fortified.h (removed attribute_overloadable and
+	clang specific handling)
+
+Note on the changes:
+- Since we can't modify the ABI, __inet_ntop_chk has been added to
+  static-only-routines and `attribute_hidden` has been added to its definition.
+- __REDIRECT_FORTIFY* macros aren't available in the current version, since
+  the patch to enable foritfication on glibc itself hasn't be ported.
+- clang specific handling of foritifcation has not been ported, which means the
+  following had to be removed from the patch:
+  - use of __attribute_overloadable__
+  - use of __fortify_clang_* macros
+
+diff --git a/debug/Makefile b/debug/Makefile
+index c19c76e2b8564bd2..18be784e86bbaaab 100644
+--- a/debug/Makefile
++++ b/debug/Makefile
+@@ -116,7 +116,8 @@ routines  = \
+   wprintf_chk \
+   $(static-only-routines)
+   # routines
+-static-only-routines := stack_chk_fail_local
++static-only-routines := stack_chk_fail_local \
++  inet_ntop_chk \
+ 
+ # Don't add stack_chk_fail_local.o to libc.a since __stack_chk_fail_local
+ # is an alias of __stack_chk_fail in stack_chk_fail.o.
+diff --git a/debug/inet_ntop_chk.c b/debug/inet_ntop_chk.c
+new file mode 100644
+index 0000000000000000..8a3994dd3fc9bfe4
+--- /dev/null
++++ b/debug/inet_ntop_chk.c
+@@ -0,0 +1,31 @@
++/* Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <arpa/inet.h>
++#include <stdio.h>
++
++attribute_hidden
++const char *
++__inet_ntop_chk (int af, const void *src, char *dst,
++		 socklen_t size, size_t dst_size)
++{
++  if (size > dst_size)
++    __chk_fail ();
++
++  return inet_ntop (af, src, dst, size);
++}
++libc_hidden_def (__inet_ntop_chk)
+diff --git a/debug/tst-fortify.c b/debug/tst-fortify.c
+index 01a8703de1e6e09a..50909d0af53da10e 100644
+--- a/debug/tst-fortify.c
++++ b/debug/tst-fortify.c
+@@ -24,6 +24,7 @@
+ 
+ #include <assert.h>
+ #include <fcntl.h>
++#include <arpa/inet.h>
+ #include <limits.h>
+ #include <locale.h>
+ #include <obstack.h>
+@@ -1762,6 +1763,26 @@ do_test (void)
+ # endif
+ #endif
+ 
++  struct in6_addr addr6 = {};
++  struct in_addr addr = {};
++  char addrstr6[INET6_ADDRSTRLEN];
++  char addrstr[INET_ADDRSTRLEN];
++
++  if (inet_ntop (AF_INET6, &addr6, addrstr6, sizeof (addrstr6)) == NULL)
++    FAIL ();
++  if (inet_ntop (AF_INET, &addr, addrstr, sizeof (addrstr)) == NULL)
++    FAIL ();
++
++#if __USE_FORTIFY_LEVEL >= 1
++  CHK_FAIL_START
++  inet_ntop (AF_INET6, &addr6, buf, INET6_ADDRSTRLEN);
++  CHK_FAIL_END
++
++  CHK_FAIL_START
++  inet_ntop (AF_INET, &addr, buf, INET_ADDRSTRLEN);
++  CHK_FAIL_END
++#endif
++
+   return ret;
+ }
+ 
+diff --git a/include/arpa/inet.h b/include/arpa/inet.h
+index d9e55a3c7f2db9f2..a02892f48a27454e 100644
+--- a/include/arpa/inet.h
++++ b/include/arpa/inet.h
+@@ -3,12 +3,18 @@
+ #include <inet/arpa/inet.h>
+ 
+ #ifndef _ISOMAC
++/* Declare functions with security checks.
++   This needs to be included unconditionally as these definition are needed even
++   when fortification is disabled in inet/arpa/inet.h.  */
++#include <bits/inet-fortified-decl.h>
++
+ /* Variant of inet_aton which rejects trailing garbage.  */
+ extern int __inet_aton_exact (const char *__cp, struct in_addr *__inp);
+ libc_hidden_proto (__inet_aton_exact)
+ 
+ extern __typeof (inet_ntop) __inet_ntop;
+ libc_hidden_proto (__inet_ntop)
++libc_hidden_proto (__inet_ntop_chk)
+ 
+ libc_hidden_proto (inet_pton)
+ extern __typeof (inet_pton) __inet_pton;
+diff --git a/include/bits/inet-fortified-decl.h b/include/bits/inet-fortified-decl.h
+new file mode 100644
+index 0000000000000000..e6ad4d4663c61a0d
+--- /dev/null
++++ b/include/bits/inet-fortified-decl.h
+@@ -0,0 +1 @@
++#include <inet/bits/inet-fortified-decl.h>
+diff --git a/include/bits/inet-fortified.h b/include/bits/inet-fortified.h
+new file mode 100644
+index 0000000000000000..abba7c57014c2a23
+--- /dev/null
++++ b/include/bits/inet-fortified.h
+@@ -0,0 +1 @@
++#include <inet/bits/inet-fortified.h>
+diff --git a/inet/Makefile b/inet/Makefile
+index b7d6e40fb319f52d..ef6b94ed0b519d6d 100644
+--- a/inet/Makefile
++++ b/inet/Makefile
+@@ -26,6 +26,8 @@ headers := \
+   $(wildcard arpa/*.h protocols/*.h) \
+   aliases.h \
+   bits/in.h \
++  bits/inet-fortified-decl.h \
++  bits/inet-fortified.h \
+   ifaddrs.h \
+   netinet/ether.h \
+   netinet/icmp6.h \
+diff --git a/inet/arpa/inet.h b/inet/arpa/inet.h
+index 54c9c6d468b66a2f..2ac498061a533a7b 100644
+--- a/inet/arpa/inet.h
++++ b/inet/arpa/inet.h
+@@ -101,6 +101,11 @@ extern char *inet_nsap_ntoa (int __len, const unsigned char *__cp,
+ 			     char *__buf) __THROW;
+ #endif
+ 
++#if __USE_FORTIFY_LEVEL > 0 && defined __fortify_function
++/* Include functions with security checks.  */
++#  include <bits/inet-fortified.h>
++#endif
++
+ __END_DECLS
+ 
+ #endif /* arpa/inet.h */
+diff --git a/inet/bits/inet-fortified-decl.h b/inet/bits/inet-fortified-decl.h
+new file mode 100644
+index 0000000000000000..229063ae7898ba2d
+--- /dev/null
++++ b/inet/bits/inet-fortified-decl.h
+@@ -0,0 +1,35 @@
++/* Declarations of checking macros for inet functions.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _BITS_INET_FORTIFIED_DEC_H
++#define _BITS_INET_FORTIFIED_DEC_H 1
++
++#ifndef _ARPA_INET_H
++# error "Never include <bits/inet-fortified-decl.h> directly; use <arpa/inet.h> instead."
++#endif
++
++extern const char *__inet_ntop_chk (int, const void *, char *, socklen_t, size_t);
++
++extern const char *__REDIRECT_NTH (__inet_ntop_alias,
++				   (int, const void *, char *, socklen_t), inet_ntop);
++extern const char *__REDIRECT_NTH (__inet_ntop_chk_warn,
++				   (int, const void *, char *, socklen_t, size_t), __inet_ntop_chk)
++     __warnattr ("inet_ntop called with bigger length than "
++		 "size of destination buffer");
++
++#endif /* bits/inet-fortified-decl.h.  */
+diff --git a/inet/bits/inet-fortified.h b/inet/bits/inet-fortified.h
+new file mode 100644
+index 0000000000000000..af26f36ef6ae0533
+--- /dev/null
++++ b/inet/bits/inet-fortified.h
+@@ -0,0 +1,37 @@
++/* Checking macros for inet functions.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _BITS_INET_FORTIFIED_H
++#define _BITS_INET_FORTIFIED_H 1
++
++#ifndef _ARPA_INET_H
++# error "Never include <bits/inet-fortified.h> directly; use <arpa/inet.h> instead."
++#endif
++
++#include <bits/inet-fortified-decl.h>
++
++__fortify_function const char *
++__NTH (inet_ntop (int __af, const void * __restrict __src,
++		  char *__restrict __dst, socklen_t __dst_size))
++{
++  return __glibc_fortify (inet_ntop, __dst_size, sizeof (char),
++			  __glibc_objsize (__dst),
++			  __af, __src, __dst, __dst_size);
++};
++
++#endif /* bits/inet-fortified.h.  */

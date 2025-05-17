@@ -1,0 +1,2531 @@
+commit 7ec4d7e3d1c0c6da11dbad1292fd9d94124c57ca
+Author: Maciej W. Rozycki <macro@redhat.com>
+Date:   Thu Nov 7 06:14:24 2024 +0000
+
+    stdio-common: Add tests for formatted printf output specifiers
+    
+    This is a collection of tests for formatted printf output specifiers
+    covering the d, i, o, u, x, and X integer conversions, the e, E, f, F,
+    g, and G floating-point conversions, the c character conversion, and the
+    s string conversion.  Also the hh, h, l, and ll length modifiers are
+    covered with the integer conversions as is the L length modifier with
+    the floating-point conversions.
+    
+    The -, +, space, #, and 0 flags are iterated over, as permitted by the
+    conversion handled, in tuples of 1..5, including tuples with repetitions
+    of 2, and combined with field width and/or precision, again as permitted
+    by the conversion.  The resulting format string is then used to produce
+    output from respective sets of input data corresponding to the specific
+    conversion under test.  POSIX extensions beyond ISO C are not used.
+    
+    Output is produced in the form of records which include both the format
+    string (and width and/or precision where given in the form of separate
+    arguments) and the conversion result, and is verified with GNU AWK using
+    the format obtained from each such record against the reference value
+    also supplied, relying on the fact that GNU AWK has its own independent
+    implementation of format processing, striving to be ISO C compatible.
+    
+    In the course of implementation I have determined that in the non-bignum
+    mode GNU AWK uses system sprintf(3) for the floating-point conversions,
+    defeating the objective of doing the verification against an independent
+    implementation.  Additionally the bignum mode (using MPFR) is required
+    to correctly output wider integer and floating-point data.  Therefore
+    for the conversions affected the relevant shell scripts sanity-check AWK
+    and terminate with unsupported status if the bignum mode is unavailable
+    for floating-point data or where data is output incorrectly.
+    
+    The f and F floating-point conversions are build-time options for GNU
+    AWK, depending on the environment, so they are probed for before being
+    used.  Similarly the a and A floating-point conversions, however they
+    are currently not used, see below.  Also GNU AWK does not handle the b
+    or B integer conversions at all at the moment, as at 5.3.0.  Support for
+    the a, A, b, and B conversions can however be easily added following the
+    approach taken for the f and F conversions.
+    
+    Output produced by gawk for the a and A floating-point conversions does
+    not match one produced by us: insufficient precision is used where one
+    hasn't been explicitly given, e.g. for the negated maximum finite IEEE
+    754 64-bit value of -1.79769313486231570814527423731704357e+308 and "%a"
+    format we produce -0x1.fffffffffffffp+1023 vs gawk's -0x1.000000p+1024
+    and a different exponent is chosen otherwise, such as with "%.a" where
+    we output -0x2p+1023 vs gawk's -0x1p+1024 for the same value, or "%.20a"
+    where -0x1.fffffffffffff0000000p+1023 is our output, but gawk produces
+    -0xf.ffffffffffff80000000p+1020 instead.  Consequently I chose not to
+    include a and A conversions in testing at this time.
+    
+    And last but not least there are numerous corner cases that GNU AWK does
+    not handle correctly, which are worked around by explicit handling in
+    the AWK script.  These are in particular:
+    
+    - extraneous leading 0 produced for the alternative form with the o
+      conversion, e.g. { printf "%#.2o", 1 } produces "001" rather than
+      "01",
+    
+    - unexpected 0 produced where no characters are expected for the input
+      of 0 and the alternative form with the precision of 0 and the integer
+      hexadecimal conversions, e.g. { printf "%#.x", 0 } produces "0" rather
+      than "",
+    
+    - missing + character in the non-bignum mode only for the input of 0
+      with the + flag, precision of 0 and the signed integer conversions,
+      e.g. { printf "%+.i", 0 } produces "" rather than "+",
+    
+    - missing space character in the non-bignum mode only for the input of 0
+      with the space flag, precision of 0 and the signed integer
+      conversions, e.g. { printf "% .i", 0 } produces "" rather than " ",
+    
+    - for released gawk versions of up to 4.2.1 missing - character for the
+      input of -NaN with the floating-point conversions, e.g. { printf "%e",
+      "-nan" }' produces "nan" rather than "-nan",
+    
+    - for released gawk versions from 5.0.0 onwards + character output for
+      the input of -NaN with the floating-point conversions, e.g. { printf
+      "%e", "-nan" }' produces "+nan" rather than "-nan",
+    
+    - for released gawk versions from 5.0.0 onwards + character output for
+      the input of Inf or NaN in the absence of the + or space flags with
+      the floating-point conversions, e.g. { printf "%e", "inf" }' produces
+      "+inf" rather than "inf",
+    
+    - for released gawk versions of up to 4.2.1 missing + character for the
+      input of Inf or NaN with the + flag and the floating-point
+      conversions, e.g. { printf "%+e", "inf" }' produces "inf" rather than
+      "+inf",
+    
+    - for released gawk versions of up to 4.2.1 missing space character for
+      the input of Inf or NaN with the space flag and the floating-point
+      conversions, e.g. { printf "% e", "nan" }' produces "nan" rather than
+      " nan",
+    
+    - for released gawk versions from 5.0.0 onwards + character output for
+      the input of Inf or NaN with the space flag and the floating-point
+      conversions, e.g. { printf "% e", "inf" }' produces "+inf" rather than
+      " inf",
+    
+    - for released gawk versions from 5.0.0 onwards the field width is
+      ignored for the input of Inf or NaN and the floating-point
+      conversions, e.g. { printf "%20e", "-inf" }' produces "-inf" rather
+      than "                -inf",
+    
+    NB for released gawk versions of up to 4.2.1 floating-point conversion
+    issues apply to the bignum mode only, as in the non-bignum mode system
+    sprintf(3) is used.  As from version 5.0.0 specialized handling has been
+    added for [-]Inf and [-]NaN inputs and the issues listed apply to both
+    modes.  The '--posix' flag makes gawk versions from 5.0.0 onwards avoid
+    the issue with field width and the + character unconditionally output
+    for the input of Inf or NaN, however not the remaining issues and then
+    the 'gensub' function is not supported in the POSIX mode, so to go this
+    path I deemed not worth it.
+    
+    Each test completes within single seconds except for the long double
+    one.  There the F/f formats produce a large number of digits, which
+    appears to be computationally intensive and CPU-bound.  Standalone
+    execution time for 'tst-printf-format-p-ldouble --direct f' is in the
+    range of 00m36s for POWER9@2.166GHz and 09m52s for FU740@1.2GHz and
+    output redirected locally to /dev/null, and 10m11s for FU740 and output
+    redirected over 100Mbps network via SSH to /dev/null, so the throughput
+    of the network adds very little (~3.2% in this case) to the processing
+    time.  This is with IEEE 754 quad.
+    
+    So I have scaled the timeout for 'tst-printf-format-skeleton-ldouble'
+    accordingly.  Regardless, following recent practice the test has been
+    added to the standard rather than extended set.  However, unlike most
+    of the remaining tests it has been split by the conversion specifier,
+    so as to allow better parallelization of this long-running test.  As
+    a side effect this lets the test report the unsupported status for the
+    F/f conversions where applicable, so 'tst-printf-format-p-double' has
+    been split for consistency as well.
+    
+    Only printf itself is handled at the moment, but the infrastructure
+    provides for all the printf family functions to be verified, changes
+    for which to be supplied separately.  The complication around having
+    some tests iterating over all the relevant conversion specifiers and
+    other verifying conversion specifiers individually combined with
+    iterating over printf family functions has hit a peculiarity in GNU
+    make where the use of multiple targets with a pattern rule is handled
+    differently from such use with an ordinary rule.  Consequently it
+    seems impossible to bulk-define a pattern rule using '$(foreach ...)',
+    where each target would simply trigger the recipe according to the
+    pattern and matching dependencies individually (such a rule does work,
+    but implies all targets to be updated with a single recipe execution).
+    
+    Therefore as a compromise a single single-target pattern rule has been
+    defined that has listed all the conversion-specific scripts and all the
+    test executables as dependencies.  Consequently tests will be rerun in
+    the absence of changes to their actual sources or scripts whenever an
+    unrelated file has changed that has been listed.  Also all the formatted
+    printf output tests will always be built whenever any single one is to
+    be run.  This only affects test development and not test runs in the
+    field, though it does change the order of execution of the individual
+    steps and also acts as a Makefile barrier in parallel runs.  As the
+    execution time dominates the compilation time for these tests it is not
+    seen as a serious shortcoming.
+    
+    As pointed out by Florian Weimer <fweimer@redhat.com> the malloc tracing
+    facility can take a substantial amount of time in calling dladdr(3) to
+    determine the caller's location.  This is not needed by the verification
+    made with these tests, so I chose to interpose the symbol with a stub
+    implementation that always fails in the shared skeleton.  We have total
+    control over the test environment, so I think it is a safe and minimal
+    impact approach.  If there's ever anything else added to the tests that
+    would actually rely on dladdr(3) returning usable results, only then we
+    can think of a different approach.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index 09d3622823203f74..0a45dcb4f45c0a5d 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -22,6 +22,34 @@ subdir	:= stdio-common
+ 
+ include ../Makeconfig
+ 
++# List of markers for printf family function tests.
++xprintf-funcs := p
++
++# List of data types and formats for individual per-conversion printf tests.
++fmt-convs := double ldouble
++fmts := E e F f G g
++
++# List of data types grouping all conversions in single printf tests.
++nonfmt-convs := c char int llong long s short
++nonfmt-convs += uchar uint ullong ulong ushort
++
++convs := $(sort $(fmt-convs) $(nonfmt-convs))
++
++xprintf-srcs := \
++  $(foreach p,$(xprintf-funcs), \
++	    $(foreach c,$(convs),tst-printf-format-$(p)-$(c)))
++
++fmt-xprintf-stems := \
++  $(foreach f,$(fmts), \
++	    $(foreach p,$(xprintf-funcs), \
++		      $(foreach c,$(fmt-convs), \
++				tst-printf-format-$(p)-$(c)-$(f))))
++nonfmt-xprintf-stems := \
++  $(foreach p,$(xprintf-funcs), \
++	    $(foreach c,$(nonfmt-convs),tst-printf-format-$(p)-$(c)))
++
++xprintf-stems := $(sort $(fmt-xprintf-stems) $(nonfmt-xprintf-stems))
++
+ headers := \
+   bits/printf-ldbl.h \
+   bits/stdio_lim.h \
+@@ -240,6 +268,7 @@ endif
+ endif
+ 
+ test-srcs = \
++  $(xprintf-srcs) \
+   tst-printf \
+   tst-printfsz-islongdouble \
+   tst-unbputc \
+@@ -247,6 +276,7 @@ test-srcs = \
+ 
+ ifeq ($(run-built-tests),yes)
+ tests-special += \
++  $(foreach f,$(xprintf-stems),$(objpfx)$(f).out) \
+   $(objpfx)tst-printf.out \
+   $(objpfx)tst-printfsz-islongdouble.out \
+   $(objpfx)tst-setvbuf1-cmp.out \
+@@ -257,6 +287,7 @@ tests-special += \
+ ifeq (yes,$(build-shared))
+ ifneq ($(PERL),no)
+ tests-special += \
++  $(foreach f,$(xprintf-stems),$(objpfx)$(f)-mem.out) \
+   $(objpfx)tst-freopen2-mem.out \
+   $(objpfx)tst-freopen3-mem.out \
+   $(objpfx)tst-freopen4-mem.out \
+@@ -276,6 +307,8 @@ tests-special += \
+   # tests-special
+ 
+ generated += \
++  $(foreach f,$(xprintf-stems),$(f)-mem.out) \
++  $(foreach f,$(xprintf-stems),$(f).mtrace) \
+   tst-freopen2-mem.out \
+   tst-freopen2.mtrace \
+   tst-freopen3-mem.out \
+@@ -402,6 +435,21 @@ $(objpfx)tst-printf.out: tst-printf.sh $(objpfx)tst-printf
+ 	$(SHELL) $< $(common-objpfx) '$(test-program-prefix)'; \
+ 	$(evaluate-test)
+ 
++# We can't split a quoted recipe line, so do it via an auxiliary variable.
++make-tst-printf-format-out = \
++  AWK='$(AWK)' BASH='$(BASH)' \
++    $(BASH) $< $@ $(common-objpfx) \
++    '$(run-program-prefix-before-env) \
++     $(run-program-env) \
++     MALLOC_TRACE=$(@:.out=.mtrace) \
++     LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so \
++     $(run-program-prefix-after-env)'
++$(objpfx)tst-printf-format-%.out: \
++  tst-printf-format.sh $(foreach c,$(convs),tst-printf-format-$(c).sh) \
++  $(foreach f,$(xprintf-srcs),$(objpfx)$(f)) tst-printf-format.awk
++	$(make-tst-printf-format-out) > $@; \
++	$(evaluate-test)
++
+ $(objpfx)tst-printfsz-islongdouble.out: \
+   tst-printfsz-islongdouble.sh $(objpfx)tst-printfsz-islongdouble
+ 	$(SHELL) $^ '$(test-program-prefix)' $@; \
+@@ -415,6 +463,10 @@ $(objpfx)tst-printf-bz18872.c: tst-printf-bz18872.sh
+ $(objpfx)tst-%-mem.out: $(objpfx)tst-%.out
+ 	$(common-objpfx)malloc/mtrace $(objpfx)tst-$*.mtrace > $@; \
+ 	$(evaluate-test)
++$(objpfx)tst-printf-format-%-mem.out: $(objpfx)tst-printf-format-%.out
++	$(common-objpfx)malloc/mtrace \
++	  $(objpfx)tst-printf-format-$*.mtrace > $@; \
++	$(evaluate-test)
+ 
+ errlist-h = $(firstword $(wildcard $(addsuffix /errlist.h,$(sysdirs) .)))
+ 
+diff --git a/stdio-common/tst-printf-format-c.sh b/stdio-common/tst-printf-format-c.sh
+new file mode 100644
+index 0000000000000000..2b8d72050f670fd6
+--- /dev/null
++++ b/stdio-common/tst-printf-format-c.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++# Testing of the 'c' printf conversion.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++echo Verifying c
++(set -o pipefail
++ ${test_program_prefix} \
++  ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-c c |
++   $AWK -f tst-printf-format.awk 2>&1 |
++   head -n 1 | sed "s/^/Conversion c output error, first line:\n/") 2>&1 ||
++  exit 1
+diff --git a/stdio-common/tst-printf-format-char.sh b/stdio-common/tst-printf-format-char.sh
+new file mode 100644
+index 0000000000000000..99219679df2ddfb7
+--- /dev/null
++++ b/stdio-common/tst-printf-format-char.sh
+@@ -0,0 +1,40 @@
++#!/bin/bash
++# Testing of signed char printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++status=0
++
++for f in d i; do
++  echo Verifying $f
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-char $f |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 | sed "s/^/Conversion $f output error, first line:\n/") 2>&1 ||
++    status=1
++done
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-double.sh b/stdio-common/tst-printf-format-double.sh
+new file mode 100644
+index 0000000000000000..b4e61acfdc615c22
+--- /dev/null
++++ b/stdio-common/tst-printf-format-double.sh
+@@ -0,0 +1,74 @@
++#!/bin/bash
++# Testing of double printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++format=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++# For floating-point formats we need to use the bignum mode even if the
++# regular mode would do, because GAWK in the latter mode uses sprintf(3)
++# internally to process the conversion requested, so any bug in our code
++# would then be verified against itself, defeating the objective of doing
++# the verification against an independent implementation.
++AWK="${AWK:-awk} -M"
++
++status=77
++
++# Verify that AWK can handle the range required.  It also catches:
++# "gawk: warning: -M ignored: MPFR/GMP support not compiled in"
++# message produced where bignum support is not there, which is the
++# only indication as the use of '-M' does not affect the exit status
++# in this case.
++ref="-1.79769313486231570814527423731704357e+308"
++val=$(echo "$ref" | $AWK '{ printf "%.35e\n", $1 }' 2>&1) &&
++  test "$val" = "$ref" && status=0
++
++test $status -eq 0 || { echo "No working AWK found" && exit $status; }
++
++# Check for any additional conversions that AWK handles conditionally
++# according to its version and/or the environment it has been built in.
++# The 'A' and 'a' conversions are not suitable to use at this point, as
++# output produced by AWK is different apparently due to a subtlety in
++# rounding, so do not try them.
++declare -A conversion_disabled
++ref="-inf"
++for f in f F; do
++  conversion_disabled[$f]=true
++  val=$(echo "$ref" | $AWK '{ printf "%'$f'\n", $1 }' 2>&1) &&
++    test "${val^^}" = "${ref^^}" && unset conversion_disabled[$f]
++done
++
++if test "${conversion_disabled[$format]+set}" = set; then
++  echo Unsupported $format
++  status=77
++else
++  echo Verifying $format
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-double $format |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 |
++     sed "s/^/Conversion $format output error, first line:\n/") 2>&1 ||
++    status=1
++fi
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-int.sh b/stdio-common/tst-printf-format-int.sh
+new file mode 100644
+index 0000000000000000..32dcfb160a3ab5e9
+--- /dev/null
++++ b/stdio-common/tst-printf-format-int.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++# Testing of int printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++status=77
++
++# Verify that AWK can handle the range required.  It also catches:
++# "gawk: warning: -M ignored: MPFR/GMP support not compiled in"
++# message produced where bignum support is not there, which is the
++# only indication as the use of '-M' does not affect the exit status
++# in this case.
++ref="-2147483648"
++for AWK in "$AWK -M" "$AWK"; do
++  val=$(echo "$ref" | $AWK '{ printf "%d\n", $1 }' 2>&1) || continue
++  test "$val" = "$ref" && status=0 && break
++done
++
++test $status -eq 0 || { echo "No working AWK found" && exit $status; }
++
++for f in d i; do
++  echo Verifying $f
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-int $f |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 | sed "s/^/Conversion $f output error, first line:\n/") 2>&1 ||
++    status=1
++done
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-ldouble.sh b/stdio-common/tst-printf-format-ldouble.sh
+new file mode 100644
+index 0000000000000000..4bfecadea9d7fe80
+--- /dev/null
++++ b/stdio-common/tst-printf-format-ldouble.sh
+@@ -0,0 +1,74 @@
++#!/bin/bash
++# Testing of long double printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++format=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++# For floating-point formats we need to use the bignum mode even if the
++# regular mode would do, because GAWK in the latter mode uses sprintf(3)
++# internally to process the conversion requested, so any bug in our code
++# would then be verified against itself, defeating the objective of doing
++# the verification against an independent implementation.
++AWK="${AWK:-awk} -M"
++
++status=77
++
++# Verify that AWK can handle the range required.  It also catches:
++# "gawk: warning: -M ignored: MPFR/GMP support not compiled in"
++# message produced where bignum support is not there, which is the
++# only indication as the use of '-M' does not affect the exit status
++# in this case.
++ref="-1.18973149535723176508575932662800702e+4932"
++val=$(echo "$ref" | $AWK '{ PREC=113; printf "%.35e\n", $1 }' 2>&1) &&
++  test "$val" = "$ref" && status=0
++
++test $status -eq 0 || { echo "No working AWK found" && exit $status; }
++
++# Check for any additional conversions that AWK handles conditionally
++# according to its version and/or the environment it has been built in.
++# The 'A' and 'a' conversions are not suitable to use at this point, as
++# output produced by AWK is different apparently due to a subtlety in
++# rounding, so do not try them.
++declare -A conversion_disabled
++ref="-inf"
++for f in f F; do
++  conversion_disabled[$f]=true
++  val=$(echo "$ref" | $AWK '{ printf "%'$f'\n", $1 }' 2>&1) &&
++    test "${val^^}" = "${ref^^}" && unset conversion_disabled[$f]
++done
++
++if test "${conversion_disabled[$format]+set}" = set; then
++  echo Unsupported $format
++  status=77
++else
++  echo Verifying $format
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-ldouble $format |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 |
++     sed "s/^/Conversion $format output error, first line:\n/") 2>&1 ||
++    status=1
++fi
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-llong.sh b/stdio-common/tst-printf-format-llong.sh
+new file mode 100644
+index 0000000000000000..b028a2c89b30a9b6
+--- /dev/null
++++ b/stdio-common/tst-printf-format-llong.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++# Testing of long long int printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++status=77
++
++# Verify that AWK can handle the range required.  It also catches:
++# "gawk: warning: -M ignored: MPFR/GMP support not compiled in"
++# message produced where bignum support is not there, which is the
++# only indication as the use of '-M' does not affect the exit status
++# in this case.
++ref="9223372036854775807"
++for AWK in "$AWK -M" "$AWK"; do
++  val=$(echo "$ref" | $AWK '{ printf "%d\n", $1 }' 2>&1) || continue
++  test "$val" = "$ref" && status=0 && break
++done
++
++test $status -eq 0 || { echo "No working AWK found" && exit $status; }
++
++for f in d i; do
++  echo Verifying $f
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-llong $f |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 | sed "s/^/Conversion $f output error, first line:\n/") 2>&1 ||
++    status=1
++done
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-long.sh b/stdio-common/tst-printf-format-long.sh
+new file mode 100644
+index 0000000000000000..77c67ea5bff12c05
+--- /dev/null
++++ b/stdio-common/tst-printf-format-long.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++# Testing of long int printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++status=77
++
++# Verify that AWK can handle the range required.  It also catches:
++# "gawk: warning: -M ignored: MPFR/GMP support not compiled in"
++# message produced where bignum support is not there, which is the
++# only indication as the use of '-M' does not affect the exit status
++# in this case.
++ref="9223372036854775807"
++for AWK in "$AWK -M" "$AWK"; do
++  val=$(echo "$ref" | $AWK '{ printf "%d\n", $1 }' 2>&1) || continue
++  test "$val" = "$ref" && status=0 && break
++done
++
++test $status -eq 0 || { echo "No working AWK found" && exit $status; }
++
++for f in d i; do
++  echo Verifying $f
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-long $f |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 | sed "s/^/Conversion $f output error, first line:\n/") 2>&1 ||
++    status=1
++done
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-p-c.c b/stdio-common/tst-printf-format-p-c.c
+new file mode 100644
+index 0000000000000000..ba46f55431aa59c1
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-c.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for the 'c' conversion.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-c.c"
+diff --git a/stdio-common/tst-printf-format-p-char.c b/stdio-common/tst-printf-format-p-char.c
+new file mode 100644
+index 0000000000000000..7640bf8f662e3515
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-char.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for signed char conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-char.c"
+diff --git a/stdio-common/tst-printf-format-p-double.c b/stdio-common/tst-printf-format-p-double.c
+new file mode 100644
+index 0000000000000000..8271ec7beaa9e57d
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-double.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for double conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-double.c"
+diff --git a/stdio-common/tst-printf-format-p-int.c b/stdio-common/tst-printf-format-p-int.c
+new file mode 100644
+index 0000000000000000..cdfaaacc34772cc9
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-int.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-int.c"
+diff --git a/stdio-common/tst-printf-format-p-ldouble.c b/stdio-common/tst-printf-format-p-ldouble.c
+new file mode 100644
+index 0000000000000000..266989db32a848bb
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-ldouble.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for long double conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-ldouble.c"
+diff --git a/stdio-common/tst-printf-format-p-llong.c b/stdio-common/tst-printf-format-p-llong.c
+new file mode 100644
+index 0000000000000000..936f626a45e76211
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-llong.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for long long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-llong.c"
+diff --git a/stdio-common/tst-printf-format-p-long.c b/stdio-common/tst-printf-format-p-long.c
+new file mode 100644
+index 0000000000000000..c82c3cac0957a1a3
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-long.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-long.c"
+diff --git a/stdio-common/tst-printf-format-p-s.c b/stdio-common/tst-printf-format-p-s.c
+new file mode 100644
+index 0000000000000000..4b0201ae9465a6a8
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-s.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for the 's' conversion.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-s.c"
+diff --git a/stdio-common/tst-printf-format-p-short.c b/stdio-common/tst-printf-format-p-short.c
+new file mode 100644
+index 0000000000000000..2bf17f1b2522f5ed
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-short.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for short int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-short.c"
+diff --git a/stdio-common/tst-printf-format-p-uchar.c b/stdio-common/tst-printf-format-p-uchar.c
+new file mode 100644
+index 0000000000000000..02a70c3f1546c422
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-uchar.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for unsigned char conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-uchar.c"
+diff --git a/stdio-common/tst-printf-format-p-uint.c b/stdio-common/tst-printf-format-p-uint.c
+new file mode 100644
+index 0000000000000000..e61455e01013aba0
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-uint.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for unsigned int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-uint.c"
+diff --git a/stdio-common/tst-printf-format-p-ullong.c b/stdio-common/tst-printf-format-p-ullong.c
+new file mode 100644
+index 0000000000000000..16b2541acd66299f
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-ullong.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for unsigned long long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-ullong.c"
+diff --git a/stdio-common/tst-printf-format-p-ulong.c b/stdio-common/tst-printf-format-p-ulong.c
+new file mode 100644
+index 0000000000000000..0b3a7fd2568f763b
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-ulong.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for unsigned long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-ulong.c"
+diff --git a/stdio-common/tst-printf-format-p-ushort.c b/stdio-common/tst-printf-format-p-ushort.c
+new file mode 100644
+index 0000000000000000..fa62f500ab00cbb3
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p-ushort.c
+@@ -0,0 +1,20 @@
++/* Test for formatted 'printf' output for unsigned short int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include "tst-printf-format-p.h"
++#include "tst-printf-format-skeleton-ushort.c"
+diff --git a/stdio-common/tst-printf-format-p.h b/stdio-common/tst-printf-format-p.h
+new file mode 100644
+index 0000000000000000..a9ffbb0d0e76a485
+--- /dev/null
++++ b/stdio-common/tst-printf-format-p.h
+@@ -0,0 +1,29 @@
++/* Test feature wrapper for formatted 'printf' output.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++
++#define printf_under_test(...)						\
++({									\
++  int result;								\
++									\
++  result = printf (__VA_ARGS__);					\
++  if (result < 0)							\
++    perror ("printf");							\
++  result;								\
++})
+diff --git a/stdio-common/tst-printf-format-s.sh b/stdio-common/tst-printf-format-s.sh
+new file mode 100644
+index 0000000000000000..fa0690f9800a60ce
+--- /dev/null
++++ b/stdio-common/tst-printf-format-s.sh
+@@ -0,0 +1,34 @@
++#!/bin/bash
++# Testing of the 's' printf conversion.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++echo Verifying s
++(set -o pipefail
++ ${test_program_prefix} \
++  ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-s s |
++   $AWK -f tst-printf-format.awk 2>&1 |
++   head -n 1 | sed "s/^/Conversion s output error, first line:\n/") 2>&1 ||
++  exit 1
+diff --git a/stdio-common/tst-printf-format-short.sh b/stdio-common/tst-printf-format-short.sh
+new file mode 100644
+index 0000000000000000..a610a15fa1f6e96a
+--- /dev/null
++++ b/stdio-common/tst-printf-format-short.sh
+@@ -0,0 +1,40 @@
++#!/bin/bash
++# Testing of short int printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++status=0
++
++for f in d i; do
++  echo Verifying $f
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-short $f |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 | sed "s/^/Conversion $f output error, first line:\n/") 2>&1 ||
++    status=1
++done
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-skeleton-c.c b/stdio-common/tst-printf-format-skeleton-c.c
+new file mode 100644
+index 0000000000000000..3f9bbc91e3a58e59
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-c.c
+@@ -0,0 +1,29 @@
++/* Test skeleton for formatted printf output for the 'c' conversion.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 3
++#define HUGE_WIDTH 4
++#define REF_FMT "c"
++#define REF_VAL(v) (v)
++typedef unsigned char type_t;
++static const type_t vals[] = { 0, 42, UCHAR_MAX };
++static const char length[] = "";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-char.c b/stdio-common/tst-printf-format-skeleton-char.c
+new file mode 100644
+index 0000000000000000..8c7b44b061f69cb6
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-char.c
+@@ -0,0 +1,31 @@
++/* Test skeleton for formatted printf output for signed char conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 3
++#define HUGE_WIDTH 5
++#define REF_FMT "i"
++#define REF_VAL(v) ((((v) & 0xff) ^ 0x80) - 0x80)
++typedef int type_t;
++static const type_t vals[] =
++  { SCHAR_MIN - 123, SCHAR_MIN - 1, SCHAR_MIN, -123, -1, 0, 1, 42, SCHAR_MAX,
++    SCHAR_MAX + 1, SCHAR_MAX + 42 };
++static const char length[] = "hh";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-double.c b/stdio-common/tst-printf-format-skeleton-double.c
+new file mode 100644
+index 0000000000000000..03ac594736fd352f
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-double.c
+@@ -0,0 +1,33 @@
++/* Test skeleton for formatted printf output for double conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <float.h>
++#include <math.h>
++
++#define MID_WIDTH 20
++#define HUGE_WIDTH 320
++#define REF_FMT ".35e"
++#define REF_VAL(v) (v)
++#define PREC DBL_MANT_DIG
++typedef double type_t;
++static const type_t vals[] =
++  { -HUGE_VAL, -DBL_MAX, -DBL_MIN, copysign (0, -1), -NAN, NAN, 0, DBL_MIN,
++    DBL_MAX, HUGE_VAL };
++static const char length[] = "";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-int.c b/stdio-common/tst-printf-format-skeleton-int.c
+new file mode 100644
+index 0000000000000000..5d2076c53f6bbc2d
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-int.c
+@@ -0,0 +1,29 @@
++/* Test skeleton for formatted printf output for int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 8
++#define HUGE_WIDTH 15
++#define REF_FMT "i"
++#define REF_VAL(v) (v)
++typedef int type_t;
++static const type_t vals[] = { INT_MIN, -123, -1, 0, 1, 42, INT_MAX };
++static const char length[] = "";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-ldouble.c b/stdio-common/tst-printf-format-skeleton-ldouble.c
+new file mode 100644
+index 0000000000000000..ed47e7796390ecaf
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-ldouble.c
+@@ -0,0 +1,38 @@
++/* Test skeleton for formatted printf output for long double conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <float.h>
++#include <math.h>
++#include <support/test-driver.h>
++
++#define MID_WIDTH 20
++#define HUGE_WIDTH 4950
++#define REF_FMT ".35Le"
++#define REF_VAL(v) (v)
++#define PREC LDBL_MANT_DIG
++typedef long double type_t;
++static const type_t vals[] =
++  { -HUGE_VAL, -LDBL_MAX, -LDBL_MIN, copysign (0, -1), -NAN, NAN, 0, LDBL_MIN,
++    LDBL_MAX, HUGE_VAL };
++static const char length[] = "L";
++
++#ifndef TIMEOUT
++# define TIMEOUT (DEFAULT_TIMEOUT * 64)
++#endif
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-llong.c b/stdio-common/tst-printf-format-skeleton-llong.c
+new file mode 100644
+index 0000000000000000..9a4b7a39af660ba3
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-llong.c
+@@ -0,0 +1,29 @@
++/* Test skeleton for formatted printf output for long long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 15
++#define HUGE_WIDTH 25
++#define REF_FMT "lli"
++#define REF_VAL(v) (v)
++typedef long long int type_t;
++static const type_t vals[] = { LLONG_MIN, -123, -1, 0, 1, 42, LLONG_MAX };
++static const char length[] = "ll";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-long.c b/stdio-common/tst-printf-format-skeleton-long.c
+new file mode 100644
+index 0000000000000000..bf011b7fdb375fc6
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-long.c
+@@ -0,0 +1,29 @@
++/* Test skeleton for formatted printf output for long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 15
++#define HUGE_WIDTH 25
++#define REF_FMT "li"
++#define REF_VAL(v) (v)
++typedef long int type_t;
++static const type_t vals[] = { LONG_MIN, -123, -1, 0, 1, 42, LONG_MAX };
++static const char length[] = "l";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-s.c b/stdio-common/tst-printf-format-skeleton-s.c
+new file mode 100644
+index 0000000000000000..59aab9fc89836ec6
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-s.c
+@@ -0,0 +1,30 @@
++/* Test skeleton for formatted printf output for the 's' conversion.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 5
++#define HUGE_WIDTH 10
++#define REF_FMT "s"
++#define REF_VAL(v) (v)
++typedef const char *type_t;
++static const type_t vals[] =
++  { "", "The", "quick", "brown fox", "jumps over the lazy dog" };
++static const char length[] = "";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-short.c b/stdio-common/tst-printf-format-skeleton-short.c
+new file mode 100644
+index 0000000000000000..1b7c8c09d71df95a
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-short.c
+@@ -0,0 +1,31 @@
++/* Test skeleton for formatted printf output for short int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 4
++#define HUGE_WIDTH 7
++#define REF_FMT "i"
++#define REF_VAL(v) ((((v) & 0xffff) ^ 0x8000) - 0x8000)
++typedef int type_t;
++static const type_t vals[] =
++  { SHRT_MIN - 123, SHRT_MIN - 1, SHRT_MIN, -123, -1, 0, 1, 42, SHRT_MAX,
++    SHRT_MAX + 1, SHRT_MAX + 42 };
++static const char length[] = "h";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-uchar.c b/stdio-common/tst-printf-format-skeleton-uchar.c
+new file mode 100644
+index 0000000000000000..389188d746ffc508
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-uchar.c
+@@ -0,0 +1,30 @@
++/* Test skeleton for formatted printf output for unsigned char conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 3
++#define HUGE_WIDTH 4
++#define REF_FMT "u"
++#define REF_VAL(v) ((v) & 0xff)
++typedef unsigned int type_t;
++static const type_t vals[] =
++  { 0, 1, 42, UCHAR_MAX, UCHAR_MAX + 1, UCHAR_MAX + 42 };
++static const char length[] = "hh";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-uint.c b/stdio-common/tst-printf-format-skeleton-uint.c
+new file mode 100644
+index 0000000000000000..6a4159111402c467
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-uint.c
+@@ -0,0 +1,29 @@
++/* Test skeleton for formatted printf output for unsigned int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 7
++#define HUGE_WIDTH 14
++#define REF_FMT "u"
++#define REF_VAL(v) (v)
++typedef unsigned int type_t;
++static const type_t vals[] = { 0, 1, 42, UINT_MAX };
++static const char length[] = "";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-ullong.c b/stdio-common/tst-printf-format-skeleton-ullong.c
+new file mode 100644
+index 0000000000000000..a2ad7893cfec8b11
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-ullong.c
+@@ -0,0 +1,29 @@
++/* Test skeleton for formatted printf output for unsigned long long int convs.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 14
++#define HUGE_WIDTH 24
++#define REF_FMT "llu"
++#define REF_VAL(v) (v)
++typedef unsigned long long int type_t;
++static const type_t vals[] = { 0, 1, 42, UINT_MAX, ULLONG_MAX };
++static const char length[] = "ll";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-ulong.c b/stdio-common/tst-printf-format-skeleton-ulong.c
+new file mode 100644
+index 0000000000000000..05cd4e0efcc657e1
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-ulong.c
+@@ -0,0 +1,29 @@
++/* Test skeleton for formatted printf output for unsigned long int conversions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 14
++#define HUGE_WIDTH 24
++#define REF_FMT "lu"
++#define REF_VAL(v) (v)
++typedef unsigned long int type_t;
++static const type_t vals[] = { 0, 1, 42, ULONG_MAX };
++static const char length[] = "l";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton-ushort.c b/stdio-common/tst-printf-format-skeleton-ushort.c
+new file mode 100644
+index 0000000000000000..5cc2e0283a54fa04
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton-ushort.c
+@@ -0,0 +1,30 @@
++/* Test skeleton for formatted printf output for unsigned short int convs.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++
++#define MID_WIDTH 3
++#define HUGE_WIDTH 6
++#define REF_FMT "u"
++#define REF_VAL(v) ((v) & 0xffff)
++typedef unsigned int type_t;
++static const type_t vals[] =
++  { 0, 1, 42, USHRT_MAX, USHRT_MAX + 1, USHRT_MAX + 42 };
++static const char length[] = "h";
++
++#include "tst-printf-format-skeleton.c"
+diff --git a/stdio-common/tst-printf-format-skeleton.c b/stdio-common/tst-printf-format-skeleton.c
+new file mode 100644
+index 0000000000000000..e564d3a85395507e
+--- /dev/null
++++ b/stdio-common/tst-printf-format-skeleton.c
+@@ -0,0 +1,380 @@
++/* Test skeleton for formatted printf output.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* The following definitions have to be supplied by the source including
++   this skeleton:
++
++   Macros:
++   MID_WIDTH	Medium width/precision positive integer constant.  Choose
++		such as to cause some, but not all the strings produced
++		to be truncated for the conversions handled.
++   HUGE_WIDTH	Large width/precision positive integer constant.  Choose
++		such as to cause none of the strings produced to be
++		truncated for the conversions handled.
++   REF_FMT	Reference output format string.  Use no flags and such
++		a precision and length modifier, where applicable, and
++		a conversion as to make sure the output produced allows
++		the original value to be reproduced.
++   REF_VAL(v)	Reference value V transformation.  For conversions with
++		a truncating length modifier define such as to reproduce
++		the truncation operation, otherwise let V pass through.
++   PREC		[optional] Working precision positive integer constant.
++		Set to the number of binary digits in the significand for
++		the argument type handled; usually for floating-point
++		conversions only, but it may be required for 128-bit or
++		wider integer data types as well.
++
++   Typedefs:
++   type_t	Variadic function argument type.  Define to the promoted
++		type corresponding to the conversion argument type
++		handled.
++
++   Variables:
++   vals		Array of TYPE_T values.  Choose such as to cover boundary
++		and any special cases.
++   length	Length modifier string.  Define according to the
++		conversion argument type handled.
++
++   The feature to be tested is wrapped into 'printf_under_test'.  It is up
++   to the source including this skeleton if this is going to be a macro
++   or an actual function.
++
++   See tst-*printf-format-*.c for usage examples.  */
++
++#include <array_length.h>
++#include <dlfcn.h>
++#include <mcheck.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++/* Set to nonzero to select all possible tuples with repetitions of 1..n
++   elements from the set of flags as defined in FLAGS array below; n is
++   the length of FLAGS array.  Otherwise select all possible tuples with
++   repetitions of 1..2 elements, followed by tuples of 3..n elements where
++   the index of each element k; k = 2..n in FLAGS is lower than the index
++   of element k-1 in FLAGS.  */
++#ifndef TST_PRINTF_DUPS
++# define TST_PRINTF_DUPS 0
++#endif
++/* Set to nonzero to report the precision (number of significand digits)
++   required for floating-point calculations.  */
++#ifndef PREC
++# define PREC 0
++#endif
++
++/* The list of conversions permitted for the '#' flag, the '0' flag,
++   and precision respectively.  */
++#define HASH_FORMATS "boxXaAeEfFgG"
++#define ZERO_FORMATS "bdiouxXaAeEfFgG"
++#define PREC_FORMATS "bdiouxXaAeEfFgGs"
++
++/* Output format conversion flags.  */
++static struct
++{
++  /* Flag character.  */
++  char f;
++  /* List of conversion specifiers the flag is valid for; NULL if all.  */
++  const char *s;
++} const flags[] =
++  { {'-'}, {'+'}, {' '}, {'#', HASH_FORMATS}, {'0', ZERO_FORMATS} };
++
++/* Helper to initialize elements of the PW array for the width and
++   precision to be specified as a positive integer directly in the
++   format, and then as both a negative and a positive argument to '*'.  */
++#define STR(v) #v
++#define WPINIT(v) {0, STR (v)}, {v, NULL}, {-v, NULL}
++
++/* Width and precision settings to iterate over; zero is initialized
++   directly as it has no corresponding negated value and other values
++   use the helper above.  */
++static struct wp
++{
++  /* Integer argument to '*', used if S is NULL.  */
++  int i;
++  /* String denoting an integer to use in the format, or NULL to use '*'.  */
++  const char *s;
++} const wp[] =
++  { {0, "0"}, {0, NULL}, WPINIT (1), WPINIT (2),
++    WPINIT (MID_WIDTH), WPINIT (HUGE_WIDTH) };
++
++/* Produce a record according to '%' and zero or more output format flags
++   already provided in FMT at indices 0..IDX-1, width W if non-NULL, '.'
++   precision specifier if POINT set to true, precision P if non-NULL,
++   any length modifiers L, conversion C, and value VAL.
++
++   Record formats produced:
++
++   %<FLAGS><L><C>:<VAL>:
++   %<FLAGS>.<L><C>:<VAL>:
++   %<FLAGS><W><L><C>:<VAL>:
++   %<FLAGS><W>.<L><C>:<VAL>:
++   %<FLAGS>.<P><L><C>:<VAL>:
++   %<FLAGS><W>.<P><L><C>:<VAL>:
++   %<FLAGS>*<L><C>:<W>:<VAL>:
++   %<FLAGS>*.<L><C>:<W>:<VAL>:
++   %<FLAGS>.*<L><C>:<P>:<VAL>:
++   %<FLAGS>*.*<L><C>:<W>:<P>:<VAL>:
++
++   Return 0 on success, -1 on failure.  */
++
++static int
++do_printf (char *fmt, size_t idx,
++	   const struct wp *w, bool point, const struct wp *p,
++	   const char *l, char c, type_t val)
++{
++  int wpval[2] = { 0 };
++  size_t nint = 0;
++  int result;
++  size_t i;
++
++  if (w != NULL)
++    {
++      if (w->s == NULL)
++	{
++	  fmt[idx++] = '*';
++	  wpval[nint++] = w->i;
++	}
++      else
++	for (i = 0; w->s[i] != '\0'; i++)
++	  fmt[idx++] = w->s[i];
++    }
++  if (point)
++    fmt[idx++] = '.';
++  if (p != NULL)
++    {
++      if (p->s == NULL)
++	{
++	  fmt[idx++] = '*';
++	  wpval[nint++] = p->i;
++	}
++      else
++	for (i = 0; p->s[i] != '\0'; i++)
++	  fmt[idx++] = p->s[i];
++    }
++  for (i = 0; length[i] != '\0'; i++)
++    fmt[idx++] = length[i];
++  fmt[idx++] = c;
++  fmt[idx] = ':';
++  fmt[idx + 1] = '\0';
++  if (fputs (fmt, stdout) == EOF)
++    {
++      perror ("fputs");
++      return -1;
++    }
++  fmt[idx++] = '\0';
++  if (nint > 0)
++    {
++      result = printf ("%i:", wpval[0]);
++      if (result < 0)
++	{
++	  perror ("printf");
++	  return -1;
++	}
++      if (nint > 1)
++	{
++	  result = printf ("%i:", wpval[1]);
++	  if (result < 0)
++	    {
++	      perror ("printf");
++	      return -1;
++	    }
++	}
++    }
++  switch (nint)
++    {
++    case 0:
++      result = printf_under_test (fmt, val);
++      break;
++    case 1:
++      result = printf_under_test (fmt, wpval[0], val);
++      break;
++    case 2:
++      result = printf_under_test (fmt, wpval[0], wpval[1], val);
++      break;
++    default:
++      fputs ("Broken test, nint > 2\n", stderr);
++      return -1;
++    }
++  if (result < 0)
++    return -1;
++  if (fputs (":\n", stdout) == EOF)
++    {
++      perror ("fputs");
++      return -1;
++    }
++  return 0;
++}
++
++/* Produce a list of records according to '%' and zero or more output
++   format flags already provided in FMT at indices 0..IDX-1, iterating
++   over widths and precisions defined in global WP array, any length
++   modifiers L, conversion C, and value VAL.  Inline '0' is omitted for
++   the width, as it is a flag already handled among the flags supplied.
++   Precision is omitted where the conversion does not allow it.
++
++   Return 0 on success, -1 on failure.  */
++
++static int
++do_printf_flags (char *fmt, size_t idx, const char *l, char c, type_t val)
++{
++  bool do_prec = strchr (PREC_FORMATS, c) != NULL;
++  size_t i;
++
++  if (do_printf (fmt, idx, NULL, false, NULL, l, c, val) < 0)
++    return -1;
++  if (do_prec && do_printf (fmt, idx, NULL, true, NULL, l, c, val) < 0)
++    return -1;
++  for (i = 0; i < array_length (wp); i++)
++    {
++      size_t j;
++
++      if (do_prec && do_printf (fmt, idx, NULL, true, wp + i, l, c, val) < 0)
++	return -1;
++      /* Inline '0' is a flag rather than width and is handled elsewhere.  */
++      if (wp[i].s != NULL && wp[i].s[0] == '0' && wp[i].s[1] == '\0')
++	continue;
++      if (do_printf (fmt, idx, wp + i, false, NULL, l, c, val) < 0)
++	return -1;
++      if (do_prec)
++	{
++	  if (do_printf (fmt, idx, wp + i, true, NULL, l, c, val) < 0)
++	    return -1;
++	  for (j = 0; j < array_length (wp); j++)
++	    if (do_printf (fmt, idx, wp + i, true, wp + j, l, c, val) < 0)
++	      return -1;
++	}
++    }
++  return 0;
++}
++
++/* Produce a list of records using the formatted output specifier
++   supplied in ARGV[1] preceded by any length modifier supplied in
++   the global LENGTH variable, iterating over format flags defined
++   in the global FLAGS array, and values supplied in the global VALS
++   array.  Note that the output specifier supplied is not verified
++   against TYPE_T, so undefined behavior will result if this is used
++   incorrectly.
++
++   If PREC is nonzero, then this record:
++
++   prec:<PREC>
++
++   is produced at the beginning.  Then for each VAL from VALS a block
++   of records is produced starting with:
++
++   val:<VAL>
++
++   where VAL is formatted according to REF_FMT output format.  The
++   block continues with records as shown with DO_PRINTF above using
++   flags iterated over according to TST_PRINTF_DUPS.
++
++   See the top of this file for the definitions that have to be
++   provided by the source including this skeleton.  */
++
++static int
++do_test (int argc, char *argv[])
++{
++  char fmt[100] = {'%'};
++  size_t j;
++  size_t v;
++  char c;
++
++  if (argc < 2 || *argv[1] == '\0')
++    {
++      fprintf (stderr, "Usage: %s <specifier>\n", basename (argv[0]));
++      return EXIT_FAILURE;
++    }
++
++  mtrace ();
++
++  if (PREC && printf ("prec:%i\n", PREC) < 0)
++    {
++      perror ("printf");
++      return EXIT_FAILURE;
++    }
++
++  c = *argv[1];
++  for (v = 0; v < array_length (vals); v++)
++    {
++      if (printf ("val:%" REF_FMT "\n", REF_VAL (vals[v])) < 0)
++	{
++	  perror ("printf");
++	  return EXIT_FAILURE;
++	}
++
++      if (do_printf_flags (fmt, 1, length, c, vals[v]) < 0)
++	return EXIT_FAILURE;
++      for (j = 0; j < array_length (flags); j++)
++	{
++	  bool done = false;
++	  size_t i[j + 1];
++	  size_t k;
++
++	  memset (i, 0, sizeof (i));
++	  while (!done)
++	    {
++	      bool skip = false;
++	      size_t idx = 1;
++	      char f;
++
++	      for (k = 0; k <= j; k++)
++		{
++		  const char *s = flags[i[k]].s;
++
++		  if (s && strchr (s, c) == NULL)
++		    skip = true;
++		  if (!TST_PRINTF_DUPS && j > 1 && k > 0 && i[k] >= i[k - 1])
++		    skip = true;
++		  if (skip)
++		    break;
++
++		  f = flags[i[k]].f;
++		  fmt[idx++] = f;
++		}
++	      if (!skip && do_printf_flags (fmt, idx, length, c, vals[v]) < 0)
++		return EXIT_FAILURE;
++	      for (k = 0; k <= j; k++)
++		{
++		  i[k]++;
++		  if (i[k] < array_length (flags))
++		    break;
++		  else if (k == j)
++		    done = true;
++		  else
++		    i[k] = 0;
++		}
++	    }
++	}
++    }
++
++  return EXIT_SUCCESS;
++}
++
++/* Interpose 'dladdr' with a stub to speed up malloc tracing.  */
++
++int
++dladdr (const void *, Dl_info *)
++{
++  return 0;
++}
++
++#define TEST_FUNCTION_ARGV do_test
++#include <support/test-driver.c>
+diff --git a/stdio-common/tst-printf-format-uchar.sh b/stdio-common/tst-printf-format-uchar.sh
+new file mode 100644
+index 0000000000000000..8385d479cccf597f
+--- /dev/null
++++ b/stdio-common/tst-printf-format-uchar.sh
+@@ -0,0 +1,40 @@
++#!/bin/bash
++# Testing of unsigned char printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++status=0
++
++for f in o u x X; do
++  echo Verifying $f
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-uchar $f |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 | sed "s/^/Conversion $f output error, first line:\n/") 2>&1 ||
++    status=1
++done
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-uint.sh b/stdio-common/tst-printf-format-uint.sh
+new file mode 100644
+index 0000000000000000..6806c99ce0470f1a
+--- /dev/null
++++ b/stdio-common/tst-printf-format-uint.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++# Testing of unsigned int printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++status=77
++
++# Verify that AWK can handle the range required.  It also catches:
++# "gawk: warning: -M ignored: MPFR/GMP support not compiled in"
++# message produced where bignum support is not there, which is the
++# only indication as the use of '-M' does not affect the exit status
++# in this case.
++ref="4294967295"
++for AWK in "$AWK -M" "$AWK"; do
++  val=$(echo "$ref" | $AWK '{ printf "%d\n", $1 }' 2>&1) || continue
++  test "$val" = "$ref" && status=0 && break
++done
++
++test $status -eq 0 || { echo "No working AWK found" && exit $status; }
++
++for f in o u x X; do
++  echo Verifying $f
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-uint $f |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 | sed "s/^/Conversion $f output error, first line:\n/") 2>&1 ||
++    status=1
++done
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-ullong.sh b/stdio-common/tst-printf-format-ullong.sh
+new file mode 100644
+index 0000000000000000..c4fa69c2d16f85ce
+--- /dev/null
++++ b/stdio-common/tst-printf-format-ullong.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++# Testing of unsigned long long int printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++status=77
++
++# Verify that AWK can handle the range required.  It also catches:
++# "gawk: warning: -M ignored: MPFR/GMP support not compiled in"
++# message produced where bignum support is not there, which is the
++# only indication as the use of '-M' does not affect the exit status
++# in this case.
++ref="18446744073709551615"
++for AWK in "$AWK -M" "$AWK"; do
++  val=$(echo "$ref" | $AWK '{ printf "%d\n", $1 }' 2>&1) || continue
++  test "$val" = "$ref" && status=0 && break
++done
++
++test $status -eq 0 || { echo "No working AWK found" && exit $status; }
++
++for f in o u x X; do
++  echo Verifying $f
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-ullong $f |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 | sed "s/^/Conversion $f output error, first line:\n/") 2>&1 ||
++    status=1
++done
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-ulong.sh b/stdio-common/tst-printf-format-ulong.sh
+new file mode 100644
+index 0000000000000000..fce881afe3c0be72
+--- /dev/null
++++ b/stdio-common/tst-printf-format-ulong.sh
+@@ -0,0 +1,53 @@
++#!/bin/bash
++# Testing of unsigned long int printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++status=77
++
++# Verify that AWK can handle the range required.  It also catches:
++# "gawk: warning: -M ignored: MPFR/GMP support not compiled in"
++# message produced where bignum support is not there, which is the
++# only indication as the use of '-M' does not affect the exit status
++# in this case.
++ref="18446744073709551615"
++for AWK in "$AWK -M" "$AWK"; do
++  val=$(echo "$ref" | $AWK '{ printf "%d\n", $1 }' 2>&1) || continue
++  test "$val" = "$ref" && status=0 && break
++done
++
++test $status -eq 0 || { echo "No working AWK found" && exit $status; }
++
++for f in o u x X; do
++  echo Verifying $f
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-ulong $f |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 | sed "s/^/Conversion $f output error, first line:\n/") 2>&1 ||
++    status=1
++done
++
++exit $status
+diff --git a/stdio-common/tst-printf-format-ushort.sh b/stdio-common/tst-printf-format-ushort.sh
+new file mode 100644
+index 0000000000000000..2f411b777e67e220
+--- /dev/null
++++ b/stdio-common/tst-printf-format-ushort.sh
+@@ -0,0 +1,40 @@
++#!/bin/bash
++# Testing of unsigned short int printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++xprintf=$1; shift
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++AWK=${AWK:-awk}
++
++status=0
++
++for f in o u x X; do
++  echo Verifying $f
++  (set -o pipefail
++   ${test_program_prefix} \
++    ${common_objpfx}stdio-common/tst-printf-format-${xprintf}-ushort $f |
++     $AWK -f tst-printf-format.awk 2>&1 |
++     head -n 1 | sed "s/^/Conversion $f output error, first line:\n/") 2>&1 ||
++    status=1
++done
++
++exit $status
+diff --git a/stdio-common/tst-printf-format.awk b/stdio-common/tst-printf-format.awk
+new file mode 100644
+index 0000000000000000..8b4bc7b1e45202eb
+--- /dev/null
++++ b/stdio-common/tst-printf-format.awk
+@@ -0,0 +1,127 @@
++# Testing of printf conversions.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++BEGIN {
++  FS = ":"
++}
++
++/^prec:/ {
++  PREC = $2
++  next
++}
++
++/^val:/ {
++  val = $2
++  # Prepend "+" for +Inf or +NaN value lacking a sign, because gawk
++  # interpretes them as strings rather than numeric values in the
++  # non-bignum mode unless a sign has been explicitly given.  Keep
++  # original 'val' for reporting.
++  value = gensub(/^(INF|NAN|inf|nan)/, "+\\1", 1, val)
++  next
++}
++
++/^%/ {
++  # Discard the trailing empty field, used to improve legibility of data.
++  input = $--NF
++  format = $1
++  width = $2
++  precision = "." $(NF - 1)
++  # Discard any negative precision, which is to be taken as if omitted.
++  sub(/\.-.*/, "", precision)
++  # Simplify handling and paste the precision and width specified as
++  # arguments to '*' directly into the format.
++  sub(/\.\*/, precision, format)
++  sub(/\*/, width, format)
++  # Discard length modifiers.  They are only relevant to C data types.
++  sub(/([DHLjhltz]|wf?[1-9][0-9]*)/, "", format)
++  # Discard the '#' flag with the octal conversion if output starts with
++  # 0 in the absence of this flag.  In that case no extra 0 is supposed
++  # to be produced, but gawk prepends it anyway.
++  if (format ~ /#.*o/)
++    {
++      tmpfmt = gensub(/#/, "", "g", format)
++      tmpout = sprintf(tmpfmt, value)
++      if (tmpout ~ /^ *0/)
++	format = tmpfmt
++    }
++  # Likewise with the hexadecimal conversion where zero value with the
++  # precision of zero is supposed to produce no characters, but gawk
++  # outputs 0 instead.
++  else if (format ~ /#.*[Xx]/)
++    {
++      tmpfmt = gensub(/#/, "", "g", format)
++      tmpout = sprintf(tmpfmt, value)
++      if (tmpout ~ /^ *$/)
++	format = tmpfmt
++    }
++  # AWK interpretes input opportunistically as a number, which interferes
++  # with how the 'c' conversion works: "a" input will result in "a" output
++  # however "0" input will result in "^@" output rather than "0".  Force
++  # the value to be interpreted as a string then, by appending "".
++  output = sprintf(format, value "")
++  # Make up for various anomalies with the handling of +/-Inf and +/-NaN
++  # values and reprint the output produced using the string conversion,
++  # with the field width carried over and the relevant flags handled by
++  # hand.
++  if (format ~ /[EFGefg]/ && value ~ /(INF|NAN|inf|nan)/)
++    {
++      minus = format ~ /-/ ? "-" : ""
++      sign = value ~ /-/ ? "-" : format ~ /\+/ ? "+" : format ~ / / ? " " : ""
++      if (format ~ /^%[^\.1-9]*[1-9][0-9]*/)
++	width = gensub(/^%[^\.1-9]*([1-9][0-9]*).*$/, "\\1", 1, format)
++      else
++	width = ""
++      output = gensub(/[-+ ]/, "", "g", output)
++      output = sprintf("%" minus width "s", sign output)
++    }
++  # Produce "+" where the '+' flag has been used with a signed integer
++  # conversion for zero value, observing any field width in effect.
++  # In that case "+" is always supposed to be produced, but with the
++  # precision of zero gawk in the non-bignum mode produces any padding
++  # requested only.
++  else if (format ~ /\+.*[di]/ && value == 0)
++    {
++      output = gensub(/^( *) $/, format ~ /-/ ? "+\\1" : "\\1+", 1, output)
++      output = gensub(/^$/, "+", 1, output)
++    }
++  # Produce " " where the space flag has been used with a signed integer
++  # conversion for zero value.  In that case at least one " " is
++  # supposed to be produced, but with the precision of zero gawk in the
++  # non-bignum mode produces nothing.
++  else if (format ~ / .*[di]/ && value == 0)
++    {
++      output = gensub(/^$/, " ", 1, output)
++    }
++  if (output != input)
++    {
++      printf "(\"%s\"%s%s, %s) => \"%s\", expected \"%s\"\n", \
++	     $1, (NF > 2 ? ", " $2 : ""), (NF > 3 ? ", " $3 : ""), val, \
++	     input, output > "/dev/stderr"
++      status = 1
++    }
++  next
++}
++
++{
++  printf "unrecognized input: \"%s\"\n", $0 > "/dev/stderr"
++  status = 1
++}
++
++END {
++  exit status
++}
+diff --git a/stdio-common/tst-printf-format.sh b/stdio-common/tst-printf-format.sh
+new file mode 100644
+index 0000000000000000..466c4a5f4feac231
+--- /dev/null
++++ b/stdio-common/tst-printf-format.sh
+@@ -0,0 +1,39 @@
++#!/bin/bash
++# Formatted printf output test script dispatcher.
++# Copyright (C) 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++output=${1##*/}; shift
++
++tmp=${output#tst-printf-format-}
++tmp=${tmp%.out}
++
++# We are given the name of the make target in $1.  With the common prefix
++# and suffix both removed we are left with the inner part, which encodes
++# the function under test, the conversion type, and optionally the format
++# specifier, all separated with hyphens, i.e. F-T-S or F-T.  Extract them
++# and call the script corresponding to the conversion type, passing the
++# function under test and any format specifier as arguments.
++
++xprintf=${tmp%%-*}; tmp=${tmp#*-}
++conv=${tmp%%-*}; tmp=${tmp#${conv}}
++fmt=${tmp#*-}
++script=tst-printf-format-$conv.sh
++
++exec ${BASH:-bash} $script $xprintf $fmt "$@"

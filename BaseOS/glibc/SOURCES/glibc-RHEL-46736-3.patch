@@ -1,0 +1,261 @@
+commit 96d0bf98cafd0b63721f369ca21ec64590551d47
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Tue Sep 3 13:53:01 2024 +0000
+
+    Add support/ code for checking file contents
+    
+    For use in freopen tests, add various support/ helper interfaces for
+    use in checking file contents.
+    
+    Tested for x86_64.
+
+diff --git a/support/Makefile b/support/Makefile
+index 38ad266a0dec8e36..e70322cea06f137b 100644
+--- a/support/Makefile
++++ b/support/Makefile
+@@ -48,6 +48,8 @@ libsupport-routines = \
+   support_check_stat_fd \
+   support_check_stat_path \
+   support_chroot \
++  support_compare_file_bytes \
++  support_compare_file_string \
+   support_copy_file \
+   support_copy_file_range \
+   support_create_timer \
+@@ -64,6 +66,8 @@ libsupport-routines = \
+   support_fuse \
+   support_isolate_in_subprocess \
+   support_need_proc \
++  support_open_and_compare_file_bytes \
++  support_open_and_compare_file_string \
+   support_openpty \
+   support_path_support_time64 \
+   support_paths \
+diff --git a/support/file_contents.h b/support/file_contents.h
+new file mode 100644
+index 0000000000000000..9b2d750aae8a885a
+--- /dev/null
++++ b/support/file_contents.h
+@@ -0,0 +1,63 @@
++/* Functionality for checking file contents.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef SUPPORT_FILE_CONTENTS_H
++#define SUPPORT_FILE_CONTENTS_H
++
++#include <support/check.h>
++#include <stdio.h>
++
++__BEGIN_DECLS
++
++/* Check that an already-open file has exactly the given bytes,
++   starting at the current location in the file.  The file position
++   indicator is updated to point after the bytes compared.  Return 0
++   if equal, 1 otherwise or on read error.  */
++int support_compare_file_bytes (FILE *fp, const char *contents, size_t length);
++
++/* Check that an already-open file has exactly the given string as
++   contents, starting at the current offset.  The file position
++   indicator is updated to point after the bytes compared.  Return 0
++   if equal, 1 otherwise or on read error.  */
++int support_compare_file_string (FILE *fp, const char *contents);
++
++/* Check that a not-currently-open file has exactly the given bytes.
++   Return 0 if equal, 1 otherwise or on read error.  */
++int support_open_and_compare_file_bytes (const char *file,
++					 const char *contents,
++					 size_t length);
++
++/* Check that a not-currently-open file has exactly the given string
++   as contents, starting at the current offset.  Return 0 if equal, 1
++   otherwise or on read error.  */
++int support_open_and_compare_file_string (const char *file,
++					  const char *contents);
++
++/* Compare bytes read from an open file with the given string.  The
++   file position indicator is updated to point after the bytes
++   compared.  */
++#define TEST_COMPARE_FILE_STRING(FP, CONTENTS)			\
++  TEST_COMPARE (support_compare_file_string (FP, CONTENTS), 0)
++
++/* Read a file and compare bytes read from it with the given string.  */
++#define TEST_OPEN_AND_COMPARE_FILE_STRING(FILE, CONTENTS)		\
++  TEST_COMPARE (support_open_and_compare_file_string (FILE, CONTENTS), 0)
++
++__END_DECLS
++
++#endif /* SUPPORT_FILE_CONTENTS_H */
+diff --git a/support/support_compare_file_bytes.c b/support/support_compare_file_bytes.c
+new file mode 100644
+index 0000000000000000..e261e1da8f7b02b2
+--- /dev/null
++++ b/support/support_compare_file_bytes.c
+@@ -0,0 +1,42 @@
++/* Compare bytes from an open file.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++
++#include <support/file_contents.h>
++
++/* Check that an already-open file has exactly the given bytes,
++   starting at the current offset.  */
++
++int
++support_compare_file_bytes (FILE *fp, const char *contents, size_t length)
++{
++  int c;
++  while (length > 0)
++    {
++      c = getc (fp);
++      if (c == EOF || (unsigned char) c != (unsigned char) contents[0])
++	return 1;
++      contents++;
++      length--;
++    }
++  c = getc (fp);
++  if (c != EOF || ferror (fp))
++    return 1;
++  return 0;
++}
+diff --git a/support/support_compare_file_string.c b/support/support_compare_file_string.c
+new file mode 100644
+index 0000000000000000..04513c3af197037d
+--- /dev/null
++++ b/support/support_compare_file_string.c
+@@ -0,0 +1,28 @@
++/* Compare string from an open file.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <string.h>
++
++#include <support/file_contents.h>
++
++int
++support_compare_file_string (FILE *fp, const char *contents)
++{
++  return support_compare_file_bytes (fp, contents, strlen (contents));
++}
+diff --git a/support/support_open_and_compare_file_bytes.c b/support/support_open_and_compare_file_bytes.c
+new file mode 100644
+index 0000000000000000..f804ed8e460d82f0
+--- /dev/null
++++ b/support/support_open_and_compare_file_bytes.c
+@@ -0,0 +1,33 @@
++/* Compare bytes from a file.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/file_contents.h>
++#include <support/xstdio.h>
++
++/* Check that a not-currently-open file has exactly the given
++   bytes.  */
++
++int
++support_open_and_compare_file_bytes (const char *file, const char *contents,
++				     size_t length)
++{
++  FILE *fp = xfopen (file, "r");
++  int ret = support_compare_file_bytes (fp, contents, length);
++  xfclose (fp);
++  return ret;
++}
+diff --git a/support/support_open_and_compare_file_string.c b/support/support_open_and_compare_file_string.c
+new file mode 100644
+index 0000000000000000..2b596d4c88b697f2
+--- /dev/null
++++ b/support/support_open_and_compare_file_string.c
+@@ -0,0 +1,32 @@
++/* Compare string from a file.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <string.h>
++
++#include <support/file_contents.h>
++#include <support/xstdio.h>
++
++/* Check that a not-currently-open file has exactly the given string
++   as contents, starting at the current offset.  */
++
++int
++support_open_and_compare_file_string (const char *file, const char *contents)
++{
++  return support_open_and_compare_file_bytes (file, contents,
++					      strlen (contents));
++}

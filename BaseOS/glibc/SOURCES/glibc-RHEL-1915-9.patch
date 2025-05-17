@@ -1,0 +1,37 @@
+commit 079ebf7624e7fd0ad7fe94a7176a2e132c996d86
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Sep 24 10:41:35 2024 +0200
+
+    iconv: Use $(run-program-prefix) for running iconv (bug 32197)
+    
+    With --enable-hardcoded-path-in-tests, $(test-program-prefix)
+    does not redirect to the built glibc, but we need to run
+    iconv (the program) against the built glibc even with
+    --enable-hardcoded-path-in-tests, as it is using the ABI
+    path for the dynamic linker (as an installed program).
+    Use $(run-program-prefix) instead.
+    
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+
+diff --git a/iconv/Makefile b/iconv/Makefile
+index c9af0c4d44..de9d964ed3 100644
+--- a/iconv/Makefile
++++ b/iconv/Makefile
+@@ -153,14 +153,14 @@ $(objpfx)tst-translit-mchar.out: tst-translit-mchar.sh \
+ 
+ $(objpfx)tst-iconv_prog-buffer.out: \
+   tst-iconv_prog-buffer.sh $(objpfx)iconv_prog
+-	$(BASH) $< $(common-objdir) '$(test-program-prefix)' > $@; \
++	$(BASH) $< $(common-objdir) '$(run-program-prefix)' > $@; \
+ 	$(evaluate-test)
+ $(objpfx)tst-iconv_prog-buffer-tiny.out: \
+   tst-iconv_prog-buffer.sh $(objpfx)iconv_prog
+-	$(BASH) $< $(common-objdir) '$(test-program-prefix)' \
++	$(BASH) $< $(common-objdir) '$(run-program-prefix)' \
+ 	  '--buffer-size=1' > $@; \
+ 	$(evaluate-test)
+ $(objpfx)tst-iconv_prog-buffer-large.out: \
+   tst-iconv_prog-buffer.sh $(objpfx)iconv_prog
+-	$(BASH) $< $(common-objdir) '$(test-program-prefix)' '' '22' > $@; \
++	$(BASH) $< $(common-objdir) '$(run-program-prefix)' '' '22' > $@; \
+ 	$(evaluate-test)

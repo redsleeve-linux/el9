@@ -1,0 +1,69 @@
+commit f942a732d37a96217ef828116ebe64a644db18d7
+Author: Joe Talbott <joetalbott@gmail.com>
+Date:   Tue May 14 14:39:38 2024 +0000
+
+    math: Add GLIBC_TEST_LIBM_VERBOSE environment variable support.
+    
+    Allow the libm-test-driver based tests to have their verbosity set based
+    on the GLIBC_TEST_LIBM_VERBOSE environment variable.  This allows the entire
+    testsuite to be run with a non-default verbosity.
+    
+    While here check the conversion for the verbose option as well.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+diff --git a/math/libm-test-support.c b/math/libm-test-support.c
+index 9b4cb2ee7d072578..9e64dcfc99234bc7 100644
+--- a/math/libm-test-support.c
++++ b/math/libm-test-support.c
+@@ -130,7 +130,7 @@ static int noTests;	/* number of tests (without testing exceptions) */
+ static int noExcTests;	/* number of tests for exception flags */
+ static int noErrnoTests;/* number of tests for errno values */
+ 
+-static int verbose;
++static unsigned int verbose;
+ static int output_max_error;	/* Should the maximal errors printed?  */
+ static int output_points;	/* Should the single function results printed?  */
+ static int ignore_max_ulp;	/* Should we ignore max_ulp?  */
+@@ -1057,7 +1057,14 @@ parse_opt (int key, char *arg, struct argp_state *state)
+       break;
+     case 'v':
+       if (optarg)
+-	verbose = (unsigned int) strtoul (optarg, NULL, 0);
++	{
++	  char *optstr_conv = optarg;
++	  unsigned int opt_verbose;
++
++	  opt_verbose = (unsigned int) strtoul (optarg, &optstr_conv, 0);
++          if (*optstr_conv == '\0' && optstr_conv != optarg)
++            verbose = opt_verbose;
++	}
+       else
+ 	verbose = 3;
+       break;
+@@ -1139,6 +1146,7 @@ libm_test_init (int argc, char **argv)
+   int remaining;
+   char *ulps_file_path;
+   size_t dir_len = 0;
++  char *envstr_verbose;
+ 
+   verbose = 1;
+   output_ulps = 0;
+@@ -1148,6 +1156,17 @@ libm_test_init (int argc, char **argv)
+   /* XXX set to 0 for releases.  */
+   ignore_max_ulp = 0;
+ 
++  envstr_verbose = getenv("GLIBC_TEST_LIBM_VERBOSE");
++  if (envstr_verbose != NULL)
++    {
++      char *envstr_conv = envstr_verbose;
++      unsigned int env_verbose;
++
++      env_verbose = (unsigned int) strtoul (envstr_verbose, &envstr_conv, 0);
++      if (*envstr_conv == '\0' && envstr_conv != envstr_verbose)
++        verbose = env_verbose;
++    }
++
+   /* Parse and process arguments.  */
+   argp_parse (&argp, argc, argv, 0, &remaining, NULL);
+ 

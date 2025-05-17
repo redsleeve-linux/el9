@@ -1,0 +1,598 @@
+commit 3fc063dee01da4f80920a14b7db637c8501d6fd4
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Tue Aug 27 20:41:54 2024 +0000
+
+    Make __strtod_internal tests type-generic
+    
+    Some of the strtod tests use type-generic machinery in tst-strtod.h to
+    test the strto* functions for all floating types, while others only
+    test double even when the tests are in fact meaningful for all
+    floating types.
+    
+    Convert the tests of the internal __strtod_internal interface to cover
+    all floating types.  I haven't tried to convert them to use newer test
+    interfaces in other ways, just made the changes necessary to use the
+    type-generic machinery.  As an internal interface, there are no
+    aliases for different types with the same ABI (however,
+    __strtold_internal is defined even if long double has the same ABI as
+    double), so macros used by the type-generic testing code are redefined
+    as needed to avoid expecting such aliases to be present.
+    
+    Tested for x86_64.
+
+Conflicts:
+	stdlib/tst-strtod4.c
+	  (69239bd7a216007692470aa9d5f3658024638742 missing downstream)
+
+diff --git a/stdlib/tst-strtod1i.c b/stdlib/tst-strtod1i.c
+index 98fc5d527fe1edd9..32fc8b9e1f08ace9 100644
+--- a/stdlib/tst-strtod1i.c
++++ b/stdlib/tst-strtod1i.c
+@@ -25,60 +25,91 @@
+ #include <string.h>
+ #include <math.h>
+ 
+-/* Perform a few tests in a locale with thousands separators.  */
+-static int
+-do_test (void)
+-{
+-  static const struct
+-  {
+-    const char *loc;
+-    const char *str;
+-    double exp;
+-    ptrdiff_t nread;
+-  } tests[] =
+-    {
+-      { "de_DE.UTF-8", "1,5", 1.5, 3 },
+-      { "de_DE.UTF-8", "1.5", 1.0, 1 },
+-      { "de_DE.UTF-8", "1.500", 1500.0, 5 },
+-      { "de_DE.UTF-8", "36.893.488.147.419.103.232", 0x1.0p65, 26 }
+-    };
+-#define ntests (sizeof (tests) / sizeof (tests[0]))
+-  size_t n;
+-  int result = 0;
+-
+-  puts ("\nLocale tests");
++#include "tst-strtod.h"
+ 
+-  for (n = 0; n < ntests; ++n)
+-    {
+-      double d;
+-      char *endp;
++/* This tests internal interfaces, which are only defined for types
++   with distinct ABIs, so disable testing for types without distinct
++   ABIs.  */
++#undef IF_FLOAT32
++#define IF_FLOAT32(x)
++#undef IF_FLOAT64
++#define IF_FLOAT64(x)
++#undef IF_FLOAT32X
++#define IF_FLOAT32X(x)
++#undef IF_FLOAT64X
++#define IF_FLOAT64X(x)
++#if !__HAVE_DISTINCT_FLOAT128
++# undef IF_FLOAT128
++# define IF_FLOAT128(x)
++#endif
+ 
+-      if (setlocale (LC_ALL, tests[n].loc) == NULL)
+-	{
+-	  printf ("cannot set locale %s\n", tests[n].loc);
+-	  result = 1;
+-	  continue;
+-	}
++#define ntests (sizeof (tests) / sizeof (tests[0]))
+ 
+-      d = __strtod_internal (tests[n].str, &endp, 1);
+-      if (d != tests[n].exp)
+-	{
+-	  printf ("strtod(\"%s\") returns %g and not %g\n",
+-		  tests[n].str, d, tests[n].exp);
+-	  result = 1;
+-	}
+-      else if (endp - tests[n].str != tests[n].nread)
+-	{
+-	  printf ("strtod(\"%s\") read %td bytes and not %td\n",
+-		  tests[n].str, endp - tests[n].str, tests[n].nread);
+-	  result = 1;
+-	}
+-    }
++/* Perform a few tests in a locale with thousands separators.  */
++#define TEST_STRTOD(FSUF, FTYPE, FTOSTR, LSUF, CSUF)			\
++static int								\
++test_strto ## FSUF (void)						\
++{									\
++  static const struct							\
++  {									\
++    const char *loc;							\
++    const char *str;							\
++    FTYPE exp;								\
++    ptrdiff_t nread;							\
++  } tests[] =								\
++    {									\
++      { "de_DE.UTF-8", "1,5", 1.5 ## LSUF, 3 },				\
++      { "de_DE.UTF-8", "1.5", 1.0 ## LSUF, 1 },				\
++      { "de_DE.UTF-8", "1.500", 1500.0 ## LSUF, 5 },			\
++      { "de_DE.UTF-8", "36.893.488.147.419.103.232", 0x1.0p65 ## LSUF, 26 } \
++    };									\
++  size_t n;								\
++  int result = 0;							\
++									\
++  puts ("\nLocale tests");						\
++									\
++  for (n = 0; n < ntests; ++n)						\
++    {									\
++      FTYPE d;								\
++      char *endp;							\
++									\
++      if (setlocale (LC_ALL, tests[n].loc) == NULL)			\
++	{								\
++	  printf ("cannot set locale %s\n", tests[n].loc);		\
++	  result = 1;							\
++	  continue;							\
++	}								\
++									\
++      d = __strto ## FSUF ## _internal (tests[n].str, &endp, 1);	\
++      if (d != tests[n].exp)						\
++	{								\
++	  char buf1[FSTRLENMAX], buf2[FSTRLENMAX];			\
++	  FTOSTR (buf1, sizeof (buf1), "%g", d);			\
++	  FTOSTR (buf2, sizeof (buf2), "%g", tests[n].exp);		\
++	  printf ("strto" # FSUF "(\"%s\") returns %s and not %s\n",	\
++		  tests[n].str, buf1, buf2);				\
++	  result = 1;							\
++	}								\
++      else if (endp - tests[n].str != tests[n].nread)			\
++	{								\
++	  printf ("strto" # FSUF "(\"%s\") read %td bytes and not %td\n", \
++		  tests[n].str, endp - tests[n].str, tests[n].nread);	\
++	  result = 1;							\
++	}								\
++    }									\
++									\
++  if (result == 0)							\
++    puts ("all OK");							\
++									\
++  return result ? EXIT_FAILURE : EXIT_SUCCESS;				\
++}
+ 
+-  if (result == 0)
+-    puts ("all OK");
++GEN_TEST_STRTOD_FOREACH (TEST_STRTOD)
+ 
+-  return result ? EXIT_FAILURE : EXIT_SUCCESS;
++static int
++do_test (void)
++{
++  return STRTOD_TEST_FOREACH (test_strto);
+ }
+ 
+ #include <support/test-driver.c>
+diff --git a/stdlib/tst-strtod3.c b/stdlib/tst-strtod3.c
+index 23abec1896896276..0d662d8be83a7525 100644
+--- a/stdlib/tst-strtod3.c
++++ b/stdlib/tst-strtod3.c
+@@ -3,19 +3,73 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
+-static const struct
+-{
+-  const char *in;
+-  const char *out;
+-  double expected;
+-} tests[] =
+-  {
+-    { "000,,,e1", ",,,e1", 0.0 },
+-    { "000e1", "", 0.0 },
+-    { "000,1e1", ",1e1", 0.0 }
+-  };
+-#define NTESTS (sizeof (tests) / sizeof (tests[0]))
++#include "tst-strtod.h"
++
++/* This tests internal interfaces, which are only defined for types
++   with distinct ABIs, so disable testing for types without distinct
++   ABIs.  */
++#undef IF_FLOAT32
++#define IF_FLOAT32(x)
++#undef IF_FLOAT64
++#define IF_FLOAT64(x)
++#undef IF_FLOAT32X
++#define IF_FLOAT32X(x)
++#undef IF_FLOAT64X
++#define IF_FLOAT64X(x)
++#if !__HAVE_DISTINCT_FLOAT128
++# undef IF_FLOAT128
++# define IF_FLOAT128(x)
++#endif
+ 
++#define TEST_STRTOD(FSUF, FTYPE, FTOSTR, LSUF, CSUF)			\
++static const struct							\
++{									\
++  const char *in;							\
++  const char *out;							\
++  FTYPE expected;							\
++} tests_strto ## FSUF[] =						\
++  {									\
++    { "000,,,e1", ",,,e1", 0.0 ## LSUF },				\
++    { "000e1", "", 0.0 ## LSUF },					\
++    { "000,1e1", ",1e1", 0.0 ## LSUF }					\
++  };									\
++									\
++static int								\
++test_strto ## FSUF (void)						\
++{									\
++  int status = 0;							\
++									\
++  for (int i = 0;							\
++       i < sizeof (tests_strto ## FSUF) / sizeof (tests_strto ## FSUF[0]); \
++       ++i)								\
++    {									\
++      char *ep;								\
++      FTYPE r = __strto ## FSUF ## _internal (tests_strto ## FSUF[i].in, \
++					      &ep, 1);			\
++									\
++      if (strcmp (ep, tests_strto ## FSUF[i].out) != 0)			\
++	{								\
++	  printf ("%d: got rest string \"%s\", expected \"%s\"\n",	\
++		  i, ep, tests_strto ## FSUF[i].out);			\
++	  status = 1;							\
++	}								\
++									\
++      if (r != tests_strto ## FSUF[i].expected)				\
++	{								\
++	  char buf1[FSTRLENMAX], buf2[FSTRLENMAX];			\
++	  FTOSTR (buf1, sizeof (buf1), "%g", r);			\
++	  FTOSTR (buf2, sizeof (buf2), "%g",				\
++		  tests_strto ## FSUF[i].expected);			\
++	  printf ("%d: got wrong results %s, expected %s\n",		\
++		  i, buf1, buf2);					\
++	  status = 1;							\
++	}								\
++    }									\
++									\
++  return status;							\
++}
++
++GEN_TEST_STRTOD_FOREACH (TEST_STRTOD)
+ 
+ static int
+ do_test (void)
+@@ -26,29 +80,7 @@ do_test (void)
+       return 1;
+     }
+ 
+-  int status = 0;
+-
+-  for (int i = 0; i < NTESTS; ++i)
+-    {
+-      char *ep;
+-      double r = __strtod_internal (tests[i].in, &ep, 1);
+-
+-      if (strcmp (ep, tests[i].out) != 0)
+-	{
+-	  printf ("%d: got rest string \"%s\", expected \"%s\"\n",
+-		  i, ep, tests[i].out);
+-	  status = 1;
+-	}
+-
+-      if (r != tests[i].expected)
+-	{
+-	  printf ("%d: got wrong results %g, expected %g\n",
+-		  i, r, tests[i].expected);
+-	  status = 1;
+-	}
+-    }
+-
+-  return status;
++  return STRTOD_TEST_FOREACH (test_strto);
+ }
+ 
+ #define TEST_FUNCTION do_test ()
+diff --git a/stdlib/tst-strtod4.c b/stdlib/tst-strtod4.c
+index aae9835d82d38b4e..cd86f8c1f13a39e4 100644
+--- a/stdlib/tst-strtod4.c
++++ b/stdlib/tst-strtod4.c
+@@ -3,20 +3,74 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#include "tst-strtod.h"
++
++/* This tests internal interfaces, which are only defined for types
++   with distinct ABIs, so disable testing for types without distinct
++   ABIs.  */
++#undef IF_FLOAT32
++#define IF_FLOAT32(x)
++#undef IF_FLOAT64
++#define IF_FLOAT64(x)
++#undef IF_FLOAT32X
++#define IF_FLOAT32X(x)
++#undef IF_FLOAT64X
++#define IF_FLOAT64X(x)
++#if !__HAVE_DISTINCT_FLOAT128
++# undef IF_FLOAT128
++# define IF_FLOAT128(x)
++#endif
++
+ #define NNBSP "\xe2\x80\xaf"
+ 
+-static const struct
+-{
+-  const char *in;
+-  const char *out;
+-  double expected;
+-} tests[] =
+-  {
+-    { "000"NNBSP"000"NNBSP"000", "", 0.0 },
+-    { "1"NNBSP"000"NNBSP"000,5x", "x", 1000000.5 }
+-  };
+-#define NTESTS (sizeof (tests) / sizeof (tests[0]))
++#define TEST_STRTOD(FSUF, FTYPE, FTOSTR, LSUF, CSUF)			\
++static const struct							\
++{									\
++  const char *in;							\
++  const char *out;							\
++  FTYPE expected;							\
++} tests_strto ## FSUF[] =						\
++  {									\
++    { "000"NNBSP"000"NNBSP"000", "", 0.0 ## LSUF },			\
++    { "1"NNBSP"000"NNBSP"000,5x", "x", 1000000.5 ## LSUF }		\
++  };									\
++									\
++static int								\
++test_strto ## FSUF (void)						\
++{									\
++  int status = 0;							\
++									\
++  for (int i = 0;							\
++       i < sizeof (tests_strto ## FSUF) / sizeof (tests_strto ## FSUF[0]); \
++       ++i)								\
++    {									\
++      char *ep;								\
++      FTYPE r = __strto ## FSUF ## _internal (tests_strto ## FSUF[i].in, \
++					      &ep, 1);			\
++									\
++      if (strcmp (ep, tests_strto ## FSUF[i].out) != 0)			\
++	{								\
++	  printf ("%d: got rest string \"%s\", expected \"%s\"\n",	\
++		  i, ep, tests_strto ## FSUF[i].out);			\
++	  status = 1;							\
++	}								\
++									\
++      if (r != tests_strto ## FSUF[i].expected)				\
++	{								\
++	  char buf1[FSTRLENMAX], buf2[FSTRLENMAX];			\
++	  FTOSTR (buf1, sizeof (buf1), "%g", r);			\
++	  FTOSTR (buf2, sizeof (buf2), "%g",				\
++		  tests_strto ## FSUF[i].expected);			\
++	  printf ("%d: got wrong results %s, expected %s\n",		\
++		  i, buf1, buf2);					\
++	  status = 1;							\
++	}								\
++    }									\
++									\
++  return status;							\
++}
+ 
++GEN_TEST_STRTOD_FOREACH (TEST_STRTOD)
+ 
+ static int
+ do_test (void)
+@@ -27,29 +81,7 @@ do_test (void)
+       return 1;
+     }
+ 
+-  int status = 0;
+-
+-  for (int i = 0; i < NTESTS; ++i)
+-    {
+-      char *ep;
+-      double r = __strtod_internal (tests[i].in, &ep, 1);
+-
+-      if (strcmp (ep, tests[i].out) != 0)
+-	{
+-	  printf ("%d: got rest string \"%s\", expected \"%s\"\n",
+-		  i, ep, tests[i].out);
+-	  status = 1;
+-	}
+-
+-      if (r != tests[i].expected)
+-	{
+-	  printf ("%d: got wrong results %g, expected %g\n",
+-		  i, r, tests[i].expected);
+-	  status = 1;
+-	}
+-    }
+-
+-  return status;
++  return STRTOD_TEST_FOREACH (test_strto);
+ }
+ 
+ #define TEST_FUNCTION do_test ()
+diff --git a/stdlib/tst-strtod5i.c b/stdlib/tst-strtod5i.c
+index ba3e78d5f2933586..0ddae2b94765de39 100644
+--- a/stdlib/tst-strtod5i.c
++++ b/stdlib/tst-strtod5i.c
+@@ -16,52 +16,112 @@
+    License along with the GNU C Library; if not, see
+    <https://www.gnu.org/licenses/>.  */
+ 
++/* Defining _LIBC_TEST ensures long double math functions are
++   declared in the headers.  */
++#define _LIBC_TEST 1
+ #include <locale.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <math.h>
+ 
++#include "tst-strtod.h"
++
++/* This tests internal interfaces, which are only defined for types
++   with distinct ABIs, so disable testing for types without distinct
++   ABIs.  */
++#undef IF_FLOAT32
++#define IF_FLOAT32(x)
++#undef IF_FLOAT64
++#define IF_FLOAT64(x)
++#undef IF_FLOAT32X
++#define IF_FLOAT32X(x)
++#undef IF_FLOAT64X
++#define IF_FLOAT64X(x)
++#if !__HAVE_DISTINCT_FLOAT128
++# undef IF_FLOAT128
++# define IF_FLOAT128(x)
++#endif
++
+ #define NNBSP "\xe2\x80\xaf"
+ 
+-static const struct
+-{
+-  const char *in;
+-  int group;
+-  double expected;
+-} tests[] =
+-  {
+-    { "0", 0, 0.0 },
+-    { "000", 0, 0.0 },
+-    { "-0", 0, -0.0 },
+-    { "-000", 0, -0.0 },
+-    { "0,", 0, 0.0 },
+-    { "-0,", 0, -0.0 },
+-    { "0,0", 0, 0.0 },
+-    { "-0,0", 0, -0.0 },
+-    { "0e-10", 0, 0.0 },
+-    { "-0e-10", 0, -0.0 },
+-    { "0,e-10", 0, 0.0 },
+-    { "-0,e-10", 0, -0.0 },
+-    { "0,0e-10", 0, 0.0 },
+-    { "-0,0e-10", 0, -0.0 },
+-    { "0e-1000000", 0, 0.0 },
+-    { "-0e-1000000", 0, -0.0 },
+-    { "0,0e-1000000", 0, 0.0 },
+-    { "-0,0e-1000000", 0, -0.0 },
+-    { "0", 1, 0.0 },
+-    { "000", 1, 0.0 },
+-    { "-0", 1, -0.0 },
+-    { "-000", 1, -0.0 },
+-    { "0e-10", 1, 0.0 },
+-    { "-0e-10", 1, -0.0 },
+-    { "0e-1000000", 1, 0.0 },
+-    { "-0e-1000000", 1, -0.0 },
+-    { "000"NNBSP"000"NNBSP"000", 1, 0.0 },
+-    { "-000"NNBSP"000"NNBSP"000", 1, -0.0 }
+-  };
+-#define NTESTS (sizeof (tests) / sizeof (tests[0]))
++#define TEST_STRTOD(FSUF, FTYPE, FTOSTR, LSUF, CSUF)			\
++static const struct							\
++{									\
++  const char *in;							\
++  int group;								\
++  FTYPE expected;							\
++} tests_strto ## FSUF[] =						\
++  {									\
++    { "0", 0, 0.0 ## LSUF },						\
++    { "000", 0, 0.0 ## LSUF },						\
++    { "-0", 0, -0.0 ## LSUF },						\
++    { "-000", 0, -0.0 ## LSUF },					\
++    { "0,", 0, 0.0 ## LSUF },						\
++    { "-0,", 0, -0.0 ## LSUF },						\
++    { "0,0", 0, 0.0 ## LSUF },						\
++    { "-0,0", 0, -0.0 ## LSUF },					\
++    { "0e-10", 0, 0.0 ## LSUF },					\
++    { "-0e-10", 0, -0.0 ## LSUF },					\
++    { "0,e-10", 0, 0.0 ## LSUF },					\
++    { "-0,e-10", 0, -0.0 ## LSUF },					\
++    { "0,0e-10", 0, 0.0 ## LSUF },					\
++    { "-0,0e-10", 0, -0.0 ## LSUF },					\
++    { "0e-1000000", 0, 0.0 ## LSUF },					\
++    { "-0e-1000000", 0, -0.0 ## LSUF },					\
++    { "0,0e-1000000", 0, 0.0 ## LSUF },					\
++    { "-0,0e-1000000", 0, -0.0 ## LSUF },				\
++    { "0", 1, 0.0 ## LSUF },						\
++    { "000", 1, 0.0 ## LSUF },						\
++    { "-0", 1, -0.0 ## LSUF },						\
++    { "-000", 1, -0.0 ## LSUF },					\
++    { "0e-10", 1, 0.0 ## LSUF },					\
++    { "-0e-10", 1, -0.0 ## LSUF },					\
++    { "0e-1000000", 1, 0.0 ## LSUF },					\
++    { "-0e-1000000", 1, -0.0 ## LSUF },					\
++    { "000"NNBSP"000"NNBSP"000", 1, 0.0 ## LSUF },			\
++    { "-000"NNBSP"000"NNBSP"000", 1, -0.0 ## LSUF }			\
++  };									\
++									\
++static int								\
++test_strto ## FSUF (void)						\
++{									\
++  int status = 0;							\
++									\
++  for (int i = 0;							\
++       i < sizeof (tests_strto ## FSUF) / sizeof (tests_strto ## FSUF[0]); \
++       ++i)								\
++    {									\
++      char *ep;								\
++      FTYPE r = __strto ## FSUF ## _internal (tests_strto ## FSUF[i].in, \
++					      &ep,			\
++					      tests_strto ## FSUF[i].group); \
++									\
++      if (*ep != '\0')							\
++	{								\
++	  printf ("%d: got rest string \"%s\", expected \"\"\n", i, ep); \
++	  status = 1;							\
++	}								\
++									\
++      if (r != tests_strto ## FSUF[i].expected				\
++	  || (copysign ## CSUF (10.0 ## LSUF, r)			\
++	      != copysign ## CSUF (10.0 ## LSUF,			\
++				   tests_strto ## FSUF[i].expected)))	\
++	{								\
++	  char buf1[FSTRLENMAX], buf2[FSTRLENMAX];			\
++	  FTOSTR (buf1, sizeof (buf1), "%g", r);			\
++	  FTOSTR (buf2, sizeof (buf2), "%g",				\
++		  tests_strto ## FSUF[i].expected);			\
++	  printf ("%d: got wrong results %s, expected %s\n",		\
++		  i, buf1, buf2);					\
++	  status = 1;							\
++	}								\
++    }									\
++									\
++  return status;							\
++}
+ 
++GEN_TEST_STRTOD_FOREACH (TEST_STRTOD)
+ 
+ static int
+ do_test (void)
+@@ -72,29 +132,7 @@ do_test (void)
+       return 1;
+     }
+ 
+-  int status = 0;
+-
+-  for (int i = 0; i < NTESTS; ++i)
+-    {
+-      char *ep;
+-      double r = __strtod_internal (tests[i].in, &ep, tests[i].group);
+-
+-      if (*ep != '\0')
+-	{
+-	  printf ("%d: got rest string \"%s\", expected \"\"\n", i, ep);
+-	  status = 1;
+-	}
+-
+-      if (r != tests[i].expected
+-	  || copysign (10.0, r) != copysign (10.0, tests[i].expected))
+-	{
+-	  printf ("%d: got wrong results %g, expected %g\n",
+-		  i, r, tests[i].expected);
+-	  status = 1;
+-	}
+-    }
+-
+-  return status;
++  return STRTOD_TEST_FOREACH (test_strto);
+ }
+ 
+ #include <support/test-driver.c>

@@ -157,7 +157,7 @@ end \
 Summary: The GNU libc libraries
 Name: glibc
 Version: %{glibcversion}
-Release: 125%{?dist}.3.redsleeve
+Release: 168%{?dist}.14
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -199,7 +199,74 @@ Source11: parse-SUPPORTED.py
 Source12: ChangeLog.old
 Source13: nscd-sysusers.conf
 
-Source1000: glibc-arm-dl-tunables.list
+# glibc_ldso: ABI-specific program interpreter name.  Used for debuginfo
+# extraction (wrap-find-debuginfo.sh) and smoke testing ($run_ldso below).
+#
+# glibc_has_libnldbl: -lnldbl is supported for long double as double.
+#
+# glibc_has_libmvec: libmvec is available.
+#
+# glibc_rtld_early_cflags: The ABI baseline for architectures with
+# potentially a later baseline.  The --with-rtld-early-cflags=
+# configure option is passed to the main glibc build if this macro is
+# defined.
+%ifarch %{ix86}
+%global glibc_ldso /lib/ld-linux.so.2
+%global glibc_has_libnldbl 0
+%global glibc_has_libmvec 0
+%endif
+%ifarch aarch64
+%global glibc_ldso /lib/ld-linux-aarch64.so.1
+%global glibc_has_libnldbl 0
+%global glibc_has_libmvec 0
+%endif
+%ifarch ppc
+%global glibc_ldso /lib/ld.so.1
+%global glibc_has_libnldbl 1
+%global glibc_has_libmvec 0
+%endif
+%ifarch ppc64
+%global glibc_ldso /lib64/ld64.so.1
+%global glibc_has_libnldbl 1
+%global glibc_has_libmvec 0
+%endif
+%ifarch ppc64le
+%global glibc_ldso /lib64/ld64.so.2
+%global glibc_has_libnldbl 1
+%global glibc_has_libmvec 0
+%define glibc_rtld_early_cflags -mcpu=power8
+%endif
+%ifarch riscv64
+%global glibc_ldso /lib/ld-linux-riscv64-lp64d.so.1
+%global glibc_has_libnldbl 0
+%global glibc_has_libmvec 0
+%endif
+%ifarch s390
+%global glibc_ldso /lib/ld.so.1
+%global glibc_has_libnldbl 1
+%global glibc_has_libmvec 0
+%define glibc_rtld_early_cflags -march=z13
+%endif
+%ifarch s390x
+%global glibc_ldso /lib/ld64.so.1
+%global glibc_has_libnldbl 1
+%global glibc_has_libmvec 0
+%define glibc_rtld_early_cflags -march=z13
+%endif
+%ifarch x86_64 x86_64_v2 x86_64_v3 x86_64_v4
+%global glibc_ldso /lib64/ld-linux-x86-64.so.2
+%global glibc_has_libnldbl 0
+%global glibc_has_libmvec 1
+%define glibc_rtld_early_cflags -march=x86-64
+%endif
+
+# This is necessary to enable source RPM building under noarch, as
+# used by some build environments.
+%ifarch noarch
+%global glibc_ldso /lib/ld.so
+%global glibc_has_libnldbl 0
+%global glibc_has_libmvec 0
+%endif
 
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
@@ -212,7 +279,7 @@ local original = rpm.expand("%{macrobody:__debug_install_post}")
 -- Avoid embedded newlines that confuse the macro definition.
 original = original:match("^%s*(.-)%s*$"):gsub("\\\n", "")
 rpm.define("__debug_install_post bash " .. wrapper
-  .. " " .. sysroot .. " " .. original)
+  .. " " .. sysroot .. " %{_prefix}/%{glibc_ldso} " .. original)
 }
 
 # sysroot package support.  These contain arch-specific packages, so
@@ -871,25 +938,252 @@ Patch630: glibc-RHEL-46979-1.patch
 Patch631: glibc-RHEL-46979-2.patch
 Patch632: glibc-RHEL-46979-3.patch
 Patch633: glibc-RHEL-46979-4.patch
-Patch634: glibc-RHEL-49489-3.patch
-Patch635: glibc-RHEL-49489-4.patch
-Patch636: glibc-RHEL-69003.patch
-Patch637: glibc-RHEL-78939-1.patch
-Patch638: glibc-RHEL-78939-2.patch
-Patch639: glibc-RHEL-78939-3.patch
-Patch640: glibc-RHEL-78939-4.patch
-Patch641: glibc-RHEL-78939-5.patch
-Patch642: glibc-RHEL-78939-6.patch
-Patch643: glibc-RHEL-78939-7.patch
-Patch644: glibc-RHEL-78939-8.patch
-Patch645: glibc-RHEL-78939-9.patch
-Patch646: glibc-RHEL-78939-10.patch
+Patch634: glibc-RHEL-59494-1.patch
+Patch635: glibc-RHEL-59494-2.patch
+Patch636: glibc-RHEL-59494-3.patch
+Patch637: glibc-RHEL-41189.patch
+Patch638: glibc-RHEL-46728.patch
+Patch639: glibc-RHEL-46734.patch
+Patch640: glibc-RHEL-46735.patch
+Patch641: glibc-RHEL-60466-1.patch
+Patch642: glibc-RHEL-60466-2.patch
+Patch643: glibc-RHEL-46739-1.patch
+Patch644: glibc-RHEL-46739-2.patch
+Patch645: glibc-RHEL-46739-3.patch
+Patch646: glibc-RHEL-46739-4.patch
+Patch647: glibc-RHEL-46739-5.patch
+Patch648: glibc-RHEL-46739-6.patch
+Patch649: glibc-RHEL-46739-7.patch
+Patch650: glibc-RHEL-46739-8.patch
+Patch651: glibc-RHEL-46739-9.patch
+Patch652: glibc-RHEL-46739-10.patch
+Patch653: glibc-RHEL-46739-11.patch
+Patch654: glibc-RHEL-50545-1.patch
+Patch655: glibc-RHEL-50545-2.patch
+Patch656: glibc-RHEL-50545-3.patch
+Patch657: glibc-RHEL-50545-4.patch
+Patch658: glibc-RHEL-50545-5.patch
+Patch659: glibc-RHEL-50545-6.patch
+Patch660: glibc-RHEL-50545-7.patch
+Patch661: glibc-RHEL-50545-8.patch
+Patch662: glibc-RHEL-50545-9.patch
+Patch663: glibc-RHEL-50545-10.patch
+Patch664: glibc-RHEL-50545-11.patch
+Patch665: glibc-RHEL-50545-12.patch
+Patch666: glibc-RHEL-50545-13.patch
+Patch667: glibc-RHEL-50545-14.patch
+Patch668: glibc-RHEL-50662-1.patch
+Patch669: glibc-RHEL-50662-2.patch
+Patch670: glibc-RHEL-50662-3.patch
+Patch671: glibc-RHEL-50662-4.patch
+Patch672: glibc-RHEL-50662-5.patch
+Patch673: glibc-RHEL-50662-6.patch
+Patch674: glibc-RHEL-46724.patch
+Patch675: glibc-RHEL-66253-1.patch
+Patch676: glibc-RHEL-66253-2.patch
+Patch677: glibc-RHEL-66253-3.patch
+Patch678: glibc-RHEL-46733-1.patch
+Patch679: glibc-RHEL-46733-2.patch
+Patch680: glibc-RHEL-46733-3.patch
+Patch681: glibc-RHEL-54413.patch
+Patch682: glibc-RHEL-46736-1.patch
+Patch683: glibc-RHEL-46736-2.patch
+Patch684: glibc-RHEL-46736-3.patch
+Patch685: glibc-RHEL-46736-4.patch
+Patch686: glibc-RHEL-46736-5.patch
+Patch687: glibc-RHEL-46736-6.patch
+Patch688: glibc-RHEL-46736-7.patch
+Patch689: glibc-RHEL-46736-8.patch
+Patch690: glibc-RHEL-46736-9.patch
+Patch691: glibc-RHEL-46736-10.patch
+Patch692: glibc-RHEL-46736-11.patch
+Patch693: glibc-RHEL-50548-1.patch
+Patch694: glibc-RHEL-50548-2.patch
+Patch695: glibc-RHEL-50548-3.patch
+Patch696: glibc-RHEL-46725-1.patch
+Patch697: glibc-RHEL-46725-2.patch
+Patch698: glibc-RHEL-46725-3.patch
+Patch699: glibc-RHEL-46725-4.patch
+Patch700: glibc-RHEL-46725-5.patch
+Patch701: glibc-RHEL-46725-6.patch
+Patch702: glibc-RHEL-46725-7.patch
+Patch703: glibc-RHEL-46725-8.patch
+Patch704: glibc-RHEL-46725-9.patch
+Patch705: glibc-RHEL-46725-10.patch
+Patch706: glibc-RHEL-46725-11.patch
+Patch707: glibc-RHEL-46725-12.patch
+Patch708: glibc-RHEL-1915-1.patch
+Patch709: glibc-RHEL-1915-2.patch
+Patch710: glibc-RHEL-1915-3.patch
+Patch711: glibc-RHEL-1915-4.patch
+Patch712: glibc-RHEL-1915-5.patch
+Patch713: glibc-RHEL-1915-6.patch
+Patch714: glibc-RHEL-1915-7.patch
+Patch715: glibc-RHEL-1915-8.patch
+Patch716: glibc-RHEL-1915-9.patch
+Patch717: glibc-RHEL-47467.patch
+Patch718: glibc-RHEL-56032.patch
+Patch719: glibc-RHEL-67692-1.patch
+Patch720: glibc-RHEL-67692-2.patch
+Patch721: glibc-RHEL-67692-3.patch
+Patch722: glibc-RHEL-67692-4.patch
+Patch723: glibc-RHEL-46738-1.patch
+Patch724: glibc-RHEL-46738-2.patch
+Patch725: glibc-RHEL-46738-3.patch
+Patch726: glibc-RHEL-46738-4.patch
+Patch727: glibc-RHEL-65356-1.patch
+Patch728: glibc-RHEL-65356-2.patch
+Patch729: glibc-RHEL-38225-1.patch
+Patch730: glibc-RHEL-38225-2.patch
+Patch731: glibc-RHEL-54250.patch
+Patch732: glibc-RHEL-56743.patch
+Patch733: glibc-RHEL-57586.patch
+Patch734: glibc-RHEL-56539.patch
+Patch735: glibc-RHEL-56540-1.patch
+Patch736: glibc-RHEL-56540-2.patch
+Patch737: glibc-RHEL-56540-3.patch
+Patch738: glibc-RHEL-58671.patch
+Patch739: glibc-RHEL-46740.patch
+Patch740: glibc-RHEL-65910.patch
+Patch741: glibc-RHEL-69028.patch
+Patch742: glibc-RHEL-70395-1.patch
+Patch743: glibc-RHEL-70395-2.patch
+Patch744: glibc-RHEL-68850-1.patch
+Patch745: glibc-RHEL-68850-2.patch
+Patch746: glibc-RHEL-61568.patch
+Patch747: glibc-RHEL-58979.patch
+Patch748: glibc-RHEL-65354.patch
+Patch749: glibc-RHEL-56542-1.patch
+Patch750: glibc-RHEL-56542-2.patch
+Patch751: glibc-RHEL-56542-3.patch
+Patch752: glibc-RHEL-56542-4.patch
+Patch753: glibc-RHEL-56542-5.patch
+Patch754: glibc-RHEL-56542-6.patch
+Patch755: glibc-RHEL-56542-7.patch
+Patch756: glibc-RHEL-56542-8.patch
+Patch757: glibc-RHEL-56542-9.patch
+Patch758: glibc-RHEL-65358-1.patch
+Patch759: glibc-RHEL-65358-2.patch
+Patch760: glibc-RHEL-65358-3.patch
+Patch761: glibc-RHEL-65358-4.patch
+Patch762: glibc-RHEL-65358-5.patch
+Patch763: glibc-RHEL-58989-1.patch
+Patch764: glibc-RHEL-58989-2.patch
+Patch765: glibc-RHEL-62716-1.patch
+Patch766: glibc-RHEL-62716-2.patch
+Patch767: glibc-RHEL-68857.patch
+Patch768: glibc-RHEL-69633-1.patch
+Patch769: glibc-RHEL-69633-2.patch
+Patch770: glibc-RHEL-58987-1.patch
+Patch771: glibc-RHEL-58987-2.patch
+Patch772: glibc-RHEL-61559-1.patch
+Patch773: glibc-RHEL-61559-2.patch
+Patch774: glibc-RHEL-61559-3.patch
+Patch775: glibc-RHEL-61559-4.patch
+Patch776: glibc-RHEL-50550.patch
+Patch777: glibc-RHEL-65359-1.patch
+Patch778: glibc-RHEL-65359-2.patch
+Patch779: glibc-RHEL-65359-3.patch
+Patch780: glibc-RHEL-65359-4.patch
+Patch781: glibc-RHEL-75810.patch
+Patch782: glibc-RHEL-46761-1.patch
+Patch783: glibc-RHEL-46761-2.patch
+Patch784: glibc-RHEL-46761-3.patch
+Patch785: glibc-RHEL-46761-4.patch
+Patch786: glibc-RHEL-75810-2.patch
+Patch787: glibc-RHEL-75810-3.patch
+Patch788: glibc-RHEL-46761-5.patch
+Patch789: glibc-RHEL-75938.patch
+Patch790: glibc-RHEL-67592-1.patch
+Patch791: glibc-RHEL-67592-2.patch
+Patch792: glibc-RHEL-67592-3.patch
+Patch793: glibc-RHEL-67592-4.patch
+Patch794: glibc-RHEL-2419-1.patch
+Patch795: glibc-RHEL-2419-2.patch
+Patch796: glibc-RHEL-2419-3.patch
+Patch797: glibc-RHEL-2419-4.patch
+Patch798: glibc-RHEL-2419-5.patch
+Patch799: glibc-RHEL-2419-6.patch
+Patch800: glibc-RHEL-2419-7.patch
+Patch801: glibc-RHEL-2419-8.patch
+Patch802: glibc-RHEL-2419-9.patch
+Patch803: glibc-RHEL-2419-10.patch
+Patch804: glibc-RHEL-46738-5.patch
+Patch805: glibc-RHEL-46761-6.patch
+Patch806: glibc-RHEL-24740-1.patch
+Patch807: glibc-RHEL-24740-2.patch
+Patch808: glibc-RHEL-24740-3.patch
+Patch809: glibc-RHEL-71547.patch
+Patch810: glibc-RHEL-46729.patch
+Patch811: glibc-RHEL-61569-1.patch
+Patch812: glibc-RHEL-61569-2.patch
+Patch813: glibc-RHEL-83581.patch
+Patch814: glibc-RHEL-83525.patch
+Patch815: glibc-RHEL-83528-1.patch
+Patch816: glibc-RHEL-83528-2.patch
+Patch817: glibc-RHEL-80088-1.patch
+Patch818: glibc-RHEL-80088-2.patch
+Patch819: glibc-RHEL-80088-3.patch
+Patch820: glibc-RHEL-80088-4.patch
+Patch821: glibc-RHEL-80088-5.patch
+Patch822: glibc-RHEL-84325.patch
+Patch823: glibc-RHEL-83968.patch
+Patch824: glibc-RHEL-83980-1.patch
+Patch825: glibc-RHEL-83980-2.patch
+Patch826: glibc-RHEL-83980-3.patch
+Patch827: glibc-RHEL-83980-4.patch
+Patch828: glibc-RHEL-83970-1.patch
+Patch829: glibc-RHEL-83970-2.patch
+Patch830: glibc-RHEL-83970-3.patch
+Patch831: glibc-RHEL-83970-4.patch
+Patch832: glibc-RHEL-83970-5.patch
+Patch833: glibc-RHEL-83970-6.patch
+Patch834: glibc-RHEL-83970-7.patch
+Patch835: glibc-RHEL-83970-8.patch
+Patch836: glibc-RHEL-83984-1.patch
+Patch837: glibc-RHEL-83984-2.patch
+Patch838: glibc-RHEL-83984-3.patch
+Patch839: glibc-RHEL-83984-4.patch
+Patch840: glibc-RHEL-83984-5.patch
+Patch841: glibc-RHEL-83984-6.patch
+Patch842: glibc-RHEL-83984-7.patch
+Patch843: glibc-RHEL-83984-8.patch
+Patch844: glibc-RHEL-84306-1.patch
+Patch845: glibc-RHEL-84306-2.patch
+Patch846: glibc-RHEL-84306-3.patch
+Patch847: glibc-RHEL-84306-4.patch
+Patch848: glibc-RHEL-84306-5.patch
+Patch849: glibc-RHEL-84306-6.patch
+Patch850: glibc-RHEL-84306-7.patch
+Patch851: glibc-RHEL-84306-8.patch
+Patch852: glibc-RHEL-84306-9.patch
+Patch853: glibc-RHEL-84306-10.patch
+Patch854: glibc-RHEL-84306-11.patch
+Patch855: glibc-RHEL-84306-12.patch
+Patch856: glibc-RHEL-84306-13.patch
+Patch857: glibc-RHEL-84306-14.patch
+Patch858: glibc-RHEL-84306-15.patch
+Patch859: glibc-RHEL-83982-1.patch
+Patch860: glibc-RHEL-83982-2.patch
+Patch861: glibc-RHEL-83982-3.patch
 
 ##############################################################################
 # Continued list of core "glibc" package information:
 ##############################################################################
 Obsoletes: glibc-profile < 2.4
 Provides: ldconfig
+Provides: /sbin/ldconfig
+Provides: /usr/sbin/ldconfig
+# Historic file paths provided for backwards compatibility.
+Provides: %{glibc_ldso}
+Provides: /%{_lib}/libanl.so.1
+Provides: /%{_lib}/libc.so.6
+Provides: /%{_lib}/libdl.so.2
+Provides: /%{_lib}/libm.so.6
+Provides: /%{_lib}/libpthread.so.0
+Provides: /%{_lib}/libresolv.so.2
+Provides: /%{_lib}/librt.so.1
+Provides: /%{_lib}/libutil.so.1
 
 # The dynamic linker supports DT_GNU_HASH
 Provides: rtld(GNU_HASH)
@@ -1706,10 +2000,6 @@ that can be installed across architectures.
 %prep
 %autosetup -n %{glibcsrcdir} -p1
 
-%ifarch %{arm}
-cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
-%endif
-
 ##############################################################################
 # %%prep - Additional prep required...
 ##############################################################################
@@ -1927,17 +2217,20 @@ build
 # distribution that supports multiple installed glibc versions.
 %define glibc_sysroot $RPM_BUILD_ROOT
 
-# Remove existing file lists.
-find . -type f -name '*.filelist' -exec rm -rf {} \;
-
-# Reload compiler and build options that were used during %%build.
-GCC=`cat Gcc`
+# Create symbolic links for Features/UsrMove (aka UsrMerge, MoveToUsr).
+# See below: Remove UsrMove symbolic links.
+usrmove_file_names="bin lib lib64 sbin"
+for d in $usrmove_file_names ; do
+    mkdir -p "%{glibc_sysroot}/usr/$d"
+    ln -s "usr/$d" "%{glibc_sysroot}/$d"
+done
 
 %ifarch riscv64
-# RISC-V ABI wants to install everything in /lib64/lp64d or /usr/lib64/lp64d.
+# RISC-V ABI wants to install everything in /usr/lib64/lp64d.
+# Make these be symlinks to /usr/lib64.  See:
 # Make these be symlinks to /lib64 or /usr/lib64 respectively.  See:
 # https://lists.fedoraproject.org/archives/list/devel@lists.fedoraproject.org/thread/DRHT5YTPK4WWVGL3GIN5BF2IKX2ODHZ3/
-for d in %{glibc_sysroot}%{_libdir} %{glibc_sysroot}/%{_lib}; do
+for d in %{glibc_sysroot}%{_libdir}; do
 	mkdir -p $d
 	(cd $d && ln -sf . lp64d)
 done
@@ -1952,6 +2245,16 @@ popd
 # Locale creation via install-locale-files does not group identical files
 # via hardlinks, so we must group them ourselves.
 hardlink -c %{glibc_sysroot}/usr/lib/locale
+
+%if %{glibc_autorequires}
+mkdir -p %{glibc_sysroot}/%{_rpmconfigdir} %{glibc_sysroot}/%{_fileattrsdir}
+sed < %{SOURCE3} \
+    -e s/@VERSION@/%{version}/ \
+    -e s/@RELEASE@/%{baserelease}/ \
+    -e s/@SYMVER@/%{glibc_autorequires_symver}/ \
+    > %{glibc_sysroot}/%{_rpmconfigdir}/glibc.req
+cp %{SOURCE4} %{glibc_sysroot}/%{_fileattrsdir}/glibc.attr
+%endif
 
 # install_different:
 #	Install all core libraries into DESTDIR/SUBDIR. Either the file is
@@ -1988,7 +2291,7 @@ install_different()
 		libbase=${lib#*/}
 		# Take care that `libbaseso' has a * that needs expanding so
 		# take care with quoting.
-		libbaseso=$(basename %{glibc_sysroot}/%{_lib}/${libbase}.so.*)
+		libbaseso=$(basename %{glibc_sysroot}/%{_libdir}/${libbase}.so.*)
 		# Only install if different from default build library.
 		if cmp -s ${lib}.so ../build-%{target}/${lib}.so; then
 			ln -sf "$subdir_up"/$libbaseso $libdestdir/$libbaseso
@@ -2014,11 +2317,10 @@ install -p -D -m 0644 %{SOURCE13} ${RPM_BUILD_ROOT}%{_sysusersdir}/nscd.conf
 # XXX: This looks like a bug in glibc that accidentally installed these
 #      wrong files. We probably don't need this today.
 rm -f %{glibc_sysroot}/%{_libdir}/libNoVersion*
-rm -f %{glibc_sysroot}/%{_lib}/libNoVersion*
 
 # Remove the old nss modules.
-rm -f %{glibc_sysroot}/%{_lib}/libnss1-*
-rm -f %{glibc_sysroot}/%{_lib}/libnss-*.so.1
+rm -f %{glibc_sysroot}%{_libdir}/libnss1-*
+rm -f %{glibc_sysroot}%{_libdir}/libnss-*.so.1
 
 # This statically linked binary is no longer necessary in a world where
 # the default Fedora install uses an initramfs, and further we have rpm-ostree
@@ -2192,13 +2494,6 @@ mkdir -p %{glibc_sysroot}/var/{db,run}/nscd
 touch %{glibc_sysroot}/var/{db,run}/nscd/{passwd,group,hosts,services}
 touch %{glibc_sysroot}/var/run/nscd/{socket,nscd.pid}
 
-# Move libpcprofile.so and libmemusage.so into the proper library directory.
-# They can be moved without any real consequences because users would not use
-# them directly.
-mkdir -p %{glibc_sysroot}%{_libdir}
-mv -f %{glibc_sysroot}/%{_lib}/lib{pcprofile,memusage}.so \
-	%{glibc_sysroot}%{_libdir}
-
 # Disallow linking against libc_malloc_debug.
 rm %{glibc_sysroot}%{_libdir}/libc_malloc_debug.so
 
@@ -2224,7 +2519,14 @@ done
 # that have old linker scripts that reference this file. We ship this only
 # in compat-libpthread-nonshared sub-package.
 ##############################################################################
-ar cr %{glibc_sysroot}%{_prefix}/%{_lib}/libpthread_nonshared.a
+ar cr %{glibc_sysroot}%{_libdir}/libpthread_nonshared.a
+
+# Remove UsrMove symbolic links.
+# These should not end in the packaged contents.
+# They are part of the filesystem package.
+for d in $usrmove_file_names ; do
+    rm "%{glibc_sysroot}/$d"
+done
 
 ###############################################################################
 # Sysroot package creation.
@@ -2286,365 +2588,83 @@ popd
 # installed files.
 ##############################################################################
 
-##############################################################################
-# Build the file lists used for describing the package and subpackages.
-##############################################################################
-# There are several main file lists (and many more for
-# the langpack sub-packages (langpack-${lang}.filelist)):
-# * master.filelist
-#	- Master file list from which all other lists are built.
-# * glibc.filelist
-#	- Files for the glibc packages.
-# * common.filelist
-#	- Flies for the common subpackage.
-# * utils.filelist
-#	- Files for the utils subpackage.
-# * nscd.filelist
-#	- Files for the nscd subpackage.
-# * devel.filelist
-#	- Files for the devel subpackage.
-# * doc.filelist
-#	- Files for the documentation subpackage.
-# * headers.filelist
-#	- Files for the headers subpackage.
-# * static.filelist
-#	- Files for the static subpackage.
-# * libnsl.filelist
-#       - Files for the libnsl subpackage
-# * nss_db.filelist
-# * nss_hesiod.filelist
-#       - File lists for nss_* NSS module subpackages.
-# * nss-devel.filelist
-#       - File list with the .so symbolic links for NSS packages.
-# * compat-libpthread-nonshared.filelist.
-#	- File list for compat-libpthread-nonshared subpackage.
+# Placement of files in subpackages is mostly controlled by the
+# %%files section below.  There are some exceptions where a subset of
+# files are put in one package and need to be elided from another
+# package, and it's not possible to do this easily using explicit file
+# lists or directory matching.  For these exceptions. .filelist file
+# are created.
 
-# Create the main file lists. This way we can append to any one of them later
-# wihtout having to create it. Note these are removed at the start of the
-# install phase.
-touch master.filelist
-touch glibc.filelist
-touch common.filelist
-touch utils.filelist
-touch gconv.filelist
-touch nscd.filelist
-touch devel.filelist
-touch doc.filelist
-touch headers.filelist
-touch static.filelist
-touch libnsl.filelist
-touch nss_db.filelist
-touch nss_hesiod.filelist
-touch nss-devel.filelist
-touch compat-libpthread-nonshared.filelist
+# Make the sorting below more consistent.
+export LC_ALL=C
 
-###############################################################################
-# Master file list, excluding a few things.
-###############################################################################
-{
-  # List all files or links that we have created during install.
-  # Files with 'etc' are configuration files, likewise 'gconv-modules'
-  # and 'gconv-modules.cache' are caches, and we exclude them.
-  find %{glibc_sysroot} \( -type f -o -type l \) \
-       \( \
-	 -name etc -printf "%%%%config " -o \
-	 -name gconv-modules.cache \
-	 -printf "%%%%verify(not md5 size mtime) " -o \
-	 -name gconv-modules* \
-	 -printf "%%%%verify(not md5 size mtime) %%%%config(noreplace) " \
-	 , \
-	 ! -path "*/lib/debug/*" -printf "/%%P\n" \)
-  # List all directories with a %%dir prefix.  We omit the info directory and
-  # all directories in (and including) /usr/share/locale.
-  find %{glibc_sysroot} -type d \
-       \( -path '*%{_prefix}/share/locale' -prune -o \
-       \( -path '*%{_prefix}/share/*' \
-%if %{with docs}
-	! -path '*%{_infodir}' -o \
-%endif
-	  -path "*%{_prefix}/include/*" \
-       \) -printf "%%%%dir /%%P\n" \)
-} | {
-  # Also remove the *.mo entries.  We will add them to the
-  # language specific sub-packages.
-  # libnss_ files go into subpackages related to NSS modules.
-  # and .*/share/i18n/charmaps/.*), they go into the sub-package
-  # "locale-source".  /sys-root/ files are put into the sysroot package.
-  sed -e '\,.*/share/locale/\([^/_]\+\).*/LC_MESSAGES/.*\.mo,d' \
-      -e '\,.*/share/i18n/locales/.*,d' \
-      -e '\,.*/share/i18n/charmaps/.*,d' \
-      -e '\,.*/etc/\(localtime\|nsswitch.conf\|ld\.so\.conf\|ld\.so\.cache\|default\|rpc\|gai\.conf\),d' \
-      -e '\,.*/%{_libdir}/lib\(pcprofile\|memusage\)\.so,d' \
-      -e '\,.*/bin/\(memusage\|mtrace\|xtrace\|pcprofiledump\),d' \
-      -e '\,.*/sys-root,d'
-} | sort > master.filelist
+# `make_sysroot_filelist PATH FIND-ARGS LIST` writes %%files section
+# lines for files and directories in the sysroot under PATH to the
+# file LIST, with FIND-ARGS passed to the find command.  The output is
+# passed through sort.
+make_sysroot_filelist () {
+  (
+    find "%{glibc_sysroot}$1" \( -type f -o -type l \) $2 \
+      -printf "$1/%%P\n" || true
+    find "%{glibc_sysroot}$1" -type d $2 -printf "%%%%dir $1/%%P\n" || true
+  ) | sort > "$3"
+}
 
-# The master file list is now used by each subpackage to list their own
-# files. We go through each package and subpackage now and create their lists.
-# Each subpackage picks the files from the master list that they need.
-# The order of the subpackage list generation does not matter.
+# `remove_from_filelist FILE1 FILE2` removes the lines from FILE1
+# which are also in FILE2.  The lines must not contain tabs, and the
+# file is sorted as a side effect.  The input files must be sorted
+# according to the sort command.
+remove_from_filelist () {
+    comm -23 "$1" "$2" > "$1.tmp"
+    mv "$1.tmp" "$1"
+}
 
-# Make the master file list read-only after this point to avoid accidental
-# modification.
-chmod 0444 master.filelist
+# `split_sysroot_file_list DIR FIND-ARGS REGEXP MAIN-LIST EXCEPTIONS-LIST`
+# creates a list of files in the sysroot subdirectory # DIR.
+# Files and directories are enumerated with the find command,
+# passing FIND-ARGS as an extra argument.  Those output paths that
+# match REGEXP (an POSIX extended regular expression; all whitespace
+# in it is removed before matching) are put into EXCEPTIONS-LIST.  The
+# remaining files are put into MAIN-LIST.
+split_sysroot_file_list () {
+  make_sysroot_filelist "$1" "$2" "$4"
+  grep -E -e "$(printf %%s "$3" | tr -d '[:space:]')" < "$4" > "$5"
+  remove_from_filelist "$4" "$5"
+}
 
-###############################################################################
-# glibc
-###############################################################################
-
-# Add all files with the following exceptions:
-# - The info files '%{_infodir}/dir'
-# - The partial (lib*_p.a) static libraries, include files.
-# - The static files, objects, unversioned DSOs, and nscd.
-# - The bin, locale, some sbin, and share.
-#   - We want iconvconfig in the main package and we do this by using
-#     a double negation of -v and [^i] so it removes all files in
-#     sbin *but* iconvconfig.
-# - All the libnss files (we add back the ones we want later).
-# - All bench test binaries.
-# - The aux-cache, since it's handled specially in the files section.
-# - Extra gconv modules.  We add the required modules later.
-cat master.filelist \
-	| grep -v \
-	-e '%{_infodir}' \
-	-e '%{_libdir}/lib.*_p.a' \
-	-e '%{_prefix}/include' \
-	-e '%{_libdir}/lib.*\.a' \
-        -e '%{_libdir}/.*\.o' \
-	-e '%{_libdir}/lib.*\.so' \
-	-e '%{_libdir}/gconv/.*\.so$' \
-	-e '%{_libdir}/gconv/gconv-modules.d/gconv-modules-extra\.conf$' \
-	-e 'nscd' \
-	-e '%{_prefix}/bin' \
-	-e '%{_prefix}/lib/locale' \
-	-e '%{_prefix}/sbin/[^i]' \
-	-e '%{_prefix}/share' \
-	-e '/var/db/Makefile' \
-	-e '/libnss_.*\.so[0-9.]*$' \
-	-e '/libnsl' \
-	-e 'glibc-benchtests' \
-	-e 'aux-cache' \
-	> glibc.filelist
-
-# Add specific files:
-# - The nss_files, nss_compat, and nss_db files.
-# - The libmemusage.so and libpcprofile.so used by utils.
-for module in compat files dns; do
-    cat master.filelist \
-	| grep -E \
-	-e "/libnss_$module(\.so\.[0-9.]+|-[0-9.]+\.so)$" \
-	>> glibc.filelist
-done
-grep -e "libmemusage.so" -e "libpcprofile.so" master.filelist >> glibc.filelist
-
-###############################################################################
-# glibc-gconv-extra
-###############################################################################
-
-grep -e "gconv-modules-extra.conf" master.filelist > gconv.filelist
-
-# Put the essential gconv modules into the main package.
-GconvBaseModules="ANSI_X3.110 ISO8859-15 ISO8859-1 CP1252"
-GconvBaseModules="$GconvBaseModules UNICODE UTF-16 UTF-32 UTF-7"
-%ifarch s390 s390x
-GconvBaseModules="$GconvBaseModules ISO-8859-1_CP037_Z900 UTF8_UTF16_Z9"
-GconvBaseModules="$GconvBaseModules UTF16_UTF32_Z9 UTF8_UTF32_Z9"
-%endif
-GconvAllModules=$(cat master.filelist |
-                 sed -n 's|%{_libdir}/gconv/\(.*\)\.so|\1|p')
-
-# Put the base modules into glibc and the rest into glibc-gconv-extra
-for conv in $GconvAllModules; do
-    if echo $GconvBaseModules | grep -q $conv; then
-	grep -E -e "%{_libdir}/gconv/$conv.so$" \
-	    master.filelist >> glibc.filelist
-    else
-	grep -E -e "%{_libdir}/gconv/$conv.so$" \
-	    master.filelist >> gconv.filelist
-    fi
-done
-
-###############################################################################
-# glibc-devel
-###############################################################################
-
-# Static libraries that land in glibc-devel, not glibc-static.
-devel_static_library_pattern='/lib\(\(c\|nldbl\|mvec\)_nonshared\|g\|ieee\|mcheck\|pthread\|dl\|rt\|util\|anl\)\.a$'
-# Static libraries neither in glibc-devel nor in glibc-static.
-other_static_library_pattern='/libpthread_nonshared\.a'
-
-grep '%{_libdir}/lib.*\.a' master.filelist \
-  | grep "$devel_static_library_pattern" \
-  | grep -v "$other_static_library_pattern" \
-  > devel.filelist
-
-# Put all of the object files and *.so (not the versioned ones) into the
-# devel package.
-grep '%{_libdir}/.*\.o' < master.filelist >> devel.filelist
-grep '%{_libdir}/lib.*\.so' < master.filelist >> devel.filelist
-# The exceptions are:
-# - libmemusage.so and libpcprofile.so in glibc used by utils.
-# - libnss_*.so which are in nss-devel.
-sed -i -e '\,libmemusage.so,d' \
-	-e '\,libpcprofile.so,d' \
-	-e '\,/libnss_[a-z]*\.so$,d' \
-	devel.filelist
-
-%if %{glibc_autorequires}
-mkdir -p %{glibc_sysroot}/%{_rpmconfigdir} %{glibc_sysroot}/%{_fileattrsdir}
-sed < %{SOURCE4} \
-    -e s/@VERSION@/%{version}/ \
-    -e s/@RELEASE@/%{release}/ \
-    -e s/@SYMVER@/%{glibc_autorequires_symver}/ \
-    > %{glibc_sysroot}/%{_rpmconfigdir}/glibc.req
-cp %{SOURCE5} %{glibc_sysroot}/%{_fileattrsdir}/glibc.attr
-%endif
-
-###############################################################################
-# glibc-doc
-###############################################################################
-
-%if %{with docs}
-# Put the info files into the doc file list, but exclude the generated dir.
-grep '%{_infodir}' master.filelist | grep -v '%{_infodir}/dir' > doc.filelist
-grep '%{_docdir}' master.filelist >> doc.filelist
-%endif
-
-###############################################################################
-# glibc-headers
-###############################################################################
-
+# glibc-devel historically contains a subset of the files in
+# /usr/include/gnu.  The remaining headers are in glibc-headers-*.
+# The -regex clause skips /usr/include, which is owned by the
+# filesystem package.  The x86_64 exception is required because there
+# are headers that should be part of the glibc32 package only.
 %if %{need_headers_package}
-# The glibc-headers package includes only common files which are identical
-# across all multilib packages. We must keep gnu/stubs.h and gnu/lib-names.h
-# in the glibc-headers package, but the -32, -64, -64-v1, and -64-v2 versions
-# go into glibc-devel.
-grep '%{_prefix}/include/gnu/stubs-.*\.h$' < master.filelist >> devel.filelist || :
-grep '%{_prefix}/include/gnu/lib-names-.*\.h$' < master.filelist >> devel.filelist || :
-# Put the include files into headers file list.
-grep '%{_prefix}/include' < master.filelist \
-  | egrep -v '%{_prefix}/include/gnu/stubs-.*\.h$' \
-  | egrep -v '%{_prefix}/include/gnu/lib-names-.*\.h$' \
-  > headers.filelist
-%else
-# If there is no glibc-headers package, all header files go into the
-# glibc-devel package.
-grep '%{_prefix}/include' < master.filelist >> devel.filelist
+split_sysroot_file_list \
+  %{_includedir} '(
+    ! -regex .*%{_includedir}$
+%ifarch x86_64
+    ! -regex .*%{_includedir}/gnu/.*-32\.h$
+%endif
+  )' \
+  '%{_includedir}/gnu/(stubs|lib-names)-.*\.h$' \
+  headers.filelist devel.filelist
 %endif
 
-###############################################################################
-# glibc-static
-###############################################################################
-
-# Put the rest of the static files into the static package.
-grep '%{_libdir}/lib.*\.a' < master.filelist \
-  | grep -v "$devel_static_library_pattern" \
-  | grep -v "$other_static_library_pattern" \
-  > static.filelist
-
-###############################################################################
-# glibc-common
-###############################################################################
-
-# All of the bin and certain sbin files go into the common package except
-# iconvconfig which needs to go in glibc. Likewise nscd is excluded because
-# it goes in nscd. The iconvconfig binary is kept in the main glibc package
-# because we use it in the post-install scriptlet to rebuild the
-# gconv-modules.cache.  The makedb binary is in nss_db.
-grep '%{_prefix}/bin' master.filelist \
-	| grep -v '%{_prefix}/bin/makedb' \
-	>> common.filelist
-grep '%{_prefix}/sbin' master.filelist \
-	| grep -v '%{_prefix}/sbin/iconvconfig' \
-	| grep -v 'nscd' >> common.filelist
-# All of the files under share go into the common package since they should be
-# multilib-independent.
-# Exceptions:
-# - The actual share directory, not owned by us.
-# - The info files which go into doc, and the info directory.
-# - All documentation files, which go into doc.
-grep '%{_prefix}/share' master.filelist \
-	| grep -v \
-	-e '%{_prefix}/share/info/libc.info.*' \
-	-e '%%dir %{prefix}/share/info' \
-	-e '%%dir %{prefix}/share' \
-	-e '%{_docdir}' \
-	>> common.filelist
-
-###############################################################################
-# nscd
-###############################################################################
-
-# The nscd binary must go into the nscd subpackage.
-echo '%{_prefix}/sbin/nscd' > nscd.filelist
-
-###############################################################################
-# glibc-utils
-###############################################################################
-
-# Add the utils scripts and programs to the utils subpackage.
-cat > utils.filelist <<EOF
-%if %{without bootstrap}
-%{_prefix}/bin/memusage
-%{_prefix}/bin/memusagestat
-%endif
-%{_prefix}/bin/mtrace
-%{_prefix}/bin/pcprofiledump
-%{_prefix}/bin/xtrace
-EOF
-
-###############################################################################
-# nss_db, nss_hesiod
-###############################################################################
-
-# Move the NSS-related files to the NSS subpackages.  Be careful not
-# to pick up .debug files, and the -devel symbolic links.
-for module in db hesiod; do
-  grep -E "/libnss_$module\\.so\\.[0-9.]+\$" \
-    master.filelist > nss_$module.filelist
-done
-grep -E "%{_prefix}/bin/makedb$" master.filelist >> nss_db.filelist
-
-###############################################################################
-# nss-devel
-###############################################################################
-
-# Symlinks go into the nss-devel package (instead of the main devel
-# package).
-grep '/libnss_[a-z]*\.so$' master.filelist > nss-devel.filelist
-
-###############################################################################
-# libnsl
-###############################################################################
-
-# Prepare the libnsl-related file lists.
-grep -E '/libnsl\.so\.[0-9]+$' master.filelist > libnsl.filelist
-test $(wc -l < libnsl.filelist) -eq 1
-
-%if %{with benchtests}
-###############################################################################
-# glibc-benchtests
-###############################################################################
-
-# List of benchmarks.
-find build-%{target}/benchtests -type f -executable | while read b; do
-	echo "%{_prefix}/libexec/glibc-benchtests/$(basename $b)"
-done >> benchtests.filelist
-# ... and the makefile.
-for b in %{SOURCE2} %{SOURCE3}; do
-	echo "%{_prefix}/libexec/glibc-benchtests/$(basename $b)" >> benchtests.filelist
-done
-# ... and finally, the comparison scripts.
-echo "%{_prefix}/libexec/glibc-benchtests/benchout.schema.json" >> benchtests.filelist
-echo "%{_prefix}/libexec/glibc-benchtests/compare_bench.py*" >> benchtests.filelist
-echo "%{_prefix}/libexec/glibc-benchtests/import_bench.py*" >> benchtests.filelist
-echo "%{_prefix}/libexec/glibc-benchtests/validate_benchout.py*" >> benchtests.filelist
-%endif
-
-###############################################################################
-# compat-libpthread-nonshared
-###############################################################################
-echo "%{_libdir}/libpthread_nonshared.a" >> compat-libpthread-nonshared.filelist
+# The primary gconv converters are in the glibc package, the rest goes
+# into glibc-gconv-extra.  The Z9 and Z900 subpatterns are for
+# s390x-specific converters.  The -name clause skips over files
+# that are not loadable gconv modules.
+split_sysroot_file_list \
+  %{_libdir}/gconv '-name *.so' \
+  'gconv/
+   (ANSI_X3\.110
+   |CP1252
+   |ISO8859-15?
+   |UNICODE
+   |UTF-[0-9]+
+   |ISO-8859-1_CP037_Z900
+   |UTF(8|16)_UTF(16|32)_Z9
+   )\.so$' \
+  gconv-extra.filelist glibc.filelist
 
 ##############################################################################
 # Run the glibc testsuite
@@ -2714,18 +2734,12 @@ fi
 echo ====================TESTING END=====================
 PLTCMD='/^Relocation section .*\(\.rela\?\.plt\|\.rela\.IA_64\.pltoff\)/,/^$/p'
 echo ====================PLT RELOCS LD.SO================
-readelf -Wr %{glibc_sysroot}/%{_lib}/ld-*.so | sed -n -e "$PLTCMD"
+readelf -Wr %{glibc_sysroot}%{_libdir}/ld-*.so | sed -n -e "$PLTCMD"
 echo ====================PLT RELOCS LIBC.SO==============
-readelf -Wr %{glibc_sysroot}/%{_lib}/libc-*.so | sed -n -e "$PLTCMD"
+readelf -Wr %{glibc_sysroot}%{_libdir}/libc-*.so | sed -n -e "$PLTCMD"
 echo ====================PLT RELOCS END==================
 
-# Obtain a way to run the dynamic loader.  Avoid matching the symbolic
-# link and then pick the first loader (although there should be only
-# one).  Use -maxdepth 2 to avoid descending into the /sys-root/
-# sub-tree.  See wrap-find-debuginfo.sh.
-ldso_path="$(find %{glibc_sysroot}/ -maxdepth 2 -regextype posix-extended \
-  -regex '.*/ld(-.*|64|)\.so\.[0-9]+$' -type f | LC_ALL=C sort | head -n1)"
-run_ldso="$ldso_path --library-path %{glibc_sysroot}/%{_lib}"
+run_ldso="%{glibc_sysroot}/%{_prefix}%{glibc_ldso} --library-path %{glibc_sysroot}/%{_libdir}"
 
 # Show the auxiliary vector as seen by the new library
 # (even if we do not perform the valgrind test).
@@ -2951,17 +2965,45 @@ update_gconv_modules_cache ()
 %systemd_postun_with_restart nscd.service
 
 %files -f glibc.filelist
-%dir %{_prefix}/%{_lib}/audit
+%{_sbindir}/ldconfig
+%{_sbindir}/iconvconfig
+%{_libexecdir}/getconf
+%{_prefix}%{glibc_ldso}
+%{_libdir}/libBrokenLocale.so.1
+%{_libdir}/libSegFault.so
+%{_libdir}/libanl.so.1
+%{_libdir}/libc.so.6
+%{_libdir}/libc_malloc_debug.so.0
+%{_libdir}/libdl.so.2
+%{_libdir}/libm.so.6
+%{_libdir}/libmemusage.so
+%{_libdir}/libnss_compat.so.2
+%{_libdir}/libnss_dns.so.2
+%{_libdir}/libnss_files.so.2
+%{_libdir}/libpcprofile.so
+%{_libdir}/libpthread.so.0
+%{_libdir}/libresolv.so.2
+%{_libdir}/librt.so.1
+%{_libdir}/libthread_db.so.1
+%{_libdir}/libutil.so.1
+%{_libdir}/audit
+%if %{glibc_has_libmvec}
+%{_libdir}/libmvec.so.1
+%endif
 %if %{buildpower10}
-%dir /%{_libdir}/glibc-hwcaps/power10
+%{_libdir}/glibc-hwcaps
 %endif
 %verify(not md5 size mtime link) %config(noreplace) /etc/nsswitch.conf
 %verify(not md5 size mtime) %config(noreplace) /etc/ld.so.conf
 %verify(not md5 size mtime) %config(noreplace) /etc/rpc
 %dir /etc/ld.so.conf.d
-%dir %{_prefix}/libexec/getconf
 %dir %{_libdir}/gconv
 %dir %{_libdir}/gconv/gconv-modules.d
+%verify(not md5 size mtime) %config(noreplace) %{_libdir}/gconv/gconv-modules
+%verify(not md5 size mtime) %{_libdir}/gconv/gconv-modules.cache
+%ifarch s390x
+%verify(not md5 size mtime) %config(noreplace) %{_libdir}/gconv/gconv-modules.d/gconv-modules-s390.conf
+%endif
 %dir %attr(0700,root,root) /var/cache/ldconfig
 %attr(0600,root,root) %verify(not md5 size mtime) %ghost %config(missingok,noreplace) /var/cache/ldconfig/aux-cache
 %attr(0644,root,root) %verify(not md5 size mtime) %ghost %config(missingok,noreplace) /etc/ld.so.cache
@@ -2970,10 +3012,31 @@ update_gconv_modules_cache ()
 %{!?_licensedir:%global license %%doc}
 %license COPYING COPYING.LIB LICENSES
 
-%files -f common.filelist common
+%files common
+%{_bindir}/catchsegv
+%{_bindir}/gencat
+%{_bindir}/getconf
+%{_bindir}/getent
+%{_bindir}/iconv
+%{_bindir}/ld.so
+%{_bindir}/ldd
+%{_bindir}/locale
+%{_bindir}/localedef
+%{_bindir}/pldd
+%{_bindir}/sotruss
+%{_bindir}/sprof
+%{_bindir}/tzselect
+%{_bindir}/zdump
+%{_sbindir}/zic
+%dir %{_datarootdir}/i18n
+%dir %{_datarootdir}/i18n/locales
+%dir %{_datarootdir}/i18n/charmaps
 %dir %{_prefix}/lib/locale
-%dir %{_prefix}/lib/locale/C.utf8
-%{_prefix}/lib/locale/C.utf8/*
+%{_datarootdir}/locale/locale.alias
+%{_prefix}/lib/locale/C.utf8
+%ifarch %{ix86}
+%{_bindir}/lddlibc4
+%endif
 
 %files all-langpacks
 %{_prefix}/lib/locale/locale-archive
@@ -2981,37 +3044,78 @@ update_gconv_modules_cache ()
 %{_prefix}/share/locale/*/LC_MESSAGES/libc.mo
 
 %files locale-source
-%dir %{_prefix}/share/i18n/locales
-%{_prefix}/share/i18n/locales/*
-%dir %{_prefix}/share/i18n/charmaps
-%{_prefix}/share/i18n/charmaps/*
+%{_datarootdir}/i18n/locales
+%{_datarootdir}/i18n/charmaps
 
+%if %{need_headers_package}
 %files -f devel.filelist devel
+%else
+%files devel
+%{_includedir}/*
+%endif
 %if %{glibc_autorequires}
 %attr(0755,root,root) %{_rpmconfigdir}/glibc.req
 %{_fileattrsdir}/glibc.attr
 %endif
-
-%if %{with docs}
-%files -f doc.filelist doc
+%{_libdir}/*.o
+%{_libdir}/libBrokenLocale.so
+%{_libdir}/libanl.a
+%{_libdir}/libanl.so
+%{_libdir}/libc.so
+%{_libdir}/libc_nonshared.a
+%{_libdir}/libdl.a
+%{_libdir}/libg.a
+%{_libdir}/libm.so
+%{_libdir}/libmcheck.a
+%{_libdir}/libpthread.a
+%{_libdir}/libresolv.so
+%{_libdir}/librt.a
+%{_libdir}/libthread_db.so
+%{_libdir}/libutil.a
+%if %{glibc_has_libnldbl}
+%{_libdir}/libnldbl_nonshared.a
+%endif
+%if %{glibc_has_libmvec}
+%{_libdir}/libmvec.so
 %endif
 
-%files -f static.filelist static
+%if %{with docs}
+%files doc
+%{_datarootdir}/doc
+%{_infodir}/*.info*
+%endif
+
+%files static
+%{_libdir}/libBrokenLocale.a
+%{_libdir}/libc.a
+%{_libdir}/libm.a
+%{_libdir}/libresolv.a
+%if %{glibc_has_libmvec}
+%{_libdir}/libm-%{version}.a
+%{_libdir}/libmvec.a
+%endif
 
 %if  %{need_headers_package}
 %files -f headers.filelist -n %{headers_package_name}
 %endif
 
-%files -f utils.filelist utils
+%files utils
+%{_bindir}/memusage
+%{_bindir}/memusagestat
+%{_bindir}/mtrace
+%{_bindir}/pcprofiledump
+%{_bindir}/xtrace
 
-%files -f gconv.filelist gconv-extra
+%files -f gconv-extra.filelist gconv-extra
+%verify(not md5 size mtime) %config(noreplace) %{_libdir}/gconv/gconv-modules.d/gconv-modules-extra.conf
 
-%files -f nscd.filelist -n nscd
+%files -n nscd
+%{_sbindir}/nscd
 %config(noreplace) /etc/nscd.conf
 %dir %attr(0755,root,root) /var/run/nscd
 %dir %attr(0755,root,root) /var/db/nscd
-/lib/systemd/system/nscd.service
-/lib/systemd/system/nscd.socket
+%{_prefix}/lib/systemd/system/nscd.service
+%{_prefix}/lib/systemd/system/nscd.socket
 %{_tmpfilesdir}/nscd.conf
 %attr(0644,root,root) %verify(not md5 size mtime) %ghost %config(missingok,noreplace) /var/run/nscd/nscd.pid
 %attr(0666,root,root) %verify(not md5 size mtime) %ghost %config(missingok,noreplace) /var/run/nscd/socket
@@ -3026,20 +3130,28 @@ update_gconv_modules_cache ()
 %ghost %config(missingok,noreplace) /etc/sysconfig/nscd
 %{_sysusersdir}/nscd.conf
 
-%files -f nss_db.filelist -n nss_db
+%files -n nss_db
+%{_bindir}/makedb
+%{_libdir}/libnss_db.so.2
 /var/db/Makefile
-%files -f nss_hesiod.filelist -n nss_hesiod
+%files -n nss_hesiod
+%{_libdir}/libnss_hesiod.so.2
 %doc hesiod/README.hesiod
-%files -f nss-devel.filelist nss-devel
+%files nss-devel
+%{_libdir}/libnss_compat.so
+%{_libdir}/libnss_db.so
+%{_libdir}/libnss_hesiod.so
 
-%files -f libnsl.filelist -n libnsl
-/%{_lib}/libnsl.so.1
+%files -n libnsl
+%{_libdir}/libnsl.so.1
 
 %if %{with benchtests}
-%files benchtests -f benchtests.filelist
+%files benchtests
+%{_libexecdir}/glibc-benchtests
 %endif
 
-%files -f compat-libpthread-nonshared.filelist -n compat-libpthread-nonshared
+%files -n compat-libpthread-nonshared
+%{_libdir}/libpthread_nonshared.a
 
 %if %{without bootstrap}
 %files -n sysroot-%{_arch}-%{sysroot_dist}-glibc
@@ -3047,17 +3159,207 @@ update_gconv_modules_cache ()
 %endif
 
 %changelog
-* Fri Mar 14 2025Jacco Ligthart <jacco@redsleeve.org> - 2.34-125.3.redsleeve
-- add dl-tunables.list for arm
+* Tue Apr  8 2025 Florian Weimer <fweimer@redhat.com> - 2.34-168.14
+- Increase reliability of stdio-common/tst-setvbuf2 (RHEL-83982)
 
-* Thu Feb 13 2025 Carlos O'Donell <carlos@redhat.com> - 2.34-125.3
-- Fix missed wakeup in POSIX thread condition variables (RHEL-78939)
+* Wed Apr  2 2025 DJ Delorie <dj@redhat.com> - 2.34-168.13
+- Extend setvbuf testing (RHEL-83982)
 
-* Fri Dec  6 2024 DJ Delorie <dj@redhat.com> - 2.34-125.2
-- add GB18030-2022 charmap and tests (RHEL-69003)
+* Wed Apr  2 2025 Florian Weimer <fweimer@redhat.com> - 2.34-168.12
+- Extend scanf testing (RHEL-84306)
 
-* Fri Sep 27 2024 Florian Weimer <fweimer@redhat.com> - 2.34-125.1
-- Remove some unused ppc64le string functions (RHEL-49489)
+* Tue Apr 01 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-168.11
+- Fortify inet_ntop and inet_pton (RHEL-83984)
+
+* Fri Mar 28 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.10
+- Add sched_setattr, sched_getattr, pthread_gettid_np (RHEL-83970)
+
+* Thu Mar 27 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.9
+- Improve printf fortification against %n in writeable memory (RHEL-83980)
+
+* Fri Mar 21 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.8
+- nptl: extend test coverage for sched_yield (RHEL-83968)
+
+* Fri Mar 21 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.7
+- Make test tst-cpuclock2 run more reliably (RHEL-84325)
+
+* Fri Mar 21 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.6
+- nptl: Keep __rseq_size consistent (RHEL-80088)
+
+* Fri Mar 21 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.5
+- assert: Add test for CVE-2025-0395 (RHEL-83528)
+
+* Thu Mar 20 2025 Patsy Griffin <patsy@redhat.com> - 2.34-168.4
+- Use rseq area unconditionally in sched_getcpu (RHEL-83525)
+
+* Wed Mar 19 2025 Patsy Griffin <patsy@redhat.com> - 2.34-168.3
+- tst-fopen-threaded: Only check EOF for failing read (RHEL-83581)
+
+* Wed Mar 05 2025 Frederic Berat <fberat@redhat.com> - 2.34-168.2
+- Improve cpuset test coverage (RHEL-82118)
+
+* Wed Mar 05 2025 Frederic Berat <fberat@redhat.com> - 2.34-168.1
+- Increase test coverage for standard IO APIs (RHEL-82259)
+
+* Thu Feb 13 2025 Florian Weimer <fweimer@redhat.com> - 2.34-168
+- Fix transliteration regression in iconv tool (RHEL-71547)
+
+* Thu Feb 13 2025 Florian Weimer <fweimer@redhat.com> - 2.34-167
+- POWER10 string function optimizations (RHEL-24740)
+
+* Tue Feb 11 2025 Arjun Shankar <arjun@redhat.com> - 2.34-166
+- Revert: Backport: debug: Add regression tests for BZ 30932 (RHEL-46761)
+
+* Mon Feb 10 2025 Florian Weimer <fweimer@redhat.com> - 2.34-165
+- Hide internal struct _IO_FILE ABI change in installed header (RHEL-46738)
+
+* Fri Feb  7 2025 Carlos O'Donell <carlos@redhat.com> - 2.34-164
+- Fix missed wakeup in POSIX thread condition variables (RHEL-2419)
+
+* Tue Feb  4 2025 DJ Delorie <dj@redhat.com> - 2.34-163
+- manual: sigaction's sa_flags field and SA_SIGINFO (RHEL-67592)
+
+* Wed Jan 29 2025 Patsy Griffin <patsy@redhat.com> - 2.34-162
+- CVE-2025-0395: fix underallocation of abort_msg_s struct (RHEL-75938)
+
+* Tue Jan 28 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-161
+- Backport: debug: Add regression tests for BZ 30932 (RHEL-46761)
+
+* Mon Jan 27 2025 Florian Weimer <fweimer@redhat.com> - 2.34-160
+- Rebuild with gcc-11.5.0-2.el9 (RHEL-76359)
+
+* Fri Jan 24 2025 Florian Weimer <fweimer@redhat.com> - 2.34-159
+- setenv: Rework free(environ) compatibility support (RHEL-75810)
+
+* Thu Jan 23 2025 Florian Weimer <fweimer@redhat.com> - 2.34-158
+- Add tests extracted from upstream printf regression tests (RHEL-46761)
+
+* Thu Jan 23 2025 Florian Weimer <fweimer@redhat.com> - 2.34-157
+- Restore compatibility with environ/malloc usage pattern (RHEL-75810)
+
+* Thu Jan 23 2025 Florian Weimer <fweimer@redhat.com> - 2.34-156
+- Additional test for assert (RHEL-65359)
+
+* Thu Jan 23 2025 Florian Weimer <fweimer@redhat.com> - 2.34-155
+- Change utimensat to accept NULL pathname arguments (RHEL-50550)
+
+* Tue Jan 21 2025 Florian Weimer <fweimer@redhat.com> - 2.34-154
+- Add test for inheritance of thread affinity mask (RHEL-61559)
+
+* Mon Jan 20 2025 Florian Weimer <fweimer@redhat.com> - 2.34-153
+- Additional dynamic linker dependency sorting tests (RHEL-58987)
+
+* Fri Jan 10 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-152
+- Additional TLS test cases (RHEL-58989)
+- Additional mremap test cases  (RHEL-62716)
+- Fix pthread_timedjoin_np error handling and increase test coverage (RHEL-68857)
+- Avoid uninitialized result in sem_open when file does not exist (RHEL-69633)
+
+* Fri Jan 10 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-151
+- Lock all stdio streams during exit
+- Support concurrent calls to exit (RHEL-65358)
+
+* Fri Jan 10 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-150
+- Backport test implementation to verify readdir behavior (RHEL-56542)
+- Backport the deallocation attributes commit for opendir/fdopendir (RHEL-56543)
+- Backport: Fix bug bz#27454 and test implementation to verify
+  fdopendir behavior (RHEL-56544)
+- Backport test implementation to verify closedir behavior
+  (RHEL-56541)
+
+* Wed Jan 08 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-149
+- Backport: fix the glibc manual to handle spaces for @deftypefun
+  references. (RHEL-65356)
+- Backport verbosity patches for glibc math (RHEL-38225)
+- Backport getdelim test coverage improvements (RHEL-54250)
+- Backport mkdirat mode test (RHEL-56743)
+- Backport: cover the documentation coverage gap adding thread safety
+  annotations for clock_gettime and clock_getres (RHEL-57586)
+- Backport test implementation to verify lstat behavior (RHEL-56539)
+- Backport test implementation to verify rewinddir behavior
+  (RHEL-56540)
+- Backport elf/tst-startup-errno test (RHEL-58671)
+- Backport: Identify unsafe macros in the glibc documentation (RHEL-46740)
+- Backport: testsuite fixes for rhel-57588, rhel-57589, and rhel-57590 (RHEL-65910)
+- Backport new multi-threaded test for sem_getvalue (RHEL-69028)
+- Backport pthread_getcpuclockid tests (RHEL-70395)
+- Backport: Debug/tst-longjmp_chk3 needs to be enabled (RHEL-68850)
+- Backport: Improve pthread_spin_trylock test coverage (RHEL-61568)
+- Backport: Implement test to verify dynamic linker behaves correctly in case
+  of hash collision for the symbol name and symbol version. (RHEL-58979)
+- Backport: Improve sem_trywait test coverage (RHEL-65354)
+
+* Thu Dec 19 2024 DJ Delorie <dj@redhat.com> - 2.34-148
+- Increase ungetc test coverage, guarantee single char pushback (RHEL-46738)
+
+* Mon Dec 16 2024 Florian Weimer <fweimer@redhat.com> - 2.34-147
+- Make getenv thread-safe in more cases (RHEL-67692)
+
+* Mon Dec  9 2024 Florian Weimer <fweimer@redhat.com> - 2.34-146
+- Use UsrMove path destination in the RPM files (RHEL-65334)
+
+* Thu Dec  5 2024 DJ Delorie <dj@redhat.com> - 2.34-145
+- add GB18030-2022 charmap and tests (RHEL-56032)
+
+* Mon Dec  2 2024 Florian Weimer <fweimer@redhat.com> - 2.34-144
+- Document struct link_map and interaction with dlinfo (RHEL-47467)
+
+* Wed Nov 20 2024 Patsy Griffin <patsy@redhat.com> - 2.34-143
+- iconv: Support in-place conversions (RHEL-1915)
+
+* Mon Nov 18 2024 Florian Weimer <fweimer@redhat.com> - 2.34-142
+- Add printf function family tests (RHEL-46725)
+
+* Mon Nov 11 2024 Arjun Shankar <arjun@redhat.com> - 2.34-141
+- Add error and FUSE based tests for fchmod (RHEL-50548)
+
+* Thu Nov  7 2024 Florian Weimer <fweimer@redhat.com> - 2.34-140
+- Add more tests for freopen (RHEL-46736)
+
+* Thu Nov  7 2024 Florian Weimer <fweimer@redhat.com> - 2.34-139
+- Add more tests of getline (RHEL-54413)
+
+* Thu Nov  7 2024 Florian Weimer <fweimer@redhat.com> - 2.34-138
+- Add fclose testcases (RHEL-46733)
+
+* Thu Nov  7 2024 Florian Weimer <fweimer@redhat.com> - 2.34-137
+- Fix memory leak after fdopen seek failure (RHEL-66253)
+
+* Thu Nov  7 2024 Florian Weimer <fweimer@redhat.com> - 2.34-136
+- Document rules for mixing stdio streams and file descriptors (RHEL-46724)
+
+* Wed Nov 06 2024 Patsy Griffin <patsy@redhat.com> - 2.34-135
+- Support clearing options in /etc/resolv.conf, RES_OPTIONS with a - prefix
+- Introduce the strict-error/RES_STRICTERR stub resolver option (RHEL-50662)
+
+* Wed Oct 23 2024 DJ Delorie <dj@redhat.com> - 2.34-134
+- Test Implementation to verify mkstemp behavior,
+  with FUSE support (RHEL-50545)
+
+* Mon Sep 30 2024 Arjun Shankar <arjun@redhat.com> - 2.34-133
+- strtod: Fix subnormal rounding; do not set errno upon overflowing payload;
+  and add several new tests (RHEL-46739)
+
+* Fri Sep 27 2024 Florian Weimer <fweimer@redhat.com> - 2.34-132
+- Remove some unused ppc64le string functions (RHEL-60466)
+
+* Thu Sep 26 2024 Arjun Shankar <arjun@redhat.com> - 2.34-131
+- Add new test for fread (RHEL-46735)
+
+* Thu Sep 26 2024 Arjun Shankar <arjun@redhat.com> - 2.34-130
+- Add new test for fdopen (RHEL-46734)
+
+* Tue Sep 24 2024 DJ Delorie <dj@redhat.com> - 2.34-129
+- Add fgets testcases (RHEL-46728)
+
+* Tue Sep 24 2024 DJ Delorie <dj@redhat.com> - 2.34-128
+- manual: Add Descriptor-Relative Access section (RHEL-41189)
+
+* Tue Sep 24 2024 Florian Weimer <fweimer@redhat.com> - 2.34-127
+- Switch to upstream approach for building xtest during make check (RHEL-59494)
+
+* Thu Sep 19 2024 Florian Weimer <fweimer@redhat.com> - 2.34-126
+- Ensure that xtests can be built (RHEL-59494)
 
 * Thu Sep  5 2024 DJ Delorie <dj@redhat.com> - 2.34-125
 - elf: Rework exception handling in the dynamic loader (RHEL-46979)

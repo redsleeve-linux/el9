@@ -1,0 +1,164 @@
+commit b371ed272695919a332d30bd2754a82e5e683178
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Mon Oct 21 20:56:48 2024 +0000
+
+    Check time arguments to pthread_timedjoin_np and pthread_clockjoin_np
+    
+    The pthread_timedjoin_np and pthread_clockjoin_np functions do not
+    check that a valid time has been specified.  The documentation for
+    these functions in the glibc manual isn't sufficiently detailed to say
+    if they should, but consistency with POSIX functions such as
+    pthread_mutex_timedlock and pthread_cond_timedwait strongly indicates
+    that an EINVAL error is appropriate (even if there might be some
+    ambiguity about exactly where such a check should go in relation to
+    other checks for whether the thread exists, whether it's immediately
+    joinable, etc.).  Copy the logic for such a check used in
+    pthread_rwlock_common.c.
+    
+    pthread_join_common had some logic calling valid_nanoseconds before
+    commit 9e92278ffad441daf588ff1ff5bd8094aa33fbfd, "nptl: Remove
+    clockwait_tid"; I haven't checked exactly what cases that detected.
+    
+    Tested for x86_64 and x86.
+
+
+Conflicts:
+	sysdeps/pthread/Makefile (renamed test)
+
+diff --git a/nptl/pthread_join_common.c b/nptl/pthread_join_common.c
+index 617056ef10671607..d71b5ee2d7c7cda0 100644
+--- a/nptl/pthread_join_common.c
++++ b/nptl/pthread_join_common.c
+@@ -49,6 +49,12 @@ __pthread_clockjoin_ex (pthread_t threadid, void **thread_return,
+     /* We cannot wait for the thread.  */
+     return EINVAL;
+ 
++  /* Make sure the clock and time specified are valid.  */
++  if (abstime
++      && __glibc_unlikely (!futex_abstimed_supported_clockid (clockid)
++			   || ! valid_nanoseconds (abstime->tv_nsec)))
++    return EINVAL;
++
+   struct pthread *self = THREAD_SELF;
+   int result = 0;
+ 
+diff --git a/sysdeps/pthread/Makefile b/sysdeps/pthread/Makefile
+index 5a1b26fa3c0e6061..2d4cb1ac62d15f4c 100644
+--- a/sysdeps/pthread/Makefile
++++ b/sysdeps/pthread/Makefile
+@@ -129,6 +129,7 @@ tests += tst-cnd-basic tst-mtx-trylock tst-cnd-broadcast \
+ 	 tst-cancel30 \
+   tst-spin5 \
+   tst-sem19 \
++  tst-join16 \
+ 	 # tests
+ 
+ tests-time64 := \
+@@ -136,6 +137,7 @@ tests-time64 := \
+   tst-cnd-timedwait-time64 \
+   tst-cond11-time64 \
+   tst-join14-time64 \
++  tst-join16-time64 \
+   tst-mtx-timedlock-time64 \
+   tst-rwlock14-time64 \
+   tst-sem5-time64 \
+diff --git a/sysdeps/pthread/tst-join16-time64.c b/sysdeps/pthread/tst-join16-time64.c
+new file mode 100644
+index 0000000000000000..730cc5656308c30c
+--- /dev/null
++++ b/sysdeps/pthread/tst-join16-time64.c
+@@ -0,0 +1 @@
++#include "tst-join16.c"
+diff --git a/sysdeps/pthread/tst-join16.c b/sysdeps/pthread/tst-join16.c
+new file mode 100644
+index 0000000000000000..8bf37b5e42fc46f6
+--- /dev/null
++++ b/sysdeps/pthread/tst-join16.c
+@@ -0,0 +1,87 @@
++/* Test pthread_timedjoin_np and pthread_clockjoin_np with an invalid timeout.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <pthread.h>
++#include <stdio.h>
++#include <time.h>
++#include <support/check.h>
++#include <support/xthread.h>
++#include <support/xtime.h>
++
++
++#define CLOCK_USE_TIMEDJOIN (-1)
++
++static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
++
++static void *
++tf (void *arg)
++{
++  xpthread_mutex_lock (&lock);
++  xpthread_mutex_unlock (&lock);
++  return (void *) 42l;
++}
++
++static int
++do_test_clock (clockid_t clockid)
++{
++  const clockid_t clockid_for_get =
++    (clockid == CLOCK_USE_TIMEDJOIN) ? CLOCK_REALTIME : clockid;
++
++  xpthread_mutex_lock (&lock);
++  pthread_t th = xpthread_create (NULL, tf, NULL);
++
++  void *status;
++  int ret;
++  struct timespec timeout = xclock_now (clockid_for_get);
++  timeout.tv_sec += 2;
++  timeout.tv_nsec = -1;
++  if (clockid == CLOCK_USE_TIMEDJOIN)
++    ret = pthread_timedjoin_np (th, &status, &timeout);
++  else
++    ret = pthread_clockjoin_np (th, &status, clockid, &timeout);
++  TEST_COMPARE (ret, EINVAL);
++  timeout.tv_nsec = 1000000000;
++  if (clockid == CLOCK_USE_TIMEDJOIN)
++    ret = pthread_timedjoin_np (th, &status, &timeout);
++  else
++    ret = pthread_clockjoin_np (th, &status, clockid, &timeout);
++  TEST_COMPARE (ret, EINVAL);
++  xpthread_mutex_unlock (&lock);
++  timeout.tv_nsec = 0;
++  ret = pthread_join (th, &status);
++  TEST_COMPARE (ret, 0);
++  if (status != (void *) 42l)
++    FAIL_EXIT1 ("return value %p, expected %p\n", status, (void *) 42l);
++
++  return 0;
++}
++
++static int
++do_test (void)
++{
++  puts ("testing pthread_timedjoin_np");
++  do_test_clock (CLOCK_USE_TIMEDJOIN);
++  puts ("testing CLOCK_REALTIME");
++  do_test_clock (CLOCK_REALTIME);
++  puts ("testing CLOCK_MONOTONIC");
++  do_test_clock (CLOCK_MONOTONIC);
++  return 0;
++}
++
++#include <support/test-driver.c>

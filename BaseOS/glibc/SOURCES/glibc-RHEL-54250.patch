@@ -1,0 +1,60 @@
+commit 3f54e459a633b4247be91b9d0f68a7e08720b8d8
+Author: Frédéric Bérat <fberat@redhat.com>
+Date:   Tue Aug 13 12:01:26 2024 +0200
+
+    libio/tst-getdelim: Add new test covering NUL as a delimiter
+    
+    Add a new test to getdelim to verify that '\0' can be set as a
+    delimiter.
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+diff --git a/libio/tst-getdelim.c b/libio/tst-getdelim.c
+index 44437326691228be..15e2d873a50df782 100644
+--- a/libio/tst-getdelim.c
++++ b/libio/tst-getdelim.c
+@@ -1,4 +1,6 @@
+-/* Check that getdelim sets error indicator on error (BZ #29917)
++/* Test getdelim conforming to POSIX specifications.
++
++   Note: Most getdelim use cases are covered by stdio-common/tst-getline.
+ 
+    Copyright (C) 2023 Free Software Foundation, Inc.
+    This file is part of the GNU C Library.
+@@ -18,18 +20,36 @@
+    <https://www.gnu.org/licenses/>.  */
+ 
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <errno.h>
+ 
+ #include <support/check.h>
++#include <support/support.h>
++#include <support/test-driver.h>
+ 
+ static int
+ do_test (void)
+ {
++  /* Check that getdelim sets error indicator on error (BZ #29917) */
+   clearerr (stdin);
+   TEST_VERIFY (getdelim (0, 0, '\n', stdin) == -1);
+   TEST_VERIFY (ferror (stdin) != 0);
+   TEST_VERIFY (errno == EINVAL);
+ 
++  /* Test getdelim with NUL as delimiter */
++  verbose_printf ("Testing NUL delimiter\n");
++  char *lineptr = NULL;
++  size_t linelen = 0;
++  char membuf[] = "abc\0d\nef\0";
++  FILE *memstream = fmemopen (membuf, sizeof (membuf), "r");
++  TEST_VERIFY_EXIT (memstream != NULL);
++  TEST_VERIFY (getdelim (&lineptr, &linelen, '\0', memstream) != -1);
++  TEST_COMPARE_BLOB (lineptr, 4, "abc\0", 4);
++  TEST_VERIFY (getdelim (&lineptr, &linelen, '\0', memstream) != -1);
++  TEST_COMPARE_BLOB (lineptr, 5, "d\nef\0", 5);
++  fclose (memstream);
++  free (lineptr);
++
+   return 0;
+ }
+ 

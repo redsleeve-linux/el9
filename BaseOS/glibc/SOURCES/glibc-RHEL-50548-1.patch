@@ -1,0 +1,94 @@
+commit 424d97be50488beb6196c0ff0bc3dfeb87b4281c
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Aug 30 20:37:18 2024 +0200
+
+    io: Add error tests for fchmod
+    
+    On Linux most descriptors that do not correspond to file system
+    entities (such as anonymous pipes and sockets) have file permissions
+    that can be changed.  While it is possible to create a custom file
+    system that returns (say) EINVAL for an fchmod attempt, testing this
+    does not appear to be useful.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+Conflicts:
+	io/Makefile
+	  (usual tests conflict)
+
+diff --git a/io/Makefile b/io/Makefile
+index 5284a1282dd07e3d..30dd48b8acf9dcb9 100644
+--- a/io/Makefile
++++ b/io/Makefile
+@@ -79,7 +79,8 @@ tests		:= test-utime test-stat test-stat2 test-lfs tst-getcwd \
+ 		   tst-futimens \
+ 		   tst-utimensat \
+ 		   tst-closefrom \
+-		   tst-ftw-bz28126
++		   tst-ftw-bz28126 \
++		   tst-fchmod-errors
+ 
+ tests-time64 := \
+   tst-fcntl-time64 \
+diff --git a/io/tst-fchmod-errors.c b/io/tst-fchmod-errors.c
+new file mode 100644
+index 0000000000000000..ee15300fc3edf6f0
+--- /dev/null
++++ b/io/tst-fchmod-errors.c
+@@ -0,0 +1,56 @@
++/* Test various fchmod error cases.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <fcntl.h>
++#include <support/check.h>
++#include <support/xunistd.h>
++
++static int
++do_test (void)
++{
++  {
++    /* Permissions on /dev/null (the opened descriptor) cannot be changed.  */
++    int fd = xopen ("/dev/null", O_RDWR, 0);
++    errno = 0;
++    TEST_COMPARE (fchmod (fd, 0), -1);
++    TEST_COMPARE (errno, EPERM);
++    xclose (fd);
++
++    /* Now testing an invalid file descriptor.   */
++    errno = 0;
++    TEST_COMPARE (fchmod (fd, 0600), -1);
++    TEST_COMPARE (errno, EBADF);
++  }
++
++  errno = 0;
++  TEST_COMPARE (fchmod (-1, 0600), -1);
++  TEST_COMPARE (errno, EBADF);
++
++  errno = 0;
++  TEST_COMPARE (fchmod (AT_FDCWD, 0600), -1);
++  TEST_COMPARE (errno, EBADF);
++
++  /* Linux supports fchmod on pretty much all file descriptors, so
++     there is no check for failure on specific types of descriptors
++     here.  */
++
++  return 0;
++}
++
++#include <support/test-driver.c>

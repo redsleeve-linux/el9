@@ -1,0 +1,395 @@
+commit 8a46bf41e5a61248f626a8213520de499f388122
+Author: Frédéric Bérat <fberat@redhat.com>
+Date:   Fri Nov 29 14:50:27 2024 +0100
+
+    posix: Rewrite cpuset tests
+    
+    Rewriting the cpuset macros test to cover more use cases and port the
+    tests to the new test infrastructure.
+    
+    The use cases include bad actor access attempts, before and after the
+    CPU set structure.
+    
+    Reviewed-by: Tulio Magno Quites Machado Filho <tuliom@redhat.com>
+
+# Conflicts:
+#	posix/Makefile (new test added)
+
+diff --git a/posix/Makefile b/posix/Makefile
+index 61fcdf015b4ec83b..4c32a088a73723c7 100644
+--- a/posix/Makefile
++++ b/posix/Makefile
+@@ -96,7 +96,7 @@ tests		:= test-errno tstgetopt testfnm runtests runptests \
+ 		   tst-execvp3 tst-execvp4 \
+ 		   tst-execvpe1 tst-execvpe2 tst-execvpe3 tst-execvpe4 \
+ 		   tst-execvpe5 tst-execvpe6 \
+-		   tst-getaddrinfo3 tst-fnmatch2 tst-cpucount tst-cpuset \
++		   tst-getaddrinfo3 tst-fnmatch2 tst-cpucount \
+ 		   bug-getopt1 bug-getopt2 bug-getopt3 bug-getopt4 \
+ 		   bug-getopt5 tst-getopt_long1 bug-regex34 bug-regex35 \
+ 		   tst-pathconf tst-rxspencer-no-utf8 \
+@@ -108,7 +108,10 @@ tests		:= test-errno tstgetopt testfnm runtests runptests \
+ 		   tst-glob-tilde test-ssize-max tst-spawn4 bug-regex37 \
+ 		   bug-regex38 tst-regcomp-truncated tst-spawn-chdir \
+ 		   tst-wordexp-nocmd tst-execveat tst-spawn5 \
+-		   tst-sched_getaffinity
++		   tst-sched_getaffinity \
++		   tst-cpuset-dynamic \
++		   tst-cpuset-static \
++
+ 
+ # Test for the glob symbol version that was replaced in glibc 2.27.
+ ifeq ($(have-GLIBC_2.26)$(build-shared),yesyes)
+diff --git a/posix/tst-cpuset-dynamic.c b/posix/tst-cpuset-dynamic.c
+new file mode 100644
+index 0000000000000000..6e0f06dfd810a724
+--- /dev/null
++++ b/posix/tst-cpuset-dynamic.c
+@@ -0,0 +1,63 @@
++/* Test that CPU_* macros comply with their specifications.
++
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/next_to_fault.h>
++
++#define LOCAL_NUM_CPUS 2048
++#define LOCAL_CPU_SETSIZE LOCAL_NUM_CPUS / 8
++
++#define PREPARE_CPU_SET(X) \
++  X = CPU_ALLOC (LOCAL_NUM_CPUS);
++
++/* Create a mapping so that access to the page before the cpuset generates a
++   fault. The aim is to check the behavior for negative values since the
++   interface accepts signed int. */
++#define PREPARE_CPU_SET_TO_FAULT_BEFORE(X) \
++  size_t local_sz_##X = CPU_ALLOC_SIZE(LOCAL_NUM_CPUS); \
++  struct support_next_to_fault local_##X = support_next_to_fault_allocate_before(local_sz_##X); \
++  X = (cpu_set_t *) local_##X.buffer;
++
++/* Create a mapping so that access to the page after the cpuset generates a
++   fault. The aim is to check the behavior for values above CPU count since the
++   interface accepts signed int. */
++#define PREPARE_CPU_SET_TO_FAULT(X) \
++  size_t local_sz_##X = CPU_ALLOC_SIZE(LOCAL_NUM_CPUS); \
++  struct support_next_to_fault local_##X = support_next_to_fault_allocate(local_sz_##X); \
++  X = (cpu_set_t *) local_##X.buffer;
++
++#define GET_SIZE() (size_t) CPU_ALLOC_SIZE(LOCAL_NUM_CPUS)
++
++#define LOCAL_CPU_ZERO(sz, cpusetp) CPU_ZERO_S(sz, cpusetp)
++#define LOCAL_CPU_SET(cpu, sz, cpusetp) CPU_SET_S(cpu, sz, cpusetp)
++#define LOCAL_CPU_CLR(cpu, sz, cpusetp) CPU_CLR_S(cpu, sz, cpusetp)
++#define LOCAL_CPU_ISSET(cpu, sz, cpusetp) CPU_ISSET_S(cpu, sz, cpusetp)
++#define LOCAL_CPU_COUNT(sz, cpusetp) CPU_COUNT_S(sz, cpusetp)
++#define LOCAL_CPU_AND(sz, destsetp, srcsetp1, srcsetp2) \
++  CPU_AND_S(sz, destsetp, srcsetp1, srcsetp2)
++#define LOCAL_CPU_OR(sz, destsetp, srcsetp1, srcsetp2) \
++  CPU_OR_S(sz, destsetp, srcsetp1, srcsetp2)
++#define LOCAL_CPU_XOR(sz, destsetp, srcsetp1, srcsetp2) \
++  CPU_XOR_S(sz, destsetp, srcsetp1, srcsetp2)
++#define LOCAL_CPU_EQUAL(sz, setp1, setp2) CPU_EQUAL_S(sz, setp1, setp2)
++
++#define CLEAN_CPU_SET(cpusetp) CPU_FREE(cpusetp)
++#define CLEAN_CPU_SET_TO_FAULT_BEFORE(X) support_next_to_fault_free(&local_##X)
++#define CLEAN_CPU_SET_TO_FAULT(X) support_next_to_fault_free(&local_##X)
++
++#include "tst-cpuset-skeleton.c"
+diff --git a/posix/tst-cpuset-skeleton.c b/posix/tst-cpuset-skeleton.c
+new file mode 100644
+index 0000000000000000..2c04989c0da502be
+--- /dev/null
++++ b/posix/tst-cpuset-skeleton.c
+@@ -0,0 +1,123 @@
++/* Test that CPU_* macros comply with their specifications.
++
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++#include <sched.h>
++#include <stdio.h>
++
++#include <support/check.h>
++#include <support/test-driver.h>
++
++static int
++do_test (void)
++{
++  cpu_set_t *cpusetp_A = NULL;
++  cpu_set_t *cpusetp_B = NULL;
++  cpu_set_t *cpusetp_C = NULL;
++
++  size_t setsz __attribute__ ((unused)) = GET_SIZE();
++
++  TEST_VERIFY (CPU_ALLOC_SIZE (-1) == 0);
++  TEST_VERIFY (CPU_ALLOC_SIZE (0) == 0);
++  TEST_VERIFY (CPU_ALLOC_SIZE (1) == sizeof (__cpu_mask));
++  TEST_VERIFY (CPU_ALLOC_SIZE (INT_MAX) > 0);
++
++  PREPARE_CPU_SET_TO_FAULT_BEFORE(cpusetp_A);
++  PREPARE_CPU_SET_TO_FAULT(cpusetp_B);
++  PREPARE_CPU_SET(cpusetp_C);
++
++  /* Bad actor access, negative CPU number */
++  LOCAL_CPU_SET (-1, setsz, cpusetp_A);
++  TEST_VERIFY (!LOCAL_CPU_ISSET (-1, setsz, cpusetp_A));
++
++  /* Bad actor access, above CPU number */
++  LOCAL_CPU_SET (LOCAL_NUM_CPUS, setsz, cpusetp_B);
++  TEST_VERIFY (!LOCAL_CPU_ISSET (LOCAL_NUM_CPUS, setsz, cpusetp_B));
++
++  LOCAL_CPU_ZERO (setsz, cpusetp_A);
++  LOCAL_CPU_ZERO (setsz, cpusetp_B);
++  LOCAL_CPU_ZERO (setsz, cpusetp_C);
++
++  for (int cpu = 0; cpu < LOCAL_NUM_CPUS; cpu += 2)
++    {
++      /* Set A = 0x55..55 */
++      LOCAL_CPU_SET (cpu, setsz, cpusetp_A);
++      TEST_VERIFY (LOCAL_CPU_ISSET (cpu, setsz, cpusetp_A));
++    }
++  for (int cpu = 1; cpu < LOCAL_NUM_CPUS; cpu += 2)
++    {
++      /* Set B = 0xAA..AA */
++      LOCAL_CPU_SET (cpu, setsz, cpusetp_B);
++      TEST_VERIFY (LOCAL_CPU_ISSET (cpu, setsz, cpusetp_B));
++    }
++
++  /* Ensure CPU_COUNT matches expected count */
++  TEST_VERIFY (LOCAL_CPU_COUNT (setsz, cpusetp_A) == LOCAL_CPU_COUNT (setsz, cpusetp_B));
++  TEST_VERIFY (LOCAL_CPU_COUNT (setsz, cpusetp_A) == LOCAL_NUM_CPUS / 2);
++
++  LOCAL_CPU_AND (setsz, cpusetp_C, cpusetp_A, cpusetp_B);
++  for (int cpu = 0; cpu < LOCAL_NUM_CPUS; cpu++)
++    {
++      /* A setsz,  B == 0 */
++      TEST_VERIFY (!LOCAL_CPU_ISSET (cpu, setsz, cpusetp_C));
++    }
++
++  LOCAL_CPU_OR (setsz, cpusetp_C, cpusetp_A, cpusetp_B);
++  for (int cpu = 0; cpu < LOCAL_NUM_CPUS; cpu++)
++    {
++      /* A | B == 0xFF..FF */
++      TEST_VERIFY (LOCAL_CPU_ISSET (cpu, setsz, cpusetp_C));
++    }
++
++  /* Check that CPU_ZERO actually does something */
++  TEST_VERIFY (LOCAL_CPU_COUNT (setsz, cpusetp_C) == LOCAL_NUM_CPUS);
++  LOCAL_CPU_ZERO (setsz, cpusetp_C);
++  TEST_VERIFY (LOCAL_CPU_COUNT (setsz, cpusetp_C) == 0);
++
++  LOCAL_CPU_XOR (setsz, cpusetp_C, cpusetp_A, cpusetp_A);
++  for (int cpu = 0; cpu < LOCAL_NUM_CPUS; cpu++)
++    {
++      /* A ^ A == 0 */
++      TEST_VERIFY (!LOCAL_CPU_ISSET (cpu, setsz, cpusetp_C));
++    }
++
++  LOCAL_CPU_XOR (setsz, cpusetp_C, cpusetp_A, cpusetp_B);
++  for (int cpu = 0; cpu < LOCAL_NUM_CPUS; cpu++)
++    {
++      /* C = A ^ B == 0xFF..FF */
++      TEST_VERIFY (LOCAL_CPU_ISSET (cpu, setsz, cpusetp_C));
++    }
++
++  for (int cpu = 1; cpu < LOCAL_NUM_CPUS; cpu += 2)
++    {
++      /* C = 0x55..55 */
++      LOCAL_CPU_CLR (cpu, setsz, cpusetp_C);
++      TEST_VERIFY (!LOCAL_CPU_ISSET (cpu, setsz, cpusetp_C));
++    }
++
++  TEST_VERIFY (LOCAL_CPU_EQUAL (setsz, cpusetp_A, cpusetp_C));
++
++  CLEAN_CPU_SET(cpusetp_C);
++  CLEAN_CPU_SET_TO_FAULT(cpusetp_B);
++  CLEAN_CPU_SET_TO_FAULT_BEFORE(cpusetp_A);
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/posix/tst-cpuset-static.c b/posix/tst-cpuset-static.c
+new file mode 100644
+index 0000000000000000..ad4c40e422c50ab8
+--- /dev/null
++++ b/posix/tst-cpuset-static.c
+@@ -0,0 +1,61 @@
++/* Test that CPU_* macros comply with their specifications.
++
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/next_to_fault.h>
++
++#define LOCAL_NUM_CPUS CPU_SETSIZE
++
++/* Create a mapping so that access to the page before the cpuset generates a
++   fault. The aim is to check the behavior for negative values since the
++   interface accepts signed int. */
++#define PREPARE_CPU_SET_TO_FAULT_BEFORE(X) \
++  struct support_next_to_fault local_##X = support_next_to_fault_allocate_before(sizeof(*X)); \
++  X = (cpu_set_t *) local_##X.buffer;
++
++/* Create a mapping so that access to the page after the cpuset generates a
++   fault. The aim is to check the behavior for values above CPU count since the
++   interface accepts signed int. */
++#define PREPARE_CPU_SET_TO_FAULT(X) \
++  struct support_next_to_fault local_##X = support_next_to_fault_allocate(sizeof(*X)); \
++  X = (cpu_set_t *) local_##X.buffer;
++
++#define PREPARE_CPU_SET(X) \
++  cpu_set_t local_##X = {}; \
++  X = &local_##X;
++
++#define GET_SIZE() (size_t) sizeof (cpu_set_t)
++
++#define LOCAL_CPU_ZERO(sz, cpusetp) CPU_ZERO(cpusetp)
++#define LOCAL_CPU_SET(cpu, sz, cpusetp) CPU_SET(cpu, cpusetp)
++#define LOCAL_CPU_CLR(cpu, sz, cpusetp) CPU_CLR(cpu, cpusetp)
++#define LOCAL_CPU_ISSET(cpu, sz, cpusetp) CPU_ISSET(cpu, cpusetp)
++#define LOCAL_CPU_COUNT(sz, cpusetp) CPU_COUNT(cpusetp)
++#define LOCAL_CPU_AND(sz, destsetp, srcsetp1, srcsetp2) \
++  CPU_AND(destsetp, srcsetp1, srcsetp2)
++#define LOCAL_CPU_OR(sz, destsetp, srcsetp1, srcsetp2) \
++  CPU_OR(destsetp, srcsetp1, srcsetp2)
++#define LOCAL_CPU_XOR(sz, destsetp, srcsetp1, srcsetp2) \
++  CPU_XOR(destsetp, srcsetp1, srcsetp2)
++#define LOCAL_CPU_EQUAL(sz, setp1, setp2) CPU_EQUAL(setp1, setp2)
++
++#define CLEAN_CPU_SET(X)
++#define CLEAN_CPU_SET_TO_FAULT_BEFORE(X) support_next_to_fault_free(&local_##X)
++#define CLEAN_CPU_SET_TO_FAULT(X) support_next_to_fault_free(&local_##X)
++
++#include "tst-cpuset-skeleton.c"
+diff --git a/posix/tst-cpuset.c b/posix/tst-cpuset.c
+deleted file mode 100644
+index d736793222af5ec6..0000000000000000
+--- a/posix/tst-cpuset.c
++++ /dev/null
+@@ -1,82 +0,0 @@
+-#include <sched.h>
+-#include <stdio.h>
+-
+-static int
+-do_test (void)
+-{
+-  int result = 0;
+-
+-  cpu_set_t s1;
+-  cpu_set_t s2;
+-  cpu_set_t s3;
+-
+-  CPU_ZERO (&s1);
+-  CPU_SET (0, &s1);
+-
+-  CPU_ZERO (&s2);
+-  CPU_SET (0, &s2);
+-  CPU_SET (1, &s2);
+-
+-  CPU_AND (&s3, &s1, &s2);
+-  if (! CPU_EQUAL (&s3, &s1))
+-    {
+-      puts ("result of CPU_AND wrong");
+-      result = 1;
+-    }
+-
+-  CPU_OR (&s3, &s1, &s2);
+-  if (! CPU_EQUAL (&s3, &s2))
+-    {
+-      puts ("result of CPU_OR wrong");
+-      result = 1;
+-    }
+-
+-  CPU_XOR (&s3, &s1, &s2);
+-  if (CPU_COUNT (&s3) != 1)
+-    {
+-      puts ("result of CPU_XOR wrong");
+-      result = 1;
+-    }
+-
+-  cpu_set_t *vs1 = CPU_ALLOC (2048);
+-  cpu_set_t *vs2 = CPU_ALLOC (2048);
+-  cpu_set_t *vs3 = CPU_ALLOC (2048);
+-  size_t vssize = CPU_ALLOC_SIZE (2048);
+-
+-  CPU_ZERO_S (vssize, vs1);
+-  CPU_SET_S (0, vssize, vs1);
+-
+-  CPU_ZERO_S (vssize, vs2);
+-  CPU_SET_S (0, vssize, vs2);
+-  CPU_SET_S (2047, vssize, vs2);
+-
+-  CPU_AND_S (vssize, vs3, vs1, vs2);
+-  if (! CPU_EQUAL_S (vssize, vs3, vs1))
+-    {
+-      puts ("result of CPU_AND_S wrong");
+-      result = 1;
+-    }
+-
+-  CPU_OR_S (vssize, vs3, vs1, vs2);
+-  if (! CPU_EQUAL_S (vssize, vs3, vs2))
+-    {
+-      puts ("result of CPU_OR_S wrong");
+-      result = 1;
+-    }
+-
+-  CPU_XOR_S (vssize, vs3, vs1, vs2);
+-  if (CPU_COUNT_S (vssize, vs3) != 1)
+-    {
+-      puts ("result of CPU_XOR_S wrong");
+-      result = 1;
+-    }
+-
+-  CPU_FREE (vs1);
+-  CPU_FREE (vs2);
+-  CPU_FREE (vs3);
+-
+-  return result;
+-}
+-
+-#define TEST_FUNCTION do_test ()
+-#include "../test-skeleton.c"

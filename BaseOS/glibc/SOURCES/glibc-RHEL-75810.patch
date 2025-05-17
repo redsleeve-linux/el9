@@ -1,0 +1,249 @@
+commit b62759db04b8ed7f829c06f1d7c3b8fb70616493
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Jan 22 13:48:56 2025 +0100
+
+    stdlib: Support malloc-managed environ arrays for compatibility
+    
+    Some applications set environ to a heap-allocated pointer, call
+    setenv (expecting it to call realloc), free environ, and then
+    restore the original environ pointer.  This breaks after
+    commit 7a61e7f557a97ab597d6fca5e2d1f13f65685c61 ("stdlib: Make
+    getenv thread-safe in more cases") because after the setenv call,
+    the environ pointer does not point to the start of a heap allocation.
+    Instead, setenv creates a separate allocation and changes environ
+    to point into that.  This means that the free call in the application
+    results in heap corruption.
+    
+    The interim approach was more compatible with other libcs because
+    it does not assume that the incoming environ pointer is allocated
+    as if by malloc (if it was written by the application).  However,
+    it seems to be more important to stay compatible with previous
+    glibc version: assume the incoming pointer is heap allocated,
+    and preserve this property after setenv calls.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+Conflicts:
+	stdlib/Makefile
+	  (test list difference)
+
+diff --git a/csu/init-first.c b/csu/init-first.c
+index 316fed22706b1870..b1ee92332f478429 100644
+--- a/csu/init-first.c
++++ b/csu/init-first.c
+@@ -61,6 +61,7 @@ _init_first (int argc, char **argv, char **envp)
+   __libc_argc = argc;
+   __libc_argv = argv;
+   __environ = envp;
++  __environ_startup = envp;
+ 
+ #ifndef SHARED
+   /* First the initialization which normally would be done by the
+diff --git a/csu/libc-start.c b/csu/libc-start.c
+index a2fc2f6f9665a48f..4f1801c4af35a012 100644
+--- a/csu/libc-start.c
++++ b/csu/libc-start.c
+@@ -244,6 +244,7 @@ LIBC_START_MAIN (int (*main) (int, char **, char ** MAIN_AUXVEC_DECL),
+   char **ev = &argv[argc + 1];
+ 
+   __environ = ev;
++  __environ_startup = ev;
+ 
+   /* Store the lowest stack address.  This is done in ld.so if this is
+      the code for the DSO.  */
+diff --git a/include/unistd.h b/include/unistd.h
+index 5824485629793ccb..781dbabde0aad494 100644
+--- a/include/unistd.h
++++ b/include/unistd.h
+@@ -182,6 +182,9 @@ libc_hidden_proto (__sbrk)
+ extern int __libc_enable_secure attribute_relro;
+ rtld_hidden_proto (__libc_enable_secure)
+ 
++/* Original value of __environ.  Initialized by _init_first (dynamic)
++   or __libc_start_main (static).  */
++extern char **__environ_startup attribute_hidden;
+ 
+ /* Various internal function.  */
+ extern void __libc_check_standard_fds (void) attribute_hidden;
+diff --git a/posix/environ.c b/posix/environ.c
+index a0ed0d80eab207f8..2430b47d8eee148c 100644
+--- a/posix/environ.c
++++ b/posix/environ.c
+@@ -10,3 +10,5 @@ weak_alias (__environ, environ)
+ /* The SVR4 ABI says `_environ' will be the name to use
+    in case the user overrides the weak alias `environ'.  */
+ weak_alias (__environ, _environ)
++
++char **__environ_startup;
+diff --git a/stdlib/Makefile b/stdlib/Makefile
+index 4cbf47d215353681..3f98e55763c75758 100644
+--- a/stdlib/Makefile
++++ b/stdlib/Makefile
+@@ -126,6 +126,7 @@ tests := \
+   tst-setcontext7 \
+   tst-setcontext8 \
+   tst-setcontext9 \
++  tst-setenv-malloc \
+   tst-strfmon_l \
+   tst-strfrom \
+   tst-strfrom-locale \
+diff --git a/stdlib/setenv.c b/stdlib/setenv.c
+index e3833bc514870bf4..e02114103fc5957c 100644
+--- a/stdlib/setenv.c
++++ b/stdlib/setenv.c
+@@ -191,52 +191,52 @@ __add_to_environ (const char *name, const char *value, const char *combined,
+ 	ep[1] = NULL;
+       else
+ 	{
+-	  /* We cannot use __environ as is and need to copy over the
+-	     __environ contents into an array managed via
+-	     __environ_array_list.  */
+-
+-	  struct environ_array *target_array;
+-	  if (__environ_array_list != NULL
+-	      && required_size <= __environ_array_list->allocated)
+-	    /* Existing array has enough room.  Contents is copied below.  */
+-	    target_array = __environ_array_list;
+-	  else
++	  /* We cannot use __environ as is and need a larger allocation.  */
++
++	  if (start_environ == __environ_startup
++	      || __environ_is_from_array_list (start_environ))
+ 	    {
+-	      /* Allocate a new array.  */
+-	      target_array = __environ_new_array (required_size);
++	      /* Allocate a new array, managed in the list.  */
++	      struct environ_array *target_array
++		= __environ_new_array (required_size);
+ 	      if (target_array == NULL)
+ 		{
+ 		  UNLOCK;
+ 		  return -1;
+ 		}
++	      result_environ = &target_array->array[0];
++
++	      /* Copy over the __environ array contents.  This code
++		 handles the case start_environ == ep == NULL, too.  */
++	      size_t i;
++	      for (i = 0; start_environ + i < ep; ++i)
++		/* Regular store because unless there has been direct
++		   manipulation of the environment, target_array is still
++		   a private copy.  */
++		result_environ[i] = atomic_load_relaxed (start_environ + i);
++	    }
++	  else
++	    {
++	      /* Otherwise the application installed its own pointer.
++		 Historically, this pointer was managed using realloc.
++		 Continue doing so.  This disables multi-threading
++		 support.  */
++	      result_environ = __libc_reallocarray (start_environ,
++						    required_size,
++						    sizeof (*result_environ));
++	      if (result_environ == NULL)
++		{
++		  UNLOCK;
++		  return -1;
++		}
+ 	    }
+-
+-	  /* Copy over the __environ array contents.  This forward
+-	     copy slides backwards part of the array if __environ
+-	     points into target_array->array.  This happens if an
+-	     application makes an assignment like:
+-
+-	       environ = &environ[1];
+-
+-	     The forward copy avoids clobbering values that still
+-	     needing copying.  This code handles the case
+-	     start_environ == ep == NULL, too.  */
+-	  size_t i;
+-	  for (i = 0; start_environ + i < ep; ++i)
+-	    /* Regular store because unless there has been direct
+-	       manipulation of the environment, target_array is still
+-	       a private copy.  */
+-	    target_array->array[i] = atomic_load_relaxed (start_environ + i);
+ 
+ 	  /* This is the new place where we should add the element.  */
+-	  ep = target_array->array + i;
++	  ep = result_environ + (required_size - 2);
+ 
+ 	  /* Add the null terminator in case there was a pointer there
+ 	     previously.  */
+ 	  ep[1] = NULL;
+-
+-	  /* And __environ should be repointed to our array.  */
+-	  result_environ = &target_array->array[0];
+ 	}
+     }
+ 
+diff --git a/stdlib/tst-setenv-malloc.c b/stdlib/tst-setenv-malloc.c
+new file mode 100644
+index 0000000000000000..18a9d36842e67aa5
+--- /dev/null
++++ b/stdlib/tst-setenv-malloc.c
+@@ -0,0 +1,64 @@
++/* Test using setenv with a malloc-allocated environ variable.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* This test is not in the scope for POSIX or any other standard, but
++   some applications assume that environ is a heap-allocated pointer
++   after a call to setenv on an empty environment.  */
++
++#include <stdlib.h>
++#include <unistd.h>
++#include <support/check.h>
++#include <support/support.h>
++
++static const char *original_path;
++static char **save_environ;
++
++static void
++rewrite_environ (void)
++{
++  save_environ = environ;
++  environ = xmalloc (sizeof (*environ));
++  *environ = NULL;
++  TEST_COMPARE (setenv ("A", "1", 1), 0);
++  TEST_COMPARE (setenv ("B", "2", 1), 0);
++  TEST_VERIFY (environ != save_environ);
++  TEST_COMPARE_STRING (environ[0], "A=1");
++  TEST_COMPARE_STRING (environ[1], "B=2");
++  TEST_COMPARE_STRING (environ[2], NULL);
++  TEST_COMPARE_STRING (getenv ("PATH"), NULL);
++  free (environ);
++  environ = save_environ;
++  TEST_COMPARE_STRING (getenv ("PATH"), original_path);
++}
++
++static int
++do_test (void)
++{
++  original_path = getenv ("PATH");
++  rewrite_environ ();
++
++  /* Test again after reallocated the environment due to an initial
++     setenv call.  */
++  TEST_COMPARE (setenv ("TST_SETENV_MALLOC", "1", 1), 0);
++  TEST_VERIFY (environ != save_environ);
++  rewrite_environ ();
++
++  return 0;
++}
++
++#include <support/test-driver.c>

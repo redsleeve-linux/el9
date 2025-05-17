@@ -1,0 +1,715 @@
+commit 8ef3cff9d1ceafe369f982d980678d749fb93bd2
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Sep 20 13:10:54 2024 +0200
+
+    iconv: Support in-place conversions (bug 10460, bug 32033)
+
+    Check if any of the input files overlaps with the output file, and use
+    a temporary file in this case, so that the input is no clobbered
+    before it is read.  This fixes bug 10460.  It allows to use iconv
+    more easily as a functional replacement for GNU recode.
+
+    The updated output buffer management truncates the output file
+    if there is no input, fixing bug 32033.
+
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+    Conflicts:
+        NEWS - Dropped
+        iconv/Makefile - tests-special list diffs
+        iconv/iconv_prog.c - Manual merge
+
+diff -Nrup a/iconv/Makefile b/iconv/Makefile
+--- a/iconv/Makefile	2024-11-21 11:08:26.166051531 -0500
++++ b/iconv/Makefile	2024-11-21 11:08:51.325219751 -0500
+@@ -77,6 +77,8 @@ include $(patsubst %,$(..)libof-iterator
+ ifeq ($(run-built-tests),yes)
+ xtests-special += $(objpfx)test-iconvconfig.out
+ tests-special += \
++	$(objpfx)tst-iconv_prog-buffer-large.out \
++	$(objpfx)tst-iconv_prog-buffer-tiny.out \
+ 	$(objpfx)tst-iconv_prog-buffer.out \
+ 	$(objpfx)tst-iconv_prog.out \
+ 	# tests-special
+@@ -137,3 +139,12 @@ $(objpfx)tst-iconv_prog-buffer.out: \
+   tst-iconv_prog-buffer.sh $(objpfx)iconv_prog
+ 	$(BASH) $< $(common-objdir) '$(test-program-prefix)' > $@; \
+ 	$(evaluate-test)
++$(objpfx)tst-iconv_prog-buffer-tiny.out: \
++  tst-iconv_prog-buffer.sh $(objpfx)iconv_prog
++	$(BASH) $< $(common-objdir) '$(test-program-prefix)' \
++	  '--buffer-size=1' > $@; \
++	$(evaluate-test)
++$(objpfx)tst-iconv_prog-buffer-large.out: \
++  tst-iconv_prog-buffer.sh $(objpfx)iconv_prog
++	$(BASH) $< $(common-objdir) '$(test-program-prefix)' '' '22' > $@; \
++	$(evaluate-test)
+diff -Nrup a/iconv/iconv_prog.c b/iconv/iconv_prog.c
+--- a/iconv/iconv_prog.c	2024-11-21 11:08:26.167051537 -0500
++++ b/iconv/iconv_prog.c	2024-11-21 11:10:10.028745981 -0500
+@@ -48,7 +48,11 @@
+ static void print_version (FILE *stream, struct argp_state *state);
+ void (*argp_program_version_hook) (FILE *, struct argp_state *) = print_version;
+ 
+-#define OPT_VERBOSE	1000
++enum
++  {
++    OPT_VERBOSE = 1000,
++    OPT_BUFFER_SIZE,
++  };
+ #define OPT_LIST	'l'
+ 
+ /* Definitions of arguments for argp functions.  */
+@@ -64,6 +68,10 @@ static const struct argp_option options[
+   { "output", 'o', N_("FILE"), 0, N_("output file") },
+   { "silent", 's', NULL, 0, N_("suppress warnings") },
+   { "verbose", OPT_VERBOSE, NULL, 0, N_("print progress information") },
++  /* This is an internal option intended for testing only.  Very small
++     buffers do not work with all character sets.  */
++  { "buffer-size", OPT_BUFFER_SIZE, N_("BYTE-COUNT"), OPTION_HIDDEN,
++    N_("size of in-memory scratch buffer") },
+   { NULL, 0, NULL, 0, NULL }
+ };
+ 
+@@ -101,13 +109,20 @@ static int list;
+ /* If nonzero omit invalid character from output.  */
+ int omit_invalid;
+ 
++/* Current index in argv (after command line processing) with the
++   input file name.  */
++static int current_input_file_index;
++
++/* Size of the temporary, in-memory buffer.  Exceeding it needs
++   spooling to disk in a temporary file.  Controlled by --buffer_size.  */
++static size_t output_buffer_size = 1024 * 1024;
++
+ /* Prototypes for the functions doing the actual work.  */
+-static int process_block (iconv_t cd, char *addr, size_t len, FILE **output,
+-			  const char *output_file);
+-static int process_fd (iconv_t cd, int fd, FILE **output,
+-		       const char *output_file);
+-static int process_file (iconv_t cd, FILE *input, FILE **output,
+-			 const char *output_file);
++static void prepare_output_file (char **argv);
++static void close_output_file (int status);
++static int process_block (iconv_t cd, char *addr, size_t len);
++static int process_fd (iconv_t cd, int fd);
++static int process_file (iconv_t cd, FILE *input);
+ static void print_known_names (void);
+ 
+ 
+@@ -115,7 +130,6 @@ int
+ main (int argc, char *argv[])
+ {
+   int status = EXIT_SUCCESS;
+-  int remaining;
+   __gconv_t cd;
+   struct charmap_t *from_charmap = NULL;
+   struct charmap_t *to_charmap = NULL;
+@@ -127,7 +141,7 @@ main (int argc, char *argv[])
+   textdomain (_libc_intl_domainname);
+ 
+   /* Parse and process arguments.  */
+-  argp_parse (&argp, argc, argv, 0, &remaining, NULL);
++  argp_parse (&argp, argc, argv, 0, &current_input_file_index, NULL);
+ 
+   /* List all coded character sets if wanted.  */
+   if (list)
+@@ -162,7 +176,8 @@ main (int argc, char *argv[])
+   if (from_charmap != NULL || to_charmap != NULL)
+     /* Construct the conversion table and do the conversion.  */
+     status = charmap_conversion (from_code, from_charmap, to_code, to_charmap,
+-				 argc, remaining, argv, output_file);
++				 argc, current_input_file_index, argv,
++				 output_file);
+   else
+     {
+       struct gconv_spec conv_spec;
+@@ -236,16 +251,14 @@ conversions from `%s' and to `%s' are no
+ 		   _("failed to start conversion processing"));
+ 	}
+ 
+-      /* The output file.  Will be opened when we are ready to produce
+-	 output.  */
+-      FILE *output = NULL;
++      prepare_output_file (argv);
+ 
+       /* Now process the remaining files.  Write them to stdout or the file
+ 	 specified with the `-o' parameter.  If we have no file given as
+ 	 the parameter process all from stdin.  */
+-      if (remaining == argc)
++      if (current_input_file_index == argc)
+ 	{
+-	  if (process_file (cd, stdin, &output, output_file) != 0)
++	  if (process_file (cd, stdin) != 0)
+ 	    status = EXIT_FAILURE;
+ 	}
+       else
+@@ -254,17 +267,17 @@ conversions from `%s' and to `%s' are no
+ 	    int fd, ret;
+ 
+ 	    if (verbose)
+-	      fprintf (stderr, "%s:\n", argv[remaining]);
+-	    if (strcmp (argv[remaining], "-") == 0)
+-	      fd = 0;
++	      fprintf (stderr, "%s:\n", argv[current_input_file_index]);
++	    if (strcmp (argv[current_input_file_index], "-") == 0)
++	      fd = STDIN_FILENO;
+ 	    else
+ 	      {
+-		fd = open (argv[remaining], O_RDONLY);
++		fd = open (argv[current_input_file_index], O_RDONLY);
+ 
+ 		if (fd == -1)
+ 		  {
+ 		    error (0, errno, _("cannot open input file `%s'"),
+-			   argv[remaining]);
++			   argv[current_input_file_index]);
+ 		    status = EXIT_FAILURE;
+ 		    continue;
+ 		  }
+@@ -272,7 +285,7 @@ conversions from `%s' and to `%s' are no
+ 
+ 	      {
+ 		/* Read the file in pieces.  */
+-		ret = process_fd (cd, fd, &output, output_file);
++		ret = process_fd (cd, fd);
+ 
+ 		/* Now close the file.  */
+ 		close (fd);
+@@ -290,7 +303,7 @@ conversions from `%s' and to `%s' are no
+ 		  }
+ 	      }
+ 	  }
+-	while (++remaining < argc);
++	while (++current_input_file_index < argc);
+ 
+       /* Ensure that iconv -c still exits with failure if iconv (the
+ 	 function) has failed with E2BIG instead of EILSEQ.  */
+@@ -298,8 +311,7 @@ conversions from `%s' and to `%s' are no
+ 	status = EXIT_FAILURE;
+ 
+       /* Close the output file now.  */
+-      if (output != NULL && fclose (output))
+-	error (EXIT_FAILURE, errno, _("error while closing output file"));
++      close_output_file (status);
+     }
+ 
+   return status;
+@@ -329,6 +341,14 @@ parse_opt (int key, char *arg, struct ar
+       /* Omit invalid characters from output.  */
+       omit_invalid = 1;
+       break;
++    case OPT_BUFFER_SIZE:
++      {
++	int i = atoi (arg);
++	if (i <= 0)
++	  error (EXIT_FAILURE, 0, _("invalid buffer size: %s"), arg);
++	output_buffer_size = i;
++      }
++      break;
+     case OPT_VERBOSE:
+       verbose = 1;
+       break;
+@@ -375,59 +395,247 @@ warranty; not even for MERCHANTABILITY o
+   fprintf (stream, gettext ("Written by %s.\n"), "Ulrich Drepper");
+ }
+ 
++/* Command line index of the last input file that overlaps with the
++   output file.  Zero means no temporary file is ever required.  */
++static int last_overlapping_file_index;
+ 
+-static int
+-write_output (const char *outbuf, const char *outptr, FILE **output,
+-	      const char *output_file)
++/* This is set to true if the output is written to a temporary file.   */
++static bool output_using_temporary_file;
++
++/* This is the file descriptor that will be used by write_output.  */
++static int output_fd = -1;
++
++/* Pointers at the start and end of the fixed-size output buffer.  */
++static char *output_buffer_start;
++
++/* Current write position in the output buffer.  */
++static char *output_buffer_current;
++
++/* Remaining bytes after output_buffer_current in the output buffer.  */
++static size_t output_buffer_remaining;
++
++
++/* Reduce the buffer size when writing directly to the output file, to
++   reduce cache utilization.  */
++static size_t copy_buffer_size = BUFSIZ;
++
++static void
++output_error (void)
++{
++  error (EXIT_FAILURE, errno, _("cannot open output file"));
++}
++
++static void
++input_error (const char *path)
+ {
+-  /* We have something to write out.  */
+-  int errno_save = errno;
++  error (0, errno, _("cannot open input file `%s'"), path);
++}
+ 
+-  if (*output == NULL)
++/* Opens output_file for writing, truncating it.  */
++static void
++open_output_direct (void)
++{
++  output_fd = open64 (output_file, O_WRONLY | O_CREAT | O_TRUNC, 0777);
++  if (output_fd < 0)
++    output_error ();
++}
++
++static void
++prepare_output_file (char **argv)
++{
++  if (copy_buffer_size > output_buffer_size)
++    copy_buffer_size = output_buffer_size;
++
++  if (output_file == NULL || strcmp (output_file, "-") == 0)
++    {
++      /* No buffering is required when writing to standard output
++	 because input overlap is expected to be solved externally.  */
++      output_fd = STDOUT_FILENO;
++      output_buffer_size = copy_buffer_size;
++    }
++  else
+     {
+-      /* Determine output file.  */
+-      if (output_file != NULL && strcmp (output_file, "-") != 0)
++      /* If iconv creates the output file, no overlap is possible.  */
++      output_fd = open64 (output_file, O_WRONLY | O_CREAT | O_EXCL, 0777);
++      if (output_fd >= 0)
++	output_buffer_size = copy_buffer_size;
++      else
+ 	{
+-	  *output = fopen (output_file, "w");
+-	  if (*output == NULL)
+-	    error (EXIT_FAILURE, errno, _("cannot open output file"));
++	  /* Otherwise, check if any of the input files overlap with the
++	     output file.  */
++	  struct statx st;
++	  if (statx (AT_FDCWD, output_file, 0, STATX_INO | STATX_MODE, &st)
++	      != 0)
++	    output_error ();
++	  uint32_t out_dev_minor = st.stx_dev_minor;
++	  uint32_t out_dev_major = st.stx_dev_major;
++	  uint64_t out_ino = st.stx_ino;
++
++	  int idx = current_input_file_index;
++	  while (true)
++	    {
++	      /* Special case: no input files means standard input.  */
++	      if (argv[idx] == NULL && idx != current_input_file_index)
++		break;
++
++	      int ret;
++	      if (argv[idx] == NULL || strcmp (argv[idx], "-") == 0)
++		ret = statx (STDIN_FILENO, "", AT_EMPTY_PATH, STATX_INO, &st);
++	      else
++		ret = statx (AT_FDCWD, argv[idx], 0, STATX_INO, &st);
++	      if (ret != 0)
++		{
++		  input_error (argv[idx]);
++		  exit (EXIT_FAILURE);
++		}
++	      if (out_dev_minor == st.stx_dev_minor
++		  && out_dev_major == st.stx_dev_major
++		  && out_ino == st.stx_ino)
++		{
++		  if (argv[idx] == NULL)
++		    /* Corner case: index of NULL would be larger than
++		       idx while converting, triggering a switch away
++		       from the temporary file.  */
++		    last_overlapping_file_index = INT_MAX;
++		  else
++		    last_overlapping_file_index = idx;
++		}
++
++	      if (argv[idx] == NULL)
++		break;
++	      ++idx;
++	    }
++
++	  /* If there is no overlap, avoid using a temporary file.  */
++	  if (last_overlapping_file_index == 0)
++	    {
++	      open_output_direct ();
++	      output_buffer_size = copy_buffer_size;
++	    }
+ 	}
+-      else
+-	*output = stdout;
+     }
+ 
+-  if (fwrite (outbuf, 1, outptr - outbuf, *output) < (size_t) (outptr - outbuf)
+-      || ferror (*output))
++  output_buffer_start = malloc (output_buffer_size);
++  if (output_buffer_start == NULL)
++    output_error ();
++  output_buffer_current = output_buffer_start;
++  output_buffer_remaining = output_buffer_size;
++}
++
++/* Write out the range [first, last), terminating the process on write
++   error.  */
++static void
++write_fully (int fd, const char *first, const char *last)
++{
++  while (first < last)
+     {
+-      /* Error occurred while printing the result.  */
+-      error (0, 0, _("\
++      ssize_t ret = write (fd, first, last - first);
++      if (ret == 0)
++	{
++	  errno = ENOSPC;
++	  output_error ();
++	}
++      if (ret < 0)
++	error (EXIT_FAILURE, errno, _("\
+ conversion stopped due to problem in writing the output"));
+-      return -1;
++      first += ret;
+     }
++}
+ 
+-  errno = errno_save;
++static void
++flush_output (void)
++{
++  bool temporary_file_not_needed
++    = current_input_file_index > last_overlapping_file_index;
++  if (output_fd < 0)
++    {
++      if (temporary_file_not_needed)
++	open_output_direct ();
++      else
++	{
++	  /* Create an anonymous temporary file.  */
++	  FILE *fp = tmpfile ();
++	  if (fp == NULL)
++	    output_error ();
++	  output_fd = dup (fileno (fp));
++	  if (output_fd < 0)
++	    output_error ();
++	  fclose (fp);
++	  output_using_temporary_file = true;
++	}
++      /* Either way, no longer use a memory-only staging buffer.  */
++      output_buffer_size = copy_buffer_size;
++    }
++  else if (output_using_temporary_file && temporary_file_not_needed)
++    {
++      /* The temporary file is no longer needed.  Switch to direct
++	 output, replacing output_fd.  */
++      int temp_fd = output_fd;
++      open_output_direct ();
++
++      /* Copy over the data spooled to the temporary file.  */
++      if (lseek (temp_fd, 0, SEEK_SET) < 0)
++	output_error ();
++      while (true)
++	{
++	  char buf[BUFSIZ];
++	  ssize_t ret = read (temp_fd, buf, sizeof (buf));
++	  if (ret < 0)
++	    output_error ();
++	  if (ret == 0)
++	    break;
++	  write_fully (output_fd, buf, buf + ret);
++	}
++      close (temp_fd);
+ 
+-  return 0;
++      /* No longer using a temporary file from now on.  */
++      output_using_temporary_file = false;
++      output_buffer_size = copy_buffer_size;
++    }
++
++  write_fully (output_fd, output_buffer_start, output_buffer_current);
++  output_buffer_current = output_buffer_start;
++  output_buffer_remaining = output_buffer_size;
+ }
+ 
++static void
++close_output_file (int status)
++{
++  /* Do not perform a flush if a temporary file or the in-memory
++     buffer is in use and there was an error.  It would clobber the
++     overlapping input file.  */
++  if (status != EXIT_SUCCESS && !omit_invalid &&
++      (output_using_temporary_file || output_fd < 0))
++    return;
++
++  /* The current_input_file_index variable is now larger than
++     last_overlapping_file_index, so the flush_output call switches
++     away from the temporary file.  */
++  flush_output ();
++
++  if (output_fd == STDOUT_FILENO)
++    {
++      /* Close standard output in safe manner, to report certain
++	 ENOSPC errors.  */
++      output_fd = dup (output_fd);
++      if (output_fd < 0)
++	output_error ();
++    }
++  if (close (output_fd) < 0)
++    output_error ();
++}
+ 
+ static int
+-process_block (iconv_t cd, char *addr, size_t len, FILE **output,
+-	       const char *output_file)
++process_block (iconv_t cd, char *addr, size_t len)
+ {
+-#define OUTBUF_SIZE	32768
+   const char *start = addr;
+-  char outbuf[OUTBUF_SIZE];
+-  char *outptr;
+-  size_t outlen;
+   size_t n;
+   int ret = 0;
+ 
+   while (len > 0)
+     {
+-      outptr = outbuf;
+-      outlen = OUTBUF_SIZE;
+-      n = iconv (cd, &addr, &len, &outptr, &outlen);
++      n = iconv (cd, &addr, &len,
++		 &output_buffer_current, &output_buffer_remaining);
+ 
+       if (n == (size_t) -1 && omit_invalid && errno == EILSEQ)
+ 	{
+@@ -438,39 +646,34 @@ process_block (iconv_t cd, char *addr, s
+ 	    errno = E2BIG;
+ 	}
+ 
+-      if (outptr != outbuf)
+-	{
+-	  ret = write_output (outbuf, outptr, output, output_file);
+-	  if (ret != 0)
+-	    break;
+-	}
+-
+       if (n != (size_t) -1)
+ 	{
+ 	  /* All the input test is processed.  For state-dependent
+ 	     character sets we have to flush the state now.  */
+-	  outptr = outbuf;
+-	  outlen = OUTBUF_SIZE;
+-	  n = iconv (cd, NULL, NULL, &outptr, &outlen);
+-
+-	  if (outptr != outbuf)
++	  n = iconv (cd, NULL, NULL,
++		     &output_buffer_current, &output_buffer_remaining);
++	  if (n == (size_t) -1 && errno == E2BIG)
+ 	    {
+-	      ret = write_output (outbuf, outptr, output, output_file);
+-	      if (ret != 0)
+-		break;
++	      /* Try again if the state flush exceeded the buffer space.  */
++	      flush_output ();
++	      n = iconv (cd, NULL, NULL,
++			 &output_buffer_current, &output_buffer_remaining);
+ 	    }
++	  bool errno_is_EILSEQ = errno == EILSEQ;
+ 
+ 	  if (n != (size_t) -1)
+ 	    break;
+ 
+-	  if (omit_invalid && errno == EILSEQ)
++	  if (omit_invalid && errno_is_EILSEQ)
+ 	    {
+ 	      ret = 1;
+ 	      break;
+ 	    }
+ 	}
+ 
+-      if (errno != E2BIG)
++      if (errno == E2BIG)
++	flush_output ();
++      else
+ 	{
+ 	  /* iconv() ran into a problem.  */
+ 	  switch (errno)
+@@ -501,7 +704,7 @@ incomplete character or shift sequence a
+ 
+ 
+ static int
+-process_fd (iconv_t cd, int fd, FILE **output, const char *output_file)
++process_fd (iconv_t cd, int fd)
+ {
+   /* we have a problem with reading from a descriptor since we must not
+      provide the iconv() function an incomplete character or shift
+@@ -575,16 +778,16 @@ process_fd (iconv_t cd, int fd, FILE **o
+       }
+ 
+   /* Now we have all the input in the buffer.  Process it in one run.  */
+-  return process_block (cd, inbuf, actlen, output, output_file);
++  return process_block (cd, inbuf, actlen);
+ }
+ 
+ 
+ static int
+-process_file (iconv_t cd, FILE *input, FILE **output, const char *output_file)
++process_file (iconv_t cd, FILE *input)
+ {
+   /* This should be safe since we use this function only for `stdin' and
+      we haven't read anything so far.  */
+-  return process_fd (cd, fileno (input), output, output_file);
++  return process_fd (cd, fileno (input));
+ }
+ 
+ 
+diff -Nrup a/iconv/tst-iconv_prog-buffer.sh b/iconv/tst-iconv_prog-buffer.sh
+--- a/iconv/tst-iconv_prog-buffer.sh	2024-11-21 11:08:26.168051544 -0500
++++ b/iconv/tst-iconv_prog-buffer.sh	2024-11-21 11:08:51.326219757 -0500
+@@ -17,6 +17,12 @@
+ # License along with the GNU C Library; if not, see
+ # <https://www.gnu.org/licenses/>.
+ 
++# Arguments:
++#   root of the build tree ($(objpfx-common))
++#   test command wrapper (for running on the board/with new ld.so)
++#   extra flags to pass to iconv
++#   number of times to double the input files in size (default: 0)
++
+ exec 2>&1
+ set -e
+ 
+@@ -26,7 +32,9 @@ codir=$1
+ test_program_prefix="$2"
+ 
+ # Use internal converters to avoid issues with module loading.
+-iconv_args="-f ASCII -t UTF-8"
++iconv_args="-f ASCII -t UTF-8 $3"
++
++file_size_doublings=${4-0}
+ 
+ failure=false
+ 
+@@ -39,7 +47,19 @@ echo HH > "$tmp/hh"
+ echo XY > "$tmp/xy"
+ echo ZT > "$tmp/zt"
+ echo OUT > "$tmp/out-template"
++: > "$tmp/empty"
+ printf '\xff' > "$tmp/0xff"
++
++# Double all files to produce larger buffers.
++for p in "$tmp"/* ; do
++    i=0
++    while test $i -lt $file_size_doublings; do
++	cat "$p" "$p" > "$tmp/scratch"
++	mv "$tmp/scratch" "$p"
++	i=$(($i + 1))
++    done
++done
++
+ cat "$tmp/xy" "$tmp/0xff" "$tmp/zt" > "$tmp/0xff-wrapped"
+ 
+ run_iconv () {
+@@ -113,6 +133,38 @@ expect_files abc def
+ run_iconv -o "$tmp/out" "$tmp/out" "$tmp/abc"
+ expect_files abc def abc
+ 
++run_iconv -o "$tmp/out" "$tmp/ggg" "$tmp/out"
++expect_files ggg abc def abc
++
++run_iconv -o "$tmp/out" "$tmp/hh" "$tmp/out" "$tmp/hh"
++expect_files hh ggg abc def abc hh
++
++cp "$tmp/out-template" "$tmp/out"
++run_iconv -o "$tmp/out" "$tmp/ggg" "$tmp/out" "$tmp/out" "$tmp/ggg"
++expect_files ggg out-template out-template ggg
++
++cp "$tmp/out-template" "$tmp/out"
++run_iconv -o "$tmp/out" "$tmp/ggg" "$tmp/out" "$tmp/hh" "$tmp/out" "$tmp/ggg"
++expect_files ggg out-template hh out-template ggg
++
++# Empty output should truncate the output file if exists.
++
++cp "$tmp/out-template" "$tmp/out"
++run_iconv -o "$tmp/out" </dev/null
++expect_files empty
++
++cp "$tmp/out-template" "$tmp/out"
++run_iconv -o "$tmp/out" - </dev/null
++expect_files empty
++
++cp "$tmp/out-template" "$tmp/out"
++run_iconv -o "$tmp/out" /dev/null
++expect_files empty
++
++cp "$tmp/out-template" "$tmp/out"
++expect_exit 1 run_iconv -c -o "$tmp/out" "$tmp/0xff"
++expect_files empty
++
+ # But not if we are writing to standard output.
+ 
+ cp "$tmp/out-template" "$tmp/out"
+@@ -142,8 +194,36 @@ cp "$tmp/0xff" "$tmp/out"
+ expect_exit 1 run_iconv -o "$tmp/out" - < "$tmp/out"
+ expect_files 0xff
+ 
++cp "$tmp/0xff-wrapped" "$tmp/out"
++expect_exit 1 run_iconv -o "$tmp/out" "$tmp/out"
++expect_files 0xff-wrapped
++
++cp "$tmp/0xff-wrapped" "$tmp/out"
++expect_exit 1 run_iconv -o "$tmp/out" < "$tmp/out"
++expect_files 0xff-wrapped
++
++cp "$tmp/0xff-wrapped" "$tmp/out"
++expect_exit 1 run_iconv -o "$tmp/out" - < "$tmp/out"
++expect_files 0xff-wrapped
++
++cp "$tmp/0xff-wrapped" "$tmp/out"
++expect_exit 1 run_iconv -o "$tmp/out" "$tmp/abc" "$tmp/out"
++expect_files 0xff-wrapped
++
++cp "$tmp/0xff-wrapped" "$tmp/out"
++expect_exit 1 run_iconv -o "$tmp/out" "$tmp/abc" - < "$tmp/out"
++expect_files 0xff-wrapped
++
+ # If errors are ignored, the file should be overwritten.
+ 
++cp "$tmp/0xff-wrapped" "$tmp/out"
++expect_exit 1 run_iconv -c -o "$tmp/out" "$tmp/out"
++expect_files xy zt
++
++cp "$tmp/0xff" "$tmp/out"
++expect_exit 1 run_iconv -c -o "$tmp/out" "$tmp/abc" "$tmp/out" "$tmp/def"
++expect_files abc def
++
+ cp "$tmp/out-template" "$tmp/out"
+ expect_exit 1 \
+     run_iconv -c -o "$tmp/out" "$tmp/abc" "$tmp/0xff" "$tmp/def" 2>"$tmp/err"
+@@ -156,6 +236,20 @@ expect_exit 1 run_iconv -c -o "$tmp/out"
+ ! test -s "$tmp/err"
+ expect_files abc xy zt def
+ 
++cp "$tmp/0xff-wrapped" "$tmp/out"
++expect_exit 1 run_iconv -c -o "$tmp/out" "$tmp/out" "$tmp/abc" "$tmp/out" "$tmp/def"
++expect_files xy zt abc xy zt def
++
++cp "$tmp/0xff-wrapped" "$tmp/out"
++expect_exit 1 run_iconv -o "$tmp/out" \
++    "$tmp/out" "$tmp/abc" "$tmp/out" "$tmp/def"
++expect_files 0xff-wrapped
++
++cp "$tmp/0xff-wrapped" "$tmp/out"
++expect_exit 1 run_iconv -c -o "$tmp/out" \
++    "$tmp/abc" "$tmp/out" "$tmp/def" "$tmp/out"
++expect_files abc xy zt def xy zt
++
+ # If the file does not exist yet, it should not be created on error.
+ 
+ rm "$tmp/out"

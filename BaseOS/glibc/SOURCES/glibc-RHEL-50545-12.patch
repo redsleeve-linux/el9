@@ -1,0 +1,40 @@
+From 455c7622835d16c79e49fe75b8d3a1ae59a3d0ee Mon Sep 17 00:00:00 2001
+From: Florian Weimer <fweimer@redhat.com>
+Date: Sat, 21 Sep 2024 19:25:35 +0200
+Subject: [PATCH] support: Fix memory leaks in FUSE tests
+Content-type: text/plain; charset=UTF-8
+
+The internal read buffer (used by all FUSE tests) was not freed.
+The support/tst-support_fuse test missed a deallocation.
+---
+ support/support_fuse.c     | 1 +
+ support/tst-support_fuse.c | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/support/support_fuse.c b/support/support_fuse.c
+index 135dbf1198..f6c063b549 100644
+--- a/support/support_fuse.c
++++ b/support/support_fuse.c
+@@ -659,6 +659,7 @@ support_fuse_unmount (struct support_fuse *f)
+   if (rmdir (f->mountpoint) != 0)
+     FAIL ("FUSE: rmdir (\"%s\"): %m", f->mountpoint);
+   xclose (f->fd);
++  free (f->buffer_start);
+   free (f->mountpoint);
+   free (f->readdir_buffer);
+   free (f);
+diff --git a/support/tst-support_fuse.c b/support/tst-support_fuse.c
+index c4075a6608..9ee637cbab 100644
+--- a/support/tst-support_fuse.c
++++ b/support/tst-support_fuse.c
+@@ -331,6 +331,7 @@ do_test (void)
+   {
+     char *subdir_path = xasprintf ("%s/subdir", support_fuse_mountpoint (f));
+     xmkdir (subdir_path, 01234);
++    free (subdir_path);
+   }
+ 
+   {
+-- 
+2.43.5
+

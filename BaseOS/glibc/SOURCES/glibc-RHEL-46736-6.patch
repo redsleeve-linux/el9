@@ -1,0 +1,119 @@
+commit 9c0d6f7a1046aba111e25e34ec07242853e859dc
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Thu Sep 5 11:16:59 2024 +0000
+
+    Fix memory leak on freopen error return (bug 32140)
+    
+    As reported in bug 32140, freopen leaks the FILE object when it
+    returns NULL: there is no valid use of the FILE * pointer (including
+    passing to freopen again or to fclose) after such an error return, so
+    the underlying object should be freed.  Add code to free it.
+    
+    Note 1: while I think it's clear from the relevant standards that the
+    object should be freed and the FILE * can't be used after the call in
+    this case (the stream is closed, which ends the lifetime of the FILE),
+    it's entirely possible that some existing code does in fact try to use
+    the existing FILE * in some way and could be broken by this change.
+    (Though the most common case for freopen may be stdin / stdout /
+    stderr, which _IO_deallocate_file explicitly checks for and does not
+    deallocate.)
+    
+    Note 2: the deallocation is only done in the _IO_IS_FILEBUF case.
+    Other kinds of streams bypass all the freopen logic handling closing
+    the file, meaning a call to _IO_deallocate_file would neither be safe
+    (the FILE might still be linked into the list of all open FILEs) nor
+    sufficient (other internal memory allocations associated with the file
+    would not have been freed).  I think the validity of freopen for any
+    other kind of stream will need clarifying with the Austin Group, but
+    if it is valid in any such case (where "valid" means "not undefined
+    behavior so required to close the stream" rather than "required to
+    successfully associate the stream with the new file in cases where
+    fopen would work"), more significant changes would be needed to ensure
+    the stream gets fully closed.
+    
+    Tested for x86_64.
+
+diff --git a/libio/freopen.c b/libio/freopen.c
+index bed034d89441f200..03f8961a61b12e80 100644
+--- a/libio/freopen.c
++++ b/libio/freopen.c
+@@ -114,5 +114,7 @@ freopen (const char *filename, const char *mode, FILE *fp)
+ 
+ end:
+   _IO_release_lock (fp);
++  if (result == NULL && (fp->_flags & _IO_IS_FILEBUF) != 0)
++    _IO_deallocate_file (fp);
+   return result;
+ }
+diff --git a/libio/freopen64.c b/libio/freopen64.c
+index 9a314c65c1d8a5a4..abcbd80a5bd92e69 100644
+--- a/libio/freopen64.c
++++ b/libio/freopen64.c
+@@ -94,5 +94,7 @@ freopen64 (const char *filename, const char *mode, FILE *fp)
+ 
+ end:
+   _IO_release_lock (fp);
++  if (result == NULL && (fp->_flags & _IO_IS_FILEBUF) != 0)
++    _IO_deallocate_file (fp);
+   return result;
+ }
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index 5eddc4bfbf4e7fb9..bd3c785537ba0330 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -251,7 +251,9 @@ ifeq (yes,$(build-shared))
+ ifneq ($(PERL),no)
+ tests-special += \
+   $(objpfx)tst-freopen2-mem.out \
++  $(objpfx)tst-freopen3-mem.out \
+   $(objpfx)tst-freopen64-2-mem.out \
++  $(objpfx)tst-freopen64-3-mem.out \
+   $(objpfx)tst-getline-enomem-mem.out \
+   $(objpfx)tst-getline-mem.out \
+   $(objpfx)tst-printf-bz18872-mem.out \
+@@ -264,8 +266,12 @@ tests-special += \
+ generated += \
+   tst-freopen2-mem.out \
+   tst-freopen2.mtrace \
++  tst-freopen3-mem.out \
++  tst-freopen3.mtrace \
+   tst-freopen64-2-mem.out \
+   tst-freopen64-2.mtrace \
++  tst-freopen64-3-mem.out \
++  tst-freopen64-3.mtrace \
+   tst-getline-enomem-mem.out \
+   tst-getline-enomem.mtrace \
+   tst-getline-mem.out \
+@@ -344,6 +350,12 @@ tst-freopen2-ENV = \
+ tst-freopen64-2-ENV = \
+   MALLOC_TRACE=$(objpfx)tst-freopen64-2.mtrace \
+   LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
++tst-freopen3-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-freopen3.mtrace \
++  LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
++tst-freopen64-3-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-freopen64-3.mtrace \
++  LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
+ 
+ $(objpfx)tst-unbputc.out: tst-unbputc.sh $(objpfx)tst-unbputc
+ 	$(SHELL) $< $(common-objpfx) '$(test-program-prefix)'; \
+diff --git a/stdio-common/tst-freopen3-main.c b/stdio-common/tst-freopen3-main.c
+index 5107e1f98e189e4b..990a6e5921843793 100644
+--- a/stdio-common/tst-freopen3-main.c
++++ b/stdio-common/tst-freopen3-main.c
+@@ -18,6 +18,7 @@
+ 
+ #include <errno.h>
+ #include <fcntl.h>
++#include <mcheck.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ 
+@@ -48,6 +49,7 @@
+ int
+ do_test (void)
+ {
++  mtrace ();
+   struct support_descriptors *fds;
+   char *temp_dir = support_create_temp_directory ("tst-freopen3");
+   char *file1 = xasprintf ("%s/file1", temp_dir);

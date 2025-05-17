@@ -1,0 +1,882 @@
+commit 7a61e7f557a97ab597d6fca5e2d1f13f65685c61
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Nov 21 21:10:52 2024 +0100
+
+    stdlib: Make getenv thread-safe in more cases
+
+    Async-signal-safety is preserved, too.  In fact, getenv is fully
+    reentrant and can be called from the malloc call in setenv
+    (if a replacement malloc uses getenv during its initialization).
+
+    This is relatively easy to implement because even before this change,
+    setenv, unsetenv, clearenv, putenv do not deallocate the environment
+    strings themselves as they are removed from the environment.
+
+    The main changes are:
+
+    * Use release stores for environment array updates, following
+      the usual pattern for safely publishing immutable data
+      (in this case, the environment strings).
+
+    * Do not deallocate the environment array.  Instead, keep older
+      versions around and adopt an  exponential resizing policy.  This
+      results in an amortized constant space leak per active environment
+      variable, but there already is such a leak for the variable itself
+      (and that is even length-dependent, and includes no-longer used
+      values).
+
+    * Add a seqlock-like mechanism to retry getenv if a concurrent
+      unsetenv is observed.  Without that, it is possible that
+      getenv returns NULL for a variable that is never unset.  This
+      is visible on some AArch64 implementations with the newly
+      added stdlib/tst-getenv-unsetenv test case.  The mechanism
+      is not a pure seqlock because it tolerates one write from
+      unsetenv.  This avoids the need for a second copy of the
+      environ array that getenv can read from a signal handler
+      that happens to interrupt an unsetenv call.
+
+    No manual updates are included with this patch because environ
+    usage with execve, posix_spawn, system is still not thread-safe
+    relative unsetenv.  The new process may end up with an environment
+    that misses entries that were never unset.  This is the same issue
+    described above for getenv.
+
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff -Nrup a/stdlib/Makefile b/stdlib/Makefile
+--- a/stdlib/Makefile	2025-02-26 21:42:43.588147025 -0500
++++ b/stdlib/Makefile	2025-02-26 21:51:09.401674391 -0500
+@@ -95,6 +95,9 @@ tests := \
+   tst-canon-bz26341 \
+   tst-cxa_atexit \
+   tst-environ \
++  tst-getenv-signal \
++  tst-getenv-thread \
++  tst-getenv-unsetenv \
+   tst-getrandom \
+   tst-limits \
+   tst-makecontext \
+@@ -302,3 +305,7 @@ $(objpfx)tst-setcontext3.out: tst-setcon
+ 		 '$(run-program-env)' '$(test-program-prefix-after-env)' \
+ 		 $(common-objpfx)stdlib/; \
+ 	$(evaluate-test)
++
++$(objpfx)tst-getenv-signal: $(shared-thread-library)
++$(objpfx)tst-getenv-thread: $(shared-thread-library)
++$(objpfx)tst-getenv-unsetenv: $(shared-thread-library)
+diff -Nrup a/stdlib/getenv.c b/stdlib/getenv.c
+--- a/stdlib/getenv.c	2025-02-26 21:42:43.962148893 -0500
++++ b/stdlib/getenv.c	2025-02-26 19:53:57.392341787 -0500
+@@ -15,24 +15,144 @@
+    License along with the GNU C Library; if not, see
+    <https://www.gnu.org/licenses/>.  */
+ 
+-#include <stdlib.h>
++#include <atomic.h>
++#include <setenv.h>
+ #include <string.h>
+ #include <unistd.h>
+ 
++struct environ_array *__environ_array_list;
++environ_counter __environ_counter;
++
+ char *
+ getenv (const char *name)
+ {
+-  if (__environ == NULL || name[0] == '\0')
+-    return NULL;
+-
+-  size_t len = strlen (name);
+-  for (char **ep = __environ; *ep != NULL; ++ep)
++  while (true)
+     {
+-      if (name[0] == (*ep)[0]
+-	  && strncmp (name, *ep, len) == 0 && (*ep)[len] == '=')
+-	return *ep + len + 1;
+-    }
++      /* Used to deal with concurrent unsetenv.  */
++      environ_counter start_counter = atomic_load_acquire (&__environ_counter);
++
++      /* We use relaxed MO for loading the string pointers because we
++	 assume the strings themselves are immutable and that loads
++	 through the string pointers carry a dependency.  (This
++	 depends on the the release MO store to __environ in
++	 __add_to_environ.)  Objects pointed to by pointers stored in
++	 the __environ array are never modified or deallocated (except
++	 perhaps if putenv is used, but then synchronization is the
++	 responsibility of the applications).  The backing store for
++	 __environ is allocated zeroed.  In summary, we can assume
++	 that the pointers we observe are either valid or null, and
++	 that only initialized string contents is visible.  */
++      char **start_environ = atomic_load_relaxed (&__environ);
++      if (start_environ == NULL || name[0] == '\0')
++	return NULL;
++
++      size_t len = strlen (name);
++      for (char **ep = start_environ; ; ++ep)
++	{
++	  char *entry = atomic_load_relaxed (ep);
++	  if (entry == NULL)
++	    break;
++
++	  /* If there is a match, return that value.  It was valid at
++	     one point, so we can return it.  */
++	  if (name[0] == entry[0]
++	      && strncmp (name, entry, len) == 0 && entry[len] == '=')
++	    return entry + len + 1;
++	}
++
++      /* The variable was not found.  This might be a false negative
++	 because unsetenv has shuffled around entries.  Check if it is
++	 necessary to retry.  */
++
++      /* See Hans Boehm, Can Seqlocks Get Along with Programming Language
++	 Memory Models?, Section 4.  This is necessary so that loads in
++	 the loop above are not ordered past the counter check below.  */
++      atomic_thread_fence_acquire ();
++
++      if (atomic_load_acquire (&__environ_counter) == start_counter)
++	  /* If we reach this point and there was a concurrent
++	     unsetenv call which removed the key we tried to find, the
++	     NULL return value is valid.  We can also try again, not
++	     find the value, and then return NULL (assuming there are
++	     no further concurrent unsetenv calls).
++
++	     However, if getenv is called to find a value that is
++	     present originally and not removed by any of the
++	     concurrent unsetenv calls, we must not return NULL here.
++
++	     If the counter did not change, there was at most one
++	     write to the array in unsetenv while the scanning loop
++	     above was running.  This means that there are at most two
++	     different versions of the array to consider.  For the
++	     sake of argument, we assume that each load can make an
++	     independent choice which version to use.  An arbitrary
++	     number of unsetenv and setenv calls may have happened
++	     since start of getenv.  Lets write E[0], E[1], ... for
++	     the original environment elements, a(0) < (1) < ... for a
++	     sequence of increasing integers that are the indices of
++	     the environment variables remaining after the removals, and
++	     N[0], N[1], ... for the new variables added by setenv or
++	     putenv.  Then at the start of the last unsetenv call, the
++	     environment contains
++
++	       E[a(0)], E[a(1)], ..., N[0], N[1], ...
+ 
+-  return NULL;
++	     (the N[0], N[1], .... are optional.)  Let's assume that
++	     we are looking for the value E[j].  Then one of the
++	     a(i) == j (otherwise we may return NULL here because
++	     of a unsetenv for the value we are looking for).  In the
++	     discussion below it will become clear that the N[k] do
++	     not actually matter.
++
++	     The two versions of array we can choose from differ only
++	     in one element, say E[a(i)].  There are two cases:
++
++	     Case (A): E[a(i)] is an element being removed by unsetenv
++	     (the target of the first write).  We can see the original
++	     version:
++
++	     ..., E[a(i-1)], E[a(i)],   E[a(i+1)], ..., N[0], ...
++                             -------
++	     And the overwritten version:
++
++	     ..., E[a(i-1)], E[a(i+1)], E[a(i+1)], ..., N[0], ...
++                             ---------
++
++             (The valueE[a(i+1)] can be the terminating NULL.)
++	     As discussed, we are not considering the removal of the
++	     variable being searched for, so a(i) != j, and the
++	     variable getenv is looking for is available in either
++	     version, and we would have found it above.
++
++	     Case (B): E[a(i)] is an element that has already been
++	     moved forward and is now itself being overwritten with
++	     its sucessor value E[a(i+1)].  The two versions of the
++	     array look like this:
++
++	     ..., E[a(i-1)], E[a(i)], E[a(i)],   E[a(i+1)], ..., N[0], ...
++                                      -------
++	     And with the overwrite in place:
++
++	     ..., E[a(i-1)], E[a(i)], E[a(i+1)], E[a(i+1)], ..., N[0], ...
++                                      ---------
++
++             The key observation here is that even in the second
++             version with the overwrite present, the scanning loop
++             will still encounter the overwritten value E[a(i)] in the
++             previous array element.  This means that as long as the
++             E[j] is still present among the initial E[a(...)] (as we
++             assumed because there is no concurrent unsetenv for
++             E[j]), we encounter it while scanning here in getenv.
++
++	     In summary, if there was at most one write, a negative
++	     result is a true negative, and we can return NULL.  This
++	     is different from the seqlock paper, which retries if
++	     there was any write at all.  It avoids the need for a
++	     second, unwritten copy for async-signal-safety.  */
++	return NULL;
++      /* If there was one more write, retry.  This will never happen
++	 in a signal handler that interrupted unsetenv because the
++	 suspended unsetenv call cannot change the counter value.  */
++    }
+ }
+ libc_hidden_def (getenv)
+diff -Nrup a/stdlib/setenv.c b/stdlib/setenv.c
+--- a/stdlib/setenv.c	2025-02-26 21:42:43.964148903 -0500
++++ b/stdlib/setenv.c	2025-02-26 19:53:57.392341787 -0500
+@@ -19,6 +19,9 @@
+ # include <config.h>
+ #endif
+ 
++#include <assert.h>
++#include <setenv.h>
++
+ /* Pacify GCC; see the commentary about VALLEN below.  This is needed
+    at least through GCC 4.9.2.  Pacify GCC for the entire file, as
+    there seems to be no way to pacify GCC selectively, only for the
+@@ -100,25 +103,51 @@ static void *known_values;
+ 
+ #endif
+ 
++/* Allocate a new environment array and put it o the
++   __environ_array_list.  Returns NULL on memory allocation
++   failure.  */
++static struct environ_array *
++__environ_new_array (size_t required_size)
++{
++  /* No backing array yet, or insufficient room.  */
++  size_t new_size;
++  if (__environ_array_list == NULL
++      || __environ_array_list->allocated * 2 < required_size)
++    /* Add some unused space for future growth.  */
++    new_size = required_size + 16;
++  else
++    new_size = __environ_array_list->allocated * 2;
++
++  size_t new_size_in_bytes;
++  if (__builtin_mul_overflow (new_size, sizeof (char *),
++			      &new_size_in_bytes)
++      || __builtin_add_overflow (new_size_in_bytes,
++				 offsetof (struct environ_array,
++					   array),
++				 &new_size_in_bytes))
++    {
++      __set_errno (ENOMEM);
++      return NULL;
++    }
+ 
+-/* If this variable is not a null pointer we allocated the current
+-   environment.  */
+-static char **last_environ;
+-
++  /* Zero-initialize everything, so that getenv can only
++     observe valid or null pointers.  */
++  struct environ_array *target_array = calloc (1, new_size_in_bytes);
++  if (target_array == NULL)
++    return NULL;
++  target_array->allocated = new_size;
++  assert (new_size >= target_array->allocated);
++
++  /* Put it onto the list.  */
++  target_array->next = __environ_array_list;
++  __environ_array_list = target_array;
++  return target_array;
++}
+ 
+-/* This function is used by `setenv' and `putenv'.  The difference between
+-   the two functions is that for the former must create a new string which
+-   is then placed in the environment, while the argument of `putenv'
+-   must be used directly.  This is all complicated by the fact that we try
+-   to reuse values once generated for a `setenv' call since we can never
+-   free the strings.  */
+ int
+ __add_to_environ (const char *name, const char *value, const char *combined,
+ 		  int replace)
+ {
+-  char **ep;
+-  size_t size;
+-
+   /* Compute lengths before locking, so that the critical section is
+      less of a performance bottleneck.  VALLEN is needed only if
+      COMBINED is null (unfortunately GCC is not smart enough to deduce
+@@ -133,45 +162,85 @@ __add_to_environ (const char *name, cons
+   LOCK;
+ 
+   /* We have to get the pointer now that we have the lock and not earlier
+-     since another thread might have created a new environment.  */
+-  ep = __environ;
++     since another thread might have created a new environment.   */
++  char **start_environ = atomic_load_relaxed (&__environ);
++  char **ep = start_environ;
++
++  /* This gets written to __environ in the end.  */
++  char **result_environ = start_environ;
+ 
+-  size = 0;
++  /* Size of the environment if *ep == NULL.  */
+   if (ep != NULL)
+-    {
+-      for (; *ep != NULL; ++ep)
+-	if (!strncmp (*ep, name, namelen) && (*ep)[namelen] == '=')
+-	  break;
+-	else
+-	  ++size;
+-    }
++    for (; *ep != NULL; ++ep)
++      if (strncmp (*ep, name, namelen) == 0 && (*ep)[namelen] == '=')
++	break;
+ 
+-  if (ep == NULL || __builtin_expect (*ep == NULL, 1))
++  if (ep == NULL || __glibc_likely (*ep == NULL))
+     {
+-      char **new_environ;
+-
+-      /* We allocated this space; we can extend it.  Avoid using the raw
+-	 reallocated pointer to avoid GCC -Wuse-after-free.  */
+-      uintptr_t ip_last_environ = (uintptr_t)last_environ;
+-      new_environ = (char **) realloc (last_environ,
+-				       (size + 2) * sizeof (char *));
+-      if (new_environ == NULL)
++      /* The scanning loop above reached the end of the environment.
++	 Add a new string to it.  */
++      replace = true;
++
++      /* + 2 for the new entry and the terminating NULL.  */
++      size_t required_size = (ep - start_environ) + 2;
++      if (__environ_is_from_array_list (start_environ)
++	  && required_size <= __environ_array_list->allocated)
++	/* The __environ array is ours, and we have room in it.  We
++	   can use ep as-is.  Add a null terminator in case current
++	   usage is less than previous usage.  */
++	ep[1] = NULL;
++      else
+ 	{
+-	  UNLOCK;
+-	  return -1;
+-	}
++	  /* We cannot use __environ as is and need to copy over the
++	     __environ contents into an array managed via
++	     __environ_array_list.  */
++
++	  struct environ_array *target_array;
++	  if (__environ_array_list != NULL
++	      && required_size <= __environ_array_list->allocated)
++	    /* Existing array has enough room.  Contents is copied below.  */
++	    target_array = __environ_array_list;
++	  else
++	    {
++	      /* Allocate a new array.  */
++	      target_array = __environ_new_array (required_size);
++	      if (target_array == NULL)
++		{
++		  UNLOCK;
++		  return -1;
++		}
++	    }
+ 
+-      if ((uintptr_t)__environ != ip_last_environ)
+-	memcpy ((char *) new_environ, (char *) __environ,
+-		size * sizeof (char *));
+-
+-      new_environ[size] = NULL;
+-      new_environ[size + 1] = NULL;
+-      ep = new_environ + size;
++	  /* Copy over the __environ array contents.  This forward
++	     copy slides backwards part of the array if __environ
++	     points into target_array->array.  This happens if an
++	     application makes an assignment like:
++
++	       environ = &environ[1];
++
++	     The forward copy avoids clobbering values that still
++	     needing copying.  This code handles the case
++	     start_environ == ep == NULL, too.  */
++	  size_t i;
++	  for (i = 0; start_environ + i < ep; ++i)
++	    /* Regular store because unless there has been direct
++	       manipulation of the environment, target_array is still
++	       a private copy.  */
++	    target_array->array[i] = atomic_load_relaxed (start_environ + i);
++
++	  /* This is the new place where we should add the element.  */
++	  ep = target_array->array + i;
++
++	  /* Add the null terminator in case there was a pointer there
++	     previously.  */
++	  ep[1] = NULL;
+ 
+-      last_environ = __environ = new_environ;
++	  /* And __environ should be repointed to our array.  */
++	  result_environ = &target_array->array[0];
++	}
+     }
+-  if (*ep == NULL || replace)
++
++  if (replace || *ep == NULL)
+     {
+       char *np;
+ 
+@@ -213,7 +282,12 @@ __add_to_environ (const char *name, cons
+ #endif
+ 	}
+ 
+-      *ep = np;
++      /* Use release MO so that loads are sufficient to observe the
++	 pointer contents because the CPU carries the dependency for
++	 us.  This also acts as a thread fence, making getenv
++	 async-signal-safe.  */
++      atomic_store_release (ep, np);
++      atomic_store_release (&__environ, result_environ);
+     }
+ 
+   UNLOCK;
+@@ -249,18 +323,40 @@ unsetenv (const char *name)
+ 
+   LOCK;
+ 
+-  ep = __environ;
++  ep = atomic_load_relaxed (&__environ);
+   if (ep != NULL)
+-    while (*ep != NULL)
++    while (true)
+       {
+-	if (!strncmp (*ep, name, len) && (*ep)[len] == '=')
++	char *entry = atomic_load_relaxed (ep);
++	if (entry == NULL)
++	  break;
++	if (strncmp (entry, name, len) == 0 && entry[len] == '=')
+ 	  {
+ 	    /* Found it.  Remove this pointer by moving later ones back.  */
+ 	    char **dp = ep;
+ 
+-	    do
+-		dp[0] = dp[1];
+-	    while (*dp++);
++	    while (true)
++	      {
++		char *next_value = atomic_load_relaxed (dp + 1);
++		/* This store overwrites a value that has been
++		   removed, or that has already been written to a
++		   previous value.  Release MO so that this store does
++		   not get reordered before the counter update in the
++		   previous loop iteration.  */
++		atomic_store_release (dp, next_value);
++		/* Release store synchronizes with acquire loads in
++		   getenv.  Non-atomic update because there is just
++		   one writer due to the lock.
++
++		   See discussion of the counter check in getenv for
++		   an explanation why this is sufficient synchronization.  */
++		atomic_store_release (&__environ_counter,
++				      atomic_load_relaxed (&__environ_counter)
++				      + 1);
++		if (next_value == NULL)
++		  break;
++		++dp;
++	      }
+ 	    /* Continue the loop in case NAME appears again.  */
+ 	  }
+ 	else
+@@ -279,17 +375,20 @@ int
+ clearenv (void)
+ {
+   LOCK;
+-
+-  if (__environ == last_environ && __environ != NULL)
++  char **start_environ = atomic_load_relaxed (&__environ);
++  if (__environ_is_from_array_list (start_environ))
+     {
+-      /* We allocated this environment so we can free it.  */
+-      free (__environ);
+-      last_environ = NULL;
++      /* Store null pointers to avoid strange effects when the array
++	 is reused in setenv.  */
++      for (char **ep = start_environ; *ep != NULL; ++ep)
++	atomic_store_relaxed (ep, NULL);
++      /* Update the counter similar to unsetenv, so that the writes in
++	 setenv do not need to update the counter.  */
++      atomic_store_release (&__environ_counter,
++			    atomic_load_relaxed (&__environ_counter) + 1);
+     }
+ 
+-  /* Clear the environment pointer removes the whole environment.  */
+-  __environ = NULL;
+-
++  atomic_store_relaxed (&__environ, NULL);
+   UNLOCK;
+ 
+   return 0;
+@@ -300,6 +399,14 @@ libc_freeres_fn (free_mem)
+   /* Remove all traces.  */
+   clearenv ();
+ 
++  /* Clear all backing arrays.  */
++  while (__environ_array_list != NULL)
++    {
++      void *ptr = __environ_array_list;
++      __environ_array_list = __environ_array_list->next;
++      free (ptr);
++    }
++
+   /* Now remove the search tree.  */
+   __tdestroy (known_values, free);
+   known_values = NULL;
+diff -Nrup a/stdlib/setenv.h b/stdlib/setenv.h
+--- a/stdlib/setenv.h	1969-12-31 19:00:00.000000000 -0500
++++ b/stdlib/setenv.h	2025-02-26 19:53:57.392341787 -0500
+@@ -0,0 +1,73 @@
++/* Common declarations for the setenv/getenv family of functions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _SETENV_H
++#define _SETENV_H
++
++#include <atomic.h>
++#include <stdbool.h>
++
++/* We use an exponential sizing policy for environment arrays.  The
++   arrays are not deallocating during the lifetime of the process.
++   This adds between one and two additional pointers per active
++   environemnt entry, on top of what is used by setenv to keep track
++   of environment values used before.  */
++struct environ_array
++{
++  struct environ_array *next;   /* Previously used environment array.  */
++  size_t allocated;             /* Number of allocated array elments.  */
++  char *array[];               /* The actual environment array.  */
++};
++
++/* After initialization, and until the user resets environ (perhaps by
++   calling clearenv), &__environ[0] == &environ_array_list->array[0].  */
++extern struct environ_array *__environ_array_list attribute_hidden;
++
++/* Returns true if EP (which should be an __environ value) is a
++   pointer managed by setenv.  */
++static inline bool
++__environ_is_from_array_list (char **ep)
++{
++  struct environ_array *eal = atomic_load_relaxed (&__environ_array_list);
++  return eal != NULL && &eal->array[0] == ep;
++}
++
++/* Counter for detecting concurrent modification in unsetenv.
++   Ideally, this should be a 64-bit counter that cannot wrap around,
++   but given that counter wrapround is probably impossible to hit
++   (2**32 operations in unsetenv concurrently with getenv), using
++   <atomic_wide_counter.h> seems unnecessary.  */
++#if __HAVE_64B_ATOMICS
++typedef uint64_t environ_counter;
++#else
++typedef uint32_t environ_counter;
++#endif
++
++/* Updated by unsetenv to detect multiple overwrites in getenv.  */
++extern environ_counter __environ_counter attribute_hidden;
++
++/* This function is used by `setenv' and `putenv'.  The difference between
++   the two functions is that for the former must create a new string which
++   is then placed in the environment, while the argument of `putenv'
++   must be used directly.  This is all complicated by the fact that we try
++   to reuse values once generated for a `setenv' call since we can never
++   free the strings.  */
++int __add_to_environ (const char *name, const char *value,
++                      const char *combines, int replace) attribute_hidden;
++
++#endif /* _SETENV_H */
+diff -Nrup a/stdlib/tst-environ.c b/stdlib/tst-environ.c
+--- a/stdlib/tst-environ.c	2021-08-01 21:33:43.000000000 -0400
++++ b/stdlib/tst-environ.c	2025-02-26 19:53:57.393341792 -0500
+@@ -20,6 +20,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <libc-diag.h>
++#include <support/check.h>
+ 
+ #define VAR "FOOBAR"
+ 
+@@ -50,11 +51,7 @@ do_test (void)
+ 
+   /* Getting this value should now be possible.  */
+   valp = getenv (VAR);
+-  if (valp == NULL || strcmp (valp, "one") != 0)
+-    {
+-      puts ("getenv #2 failed");
+-      result = 1;
+-    }
++  TEST_COMPARE_STRING (valp, "one");
+ 
+   /* Try to replace without the replace flag set.  This should fail.  */
+   if (setenv (VAR, "two", 0) != 0)
+@@ -65,11 +62,7 @@ do_test (void)
+ 
+   /* The value shouldn't have changed.  */
+   valp = getenv (VAR);
+-  if (valp == NULL || strcmp (valp, "one") != 0)
+-    {
+-      puts ("getenv #3 failed");
+-      result = 1;
+-    }
++  TEST_COMPARE_STRING (valp, "one");
+ 
+   /* Now replace the value using putenv.  */
+   if (putenv (putenv_val) != 0)
+diff -Nrup a/stdlib/tst-getenv-signal.c b/stdlib/tst-getenv-signal.c
+--- a/stdlib/tst-getenv-signal.c	1969-12-31 19:00:00.000000000 -0500
++++ b/stdlib/tst-getenv-signal.c	2025-02-26 19:53:57.393341792 -0500
+@@ -0,0 +1,94 @@
++/* Test getenv from a signal handler interrupting environment updates.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <array_length.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <support/check.h>
++#include <support/support.h>
++#include <support/xthread.h>
++#include <support/xsignal.h>
++
++/* Set to false by the main thread after doing all the setenv
++   calls.  */
++static bool running = true;
++
++/* Used to synchronize the start of signal sending.  */
++static pthread_barrier_t barrier;
++
++/* Identity of the main thread.  */
++static pthread_t main_thread;
++
++/* Send SIGUSR1 signals to main_thread.  */
++static void *
++signal_thread (void *ignored)
++{
++  xpthread_barrier_wait (&barrier);
++  while (__atomic_load_n (&running, __ATOMIC_RELAXED))
++    xpthread_kill (main_thread, SIGUSR1);
++  return NULL;
++}
++
++/* Call getenv from a signal handler.  */
++static void
++signal_handler (int signo)
++{
++  TEST_COMPARE_STRING (getenv ("unset_variable"), NULL);
++  char *value = getenv ("set_variable");
++  TEST_VERIFY (strncmp (value, "value", strlen ("value")) == 0);
++}
++
++static int
++do_test (void)
++{
++  /* Added to the environment using putenv.  */
++  char *variables[30];
++  for (int i = 0; i < array_length (variables); ++i)
++    variables[i] = xasprintf ("v%d=%d", i, i);
++
++  xsignal (SIGUSR1, signal_handler);
++  TEST_COMPARE (setenv ("set_variable", "value", 1), 0);
++  xraise (SIGUSR1);
++  main_thread = pthread_self ();
++  xpthread_barrier_init (&barrier, NULL, 2);
++  pthread_t thr = xpthread_create (NULL, signal_thread, NULL);
++  xpthread_barrier_wait (&barrier);
++
++  for (int i = 0; i < array_length (variables); ++i)
++    {
++      char buf[30];
++      TEST_COMPARE (setenv ("temporary_variable", "1", 1), 0);
++      snprintf (buf, sizeof (buf), "V%d", i);
++      TEST_COMPARE (setenv (buf, buf + 1, 1), 0);
++      TEST_COMPARE (putenv (variables[i]), 0);
++      snprintf (buf, sizeof (buf), "value%d", i);
++      TEST_COMPARE (setenv ("set_variable", buf, 1), 0);
++      TEST_COMPARE (unsetenv ("temporary_variable"), 0);
++    }
++
++  __atomic_store_n (&running, false, __ATOMIC_RELAXED);
++  xpthread_join (thr);
++  xpthread_barrier_destroy (&barrier);
++
++  for (int i = 0; i < array_length (variables); ++i)
++    free (variables[i]);
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff -Nrup a/stdlib/tst-getenv-thread.c b/stdlib/tst-getenv-thread.c
+--- a/stdlib/tst-getenv-thread.c	1969-12-31 19:00:00.000000000 -0500
++++ b/stdlib/tst-getenv-thread.c	2025-02-26 19:53:57.393341792 -0500
+@@ -0,0 +1,62 @@
++/* Test getenv with concurrent setenv.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdbool.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <support/check.h>
++#include <support/xthread.h>
++
++/* Set to false by the main thread after doing all the setenv
++   calls.  */
++static bool running = true;
++
++/* Used to synchronize the start of the getenv thread.  */
++static pthread_barrier_t barrier;
++
++/* Invoke getenv for a nonexisting environment variable in a loop.
++   This checks that concurrent setenv does not invalidate the
++   environment array while getenv reads it.  */
++static void *
++getenv_thread (void *ignored)
++{
++  xpthread_barrier_wait (&barrier);
++  while (__atomic_load_n (&running, __ATOMIC_RELAXED))
++    TEST_VERIFY (getenv ("unset_variable") == NULL);
++  return NULL;
++}
++
++static int
++do_test (void)
++{
++  xpthread_barrier_init (&barrier, NULL, 2);
++  pthread_t thr = xpthread_create (NULL, getenv_thread, NULL);
++  xpthread_barrier_wait (&barrier);
++  for (int i = 0; i < 1000; ++i)
++    {
++      char buf[30];
++      snprintf (buf, sizeof (buf), "V%d", i);
++      TEST_COMPARE (setenv (buf, buf + 1, 1), 0);
++    }
++  __atomic_store_n (&running, false, __ATOMIC_RELAXED);
++  xpthread_join (thr);
++  xpthread_barrier_destroy (&barrier);
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff -Nrup a/stdlib/tst-getenv-unsetenv.c b/stdlib/tst-getenv-unsetenv.c
+--- a/stdlib/tst-getenv-unsetenv.c	1969-12-31 19:00:00.000000000 -0500
++++ b/stdlib/tst-getenv-unsetenv.c	2025-02-26 19:53:57.393341792 -0500
+@@ -0,0 +1,75 @@
++/* Test getenv with concurrent unsetenv.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <array_length.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <support/check.h>
++#include <support/support.h>
++#include <support/xthread.h>
++
++/* Used to synchronize the start of each test iteration.  */
++static pthread_barrier_t barrier;
++
++/* Number of iterations.  */
++enum { iterations = 10000 };
++
++/* Check that even with concurrent unsetenv, a variable that is known
++   to be there is found.  */
++static void *
++getenv_thread (void *ignored)
++{
++  for (int i = 0; i < iterations; ++i)
++    {
++      xpthread_barrier_wait (&barrier);
++      TEST_COMPARE_STRING (getenv ("variable"), "value");
++      xpthread_barrier_wait (&barrier);
++    }
++  return NULL;
++}
++
++static int
++do_test (void)
++{
++  xpthread_barrier_init (&barrier, NULL, 2);
++  pthread_t thr = xpthread_create (NULL, getenv_thread, NULL);
++
++  char *variables[50];
++  for (int i = 0; i < array_length (variables); ++i)
++    variables[i] = xasprintf ("V%d", i);
++
++  for (int i = 0; i < iterations; ++i)
++    {
++      clearenv ();
++      for (int j = 0; j < array_length (variables); ++j)
++        TEST_COMPARE (setenv (variables[j], variables[j] + 1, 1), 0);
++      TEST_COMPARE (setenv ("variable", "value", 1), 0);
++      xpthread_barrier_wait (&barrier);
++      /* Test runs.  */
++      for (int j = 0; j < array_length (variables); ++j)
++        TEST_COMPARE (unsetenv (variables[j]), 0);
++      xpthread_barrier_wait (&barrier);
++    }
++  xpthread_join (thr);
++  xpthread_barrier_destroy (&barrier);
++  for (int i = 0; i < array_length (variables); ++i)
++    free (variables[i]);
++  return 0;
++}
++
++#include <support/test-driver.c>

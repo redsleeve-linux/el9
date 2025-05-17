@@ -1,0 +1,332 @@
+commit 83a1cc3bc3d28c97d1af6c0957b11fe39fd786d8
+Author: Carlos O'Donell <carlos@redhat.com>
+Date:   Wed Oct 9 18:32:26 2024 -0400
+
+    manual: Fix and test @deftypef* function formatting
+    
+    The manual contained several instances of incorrect formatting
+    that were correct texinfo but produced incorrectly rendered manuals
+    or incorrect behaviour from the tooling.
+    
+    The most important was incorrect quoting of function returns
+    by failing to use {} to quote the return.  The impact of this
+    mistake means that 'info libc func' does not jump to the function
+    in question but instead to the introductory page under the assumption
+    that func doesn't exist.  The function returns are now correctly
+    quoted.
+    
+    The second issue was the use of a category specifier with
+    @deftypefun which doesn't accept a category specifier.  If a category
+    specifier is required then @deftypefn needs to be used. This is
+    corrected by changing the command to @deftypefn for such functions
+    that used {Deprecated function} as a category.
+    
+    The last issue is a missing space between the function name and the
+    arguments which results in odd function names like "epoll_wait(int"
+    instead of "epoll_wait".  This also impacts the use of 'info libc'
+    and is corrected.
+    
+    We additionally remove ';' from the end of function arguments and
+    add an 'int' return type for dprintf.
+    
+    Lastly we add a new test check-deftype.sh which verifies the expected
+    formatting of @deftypefun, @deftypefunx, @deftypefn, and
+    @deftypefnx.  The new test is also run as the summary file is
+    generated to ensure we don't generate incorrect results.
+    
+    The existing check-safety.sh is also run directly as a test to increase
+    coverage since the existing tests only ran on manual install.
+    
+    The new tests now run as part of the standard "make check" that
+    pre-commit CI runs and developers should run.
+    
+    No regressions on x86_64.
+    
+    HTML and PDF rendering reviewed and looks correct for all changes.
+    
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+
+Conflicts:
+	manual/time.texi (irrelevant changes)
+
+diff --git a/manual/Makefile b/manual/Makefile
+index 6301e4a16f9daf58..66ea73384d9d85aa 100644
+--- a/manual/Makefile
++++ b/manual/Makefile
+@@ -69,6 +69,11 @@ chapters.% top-menu.%: libc-texinfo.sh $(texis-path) Makefile
+ 				'$(chapters)' \
+ 			       '$(appendices) $(licenses)'
+ 
++# Verify validity of texinfo sources against project rules.
++tests-special += \
++  $(objpfx)check-deftype.out \
++  $(objpfx)check-safety.out \
++  # tests-special
+ 
+ $(objpfx)libc.dvi $(objpfx)libc.pdf $(objpfx)libc.info: \
+ 	$(addprefix $(objpfx),$(libc-texi-generated))
+@@ -83,10 +88,19 @@ $(objpfx)summary.texi: $(objpfx)stamp-summary ;
+ $(objpfx)stamp-summary: summary.pl $(filter-out $(objpfx)summary.texi, \
+ 					$(texis-path))
+ 	$(SHELL) ./check-safety.sh $(filter-out $(objpfx)%, $(texis-path))
++	$(SHELL) ./check-deftype.sh $(filter-out $(objpfx)%, $(texis-path))
+ 	LC_ALL=C $(PERL) $^ > $(objpfx)summary-tmp
+ 	$(move-if-change) $(objpfx)summary-tmp $(objpfx)summary.texi
+ 	touch $@
+ 
++$(objpfx)check-safety.out: check-safety.sh
++	$(SHELL) $< > $@ ; \
++	$(evaluate-test)
++
++$(objpfx)check-deftype.out: check-deftype.sh
++	$(SHELL) $< > $@ ; \
++	$(evaluate-test)
++
+ # Generate a file which can be added to the `dir' content to provide direct
+ # access to the documentation of the function, variables, and other
+ # definitions.
+@@ -152,10 +166,19 @@ $(objpfx)%.pdf: %.texinfo
+ 
+ 
+ # Distribution.
+-minimal-dist = summary.pl texis.awk tsort.awk libc-texinfo.sh libc.texinfo \
+-	       libm-err.texi stamp-libm-err check-safety.sh		    \
+-	       $(filter-out summary.texi, $(nonexamples))		    \
+-	       $(patsubst %.c.texi,examples/%.c, $(examples))
++minimal-dist = \
++  $(filter-out summary.texi, $(nonexamples)) \
++  $(patsubst %.c.texi,examples/%.c, $(examples)) \
++  check-deftype.sh \
++  check-safety.sh \
++  libc-texinfo.sh \
++  libc.texinfo \
++  libm-err.texi \
++  stamp-libm-err \
++  summary.pl \
++  texis.awk \
++  tsort.awk \
++  # minimal-dist
+ 
+ indices = cp fn pg tp vr ky
+ generated-dirs += libc
+diff --git a/manual/check-deftype.sh b/manual/check-deftype.sh
+new file mode 100644
+index 0000000000000000..395c99af6afe1fdd
+--- /dev/null
++++ b/manual/check-deftype.sh
+@@ -0,0 +1,50 @@
++#!/bin/sh
++
++# Copyright 2024 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++# Check that the @deftypefun command is called with the expected
++# arguments and includes checking for common mistakes including
++# failure to include a space after the function name, or incorrect
++# quoting.
++
++success=:
++
++# If no arguments are given, take all *.texi files in the current directory.
++test $# != 0 || set *.texi
++
++# We search for all @deftypefun and @deftypefunx command uses.
++# Then we remove all of those that match our expectations.
++# A @deftypefun or @deftypefunx command takes 3 arguments:
++# - return type
++# - name
++# - arguments
++# This is different from @deftypefn which includes an additional
++# category which is implicit here.
++grep -n -r '^@deftypefun' "$@" |
++grep -v '^.*@deftypefunx\?'\
++' \({\?[a-zA-Z0-9_ *]*}\?\) \([a-zA-Z0-9_]*\) (.*)$' &&
++success=false
++
++# We search for all @deftypefn and @deftypefnx command uses.
++# We have 4 arguments in the command including the category.
++grep -n -r '^@deftypefn' "$@" |
++grep -v '^.*@deftypefnx\?'\
++' {\?[a-zA-Z ]*}\? \({\?[a-zA-Z0-9@{}_ *]*}\?\) \([a-zA-Z0-9_]*\) (.*)$' &&
++success=false
++
++$success
+diff --git a/manual/ipc.texi b/manual/ipc.texi
+index 081b98fe29e0b3b5..73189960c46c908a 100644
+--- a/manual/ipc.texi
++++ b/manual/ipc.texi
+@@ -20,7 +20,7 @@ by @theglibc{}.
+ @c Need descriptions for all of these functions.
+ 
+ @subsection System V Semaphores
+-@deftypefun int semctl (int @var{semid}, int @var{semnum}, int @var{cmd});
++@deftypefun int semctl (int @var{semid}, int @var{semnum}, int @var{cmd})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acunsafe{@acucorrupt{/linux}}}
+ @c syscall(ipc) ok
+ @c
+@@ -30,35 +30,35 @@ by @theglibc{}.
+ @c semid_ds.
+ @end deftypefun
+ 
+-@deftypefun int semget (key_t @var{key}, int @var{nsems}, int @var{semflg});
++@deftypefun int semget (key_t @var{key}, int @var{nsems}, int @var{semflg})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acsafe{}}
+ @c syscall(ipc) ok
+ @end deftypefun
+ 
+-@deftypefun int semop (int @var{semid}, struct sembuf *@var{sops}, size_t @var{nsops});
++@deftypefun int semop (int @var{semid}, struct sembuf *@var{sops}, size_t @var{nsops})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acsafe{}}
+ @c syscall(ipc) ok
+ @end deftypefun
+ 
+-@deftypefun int semtimedop (int @var{semid}, struct sembuf *@var{sops}, size_t @var{nsops}, const struct timespec *@var{timeout});
++@deftypefun int semtimedop (int @var{semid}, struct sembuf *@var{sops}, size_t @var{nsops}, const struct timespec *@var{timeout})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acsafe{}}
+ @c syscall(ipc) ok
+ @end deftypefun
+ 
+ @subsection POSIX Semaphores
+ 
+-@deftypefun int sem_init (sem_t *@var{sem}, int @var{pshared}, unsigned int @var{value});
++@deftypefun int sem_init (sem_t *@var{sem}, int @var{pshared}, unsigned int @var{value})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acunsafe{@acucorrupt{}}}
+ @c Does not atomically update sem_t therefore AC-unsafe
+ @c because it can leave sem_t partially initialized.
+ @end deftypefun
+ 
+-@deftypefun int sem_destroy (sem_t *@var{sem});
++@deftypefun int sem_destroy (sem_t *@var{sem})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acsafe{}}
+ @c Function does nothing and is therefore always safe.
+ @end deftypefun
+ 
+-@deftypefun sem_t *sem_open (const char *@var{name}, int @var{oflag}, ...);
++@deftypefun {sem_t *} sem_open (const char *@var{name}, int @var{oflag}, ...)
+ @safety{@prelim{}@mtsafe{}@asunsafe{@asuinit{}}@acunsafe{@acuinit{}}}
+ @c pthread_once asuinit
+ @c
+@@ -67,7 +67,7 @@ by @theglibc{}.
+ @c shmfs on Linux.
+ @end deftypefun
+ 
+-@deftypefun int sem_close (sem_t *@var{sem});
++@deftypefun int sem_close (sem_t *@var{sem})
+ @safety{@prelim{}@mtsafe{}@asunsafe{@asulock{}}@acunsafe{@aculock{}}}
+ @c lll_lock asulock aculock
+ @c twalk mtsrace{:root}
+@@ -77,13 +77,13 @@ by @theglibc{}.
+ @c are not updated atomically.
+ @end deftypefun
+ 
+-@deftypefun int sem_unlink (const char *@var{name});
++@deftypefun int sem_unlink (const char *@var{name})
+ @safety{@prelim{}@mtsafe{}@asunsafe{@asuinit{}}@acunsafe{@acucorrupt{}}}
+ @c pthread_once asuinit acucorrupt aculock
+ @c mempcpy acucorrupt
+ @end deftypefun
+ 
+-@deftypefun int sem_wait (sem_t *@var{sem});
++@deftypefun int sem_wait (sem_t *@var{sem})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acunsafe{@acucorrupt{}}}
+ @c atomic_increment (nwaiters) acucorrupt
+ @c
+@@ -95,22 +95,22 @@ by @theglibc{}.
+ @c waiters count.
+ @end deftypefun
+ 
+-@deftypefun int sem_timedwait (sem_t *@var{sem}, const struct timespec *@var{abstime});
++@deftypefun int sem_timedwait (sem_t *@var{sem}, const struct timespec *@var{abstime})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acunsafe{@acucorrupt{}}}
+ @c Same safety issues as sem_wait.
+ @end deftypefun
+ 
+-@deftypefun int sem_trywait (sem_t *@var{sem});
++@deftypefun int sem_trywait (sem_t *@var{sem})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acsafe{}}
+ @c All atomic operations are safe in all contexts.
+ @end deftypefun
+ 
+-@deftypefun int sem_post (sem_t *@var{sem});
++@deftypefun int sem_post (sem_t *@var{sem})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acsafe{}}
+ @c Same safety as sem_trywait.
+ @end deftypefun
+ 
+-@deftypefun int sem_getvalue (sem_t *@var{sem}, int *@var{sval});
++@deftypefun int sem_getvalue (sem_t *@var{sem}, int *@var{sval})
+ @safety{@prelim{}@mtsafe{}@assafe{}@acsafe{}}
+ @c Atomic write of a value is safe in all contexts.
+ @end deftypefun
+diff --git a/manual/llio.texi b/manual/llio.texi
+index 0f84a593ee92b31f..161ec3cb6de4b61e 100644
+--- a/manual/llio.texi
++++ b/manual/llio.texi
+@@ -4820,12 +4820,12 @@ of an IOCTL, see @ref{Out-of-Band Data}.
+ @manpagefunctionstub{poll,2}
+ @end deftypefun
+ 
+-@deftypefun int epoll_create(int @var{size})
++@deftypefun int epoll_create (int @var{size})
+ 
+ @manpagefunctionstub{epoll_create,2}
+ @end deftypefun
+ 
+-@deftypefun int epoll_wait(int @var{epfd}, struct epoll_event *@var{events}, int @var{maxevents}, int @var{timeout})
++@deftypefun int epoll_wait (int @var{epfd}, struct epoll_event *@var{events}, int @var{maxevents}, int @var{timeout})
+ 
+ @manpagefunctionstub{epoll_wait,2}
+ @end deftypefun
+diff --git a/manual/memory.texi b/manual/memory.texi
+index ee709b0cac57dded..4fb605b3faae1d36 100644
+--- a/manual/memory.texi
++++ b/manual/memory.texi
+@@ -2929,7 +2929,7 @@ exceed the process' data storage limit.
+ @end deftypefun
+ 
+ 
+-@deftypefun void *sbrk (ptrdiff_t @var{delta})
++@deftypefun {void *} sbrk (ptrdiff_t @var{delta})
+ @standards{BSD, unistd.h}
+ @safety{@prelim{}@mtsafe{}@assafe{}@acsafe{}}
+ 
+diff --git a/manual/stdio.texi b/manual/stdio.texi
+index a2d9292a787b9fa3..98da13de32f49c7c 100644
+--- a/manual/stdio.texi
++++ b/manual/stdio.texi
+@@ -2489,7 +2489,7 @@ store the result in which case @code{-1} is returned.  This was
+ changed in order to comply with the @w{ISO C99} standard.
+ @end deftypefun
+ 
+-@deftypefun dprintf (int @var{fd}, @var{template}, ...)
++@deftypefun int dprintf (int @var{fd}, @var{template}, ...)
+ @standards{POSIX, stdio.h}
+ @safety{@mtsafe{@mtslocale{}}@asunsafe{@ascuheap{}}@acunsafe{@acsmem{}}}
+ This function formats its arguments according to @var{template} and
+diff --git a/manual/threads.texi b/manual/threads.texi
+index a721c7f464e3588e..3fd307e69a8029fa 100644
+--- a/manual/threads.texi
++++ b/manual/threads.texi
+@@ -592,7 +592,7 @@ destructor for the thread-specific data is not called during destruction, nor
+ is it called during thread exit.
+ @end deftypefun
+ 
+-@deftypefun void *pthread_getspecific (pthread_key_t @var{key})
++@deftypefun {void *} pthread_getspecific (pthread_key_t @var{key})
+ @standards{POSIX, pthread.h}
+ @safety{@prelim{}@mtsafe{}@assafe{}@acsafe{}}
+ @c pthread_getspecific ok

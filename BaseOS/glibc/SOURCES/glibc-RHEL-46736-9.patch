@@ -1,0 +1,495 @@
+commit e0f3bf10acf4aab27752847828bfecd3fce41190
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Fri Sep 20 23:26:31 2024 +0000
+
+    Add freopen special-case tests: chroot, EFBIG, stdin/stdout/stderr
+    
+    Add tests of special cases for freopen that were omitted from the more
+    general tests of different modes and similar issues.  The special
+    cases in the three tests here are logically unconnected, it was simply
+    convenient to put these tests in one patch.
+    
+    * Test freopen with a NULL path to the new file, in a chroot.  Rather
+      than asserting that this fails (logically, failure in this case is
+      an implementation detail; it's not required for freopen to rely on
+      /proc), verify that either it fails (without memory leaks) or that
+      it succeeds and behaves as expected on success.  There is no check
+      for file descriptor leaks because the machinery for that also
+      depends on /proc, so can't be used in a chroot.
+    
+    * Test that freopen and freopen64 are genuinely different in
+      configurations with 32-bit off_t by checking for an EFBIG trying to
+      write past 2GB in a file opened with freopen in such a configuration
+      but no error with 64-bit off_t or when opening with freopen64.
+    
+    * Test freopen of stdin, stdout and stderr.
+    
+    Tested for x86_64 and x86.
+
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index bd3c785537ba0330..c920f55ed2119900 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -177,8 +177,13 @@ tests := \
+   tst-fread \
+   tst-freopen2 \
+   tst-freopen3 \
++  tst-freopen4 \
++  tst-freopen5 \
++  tst-freopen6 \
+   tst-freopen64-2 \
+   tst-freopen64-3 \
++  tst-freopen64-4 \
++  tst-freopen64-6 \
+   tst-fseek \
+   tst-fwrite \
+   tst-getline \
+@@ -252,8 +257,13 @@ ifneq ($(PERL),no)
+ tests-special += \
+   $(objpfx)tst-freopen2-mem.out \
+   $(objpfx)tst-freopen3-mem.out \
++  $(objpfx)tst-freopen4-mem.out \
++  $(objpfx)tst-freopen5-mem.out \
++  $(objpfx)tst-freopen6-mem.out \
+   $(objpfx)tst-freopen64-2-mem.out \
+   $(objpfx)tst-freopen64-3-mem.out \
++  $(objpfx)tst-freopen64-4-mem.out \
++  $(objpfx)tst-freopen64-6-mem.out \
+   $(objpfx)tst-getline-enomem-mem.out \
+   $(objpfx)tst-getline-mem.out \
+   $(objpfx)tst-printf-bz18872-mem.out \
+@@ -268,10 +278,20 @@ generated += \
+   tst-freopen2.mtrace \
+   tst-freopen3-mem.out \
+   tst-freopen3.mtrace \
++  tst-freopen4-mem.out \
++  tst-freopen4.mtrace \
++  tst-freopen5-mem.out \
++  tst-freopen5.mtrace \
++  tst-freopen6-mem.out \
++  tst-freopen6.mtrace \
+   tst-freopen64-2-mem.out \
+   tst-freopen64-2.mtrace \
+   tst-freopen64-3-mem.out \
+   tst-freopen64-3.mtrace \
++  tst-freopen64-4-mem.out \
++  tst-freopen64-4.mtrace \
++  tst-freopen64-6-mem.out \
++  tst-freopen64-6.mtrace \
+   tst-getline-enomem-mem.out \
+   tst-getline-enomem.mtrace \
+   tst-getline-mem.out \
+@@ -356,6 +376,21 @@ tst-freopen3-ENV = \
+ tst-freopen64-3-ENV = \
+   MALLOC_TRACE=$(objpfx)tst-freopen64-3.mtrace \
+   LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
++tst-freopen4-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-freopen4.mtrace \
++  LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
++tst-freopen64-4-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-freopen64-4.mtrace \
++  LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
++tst-freopen5-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-freopen5.mtrace \
++  LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
++tst-freopen6-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-freopen6.mtrace \
++  LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
++tst-freopen64-6-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-freopen64-6.mtrace \
++  LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
+ 
+ $(objpfx)tst-unbputc.out: tst-unbputc.sh $(objpfx)tst-unbputc
+ 	$(SHELL) $< $(common-objpfx) '$(test-program-prefix)'; \
+diff --git a/stdio-common/tst-freopen4-main.c b/stdio-common/tst-freopen4-main.c
+new file mode 100644
+index 0000000000000000..e169442cf4df2e9d
+--- /dev/null
++++ b/stdio-common/tst-freopen4-main.c
+@@ -0,0 +1,100 @@
++/* Test freopen in chroot.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <mcheck.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++#include <support/check.h>
++#include <support/file_contents.h>
++#include <support/namespace.h>
++#include <support/support.h>
++#include <support/temp_file.h>
++#include <support/test-driver.h>
++#include <support/xstdio.h>
++#include <support/xunistd.h>
++
++int
++do_test (void)
++{
++  mtrace ();
++  char *temp_dir = support_create_temp_directory ("tst-freopen4");
++  FILE *fp;
++  int ret;
++
++  /* These chroot tests verify that either reopening a renamed or
++     deleted file works even in the absence of /proc, or that it fails
++     (without memory leaks); thus, for example, such reopening does
++     not crash in the absence of /proc.  */
++
++  support_become_root ();
++  if (!support_can_chroot ())
++    return EXIT_UNSUPPORTED;
++  xchroot (temp_dir);
++
++  /* Test freopen with NULL, renamed file.  This verifies that
++     reopening succeeds (and resets the file position indicator to
++     start of file) even when the original path could no longer be
++     opened, or fails without a memory leak.  (It is not possible to
++     use <support/descriptors.h> to test for file descriptor leaks
++     here, because that also depends on /proc.)  */
++
++  verbose_printf ("testing freopen with NULL, renamed file\n");
++  fp = xfopen ("/file1", "w+");
++  ret = fputs ("file has been renamed", fp);
++  TEST_VERIFY (ret >= 0);
++  ret = rename ("/file1", "/file1a");
++  TEST_COMPARE (ret, 0);
++  fp = FREOPEN (NULL, "r+", fp);
++  if (fp != NULL)
++    {
++      puts ("freopen of renamed file succeeded");
++      TEST_COMPARE_FILE_STRING (fp, "file has been renamed");
++      xfclose (fp);
++    }
++  else
++    puts ("freopen of renamed file failed (OK)");
++  ret = rename ("/file1a", "/file1");
++  TEST_COMPARE (ret, 0);
++
++  /* Test freopen with NULL, deleted file.  This verifies that
++     reopening succeeds (and resets the file position indicator to
++     start of file) even when the original path could no longer be
++     opened, or fails without a memory leak.  */
++
++  verbose_printf ("testing freopen with NULL, deleted file\n");
++  fp = xfopen ("/file1", "r+");
++  ret = fputs ("file has now been deleted", fp);
++  TEST_VERIFY (ret >= 0);
++  ret = remove ("/file1");
++  TEST_COMPARE (ret, 0);
++  fp = FREOPEN (NULL, "r+", fp);
++  if (fp != NULL)
++    {
++      puts ("freopen of deleted file succeeded");
++      TEST_COMPARE_FILE_STRING (fp, "file has now been deleted");
++      xfclose (fp);
++    }
++  else
++    puts ("freopen of deleted file failed (OK)");
++
++  free (temp_dir);
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/stdio-common/tst-freopen4.c b/stdio-common/tst-freopen4.c
+new file mode 100644
+index 0000000000000000..f39ec0d21730879f
+--- /dev/null
++++ b/stdio-common/tst-freopen4.c
+@@ -0,0 +1,2 @@
++#define FREOPEN freopen
++#include <tst-freopen4-main.c>
+diff --git a/stdio-common/tst-freopen5.c b/stdio-common/tst-freopen5.c
+new file mode 100644
+index 0000000000000000..f32626bccfe5c10a
+--- /dev/null
++++ b/stdio-common/tst-freopen5.c
+@@ -0,0 +1,144 @@
++/* Test freopen and freopen64 with large offsets.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <mcheck.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++#include <support/check.h>
++#include <support/descriptors.h>
++#include <support/support.h>
++#include <support/temp_file.h>
++#include <support/test-driver.h>
++#include <support/xstdio.h>
++
++#define START_TEST(DESC)			\
++  do						\
++    {						\
++      fds = support_descriptors_list ();	\
++      verbose_printf (DESC);			\
++    }						\
++  while (0)
++
++#define END_TEST				\
++  do						\
++    {						\
++      support_descriptors_check (fds);		\
++      support_descriptors_free (fds);		\
++    }						\
++  while (0)
++
++int
++do_test (void)
++{
++  mtrace ();
++  struct support_descriptors *fds;
++  FILE *fp;
++  int ret;
++
++  char *temp_dir = support_create_temp_directory ("tst-freopen5");
++  /* This file is removed at the end of each test rather than left
++     around between tests to avoid problems with subsequent tests
++     reopening it as a large (2GB + 1 byte) file.  */
++  char *file1 = xasprintf ("%s/file1", temp_dir);
++
++  /* fopen with freopen64: large offsets OK.  */
++  START_TEST ("testing fopen with freopen64\n");
++  fp = fopen ("/dev/null", "r");
++  TEST_VERIFY_EXIT (fp != NULL);
++  fp = freopen64 (file1, "w", fp);
++  TEST_VERIFY_EXIT (fp != NULL);
++  setbuf (fp, NULL);
++  ret = fseeko64 (fp, 1LL << 32, SEEK_SET);
++  TEST_COMPARE (ret, 0);
++  ret = fputc ('x', fp);
++  TEST_COMPARE (ret, 'x');
++  xfclose (fp);
++  ret = remove (file1);
++  TEST_COMPARE (ret, 0);
++  END_TEST;
++
++  /* fopen64 with freopen64: large offsets OK.  */
++  START_TEST ("testing fopen64 with freopen64\n");
++  fp = fopen64 ("/dev/null", "r");
++  TEST_VERIFY_EXIT (fp != NULL);
++  fp = freopen64 (file1, "w", fp);
++  TEST_VERIFY_EXIT (fp != NULL);
++  setbuf (fp, NULL);
++  ret = fseeko64 (fp, 1LL << 32, SEEK_SET);
++  TEST_COMPARE (ret, 0);
++  ret = fputc ('x', fp);
++  TEST_COMPARE (ret, 'x');
++  xfclose (fp);
++  ret = remove (file1);
++  TEST_COMPARE (ret, 0);
++  END_TEST;
++
++  /* fopen with freopen: large offsets not OK on 32-bit systems.  */
++  START_TEST ("testing fopen with freopen\n");
++  fp = fopen ("/dev/null", "r");
++  TEST_VERIFY_EXIT (fp != NULL);
++  fp = freopen (file1, "w", fp);
++  TEST_VERIFY_EXIT (fp != NULL);
++  setbuf (fp, NULL);
++  ret = fseeko64 (fp, 1LL << 32, SEEK_SET);
++  TEST_COMPARE (ret, 0);
++  errno = 0;
++  ret = fputc ('x', fp);
++  if (sizeof (off_t) == 4)
++    {
++      TEST_COMPARE (ret, EOF);
++      TEST_COMPARE (errno, EFBIG);
++    }
++  else
++    TEST_COMPARE (ret, 'x');
++  fclose (fp);
++  ret = remove (file1);
++  TEST_COMPARE (ret, 0);
++  END_TEST;
++
++  /* fopen64 with freopen: large offsets not OK on 32-bit systems.  */
++  START_TEST ("testing fopen64 with freopen\n");
++  fp = fopen64 ("/dev/null", "r");
++  TEST_VERIFY_EXIT (fp != NULL);
++  fp = freopen (file1, "w", fp);
++  TEST_VERIFY_EXIT (fp != NULL);
++  setbuf (fp, NULL);
++  ret = fseeko64 (fp, 1LL << 32, SEEK_SET);
++  TEST_COMPARE (ret, 0);
++  errno = 0;
++  ret = fputc ('x', fp);
++  if (sizeof (off_t) == 4)
++    {
++      TEST_COMPARE (ret, EOF);
++      TEST_COMPARE (errno, EFBIG);
++    }
++  else
++    TEST_COMPARE (ret, 'x');
++  fclose (fp);
++  ret = remove (file1);
++  TEST_COMPARE (ret, 0);
++  END_TEST;
++
++  free (temp_dir);
++  free (file1);
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/stdio-common/tst-freopen6-main.c b/stdio-common/tst-freopen6-main.c
+new file mode 100644
+index 0000000000000000..f493f42fd7486b72
+--- /dev/null
++++ b/stdio-common/tst-freopen6-main.c
+@@ -0,0 +1,98 @@
++/* Test freopen of stdin / stdout / stderr.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <mcheck.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
++
++#include <support/check.h>
++#include <support/file_contents.h>
++#include <support/support.h>
++#include <support/temp_file.h>
++#include <support/test-driver.h>
++#include <support/xstdio.h>
++
++int
++do_test (void)
++{
++  mtrace ();
++  char *temp_dir = support_create_temp_directory ("tst-freopen6");
++  char *file1 = xasprintf ("%s/file1", temp_dir);
++  support_write_file_string (file1, "file1");
++  add_temp_file (file1);
++  FILE *fp;
++  int ret;
++
++  verbose_printf ("Testing reopening stdin\n");
++  fp = FREOPEN (file1, "r", stdin);
++  TEST_VERIFY_EXIT (fp == stdin);
++  ret = getchar ();
++  TEST_COMPARE (ret, 'f');
++  ret = getchar ();
++  TEST_COMPARE (ret, 'i');
++  ret = getchar ();
++  TEST_COMPARE (ret, 'l');
++  ret = getchar ();
++  TEST_COMPARE (ret, 'e');
++  ret = getchar ();
++  TEST_COMPARE (ret, '1');
++  ret = getchar ();
++  TEST_COMPARE (ret, EOF);
++  xfclose (fp);
++
++  verbose_printf ("Testing reopening stderr\n");
++  fp = FREOPEN (file1, "w+", stderr);
++  TEST_VERIFY_EXIT (fp == stderr);
++  errno = EINVAL;
++  perror ("test");
++  ret = fseek (fp, 0, SEEK_SET);
++  TEST_COMPARE (ret, 0);
++  TEST_COMPARE_FILE_STRING (fp, "test: Invalid argument\n");
++  xfclose (fp);
++
++  verbose_printf ("Testing reopening stdout\n");
++  /* Defer checks until the old stdout has been restored to make it
++     more likely any errors are written to the old stdout (rather than
++     the temporary file used for the redirected stdout).  */
++  int old_stdout = dup (STDOUT_FILENO);
++  TEST_VERIFY_EXIT (old_stdout != -1);
++  int ret_fseek = 0;
++  int ret_compare = 0;
++  fp = FREOPEN (file1, "w+", stdout);
++  int fp_eq_stdout = fp == stdout;
++  if (fp != NULL)
++    {
++      printf ("reopened\n");
++      ret_fseek = fseek (fp, 0, SEEK_SET);
++      ret_compare = support_compare_file_string (fp, "reopened\n");
++    }
++  xfclose (fp);
++  stdout = fdopen (old_stdout, "w");
++  TEST_VERIFY (fp_eq_stdout);
++  TEST_COMPARE (ret_fseek, 0);
++  TEST_COMPARE (ret_compare, 0);
++  xfclose (stdout);
++
++  free (temp_dir);
++  free (file1);
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/stdio-common/tst-freopen6.c b/stdio-common/tst-freopen6.c
+new file mode 100644
+index 0000000000000000..8fd6957b54fa9bc2
+--- /dev/null
++++ b/stdio-common/tst-freopen6.c
+@@ -0,0 +1,2 @@
++#define FREOPEN freopen
++#include <tst-freopen6-main.c>
+diff --git a/stdio-common/tst-freopen64-4.c b/stdio-common/tst-freopen64-4.c
+new file mode 100644
+index 0000000000000000..1411be2bfa0105c1
+--- /dev/null
++++ b/stdio-common/tst-freopen64-4.c
+@@ -0,0 +1,2 @@
++#define FREOPEN freopen64
++#include <tst-freopen4-main.c>
+diff --git a/stdio-common/tst-freopen64-6.c b/stdio-common/tst-freopen64-6.c
+new file mode 100644
+index 0000000000000000..3ec509a36c2471f6
+--- /dev/null
++++ b/stdio-common/tst-freopen64-6.c
+@@ -0,0 +1,2 @@
++#define FREOPEN freopen64
++#include <tst-freopen6-main.c>

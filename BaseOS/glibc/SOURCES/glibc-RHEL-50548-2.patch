@@ -1,0 +1,44 @@
+commit 3844cdc33093dbe1e33ddb831eada9bdb4a482b9
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Aug 30 22:07:12 2024 +0200
+
+    io: Fix destructive nature of tst-fchmod-errors
+    
+    We must not change the permissions of /dev/null if running
+    as root.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+diff --git a/io/tst-fchmod-errors.c b/io/tst-fchmod-errors.c
+index ee15300fc3edf6f0..bf2a4c568e33aeaa 100644
+--- a/io/tst-fchmod-errors.c
++++ b/io/tst-fchmod-errors.c
+@@ -18,8 +18,10 @@
+ 
+ #include <errno.h>
+ #include <fcntl.h>
++#include <stdio.h>
+ #include <support/check.h>
+ #include <support/xunistd.h>
++#include <unistd.h>
+ 
+ static int
+ do_test (void)
+@@ -27,9 +29,14 @@ do_test (void)
+   {
+     /* Permissions on /dev/null (the opened descriptor) cannot be changed.  */
+     int fd = xopen ("/dev/null", O_RDWR, 0);
+-    errno = 0;
+-    TEST_COMPARE (fchmod (fd, 0), -1);
+-    TEST_COMPARE (errno, EPERM);
++    if (getuid () == 0)
++      puts ("info: /dev/null fchmod test skipped because of root privileges");
++    else
++      {
++        errno = 0;
++        TEST_COMPARE (fchmod (fd, 0), -1);
++        TEST_COMPARE (errno, EPERM);
++      }
+     xclose (fd);
+ 
+     /* Now testing an invalid file descriptor.   */

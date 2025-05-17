@@ -1,0 +1,176 @@
+commit e3a6e85d67f1a48dec3e2557a83d6ce1544a58cb
+Author: Aaron Merey <amerey@redhat.com>
+Date:   Thu Mar 20 13:13:33 2025 -0400
+
+    Add _FORTIFY_SOURCE support for inet_pton
+    
+    Add function __inet_pton_chk which calls __chk_fail when the size of
+    argument dst is too small.   inet_pton is redirected to __inet_pton_chk
+    or __inet_pton_warn when _FORTIFY_SOURCE is > 0.
+    
+    Also add tests to debug/tst-fortify.c, update the abilist with
+    __inet_pton_chk and mention inet_pton fortification in maint.texi.
+    
+    Co-authored-by: Frédéric Bérat <fberat@redhat.com>
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+Conflicts:
+	debug/Makefile (New routine added to static-only-routines
+	instead of routines)
+	debug/Versions (Not added in the backport)
+	manual/maint.texi (Not relevant for this version)
+	*/libc.abilist (Not added in the backport)
+	inet/bits/inet-fortified-decl.h (Replace __REDIRECT_FORTIFY_NTH
+	with __REDIRECT_NTH)
+	inet/bits/inet-fortified.h (removed attribute_overloadable and
+	clang specific handling)
+
+Note on the changes:
+- Since we can't modify the ABI, __inet_pton_chk has been added to
+  static-only-routines and `attribute_hidden` has been added to its definition.
+- __REDIRECT_FORTIFY* macros aren't available in the current version, since
+  the patch to enable foritfication on glibc itself hasn't be ported.
+- clang specific handling of foritifcation has not been ported, which means the
+  following had to be removed from the patch:
+  - use of __attribute_overloadable__
+  - use of __fortify_clang_* macros
+
+diff --git a/debug/Makefile b/debug/Makefile
+index 18be784e86bbaaab..c6ca9946d5fb5d19 100644
+--- a/debug/Makefile
++++ b/debug/Makefile
+@@ -118,6 +118,7 @@ routines  = \
+   # routines
+ static-only-routines := stack_chk_fail_local \
+   inet_ntop_chk \
++  inet_pton_chk \
+ 
+ # Don't add stack_chk_fail_local.o to libc.a since __stack_chk_fail_local
+ # is an alias of __stack_chk_fail in stack_chk_fail.o.
+diff --git a/debug/inet_pton_chk.c b/debug/inet_pton_chk.c
+new file mode 100644
+index 0000000000000000..c9e4fd4683900141
+--- /dev/null
++++ b/debug/inet_pton_chk.c
+@@ -0,0 +1,31 @@
++/* Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <arpa/inet.h>
++#include <stdio.h>
++
++attribute_hidden
++int
++__inet_pton_chk (int af, const char *src, void *dst, size_t dst_size)
++{
++  if ((af == AF_INET && dst_size < 4)
++      || (af == AF_INET6 && dst_size < 16))
++    __chk_fail ();
++
++  return inet_pton (af, src, dst);
++}
++libc_hidden_def (__inet_pton_chk)
+diff --git a/debug/tst-fortify.c b/debug/tst-fortify.c
+index 50909d0af53da10e..a87793e44ee36363 100644
+--- a/debug/tst-fortify.c
++++ b/debug/tst-fortify.c
+@@ -1783,6 +1783,30 @@ do_test (void)
+   CHK_FAIL_END
+ #endif
+ 
++  const char *ipv4str = "127.0.0.1";
++  const char *ipv6str = "::1";
++
++  if (inet_pton (AF_INET, ipv4str, (void *) &addr) != 1)
++    FAIL ();
++  if (inet_pton (AF_INET6, ipv6str, (void *) &addr6) != 1)
++    FAIL ();
++
++#if __USE_FORTIFY_LEVEL >= 1
++  char smallbuf[2];
++
++  CHK_FAIL_START
++  inet_pton (AF_INET, ipv4str, (void *) smallbuf);
++  CHK_FAIL_END
++
++  CHK_FAIL_START
++  inet_pton (AF_INET6, ipv6str, (void *) smallbuf);
++  CHK_FAIL_END
++
++  CHK_FAIL_START
++  inet_pton (AF_INET6, ipv6str, (void *) &addr);
++  CHK_FAIL_END
++#endif
++
+   return ret;
+ }
+ 
+diff --git a/include/arpa/inet.h b/include/arpa/inet.h
+index a02892f48a27454e..3db8f1a96fdbd6fd 100644
+--- a/include/arpa/inet.h
++++ b/include/arpa/inet.h
+@@ -19,6 +19,8 @@ libc_hidden_proto (__inet_ntop_chk)
+ libc_hidden_proto (inet_pton)
+ extern __typeof (inet_pton) __inet_pton;
+ libc_hidden_proto (__inet_pton)
++libc_hidden_proto (__inet_pton_chk)
++
+ extern __typeof (inet_makeaddr) __inet_makeaddr;
+ libc_hidden_proto (__inet_makeaddr)
+ libc_hidden_proto (inet_netof)
+diff --git a/inet/bits/inet-fortified-decl.h b/inet/bits/inet-fortified-decl.h
+index 229063ae7898ba2d..189d35aee8bacab1 100644
+--- a/inet/bits/inet-fortified-decl.h
++++ b/inet/bits/inet-fortified-decl.h
+@@ -32,4 +32,11 @@ extern const char *__REDIRECT_NTH (__inet_ntop_chk_warn,
+      __warnattr ("inet_ntop called with bigger length than "
+ 		 "size of destination buffer");
+ 
++extern int __inet_pton_chk (int, const char *, void *, size_t);
++
++extern int __REDIRECT_NTH (__inet_pton_alias,
++			   (int, const char *, void *), inet_pton);
++extern int __REDIRECT_NTH (__inet_pton_chk_warn,
++			   (int, const char *, void *, size_t), __inet_pton_chk)
++     __warnattr ("inet_pton called with a destination buffer size too small");
+ #endif /* bits/inet-fortified-decl.h.  */
+diff --git a/inet/bits/inet-fortified.h b/inet/bits/inet-fortified.h
+index af26f36ef6ae0533..8420a4b7fb41086f 100644
+--- a/inet/bits/inet-fortified.h
++++ b/inet/bits/inet-fortified.h
+@@ -34,4 +34,21 @@ __NTH (inet_ntop (int __af, const void * __restrict __src,
+ 			  __af, __src, __dst, __dst_size);
+ };
+ 
++__fortify_function int
++__NTH (inet_pton (int __af, const char *__restrict __src,
++		  void * __restrict __dst))
++{
++  size_t sz = 0;
++  if (__af == AF_INET)
++    sz = sizeof (struct in_addr);
++  else if (__af == AF_INET6)
++    sz = sizeof (struct in6_addr);
++  else
++    return __inet_pton_alias (__af, __src, __dst);
++
++  return __glibc_fortify (inet_pton, sz, sizeof (char),
++			  __glibc_objsize (__dst),
++			  __af, __src, __dst);
++};
++
+ #endif /* bits/inet-fortified.h.  */

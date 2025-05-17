@@ -1,0 +1,56 @@
+commit 0e12ca024119ec6c6d2ac852a65046002efa0e80
+Author: Steve Grubb <sgrubb@redhat.com>
+Date:   Fri Mar 11 15:29:06 2022 -0500
+
+    associate a deallocation for opendir
+    
+    This patch associates closedir as a deallocation for opendir and fdopendir.
+    This required moving the closedir declaration above the other 2 functions.
+    
+    Reviewed-by: Paul Eggert <eggert@cs.ucla.edu>
+    Reviewed-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+
+diff --git a/dirent/dirent.h b/dirent/dirent.h
+index 1d1fab7e55cdad4d..84834e8db9dea874 100644
+--- a/dirent/dirent.h
++++ b/dirent/dirent.h
+@@ -126,28 +126,30 @@ enum
+    The actual structure is opaque to users.  */
+ typedef struct __dirstream DIR;
+ 
++/* Close the directory stream DIRP.
++   Return 0 if successful, -1 if not.
++
++   This function is a possible cancellation point and therefore not
++   marked with __THROW.  */
++extern int closedir (DIR *__dirp) __nonnull ((1));
++
+ /* Open a directory stream on NAME.
+    Return a DIR stream on the directory, or NULL if it could not be opened.
+ 
+    This function is a possible cancellation point and therefore not
+    marked with __THROW.  */
+-extern DIR *opendir (const char *__name) __nonnull ((1));
++extern DIR *opendir (const char *__name) __nonnull ((1))
++	__attribute_malloc__ __attr_dealloc (closedir, 1);
+ 
+ #ifdef __USE_XOPEN2K8
+ /* Same as opendir, but open the stream on the file descriptor FD.
+ 
+    This function is a possible cancellation point and therefore not
+    marked with __THROW.  */
+-extern DIR *fdopendir (int __fd);
++extern DIR *fdopendir (int __fd)
++	__attribute_malloc__ __attr_dealloc (closedir, 1);
+ #endif
+ 
+-/* Close the directory stream DIRP.
+-   Return 0 if successful, -1 if not.
+-
+-   This function is a possible cancellation point and therefore not
+-   marked with __THROW.  */
+-extern int closedir (DIR *__dirp) __nonnull ((1));
+-
+ /* Read a directory entry from DIRP.  Return a pointer to a `struct
+    dirent' describing the entry, or NULL for EOF or error.  The
+    storage returned may be overwritten by a later readdir call on the

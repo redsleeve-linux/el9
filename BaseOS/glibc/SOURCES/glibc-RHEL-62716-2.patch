@@ -1,0 +1,291 @@
+commit ff0320bec2810192d453c579623482fab87bfa01
+Author: H.J. Lu <hjl.tools@gmail.com>
+Date:   Wed Jul 24 14:05:15 2024 -0700
+
+    Add mremap tests
+    
+    Add tests for MREMAP_MAYMOVE and MREMAP_FIXED.  On Linux, also test
+    MREMAP_DONTUNMAP.
+    
+    Signed-off-by: H.J. Lu <hjl.tools@gmail.com>
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+Conflicts:
+	misc/Makefile (new test added)
+	sysdeps/unix/sysv/linux/Makefile (new test added)
+
+diff --git a/misc/Makefile b/misc/Makefile
+index ae244a72689ffb0a..5d6fc0f6824a734f 100644
+--- a/misc/Makefile
++++ b/misc/Makefile
+@@ -89,7 +89,9 @@ tests := tst-dirname tst-tsearch tst-fdset tst-mntent tst-hsearch \
+ 	 tst-preadvwritev2 tst-preadvwritev64v2 tst-warn-wide \
+ 	 tst-ldbl-warn tst-ldbl-error tst-dbl-efgcvt tst-ldbl-efgcvt \
+ 	 tst-mntent-autofs tst-syscalls tst-mntent-escape tst-select \
+-	 tst-ioctl
++	 tst-ioctl \
++  tst-mremap1 \
++  tst-mremap2 \
+ 
+ tests-time64 := \
+   tst-select-time64 \
+diff --git a/misc/tst-mremap1.c b/misc/tst-mremap1.c
+new file mode 100644
+index 0000000000000000..0469991a6c1438b6
+--- /dev/null
++++ b/misc/tst-mremap1.c
+@@ -0,0 +1,46 @@
++/* Test mremap with MREMAP_MAYMOVE.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <sys/mman.h>
++#include <support/xstdlib.h>
++#include <support/xunistd.h>
++#include <support/check.h>
++#include <support/test-driver.h>
++
++static int
++do_test (void)
++{
++  size_t old_size = getpagesize ();
++  char *old_addr = xmmap (NULL, old_size, PROT_READ | PROT_WRITE,
++			  MAP_PRIVATE | MAP_ANONYMOUS, -1);
++  old_addr[0] = 1;
++  old_addr[old_size - 1] = 2;
++
++  /* Test MREMAP_MAYMOVE.  */
++  size_t new_size = old_size + old_size;
++  char *new_addr = mremap (old_addr, old_size, new_size, MREMAP_MAYMOVE);
++  TEST_VERIFY_EXIT (new_addr != MAP_FAILED);
++  new_addr[0] = 1;
++  new_addr[new_size - 1] = 2;
++  xmunmap (new_addr, new_size);
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/misc/tst-mremap2.c b/misc/tst-mremap2.c
+new file mode 100644
+index 0000000000000000..45be7f0369c2571e
+--- /dev/null
++++ b/misc/tst-mremap2.c
+@@ -0,0 +1,54 @@
++/* Test mremap with MREMAP_FIXED.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <sys/mman.h>
++#include <support/xstdlib.h>
++#include <support/xunistd.h>
++#include <support/test-driver.h>
++#include <mremap-failure.h>
++
++static int
++do_test (void)
++{
++  size_t old_size = getpagesize ();
++  size_t new_size = old_size + old_size;
++  char *old_addr = xmmap (NULL, old_size, PROT_READ | PROT_WRITE,
++			  MAP_PRIVATE | MAP_ANONYMOUS, -1);
++  old_addr[0] = 1;
++  old_addr[old_size - 1] = 2;
++
++  char *fixed_addr = xmmap (NULL, new_size, PROT_READ | PROT_WRITE,
++			    MAP_PRIVATE | MAP_ANONYMOUS, -1);
++  fixed_addr[0] = 1;
++  fixed_addr[new_size - 1] = 2;
++
++  /* Test MREMAP_FIXED.  */
++  char *new_addr = mremap (old_addr, old_size, new_size,
++			   MREMAP_FIXED | MREMAP_MAYMOVE,
++			   fixed_addr);
++  if (new_addr == MAP_FAILED)
++    return mremap_failure_exit (errno);
++  new_addr[0] = 1;
++  new_addr[new_size - 1] = 2;
++  xmunmap (new_addr, new_size);
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/sysdeps/generic/mremap-failure.h b/sysdeps/generic/mremap-failure.h
+new file mode 100644
+index 0000000000000000..bc0d476368050c2c
+--- /dev/null
++++ b/sysdeps/generic/mremap-failure.h
+@@ -0,0 +1,25 @@
++/* mremap failure handling.  Generic version.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* Return exit value on mremap failure with errno ERR.  */
++
++static int
++mremap_failure_exit (int err)
++{
++  return EXIT_FAILURE;
++}
+diff --git a/sysdeps/unix/sysv/linux/Makefile b/sysdeps/unix/sysv/linux/Makefile
+index 74656e56038844aa..8632bfe6eac31ff2 100644
+--- a/sysdeps/unix/sysv/linux/Makefile
++++ b/sysdeps/unix/sysv/linux/Makefile
+@@ -126,6 +126,7 @@ tests += tst-clone tst-clone2 tst-clone3 tst-fanotify tst-personality \
+   tst-scm_rights \
+   tst-getauxval \
+   tst-fdopendir-o_path \
++  tst-linux-mremap1 \
+   # tests
+ 
+ # Test for the symbol version of fcntl that was replaced in glibc 2.28.
+diff --git a/sysdeps/unix/sysv/linux/mremap-failure.h b/sysdeps/unix/sysv/linux/mremap-failure.h
+new file mode 100644
+index 0000000000000000..c99ab30ca9ea796f
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/mremap-failure.h
+@@ -0,0 +1,30 @@
++/* mremap failure handling.  Linux version.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/check.h>
++
++/* Return exit value on mremap failure with errno ERR.  */
++
++static int
++mremap_failure_exit (int err)
++{
++  if (err != EINVAL)
++    return EXIT_FAILURE;
++
++  return EXIT_UNSUPPORTED;
++}
+diff --git a/sysdeps/unix/sysv/linux/tst-linux-mremap1.c b/sysdeps/unix/sysv/linux/tst-linux-mremap1.c
+new file mode 100644
+index 0000000000000000..408e8af2abe59033
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/tst-linux-mremap1.c
+@@ -0,0 +1,63 @@
++/* Test mremap with MREMAP_DONTUNMAP.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <sys/mman.h>
++#include <support/xstdlib.h>
++#include <support/xunistd.h>
++#include <support/check.h>
++#include <support/test-driver.h>
++#include <mremap-failure.h>
++
++static int
++do_test (void)
++{
++  size_t old_size = getpagesize ();
++  size_t new_size = old_size;
++  char *old_addr = xmmap (NULL, old_size, PROT_READ | PROT_WRITE,
++			  MAP_PRIVATE | MAP_ANONYMOUS, -1);
++  old_addr[0] = 1;
++  old_addr[old_size - 1] = 2;
++
++  /* Create an available 64-page mmap region.  */
++  size_t fixed_size = old_size * 64;
++  char *fixed_addr = xmmap (NULL, fixed_size, PROT_READ | PROT_WRITE,
++			    MAP_PRIVATE | MAP_ANONYMOUS, -1);
++  xmunmap (fixed_addr, fixed_size);
++
++  /* Add 3 * pagesize.  */
++  fixed_size += 3 * old_size;
++
++  /* Test MREMAP_DONTUNMAP.  It should return FIXED_ADDR created above.  */
++  char *new_addr = mremap (old_addr, old_size, new_size,
++			   MREMAP_DONTUNMAP | MREMAP_MAYMOVE,
++			   fixed_addr);
++  if (new_addr == MAP_FAILED)
++    return mremap_failure_exit (errno);
++  TEST_VERIFY_EXIT (fixed_addr == new_addr);
++  old_addr[0] = 3;
++  old_addr[old_size - 1] = 4;
++  new_addr[0] = 1;
++  new_addr[new_size - 1] = 2;
++  xmunmap (new_addr, new_size);
++  xmunmap (old_addr, old_size);
++
++  return 0;
++}
++
++#include <support/test-driver.c>

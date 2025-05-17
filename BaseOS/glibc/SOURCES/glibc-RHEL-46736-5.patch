@@ -1,0 +1,69 @@
+commit f512634ddef242ef0ff025ddeba64ce51035040f
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Thu Sep 5 11:15:29 2024 +0000
+
+    Clear flags2 flags set from mode in freopen (bug 32134)
+    
+    As reported in bug 32134, freopen does not clear the flags set in
+    fp->_flags2 by the "e", "m" or "c" mode characters.  Clear these so
+    that they can be set or not as appropriate from the mode string passed
+    to freopen.  The relevant test for "e" in tst-freopen2-main.c is
+    enabled accordingly; "c" is expected to be covered in a separately
+    written test (and while tst-freopen2-main.c does include transitions
+    to and from "m", that's not really a semantic flag intended to result
+    in behaving in an observably different way).
+    
+    Tested for x86_64.
+
+diff --git a/libio/freopen.c b/libio/freopen.c
+index c947a5aecfde3c80..bed034d89441f200 100644
+--- a/libio/freopen.c
++++ b/libio/freopen.c
+@@ -63,6 +63,9 @@ freopen (const char *filename, const char *mode, FILE *fp)
+ 	 up here. */
+       _IO_old_file_close_it (fp);
+       _IO_JUMPS_FUNC_UPDATE (fp, &_IO_old_file_jumps);
++      fp->_flags2 &= ~(_IO_FLAGS2_MMAP
++		       | _IO_FLAGS2_NOTCANCEL
++		       | _IO_FLAGS2_CLOEXEC);
+       result = _IO_old_file_fopen (fp, gfilename, mode);
+     }
+   else
+@@ -72,6 +75,9 @@ freopen (const char *filename, const char *mode, FILE *fp)
+       _IO_JUMPS_FILE_plus (fp) = &_IO_file_jumps;
+       if (_IO_vtable_offset (fp) == 0 && fp->_wide_data != NULL)
+ 	fp->_wide_data->_wide_vtable = &_IO_wfile_jumps;
++      fp->_flags2 &= ~(_IO_FLAGS2_MMAP
++		       | _IO_FLAGS2_NOTCANCEL
++		       | _IO_FLAGS2_CLOEXEC);
+       result = _IO_file_fopen (fp, gfilename, mode, 1);
+       if (result != NULL)
+ 	result = __fopen_maybe_mmap (result);
+diff --git a/libio/freopen64.c b/libio/freopen64.c
+index fb02c201bd83c401..9a314c65c1d8a5a4 100644
+--- a/libio/freopen64.c
++++ b/libio/freopen64.c
+@@ -56,6 +56,9 @@ freopen64 (const char *filename, const char *mode, FILE *fp)
+   _IO_JUMPS_FILE_plus (fp) = &_IO_file_jumps;
+   if (_IO_vtable_offset (fp) == 0 && fp->_wide_data != NULL)
+     fp->_wide_data->_wide_vtable = &_IO_wfile_jumps;
++  fp->_flags2 &= ~(_IO_FLAGS2_MMAP
++		   | _IO_FLAGS2_NOTCANCEL
++		   | _IO_FLAGS2_CLOEXEC);
+   result = _IO_file_fopen (fp, gfilename, mode, 0);
+   fp->_flags2 &= ~_IO_FLAGS2_NOCLOSE;
+   if (result != NULL)
+diff --git a/stdio-common/tst-freopen2-main.c b/stdio-common/tst-freopen2-main.c
+index 22b21afebf709563..5dad41c76b02e6de 100644
+--- a/stdio-common/tst-freopen2-main.c
++++ b/stdio-common/tst-freopen2-main.c
+@@ -308,9 +308,7 @@ do_test (void)
+   TEST_VERIFY_EXIT (fp != NULL);
+   ret = fcntl (fileno (fp), F_GETFD);
+   TEST_VERIFY (ret != -1);
+-#if 0 /* Fails to clear FD_CLOEXEC (bug 32134).  */
+   TEST_COMPARE (ret & FD_CLOEXEC, 0);
+-#endif
+   TEST_COMPARE_FILE_STRING (fp, "plustomore");
+   xfclose (fp);
+   END_TEST;

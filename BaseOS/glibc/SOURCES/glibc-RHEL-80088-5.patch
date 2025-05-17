@@ -1,0 +1,28 @@
+commit d9f40387d3305d97e30a8cf8724218c42a63680a
+Author: Michael Jeanson <mjeanson@efficios.com>
+Date:   Wed Nov 20 14:15:42 2024 -0500
+
+    nptl: initialize cpu_id_start prior to rseq registration
+    
+    When adding explicit initialization of rseq fields prior to
+    registration, I glossed over the fact that 'cpu_id_start' is also
+    documented as initialized by user-space.
+    
+    While current kernels don't validate the content of this field on
+    registration, future ones could.
+    
+    Signed-off-by: Michael Jeanson <mjeanson@efficios.com>
+    Reviewed-by: Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+
+diff --git a/sysdeps/unix/sysv/linux/rseq-internal.h b/sysdeps/unix/sysv/linux/rseq-internal.h
+index 7e70ae7ebdee4917..c108a12a6227eeac 100644
+--- a/sysdeps/unix/sysv/linux/rseq-internal.h
++++ b/sysdeps/unix/sysv/linux/rseq-internal.h
+@@ -56,6 +56,7 @@ rseq_register_current_thread (struct pthread *self, bool do_rseq)
+          registration, there is no guarantee that struct pthread is
+          cleared on all architectures.  */
+       THREAD_SETMEM (self, rseq_area.cpu_id, RSEQ_CPU_ID_UNINITIALIZED);
++      THREAD_SETMEM (self, rseq_area.cpu_id_start, 0);
+       THREAD_SETMEM (self, rseq_area.rseq_cs, 0);
+       THREAD_SETMEM (self, rseq_area.flags, 0);
+ 

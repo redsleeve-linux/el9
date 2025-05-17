@@ -1,0 +1,151 @@
+commit a9017caff3b77032d04e2e439f7c04a63241e63e
+Author: Sergey Kolosov <skolosov@redhat.com>
+Date:   Tue Jan 28 23:56:26 2025 +0100
+
+    nptl: extend test coverage for sched_yield
+    
+    We add sched_yield() API testing to the existing thread affinity
+    test case because it allows us to test sched_yield() operation
+    in the following scenarios:
+    
+      * On a main thread.
+      * On multiple threads simultaneously.
+      * On every CPU the system reports simultaneously.
+    
+    The ensures we exercise sched_yield() in as many scenarios as
+    we would exercise calls to the affinity functions.
+    
+    Additionally, the test is improved by adding a semaphore to coordinate
+    all the threads running, so that an early starter thread won't consume
+    cpu resources that could be used to start the other threads.
+    
+    Co-authored-by: DJ Delorie <dj@redhat.com>
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+
+diff --git a/sysdeps/unix/sysv/linux/tst-skeleton-affinity.c b/sysdeps/unix/sysv/linux/tst-skeleton-affinity.c
+index afc8c1b96fa2f408..55ddcda2ce24e186 100644
+--- a/sysdeps/unix/sysv/linux/tst-skeleton-affinity.c
++++ b/sysdeps/unix/sysv/linux/tst-skeleton-affinity.c
+@@ -38,6 +38,7 @@
+ #include <sched.h>
+ #include <stdbool.h>
+ #include <stdio.h>
++#include <support/test-driver.h>
+ 
+ /* CPU set configuration determined.  Can be used from early_test.  */
+ struct conf
+@@ -253,12 +254,12 @@ do_test (void)
+     if (getaffinity (sizeof (set), &set) < 0 && errno == ENOSYS)
+       {
+ 	puts ("warning: getaffinity not supported, test cannot run");
+-	return 0;
++	return EXIT_UNSUPPORTED;
+       }
+     if (sched_getcpu () < 0 && errno == ENOSYS)
+       {
+ 	puts ("warning: sched_getcpu not supported, test cannot run");
+-	return 0;
++	return EXIT_UNSUPPORTED;
+       }
+   }
+ 
+diff --git a/sysdeps/unix/sysv/linux/tst-skeleton-thread-affinity.c b/sysdeps/unix/sysv/linux/tst-skeleton-thread-affinity.c
+index 1445ea2d19430ce8..545a6c77c6fdd091 100644
+--- a/sysdeps/unix/sysv/linux/tst-skeleton-thread-affinity.c
++++ b/sysdeps/unix/sysv/linux/tst-skeleton-thread-affinity.c
+@@ -45,10 +45,14 @@ static int still_running;
+ /* 0 if no scheduling failures, 1 if failures are encountered.  */
+ static int failed;
+ 
++/* Used to synchronize the threads.  */
++static pthread_barrier_t barrier;
++
+ static void *
+ thread_burn_one_cpu (void *closure)
+ {
+   int cpu = (uintptr_t) closure;
++  xpthread_barrier_wait (&barrier);
+   while (__atomic_load_n (&still_running, __ATOMIC_RELAXED) == 0)
+     {
+       int current = sched_getcpu ();
+@@ -61,6 +65,11 @@ thread_burn_one_cpu (void *closure)
+ 	  __atomic_store_n (&still_running, 1, __ATOMIC_RELAXED);
+ 	}
+     }
++  if (sched_yield () != 0)
++    {
++      printf ("error: sched_yield() failed for cpu %d\n", cpu);
++      __atomic_store_n (&failed, 1, __ATOMIC_RELAXED);
++    }
+   return NULL;
+ }
+ 
+@@ -78,6 +87,7 @@ thread_burn_any_cpu (void *closure)
+ {
+   struct burn_thread *param = closure;
+ 
++  xpthread_barrier_wait (&barrier);
+   /* Schedule this thread around a bit to see if it lands on another
+      CPU.  Run this for 2 seconds, once with sched_yield, once
+      without.  */
+@@ -99,7 +109,11 @@ thread_burn_any_cpu (void *closure)
+ 	  CPU_SET_S (cpu, CPU_ALLOC_SIZE (param->conf->set_size),
+ 		     param->seen_set);
+ 	  if (pass == 1)
+-	    sched_yield ();
++	    if (sched_yield () != 0)
++	      {
++		printf ("error: sched_yield() failed for cpu %d\n", cpu);
++		__atomic_store_n (&failed, 1, __ATOMIC_RELAXED);
++	      }
+ 	}
+     }
+   return NULL;
+@@ -156,6 +170,7 @@ early_test (struct conf *conf)
+     = calloc (conf->last_cpu + 1, sizeof (*other_threads));
+   cpu_set_t *initial_set = CPU_ALLOC (conf->set_size);
+   cpu_set_t *scratch_set = CPU_ALLOC (conf->set_size);
++  int num_available_cpus = 0;
+ 
+   if (pinned_threads == NULL || other_threads == NULL
+       || initial_set == NULL || scratch_set == NULL)
+@@ -172,6 +187,7 @@ early_test (struct conf *conf)
+     {
+       if (!CPU_ISSET_S (cpu, CPU_ALLOC_SIZE (conf->set_size), initial_set))
+ 	continue;
++      num_available_cpus ++;
+       other_threads[cpu].conf = conf;
+       other_threads[cpu].initial_set = initial_set;
+       other_threads[cpu].thread = cpu;
+@@ -194,6 +210,15 @@ early_test (struct conf *conf)
+     }
+   support_set_small_thread_stack_size (&attr);
+ 
++  /* This count assumes that all the threads below are created
++     successfully, and call pthread_barrier_wait().  If any threads
++     fail to be created, this function will return FALSE (failure) and
++     the waiting threads will eventually time out the whole test.
++     This is acceptable because we're not testing thread creation and
++     assume all threads will be created, and failure here implies a
++     failure outside the test's scope.  */
++  xpthread_barrier_init (&barrier, NULL, num_available_cpus * 2 + 1);
++
+   /* Spawn a thread pinned to each available CPU.  */
+   for (int cpu = 0; cpu <= conf->last_cpu; ++cpu)
+     {
+@@ -245,6 +270,15 @@ early_test (struct conf *conf)
+ 	}
+     }
+ 
++  /* Test that sched_yield() works correctly in the main thread.  This
++     also gives the kernel an opportunity to run the other threads,
++     randomizing thread startup a bit.  */
++  if (sched_yield () != 0)
++    {
++      printf ("error: sched_yield() failed for main thread\n");
++      __atomic_store_n (&failed, 1, __ATOMIC_RELAXED);
++    }
++
+   /* Main thread.  */
+   struct burn_thread main_thread;
+   main_thread.conf = conf;

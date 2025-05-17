@@ -1,0 +1,410 @@
+From bf2927484152e12996af60ea439cf94b66fcd81d Mon Sep 17 00:00:00 2001
+From: Florian Weimer <fweimer@redhat.com>
+Date: Fri, 16 Aug 2024 16:05:20 +0200
+Subject: [PATCH] io: Use struct statx and xstatx in tests
+Content-type: text/plain; charset=UTF-8
+
+This avoids the need to define struct_statx to an appropriate
+struct stat type variant because struct statx does not change
+based on time/file offset flags.
+
+Reviewed-by: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+---
+ io/tst-futimens-time64.c  |  1 -
+ io/tst-futimens.c         | 13 +++++--------
+ io/tst-futimes-time64.c   |  1 -
+ io/tst-futimes.c          | 13 +++++--------
+ io/tst-futimesat-time64.c |  3 ---
+ io/tst-futimesat.c        | 30 ++++++++----------------------
+ io/tst-lutimes-time64.c   |  1 -
+ io/tst-lutimes.c          | 26 ++++++++++++--------------
+ io/tst-utime-time64.c     |  1 -
+ io/tst-utime.c            | 13 +++++--------
+ io/tst-utimensat-time64.c |  1 -
+ io/tst-utimensat.c        | 35 +++++++++++++++++------------------
+ io/tst-utimes-time64.c    |  1 -
+ io/tst-utimes.c           | 13 +++++--------
+ 14 files changed, 57 insertions(+), 95 deletions(-)
+
+diff --git a/io/tst-futimens-time64.c b/io/tst-futimens-time64.c
+index 88fcb38489..71204a6166 100644
+--- a/io/tst-futimens-time64.c
++++ b/io/tst-futimens-time64.c
+@@ -1,2 +1 @@
+-#define struct_stat struct stat
+ #include "tst-futimens.c"
+diff --git a/io/tst-futimens.c b/io/tst-futimens.c
+index 6204befedd..075ca42b93 100644
+--- a/io/tst-futimens.c
++++ b/io/tst-futimens.c
+@@ -18,26 +18,23 @@
+ 
+ #include <support/check.h>
+ #include <support/xunistd.h>
++#include <fcntl.h>
+ #include <sys/stat.h>
+ 
+-#ifndef struct_stat
+-# define struct_stat struct stat64
+-#endif
+-
+ static int
+ test_futimens_helper (const char *file, int fd, const struct timespec *ts)
+ {
+   int result = futimens (fd, ts);
+   TEST_VERIFY_EXIT (result == 0);
+ 
+-  struct_stat st;
+-  xfstat (fd, &st);
++  struct statx st;
++  xstatx (fd, "", AT_EMPTY_PATH, STATX_BASIC_STATS, &st);
+ 
+   /* Check if seconds for atime match */
+-  TEST_COMPARE (st.st_atime, ts[0].tv_sec);
++  TEST_COMPARE (st.stx_atime.tv_sec, ts[0].tv_sec);
+ 
+   /* Check if seconds for mtime match */
+-  TEST_COMPARE (st.st_mtime, ts[1].tv_sec);
++  TEST_COMPARE (st.stx_mtime.tv_sec, ts[1].tv_sec);
+ 
+   return 0;
+ }
+diff --git a/io/tst-futimes-time64.c b/io/tst-futimes-time64.c
+index d489c265d1..eeb4bed7c4 100644
+--- a/io/tst-futimes-time64.c
++++ b/io/tst-futimes-time64.c
+@@ -1,2 +1 @@
+-#define struct_stat struct stat
+ #include "tst-futimes.c"
+diff --git a/io/tst-futimes.c b/io/tst-futimes.c
+index d21acf6a24..612fe460cf 100644
+--- a/io/tst-futimes.c
++++ b/io/tst-futimes.c
+@@ -18,27 +18,24 @@
+ 
+ #include <support/check.h>
+ #include <support/xunistd.h>
++#include <fcntl.h>
+ #include <sys/stat.h>
+ #include <sys/time.h>
+ 
+-#ifndef struct_stat
+-# define struct_stat struct stat64
+-#endif
+-
+ static int
+ test_futimens_helper (const char *file, int fd, const struct timeval *tv)
+ {
+   int r = futimes (fd, tv);
+   TEST_VERIFY_EXIT (r == 0);
+ 
+-  struct_stat st;
+-  xfstat (fd, &st);
++  struct statx st;
++  xstatx (fd, "", AT_EMPTY_PATH, STATX_BASIC_STATS, &st);
+ 
+   /* Check if seconds for atime match */
+-  TEST_COMPARE (st.st_atime, tv[0].tv_sec);
++  TEST_COMPARE (st.stx_atime.tv_sec, tv[0].tv_sec);
+ 
+   /* Check if seconds for mtime match */
+-  TEST_COMPARE (st.st_mtime, tv[1].tv_sec);
++  TEST_COMPARE (st.stx_mtime.tv_sec, tv[1].tv_sec);
+ 
+   return 0;
+ }
+diff --git a/io/tst-futimesat-time64.c b/io/tst-futimesat-time64.c
+index f6c0500eef..1585317579 100644
+--- a/io/tst-futimesat-time64.c
++++ b/io/tst-futimesat-time64.c
+@@ -1,4 +1 @@
+-#define struct_stat  struct stat
+-#define fstat        fstat
+-#define fstatat      fstatat
+ #include "io/tst-futimesat.c"
+diff --git a/io/tst-futimesat.c b/io/tst-futimesat.c
+index 67a8551beb..feae4e7aa7 100644
+--- a/io/tst-futimesat.c
++++ b/io/tst-futimesat.c
+@@ -30,12 +30,6 @@
+ #include <support/temp_file.h>
+ #include <support/xunistd.h>
+ 
+-#ifndef struct_stat
+-# define struct_stat struct stat64
+-# define fstat       fstat64
+-# define fstatat     fstatat64
+-#endif
+-
+ static int dir_fd;
+ 
+ static void
+@@ -118,19 +112,15 @@ do_test (void)
+   xwrite (fd, "hello", 5);
+   puts ("file created");
+ 
+-  struct_stat st1;
+-  if (fstat (fd, &st1) != 0)
+-    {
+-      puts ("fstat64 failed");
+-      return 1;
+-    }
++  struct statx st1;
++  xstatx (fd, "", AT_EMPTY_PATH, STATX_BASIC_STATS, &st1);
+ 
+   close (fd);
+ 
+   struct timeval tv[2];
+-  tv[0].tv_sec = st1.st_atime + 1;
++  tv[0].tv_sec = st1.stx_atime.tv_sec + 1;
+   tv[0].tv_usec = 0;
+-  tv[1].tv_sec = st1.st_mtime + 1;
++  tv[1].tv_sec = st1.stx_mtime.tv_sec + 1;
+   tv[1].tv_usec = 0;
+   if (futimesat (dir_fd, "some-file", tv) != 0)
+     {
+@@ -138,16 +128,12 @@ do_test (void)
+       return 1;
+     }
+ 
+-  struct_stat st2;
+-  if (fstatat (dir_fd, "some-file", &st2, 0) != 0)
+-    {
+-      puts ("fstatat64 failed");
+-      return 1;
+-    }
++  struct statx st2;
++  xstatx (dir_fd, "some-file", 0, STATX_BASIC_STATS, &st2);
+ 
+-  if (st2.st_mtime != tv[1].tv_sec
++  if (st2.stx_mtime.tv_sec != tv[1].tv_sec
+ #ifdef _STATBUF_ST_NSEC
+-      || st2.st_mtim.tv_nsec != 0
++      || st2.stx_mtime.tv_nsec != 0
+ #endif
+       )
+     {
+diff --git a/io/tst-lutimes-time64.c b/io/tst-lutimes-time64.c
+index 06caec0a91..c5bea965da 100644
+--- a/io/tst-lutimes-time64.c
++++ b/io/tst-lutimes-time64.c
+@@ -1,2 +1 @@
+-#define struct_stat struct stat
+ #include "tst-lutimes.c"
+diff --git a/io/tst-lutimes.c b/io/tst-lutimes.c
+index edef5ab90e..78bcc58291 100644
+--- a/io/tst-lutimes.c
++++ b/io/tst-lutimes.c
+@@ -18,34 +18,32 @@
+ 
+ #include <support/check.h>
+ #include <support/xunistd.h>
++#include <fcntl.h>
+ #include <sys/stat.h>
+ #include <sys/time.h>
+ 
+-#ifndef struct_stat
+-# define struct_stat struct stat64
+-#endif
+-
+ static int
+ test_lutimes_helper (const char *testfile, int fd, const char *testlink,
+                      const struct timeval *tv)
+ {
+-  struct_stat stfile_orig;
+-  xlstat (testfile, &stfile_orig);
++  struct statx stfile_orig;
++  xstatx (AT_FDCWD, testfile, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS,
++          &stfile_orig);
+ 
+   TEST_VERIFY_EXIT (lutimes (testlink, tv) == 0);
+ 
+-  struct_stat stlink;
+-  xlstat (testlink, &stlink);
++  struct statx stlink;
++  xstatx (AT_FDCWD, testlink, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS, &stlink);
+ 
+-  TEST_COMPARE (stlink.st_atime, tv[0].tv_sec);
+-  TEST_COMPARE (stlink.st_mtime, tv[1].tv_sec);
++  TEST_COMPARE (stlink.stx_atime.tv_sec, tv[0].tv_sec);
++  TEST_COMPARE (stlink.stx_mtime.tv_sec, tv[1].tv_sec);
+ 
+   /* Check if the timestamp from original file is not changed.  */
+-  struct_stat stfile;
+-  xlstat (testfile, &stfile);
++  struct statx stfile;
++  xstatx (AT_FDCWD, testfile, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS, &stfile);
+ 
+-  TEST_COMPARE (stfile_orig.st_atime, stfile.st_atime);
+-  TEST_COMPARE (stfile_orig.st_mtime, stfile.st_mtime);
++  TEST_COMPARE (stfile_orig.stx_atime.tv_sec, stfile.stx_atime.tv_sec);
++  TEST_COMPARE (stfile_orig.stx_mtime.tv_sec, stfile.stx_mtime.tv_sec);
+ 
+   return 0;
+ }
+diff --git a/io/tst-utime-time64.c b/io/tst-utime-time64.c
+index eb62f59126..8894592a15 100644
+--- a/io/tst-utime-time64.c
++++ b/io/tst-utime-time64.c
+@@ -1,2 +1 @@
+-#define struct_stat struct stat
+ #include "tst-utime.c"
+diff --git a/io/tst-utime.c b/io/tst-utime.c
+index e2e6dcd04c..f329358289 100644
+--- a/io/tst-utime.c
++++ b/io/tst-utime.c
+@@ -19,26 +19,23 @@
+ #include <utime.h>
+ #include <support/check.h>
+ #include <support/xunistd.h>
++#include <fcntl.h>
+ #include <sys/stat.h>
+ 
+-#ifndef struct_stat
+-# define struct_stat struct stat64
+-#endif
+-
+ static int
+ test_utime_helper (const char *file, int fd, const struct utimbuf *ut)
+ {
+   int result = utime (file, ut);
+   TEST_VERIFY_EXIT (result == 0);
+ 
+-  struct_stat st;
+-  xfstat (fd, &st);
++  struct statx st;
++  xstatx (fd, "", AT_EMPTY_PATH, STATX_BASIC_STATS, &st);
+ 
+   /* Check if seconds for actime match */
+-  TEST_COMPARE (st.st_atime, ut->actime);
++  TEST_COMPARE (st.stx_atime.tv_sec, ut->actime);
+ 
+   /* Check if seconds for modtime match */
+-  TEST_COMPARE (st.st_mtime, ut->modtime);
++  TEST_COMPARE (st.stx_mtime.tv_sec, ut->modtime);
+ 
+   return 0;
+ }
+diff --git a/io/tst-utimensat-time64.c b/io/tst-utimensat-time64.c
+index 7ac7d8df1d..5d60fce881 100644
+--- a/io/tst-utimensat-time64.c
++++ b/io/tst-utimensat-time64.c
+@@ -1,2 +1 @@
+-#define struct_stat struct stat
+ #include "tst-utimensat.c"
+diff --git a/io/tst-utimensat.c b/io/tst-utimensat.c
+index 3d9a72c471..2a756d7b07 100644
+--- a/io/tst-utimensat.c
++++ b/io/tst-utimensat.c
+@@ -22,10 +22,6 @@
+ #include <sys/stat.h>
+ #include <sys/time.h>
+ 
+-#ifndef struct_stat
+-# define struct_stat struct stat64
+-#endif
+-
+ static int
+ test_utimesat_helper (const char *testfile, int fd, const char *testlink,
+                       const struct timespec *ts)
+@@ -33,35 +29,38 @@ test_utimesat_helper (const char *testfile, int fd, const char *testlink,
+   {
+     TEST_VERIFY_EXIT (utimensat (fd, testfile, ts, 0) == 0);
+ 
+-    struct_stat st;
+-    xfstat (fd, &st);
++    struct statx st;
++    xstatx (fd, "", AT_EMPTY_PATH, STATX_BASIC_STATS, &st);
+ 
+     /* Check if seconds for atime match */
+-    TEST_COMPARE (st.st_atime, ts[0].tv_sec);
++    TEST_COMPARE (st.stx_atime.tv_sec, ts[0].tv_sec);
+ 
+     /* Check if seconds for mtime match */
+-    TEST_COMPARE (st.st_mtime, ts[1].tv_sec);
++    TEST_COMPARE (st.stx_mtime.tv_sec, ts[1].tv_sec);
+   }
+ 
+   {
+-    struct_stat stfile_orig;
+-    xlstat (testfile, &stfile_orig);
++    struct statx stfile_orig;
++    xstatx (AT_FDCWD, testfile, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS,
++	    &stfile_orig);
+ 
+     TEST_VERIFY_EXIT (utimensat (0 /* ignored  */, testlink, ts,
+ 				 AT_SYMLINK_NOFOLLOW)
+ 		       == 0);
+-    struct_stat stlink;
+-    xlstat (testlink, &stlink);
++    struct statx stlink;
++    xstatx (AT_FDCWD, testlink, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS,
++	    &stlink);
+ 
+-    TEST_COMPARE (stlink.st_atime, ts[0].tv_sec);
+-    TEST_COMPARE (stlink.st_mtime, ts[1].tv_sec);
++    TEST_COMPARE (stlink.stx_atime.tv_sec, ts[0].tv_sec);
++    TEST_COMPARE (stlink.stx_mtime.tv_sec, ts[1].tv_sec);
+ 
+     /* Check if the timestamp from original file is not changed.  */
+-    struct_stat stfile;
+-    xlstat (testfile, &stfile);
++    struct statx stfile;
++    xstatx (AT_FDCWD, testfile, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS,
++	    &stfile);
+ 
+-    TEST_COMPARE (stfile_orig.st_atime, stfile.st_atime);
+-    TEST_COMPARE (stfile_orig.st_mtime, stfile.st_mtime);
++    TEST_COMPARE (stfile_orig.stx_atime.tv_sec, stfile.stx_atime.tv_sec);
++    TEST_COMPARE (stfile_orig.stx_mtime.tv_sec, stfile.stx_mtime.tv_sec);
+   }
+ 
+   return 0;
+diff --git a/io/tst-utimes-time64.c b/io/tst-utimes-time64.c
+index 234ec02541..026ef5f78d 100644
+--- a/io/tst-utimes-time64.c
++++ b/io/tst-utimes-time64.c
+@@ -1,2 +1 @@
+-#define struct_stat struct stat
+ #include "tst-utimes.c"
+diff --git a/io/tst-utimes.c b/io/tst-utimes.c
+index 8edcfabebf..6cd436c5a0 100644
+--- a/io/tst-utimes.c
++++ b/io/tst-utimes.c
+@@ -18,28 +18,25 @@
+ 
+ #include <support/check.h>
+ #include <support/xunistd.h>
++#include <fcntl.h>
+ #include <sys/stat.h>
+ #include <sys/time.h>
+ #include <time.h>
+ 
+-#ifndef struct_stat
+-# define struct_stat struct stat64
+-#endif
+-
+ static int
+ test_utimes_helper (const char *file, int fd, const struct timeval *tv)
+ {
+   int result = utimes (file, tv);
+   TEST_VERIFY_EXIT (result == 0);
+ 
+-  struct_stat st;
+-  xfstat (fd, &st);
++  struct statx st;
++  xstatx (fd, "", AT_EMPTY_PATH, STATX_BASIC_STATS, &st);
+ 
+   /* Check if seconds for atime match */
+-  TEST_COMPARE (st.st_atime, tv[0].tv_sec);
++  TEST_COMPARE (st.stx_atime.tv_sec, tv[0].tv_sec);
+ 
+   /* Check if seconds for mtime match */
+-  TEST_COMPARE (st.st_mtime, tv[1].tv_sec);
++  TEST_COMPARE (st.stx_mtime.tv_sec, tv[1].tv_sec);
+ 
+   return 0;
+ }
+-- 
+2.43.5
+

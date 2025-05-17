@@ -1,0 +1,452 @@
+From e7c14e542d8d858b824b5df4f4e3dc93695e6171 Mon Sep 17 00:00:00 2001
+From: Florian Weimer <fweimer@redhat.com>
+Date: Fri, 16 Aug 2024 16:05:20 +0200
+Subject: [PATCH] support: Use macros for *stat wrappers
+Content-type: text/plain; charset=UTF-8
+
+Macros will automatically use the correct types, without
+having to fiddle with internal glibc macros.  It's also
+impossible to get the types wrong due to aliasing because
+support_check_stat_fd and support_check_stat_path do not
+depend on the struct stat* types.
+
+The changes reveal some inconsistencies in tests.
+
+Reviewed-by: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+
+Conflicts
+	locale/tst-localedef-path-norm.c
+		context
+	support/Makefile
+		context
+	support/xunistd.h
+		context
+	all
+		copyright years
+---
+ elf/tst-ldconfig-bad-aux-cache.c              |  2 +-
+ io/tst-copy_file_range.c                      |  2 +-
+ io/tst-statx.c                                |  4 +--
+ locale/tst-localedef-path-norm.c              |  2 +-
+ localedata/tst-localedef-hardlinks.c          |  2 +-
+ posix/tst-execveat.c                          |  2 +-
+ stdio-common/tst-renameat2.c                  |  2 +-
+ stdlib/tst-system.c                           |  2 +-
+ support/Makefile                              |  8 ++---
+ support/support-xfstat-time64.c               | 32 -------------------
+ support/support-xstat-time64.c                | 32 -------------------
+ support/support-xstat.c                       | 30 -----------------
+ support/{xlstat.c => support_check_stat_fd.c} | 11 +++----
+ ...ort-xfstat.c => support_check_stat_path.c} |  9 +++---
+ support/xlstat-time64.c                       | 32 -------------------
+ support/xunistd.h                             | 30 ++++++++---------
+ 16 files changed, 34 insertions(+), 168 deletions(-)
+ delete mode 100644 support/support-xfstat-time64.c
+ delete mode 100644 support/support-xstat-time64.c
+ delete mode 100644 support/support-xstat.c
+ rename support/{xlstat.c => support_check_stat_fd.c} (76%)
+ rename support/{support-xfstat.c => support_check_stat_path.c} (81%)
+ delete mode 100644 support/xlstat-time64.c
+
+diff --git a/elf/tst-ldconfig-bad-aux-cache.c b/elf/tst-ldconfig-bad-aux-cache.c
+index 7f1fbb5252..8c2e62ecc2 100644
+--- a/elf/tst-ldconfig-bad-aux-cache.c
++++ b/elf/tst-ldconfig-bad-aux-cache.c
+@@ -85,7 +85,7 @@ do_test (void)
+   support_capture_subprocess_check (&result, "execv", 0, sc_allow_none);
+   support_capture_subprocess_free (&result);
+ 
+-  xstat (path, &fs);
++  xstat64 (path, &fs);
+ 
+   size = fs.st_size;
+   /* Run 3 tests, each truncating aux-cache shorter and shorter.  */
+diff --git a/io/tst-copy_file_range.c b/io/tst-copy_file_range.c
+index 9837b7c339..3d7b0aa901 100644
+--- a/io/tst-copy_file_range.c
++++ b/io/tst-copy_file_range.c
+@@ -117,7 +117,7 @@ simple_file_copy (void)
+     TEST_COMPARE (xlseek (outfd, 0, SEEK_CUR), 6 + length);
+ 
+   struct stat64 st;
+-  xfstat (outfd, &st);
++  xfstat64 (outfd, &st);
+   if (length > 0)
+     TEST_COMPARE (st.st_size, out_skipped + length);
+   else
+diff --git a/io/tst-statx.c b/io/tst-statx.c
+index d84568859e..685924ae76 100644
+--- a/io/tst-statx.c
++++ b/io/tst-statx.c
+@@ -78,7 +78,7 @@ both_implementations_tests (statx_function impl, const char *path, int fd)
+     struct statx stx = { 0, };
+     TEST_COMPARE (statx (fd, "", AT_EMPTY_PATH, STATX_BASIC_STATS, &stx), 0);
+     struct stat64 st;
+-    xfstat (fd, &st);
++    xfstat64 (fd, &st);
+     TEST_COMPARE (stx.stx_mode, st.st_mode);
+     TEST_COMPARE (stx.stx_dev_major, major (st.st_dev));
+     TEST_COMPARE (stx.stx_dev_minor, minor (st.st_dev));
+@@ -88,7 +88,7 @@ both_implementations_tests (statx_function impl, const char *path, int fd)
+     TEST_COMPARE (statx (AT_FDCWD, "/dev/null", 0, STATX_BASIC_STATS, &stx),
+                   0);
+     struct stat64 st;
+-    xstat ("/dev/null", &st);
++    xstat64 ("/dev/null", &st);
+     TEST_COMPARE (stx.stx_mode, st.st_mode);
+     TEST_COMPARE (stx.stx_dev_major, major (st.st_dev));
+     TEST_COMPARE (stx.stx_dev_minor, minor (st.st_dev));
+diff --git a/locale/tst-localedef-path-norm.c b/locale/tst-localedef-path-norm.c
+index ffe8cbd467..f592b9a960 100644
+--- a/locale/tst-localedef-path-norm.c
++++ b/locale/tst-localedef-path-norm.c
+@@ -81,7 +81,7 @@ run_test (struct test_closure data)
+   support_capture_subprocess_free (&result);
+ 
+   /* Verify path is present and is a directory.  */
+-  xstat (path, &fs);
++  xstat64 (path, &fs);
+   TEST_VERIFY_EXIT (S_ISDIR (fs.st_mode));
+   printf ("info: Directory '%s' exists.\n", path);
+ }
+diff --git a/localedata/tst-localedef-hardlinks.c b/localedata/tst-localedef-hardlinks.c
+index e88215a150..23927b462f 100644
+--- a/localedata/tst-localedef-hardlinks.c
++++ b/localedata/tst-localedef-hardlinks.c
+@@ -62,7 +62,7 @@ check_link (struct test_data step)
+   char *output;
+ 
+   output = xasprintf ("%s/%s", support_complocaledir_prefix, step.output);
+-  xstat (output, &locale);
++  xstat64 (output, &locale);
+   free (output);
+   TEST_COMPARE (locale.st_nlink, step.st_nlink);
+ }
+diff --git a/posix/tst-execveat.c b/posix/tst-execveat.c
+index 4565d6b19f..dde034a9f1 100644
+--- a/posix/tst-execveat.c
++++ b/posix/tst-execveat.c
+@@ -155,7 +155,7 @@ do_test (void)
+   tmp_sh = xasprintf ("%s/tmp_sh", tmp_dir);
+   add_temp_file (tmp_sh);
+   fd_out = xopen (symlink_name, O_CREAT | O_WRONLY, 0);
+-  xstat ("/bin/sh", &st);
++  xstat64 ("/bin/sh", &st);
+   fd = xopen ("/bin/sh", O_RDONLY, 0);
+   xcopy_file_range (fd, 0, fd_out, 0, st.st_size, 0);
+   xfchmod (fd_out, 0700);
+diff --git a/stdio-common/tst-renameat2.c b/stdio-common/tst-renameat2.c
+index b65afed75e..7f4345f716 100644
+--- a/stdio-common/tst-renameat2.c
++++ b/stdio-common/tst-renameat2.c
+@@ -82,7 +82,7 @@ static void
+ check_size (const char *path, off64_t expected_size)
+ {
+   struct stat64 st;
+-  xstat (path, &st);
++  xstat64 (path, &st);
+   if (st.st_size != expected_size)
+     FAIL_EXIT1 ("file \"%s\": expected size %lld, actual size %lld",
+                 path, (unsigned long long int) expected_size,
+diff --git a/stdlib/tst-system.c b/stdlib/tst-system.c
+index 47c742f963..b5b630a41b 100644
+--- a/stdlib/tst-system.c
++++ b/stdlib/tst-system.c
+@@ -156,7 +156,7 @@ do_test (void)
+ 
+   {
+     struct stat64 st;
+-    xstat (_PATH_BSHELL, &st);
++    xstat64 (_PATH_BSHELL, &st);
+     mode_t mode = st.st_mode;
+     xchmod (_PATH_BSHELL, mode & ~(S_IXUSR | S_IXGRP | S_IXOTH));
+ 
+diff --git a/support/Makefile b/support/Makefile
+index 5b1c96a49e..6e3c55394f 100644
+--- a/support/Makefile
++++ b/support/Makefile
+@@ -42,14 +42,12 @@ libsupport-routines = \
+   resolv_test \
+   set_fortify_handler \
+   support_stack_alloc \
+-  support-xfstat \
+-  support-xfstat-time64 \
+-  support-xstat \
+-  support-xstat-time64 \
+   support_become_root \
+   support_can_chroot \
+   support_capture_subprocess \
+   support_capture_subprocess_check \
++  support_check_stat_fd \
++  support_check_stat_path \
+   support_chroot \
+   support_copy_file \
+   support_copy_file_range \
+@@ -130,8 +128,6 @@ libsupport-routines = \
+   xgetsockname \
+   xlisten \
+   xlseek \
+-  xlstat \
+-  xlstat-time64 \
+   xmalloc \
+   xmemstream \
+   xmkdir \
+diff --git a/support/support-xfstat-time64.c b/support/support-xfstat-time64.c
+deleted file mode 100644
+index 589a69bb3e..0000000000
+--- a/support/support-xfstat-time64.c
++++ /dev/null
+@@ -1,32 +0,0 @@
+-/* 64-bit time_t stat with error checking.
+-   Copyright (C) 2021 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-/* NB: Non-standard file name to avoid sysdeps override for xstat.  */
+-
+-#include <support/check.h>
+-#include <support/xunistd.h>
+-#include <sys/stat.h>
+-
+-#if __TIMESIZE != 64
+-void
+-xfstat_time64 (int fd, struct __stat64_t64 *result)
+-{
+-  if (__fstat64_time64 (fd, result) != 0)
+-    FAIL_EXIT1 ("__fstat64_time64 (%d): %m", fd);
+-}
+-#endif
+diff --git a/support/support-xstat-time64.c b/support/support-xstat-time64.c
+deleted file mode 100644
+index 451948734a..0000000000
+--- a/support/support-xstat-time64.c
++++ /dev/null
+@@ -1,32 +0,0 @@
+-/* 64-bit time_t stat with error checking.
+-   Copyright (C) 2021 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-/* NB: Non-standard file name to avoid sysdeps override for xstat.  */
+-
+-#include <support/check.h>
+-#include <support/xunistd.h>
+-#include <sys/stat.h>
+-
+-#if __TIMESIZE != 64
+-void
+-xstat_time64 (const char *path, struct __stat64_t64 *result)
+-{
+-  if (__stat64_time64 (path, result) != 0)
+-    FAIL_EXIT1 ("__stat64_time64 (\"%s\"): %m", path);
+-}
+-#endif
+diff --git a/support/support-xstat.c b/support/support-xstat.c
+deleted file mode 100644
+index ce866f74d2..0000000000
+--- a/support/support-xstat.c
++++ /dev/null
+@@ -1,30 +0,0 @@
+-/* stat64 with error checking.
+-   Copyright (C) 2017-2021 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-/* NB: Non-standard file name to avoid sysdeps override for xstat.  */
+-
+-#include <support/check.h>
+-#include <support/xunistd.h>
+-#include <sys/stat.h>
+-
+-void
+-xstat (const char *path, struct stat64 *result)
+-{
+-  if (stat64 (path, result) != 0)
+-    FAIL_EXIT1 ("stat64 (\"%s\"): %m", path);
+-}
+diff --git a/support/xlstat.c b/support/support_check_stat_fd.c
+similarity index 76%
+rename from support/xlstat.c
+rename to support/support_check_stat_fd.c
+index 87df988879..4c12adf6b7 100644
+--- a/support/xlstat.c
++++ b/support/support_check_stat_fd.c
+@@ -1,5 +1,5 @@
+-/* lstat64 with error checking.
+-   Copyright (C) 2017-2021 Free Software Foundation, Inc.
++/* Error checking for descriptor-based stat functions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
+    This file is part of the GNU C Library.
+ 
+    The GNU C Library is free software; you can redistribute it and/or
+@@ -18,11 +18,10 @@
+ 
+ #include <support/check.h>
+ #include <support/xunistd.h>
+-#include <sys/stat.h>
+ 
+ void
+-xlstat (const char *path, struct stat64 *result)
++support_check_stat_fd (const char *name, int fd, int result)
+ {
+-  if (lstat64 (path, result) != 0)
+-    FAIL_EXIT1 ("lstat64 (\"%s\"): %m", path);
++  if (result != 0)
++    FAIL_EXIT1 ("%s (%d): %m", name, fd);
+ }
+diff --git a/support/support-xfstat.c b/support/support_check_stat_path.c
+similarity index 81%
+rename from support/support-xfstat.c
+rename to support/support_check_stat_path.c
+index ab4b01c97d..3cf72afe59 100644
+--- a/support/support-xfstat.c
++++ b/support/support_check_stat_path.c
+@@ -1,4 +1,4 @@
+-/* fstat64 with error checking.
++/* Error checking for path-based stat functions.
+    Copyright (C) 2017-2021 Free Software Foundation, Inc.
+    This file is part of the GNU C Library.
+ 
+@@ -18,11 +18,10 @@
+ 
+ #include <support/check.h>
+ #include <support/xunistd.h>
+-#include <sys/stat.h>
+ 
+ void
+-xfstat (int fd, struct stat64 *result)
++support_check_stat_path (const char *name, const char *path, int result)
+ {
+-  if (fstat64 (fd, result) != 0)
+-    FAIL_EXIT1 ("fstat64 (%d): %m", fd);
++  if (result != 0)
++    FAIL_EXIT1 ("%s (\"%s\"): %m", name, path);
+ }
+diff --git a/support/xlstat-time64.c b/support/xlstat-time64.c
+deleted file mode 100644
+index 2bc3ca6593..0000000000
+--- a/support/xlstat-time64.c
++++ /dev/null
+@@ -1,32 +0,0 @@
+-/* 64-bit time_t stat with error checking.
+-   Copyright (C) 2021 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-/* NB: Non-standard file name to avoid sysdeps override for xstat.  */
+-
+-#include <support/check.h>
+-#include <support/xunistd.h>
+-#include <sys/stat.h>
+-
+-#if __TIMESIZE != 64
+-void
+-xlstat_time64 (const char *path, struct __stat64_t64 *result)
+-{
+-  if (__lstat64_time64 (path, result) != 0)
+-    FAIL_EXIT1 ("__lstat64_time64 (\"%s\"): %m", path);
+-}
+-#endif
+diff --git a/support/xunistd.h b/support/xunistd.h
+index cc74c4fad0..204951bce7 100644
+--- a/support/xunistd.h
++++ b/support/xunistd.h
+@@ -29,7 +29,6 @@
+ 
+ __BEGIN_DECLS
+ 
+-struct stat64;
+ struct statx;
+ 
+ pid_t xfork (void);
+@@ -37,21 +36,20 @@ pid_t xwaitpid (pid_t, int *status, int
+ void xpipe (int[2]);
+ void xdup2 (int, int);
+ int xopen (const char *path, int flags, mode_t);
+-#ifndef __USE_TIME_BITS64
+-# ifdef __USE_FILE_OFFSET64
+-void xstat (const char *path, struct stat *);
+-void xlstat (const char *path, struct stat *);
+-void xfstat (int fd, struct stat *);
+-# else
+-void xstat (const char *path, struct stat64 *);
+-void xlstat (const char *path, struct stat64 *);
+-void xfstat (int fd, struct stat64 *);
+-# endif
+-#else
+-void __REDIRECT (xstat, (const char *path, struct stat *), xstat_time64);
+-void __REDIRECT (xlstat, (const char *path, struct stat *), xlstat_time64);
+-void __REDIRECT (xfstat, (int fd, struct stat *), xfstat_time64);
+-#endif
++void support_check_stat_fd (const char *name, int fd, int result);
++void support_check_stat_path (const char *name, const char *path, int result);
++#define xstat(path, st) \
++  (support_check_stat_path ("stat", (path), stat ((path), (st))))
++#define xfstat(fd, st) \
++  (support_check_stat_fd ("fstat", (fd), fstat ((fd), (st))))
++#define xlstat(path, st) \
++  (support_check_stat_path ("lstat", (path), lstat ((path), (st))))
++#define xstat64(path, st) \
++  (support_check_stat_path ("stat64", (path), stat64 ((path), (st))))
++#define xfstat64(fd, st) \
++  (support_check_stat_fd ("fstat64", (fd), fstat64 ((fd), (st))))
++#define xlstat64(path, st) \
++  (support_check_stat_path ("lstat64", (path), lstat64 ((path), (st))))
+ void xstatx (int, const char *, int, unsigned int, struct statx *);
+ void xmkdir (const char *path, mode_t);
+ void xchroot (const char *path);
+-- 
+2.43.5
+

@@ -1,0 +1,183 @@
+Backport of the test case from this commit:
+
+commit 0d50f477f47ba637b54fb03ac48d769ec4543e8d
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Jan 25 08:01:00 2023 +0100
+
+    stdio-common: Handle -1 buffer size in __sprintf_chk & co (bug 30039)
+    
+    This shows up as an assertion failure when sprintf is called with
+    a specifier like "%.8g" and libquadmath is linked in:
+    
+    Fatal glibc error: printf_buffer_as_file.c:31
+      (__printf_buffer_as_file_commit): assertion failed:
+      file->stream._IO_write_ptr <= file->next->write_end
+    
+    Fix this by detecting pointer wraparound in __vsprintf_internal
+    and saturate the addition to the end of the address space instead.
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+    Tested-by: Carlos O'Donell <carlos@redhat.com>
+
+Conflicts:
+	debug/Makefile
+	  (missing time64 tests downstream)
+	include/printf_buffer.h
+	libio/iovsprintf.c
+	  (not included in test-only backport)
+
+diff --git a/debug/Makefile b/debug/Makefile
+index ddae3817aef9afad..563e6249121e8bc9 100644
+--- a/debug/Makefile
++++ b/debug/Makefile
+@@ -187,6 +187,10 @@ LDFLAGS-tst-backtrace6 = -rdynamic
+ 
+ CFLAGS-tst-ssp-1.c += -fstack-protector-all
+ 
++# Disable compiler optimizations around vsprintf (the function under test).
++CFLAGS-tst-sprintf-fortify-unchecked.c = \
++  -fno-builtin-vsprintf -fno-builtin-__vsprintf_chk
++
+ tests = backtrace-tst \
+ 	tst-longjmp_chk \
+ 	test-strcpy_chk \
+@@ -199,6 +203,7 @@ tests = backtrace-tst \
+ 	tst-backtrace5 \
+ 	tst-backtrace6 \
+ 	tst-realpath-chk \
++	tst-sprintf-fortify-unchecked \
+ 	$(tests-all-chk) \
+ 
+ ifeq ($(have-ssp),yes)
+diff --git a/debug/tst-sprintf-fortify-unchecked.c b/debug/tst-sprintf-fortify-unchecked.c
+new file mode 100644
+index 0000000000000000..7c7bd1b5e4fe12e8
+--- /dev/null
++++ b/debug/tst-sprintf-fortify-unchecked.c
+@@ -0,0 +1,126 @@
++/* Tests for fortified sprintf with unknown buffer bounds (bug 30039).
++   Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <printf.h>
++#include <stdarg.h>
++#include <stdio.h>
++#include <string.h>
++#include <support/check.h>
++
++/* This test is not built with _FORTIFY_SOURCE.  Instead it calls the
++   appropriate implementation directly.  The fortify mode is specified
++   in this variable.  */
++static int fortify_mode;
++
++/* This does not handle long-double redirects etc., but we test only
++   format strings that stay within the confines of the base
++   implementation.  */
++int __vsprintf_chk (char *s, int flag, size_t slen, const char *format,
++                    va_list ap);
++
++/* Invoke vsprintf or __vsprintf_chk according to fortify_mode.  */
++static int
++my_vsprintf (char *buf, const char *format, va_list ap)
++{
++  int result;
++  if (fortify_mode == 0)
++    result = vsprintf (buf, format, ap);
++  else
++    /* Call the fortified version with an unspecified length.  */
++    result = __vsprintf_chk (buf, fortify_mode - 1, -1, format, ap);
++  return result;
++}
++
++/* Run one test, with the specified expected output.  */
++static void __attribute ((format (printf, 2, 3)))
++do_check (const char *expected, const char *format, ...)
++{
++  va_list ap;
++  va_start (ap, format);
++
++  char buf_expected[24];
++  memset (buf_expected, '@', sizeof (buf_expected));
++  TEST_VERIFY (strlen (expected) < sizeof (buf_expected));
++  strcpy (buf_expected, expected);
++
++  char buf[sizeof (buf_expected)];
++  memset (buf, '@', sizeof (buf));
++
++  int ret = my_vsprintf (buf, format, ap);
++  TEST_COMPARE_BLOB (buf_expected, sizeof (buf_expected), buf, sizeof (buf));
++  TEST_COMPARE (ret, strlen (expected));
++
++  va_end (ap);
++}
++
++/* Run the tests in all fortify modes.  */
++static void
++do_tests (void)
++{
++  for (fortify_mode = 0; fortify_mode <= 3; ++fortify_mode)
++    {
++      do_check ("0", "%d", 0);
++      do_check ("-2147483648", "%d", -2147483647 - 1);
++      do_check ("-9223372036854775808", "%lld", -9223372036854775807LL - 1);
++      do_check ("", "%s", "");
++      do_check ("                      ", "%22s", "");
++      do_check ("XXXXXXXXXXXXXXXXXXXXXX", "%s", "XXXXXXXXXXXXXXXXXXXXXX");
++      do_check ("1.125000", "%f", 1.125);
++      do_check ("1.125", "%g", 1.125);
++      do_check ("1.125", "%.8g", 1.125);
++    }
++}
++
++/* printf callback that falls back to the glibc-supplied
++   implementation.  */
++static int
++dummy_printf_function (FILE *__stream,
++                       const struct printf_info *__info,
++                       const void *const *__args)
++{
++  return -2;                    /* Request fallback.  */
++}
++
++/* Likewise for the type information.  */
++static int
++dummy_arginfo_function (const struct printf_info *info,
++                        size_t n, int *argtypes, int *size)
++{
++  return -1;                    /* Request fallback.  */
++}
++
++static int
++do_test (void)
++{
++  do_tests ();
++
++  /* Activate __printf_function_invoke mode.  */
++  register_printf_specifier ('d', dummy_printf_function,
++                             dummy_arginfo_function);
++  register_printf_specifier ('g', dummy_printf_function,
++                             dummy_arginfo_function);
++  register_printf_specifier ('s', dummy_printf_function,
++                             dummy_arginfo_function);
++
++  /* Rerun the tests with callback functions.  */
++  do_tests ();
++
++  return 0;
++}
++
++#include <support/test-driver.c>

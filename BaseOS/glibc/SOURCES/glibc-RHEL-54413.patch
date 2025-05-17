@@ -1,0 +1,630 @@
+commit 7f04bb4e49413bd57ac3215f3480b09ae7131968
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Wed Aug 21 19:58:14 2024 +0000
+
+    Add more tests of getline
+    
+    There is very little test coverage for getline (only a minimal
+    stdio-common/tstgetln.c which doesn't verify anything about the
+    results of the getline calls).  Add some more thorough tests
+    (generally using fopencookie for convenience in testing various cases
+    for what the input and possible errors / EOF in the file read might
+    look like).
+    
+    Note the following regarding testing of error cases:
+    
+    * Nothing is said in the specifications about what if anything might
+      be written into the buffer, and whether it might be reallocated, in
+      error cases.  The expectation of the tests (required to avoid memory
+      leaks on error) is that at least on error cases, the invariant that
+      lineptr points to at least n bytes is maintained.
+    
+    * The optional EOVERFLOW error case specified in POSIX, "The number of
+      bytes to be written into the buffer, including the delimiter
+      character (if encountered), would exceed {SSIZE_MAX}.", doesn't seem
+      practically testable, as any case reading so many characters (half
+      the address space) would also be liable to run into allocation
+      failure along (ENOMEM) the way.
+    
+    * If a read error occurs part way through reading an input line, it
+      seems unclear whether a partial line should be returned by getline
+      (avoid input getting lost), which is what glibc does at least in the
+      fopencookie case used in this test, or whether getline should return
+      -1 (error) (so avoiding the program misbehaving by processing a
+      truncated line as if it were complete).  (There was a short,
+      inconclusive discussion about this on the Austin Group list on 9-10
+      November 2014.)
+    
+    * The POSIX specification of getline inherits errors from fgetc.  I
+      didn't try to cover fgetc errors systematically, just one example of
+      such an error.
+    
+    Tested for x86_64 and x86.
+
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index bc314af0617e1647..ea8598bbe3a6dfdd 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -177,6 +177,8 @@ tests := \
+   tst-fread \
+   tst-fseek \
+   tst-fwrite \
++  tst-getline \
++  tst-getline-enomem \
+   tst-gets \
+   tst-grouping \
+   tst-long-dbl-fphex \
+@@ -244,6 +246,8 @@ tests-special += \
+ ifeq (yes,$(build-shared))
+ ifneq ($(PERL),no)
+ tests-special += \
++  $(objpfx)tst-getline-enomem-mem.out \
++  $(objpfx)tst-getline-mem.out \
+   $(objpfx)tst-printf-bz18872-mem.out \
+   $(objpfx)tst-printf-bz25691-mem.out \
+   $(objpfx)tst-printf-fp-free-mem.out \
+@@ -252,6 +256,10 @@ tests-special += \
+   # tests-special
+ 
+ generated += \
++  tst-getline-enomem-mem.out \
++  tst-getline-enomem.mtrace \
++  tst-getline-mem.out \
++  tst-getline.mtrace \
+   tst-printf-bz18872-mem.out \
+   tst-printf-bz18872.c \
+   tst-printf-bz18872.mtrace \
+@@ -314,6 +322,12 @@ tst-scanf-bz27650-ENV = \
+ tst-ungetc-leak-ENV = \
+   MALLOC_TRACE=$(objpfx)tst-ungetc-leak.mtrace \
+   LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
++tst-getline-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-getline.mtrace \
++  LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
++tst-getline-enomem-ENV = \
++  MALLOC_TRACE=$(objpfx)tst-getline-enomem.mtrace \
++  LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
+ 
+ $(objpfx)tst-unbputc.out: tst-unbputc.sh $(objpfx)tst-unbputc
+ 	$(SHELL) $< $(common-objpfx) '$(test-program-prefix)'; \
+diff --git a/stdio-common/tst-getline-enomem.c b/stdio-common/tst-getline-enomem.c
+new file mode 100644
+index 0000000000000000..7fc70ea9b51d1262
+--- /dev/null
++++ b/stdio-common/tst-getline-enomem.c
+@@ -0,0 +1,78 @@
++/* Test getline: ENOMEM on allocation failure.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <mcheck.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/resource.h>
++
++#include <support/check.h>
++#include <support/test-driver.h>
++
++/* Produce a stream of test data based on data in COOKIE (ignored),
++   storing up to SIZE bytes in BUF.  */
++
++static ssize_t
++io_read (void *cookie, char *buf, size_t size)
++{
++  memset (buf, 'x', size);
++  return size;
++}
++
++/* Set up a test stream with fopencookie.  */
++
++static FILE *
++open_test_stream (void)
++{
++  static cookie_io_functions_t io_funcs = { .read = io_read };
++  static int cookie;
++  FILE *fp = fopencookie (&cookie, "r", io_funcs);
++  TEST_VERIFY_EXIT (fp != NULL);
++  return fp;
++}
++
++int
++do_test (void)
++{
++  FILE *fp;
++  char *lineptr = NULL;
++  size_t size = 0;
++  ssize_t ret;
++  mtrace ();
++  /* Test ENOMEM (and error indicator for stream set) for memory
++     allocation failure.  */
++  verbose_printf ("Testing memory allocation failure\n");
++  fp = open_test_stream ();
++  struct rlimit limit;
++  TEST_VERIFY_EXIT (getrlimit (RLIMIT_AS, &limit) == 0);
++  limit.rlim_cur = 32 * 1024 * 1024;
++  TEST_VERIFY_EXIT (setrlimit (RLIMIT_AS, &limit) == 0);
++  errno = 0;
++  ret = getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (errno, ENOMEM);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  free (lineptr);
++  fclose (fp);
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/stdio-common/tst-getline.c b/stdio-common/tst-getline.c
+new file mode 100644
+index 0000000000000000..29eb7cec0f344872
+--- /dev/null
++++ b/stdio-common/tst-getline.c
+@@ -0,0 +1,451 @@
++/* Test getline.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <fcntl.h>
++#include <malloc.h>
++#include <mcheck.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <support/check.h>
++#include <support/test-driver.h>
++#include <support/support.h>
++#include <support/xstdio.h>
++#include <support/xunistd.h>
++
++static struct test_data
++{
++  /* Input test data for fopencookie stream.  */
++  const char *in_data;
++
++  /* The amount of test data left.  */
++  size_t in_data_left;
++
++  /* Error number for forcing an error on next read.  */
++  int in_error;
++
++  /* Error number for forcing an error (rather than EOF) after all
++     bytes read.  */
++  int in_error_after;
++} the_cookie;
++
++/* Produce a stream of test data based on data in COOKIE, storing up
++   to SIZE bytes in BUF.  */
++
++static ssize_t
++io_read (void *cookie, char *buf, size_t size)
++{
++  struct test_data *p = cookie;
++  if (p->in_error)
++    {
++      errno = p->in_error;
++      return -1;
++    }
++  if (size > p->in_data_left)
++    size = p->in_data_left;
++  memcpy (buf, p->in_data, size);
++  p->in_data += size;
++  p->in_data_left -= size;
++  if (p->in_data_left == 0)
++    p->in_error = p->in_error_after;
++  return size;
++}
++
++/* Set up a test stream with fopencookie.  */
++
++static FILE *
++open_test_stream (const char *in_data, size_t size)
++{
++  static cookie_io_functions_t io_funcs = { .read = io_read };
++  the_cookie.in_data = in_data;
++  the_cookie.in_data_left = size;
++  the_cookie.in_error = 0;
++  the_cookie.in_error_after = 0;
++  FILE *fp = fopencookie (&the_cookie, "r", io_funcs);
++  TEST_VERIFY_EXIT (fp != NULL);
++  return fp;
++}
++
++/* Set up a test stream with fopencookie, using data from a string
++   literal.  */
++#define OPEN_TEST_STREAM(IN_DATA) open_test_stream (IN_DATA, sizeof (IN_DATA))
++
++/* Wrap getline to verify that (as per the glibc manual), *LINEPTR is
++   returned as non-null and with at least *N bytes (even on error or
++   EOF).  Also clear errno for the benefit of tests that check the
++   value of errno after the call.  */
++
++ssize_t
++wrap_getline (char **lineptr, size_t *n, FILE *stream)
++{
++  errno = 0;
++  ssize_t ret = getline (lineptr, n, stream);
++  if (lineptr != NULL && n != NULL)
++    {
++      TEST_VERIFY (*lineptr != NULL);
++      TEST_VERIFY (malloc_usable_size (*lineptr) >= *n);
++    }
++  return ret;
++}
++
++int
++do_test (void)
++{
++  FILE *fp;
++  char *lineptr = NULL;
++  size_t size = 0;
++  ssize_t ret;
++  mtrace ();
++  /* Test failure with EINVAL (and error indicator for stream set) if
++     lineptr is a null pointer.  */
++  verbose_printf ("Testing lineptr == NULL\n");
++  fp = OPEN_TEST_STREAM ("test");
++  ret = wrap_getline (NULL, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (errno, EINVAL);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  fclose (fp);
++  /* Test failure with EINVAL (and error indicator for stream set) if
++     n is a null pointer.  */
++  verbose_printf ("Testing n == NULL\n");
++  fp = OPEN_TEST_STREAM ("test");
++  ret = wrap_getline (&lineptr, NULL, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (errno, EINVAL);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  fclose (fp);
++  /* Test failure with EINVAL (and error indicator for stream set) if
++     both lineptr and n are null pointers.  */
++  verbose_printf ("Testing lineptr == NULL and n == NULL\n");
++  fp = OPEN_TEST_STREAM ("test");
++  ret = wrap_getline (NULL, NULL, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (errno, EINVAL);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  fclose (fp);
++  /* Test normal line, fitting in available space (including case with
++     null bytes).  */
++  verbose_printf ("Testing normal nonempty input\n");
++  lineptr = xmalloc (10);
++  size = 10;
++  fp = OPEN_TEST_STREAM ("foo\nbar\0\n\0baz\nte\0st\n");
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 4);
++  TEST_COMPARE_BLOB (lineptr, 5, "foo\n", 5);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 5);
++  TEST_COMPARE_BLOB (lineptr, 6, "bar\0\n", 6);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 5);
++  TEST_COMPARE_BLOB (lineptr, 6, "\0baz\n", 6);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 6);
++  TEST_COMPARE_BLOB (lineptr, 7, "te\0st\n", 7);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 1);
++  TEST_COMPARE_BLOB (lineptr, 1, "", 1);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (ferror (fp), 0);
++  TEST_COMPARE (!!feof (fp), 1);
++  fclose (fp);
++  /* Test normal line, with reallocation (including case with null bytes).  */
++  verbose_printf ("Testing normal nonempty input with reallocation\n");
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  fp = OPEN_TEST_STREAM ("foo\nbar\0\n\0baz\nte\0st\n"
++			 "foo\nbar\0\n\0baz\nte\0st\n");
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 4);
++  TEST_COMPARE_BLOB (lineptr, 5, "foo\n", 5);
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 5);
++  TEST_COMPARE_BLOB (lineptr, 6, "bar\0\n", 6);
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 5);
++  TEST_COMPARE_BLOB (lineptr, 6, "\0baz\n", 6);
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 6);
++  TEST_COMPARE_BLOB (lineptr, 7, "te\0st\n", 7);
++  free (lineptr);
++  lineptr = xmalloc (1);
++  size = 1;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 4);
++  TEST_COMPARE_BLOB (lineptr, 5, "foo\n", 5);
++  free (lineptr);
++  lineptr = xmalloc (1);
++  size = 1;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 5);
++  TEST_COMPARE_BLOB (lineptr, 6, "bar\0\n", 6);
++  free (lineptr);
++  lineptr = xmalloc (1);
++  size = 1;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 5);
++  TEST_COMPARE_BLOB (lineptr, 6, "\0baz\n", 6);
++  free (lineptr);
++  lineptr = xmalloc (1);
++  size = 1;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 6);
++  TEST_COMPARE_BLOB (lineptr, 7, "te\0st\n", 7);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 1);
++  TEST_COMPARE_BLOB (lineptr, 1, "", 1);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (ferror (fp), 0);
++  TEST_COMPARE (!!feof (fp), 1);
++  fclose (fp);
++  /* Test EOF before delimiter but after some bytes read, fitting in
++     available space (including case with null bytes).  */
++  verbose_printf ("Testing EOF before delimiter\n");
++  free (lineptr);
++  lineptr = xmalloc (10);
++  size = 10;
++  fp = open_test_stream ("foo", 3);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 3);
++  TEST_COMPARE_BLOB (lineptr, 4, "foo", 4);
++  fclose (fp);
++  free (lineptr);
++  lineptr = xmalloc (10);
++  size = 10;
++  fp = open_test_stream ("bar\0", 4);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 4);
++  TEST_COMPARE_BLOB (lineptr, 5, "bar\0", 5);
++  fclose (fp);
++  free (lineptr);
++  lineptr = xmalloc (10);
++  size = 10;
++  fp = open_test_stream ("\0baz", 4);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 4);
++  TEST_COMPARE_BLOB (lineptr, 5, "\0baz", 5);
++  fclose (fp);
++  free (lineptr);
++  lineptr = xmalloc (10);
++  size = 10;
++  fp = open_test_stream ("te\0st", 5);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 5);
++  TEST_COMPARE_BLOB (lineptr, 6, "te\0st", 6);
++  fclose (fp);
++  /* Test EOF before delimiter but after some bytes read, with
++     reallocation (including case with null bytes).  */
++  verbose_printf ("Testing EOF before delimiter with reallocation\n");
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  fp = open_test_stream ("foo", 3);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 3);
++  TEST_COMPARE_BLOB (lineptr, 4, "foo", 4);
++  fclose (fp);
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  fp = open_test_stream ("bar\0", 4);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 4);
++  TEST_COMPARE_BLOB (lineptr, 5, "bar\0", 5);
++  fclose (fp);
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  fp = open_test_stream ("\0baz", 4);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 4);
++  TEST_COMPARE_BLOB (lineptr, 5, "\0baz", 5);
++  fclose (fp);
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  fp = open_test_stream ("te\0st", 5);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 5);
++  TEST_COMPARE_BLOB (lineptr, 6, "te\0st", 6);
++  fclose (fp);
++  free (lineptr);
++  lineptr = xmalloc (1);
++  size = 1;
++  fp = open_test_stream ("foo", 3);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 3);
++  TEST_COMPARE_BLOB (lineptr, 4, "foo", 4);
++  fclose (fp);
++  free (lineptr);
++  lineptr = xmalloc (1);
++  size = 1;
++  fp = open_test_stream ("bar\0", 4);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 4);
++  TEST_COMPARE_BLOB (lineptr, 5, "bar\0", 5);
++  fclose (fp);
++  free (lineptr);
++  lineptr = xmalloc (1);
++  size = 1;
++  fp = open_test_stream ("\0baz", 4);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 4);
++  TEST_COMPARE_BLOB (lineptr, 5, "\0baz", 5);
++  fclose (fp);
++  free (lineptr);
++  lineptr = xmalloc (1);
++  size = 1;
++  fp = open_test_stream ("te\0st", 5);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 5);
++  TEST_COMPARE_BLOB (lineptr, 6, "te\0st", 6);
++  fclose (fp);
++  /* Test EOF with no bytes read (nothing is specified about anything
++     written to the buffer), including EOF again when already at end
++     of file.  */
++  verbose_printf ("Testing EOF with no bytes read\n");
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  fp = open_test_stream ("", 0);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (ferror (fp), 0);
++  TEST_COMPARE (!!feof (fp), 1);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (ferror (fp), 0);
++  TEST_COMPARE (!!feof (fp), 1);
++  fclose (fp);
++  free (lineptr);
++  lineptr = xmalloc (1);
++  size = 1;
++  fp = open_test_stream ("", 0);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (ferror (fp), 0);
++  TEST_COMPARE (!!feof (fp), 1);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (ferror (fp), 0);
++  TEST_COMPARE (!!feof (fp), 1);
++  fclose (fp);
++  /* Test error occurring with no bytes read, including calling
++     wrap_getline again while the file is in error state.  */
++  verbose_printf ("Testing error with no bytes read\n");
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  fp = open_test_stream ("", 0);
++  the_cookie.in_error = EINVAL;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (errno, EINVAL);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  /* Make sure error state is sticky.  */
++  the_cookie.in_error = 0;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  fclose (fp);
++  /* Test error occurring after some bytes read.  Specifications are
++     ambiguous here; at least in the fopencookie case used for
++     testing, glibc returns the partial line (but with the error
++     indicator on the stream set).  */
++  verbose_printf ("Testing error after some bytes read\n");
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  fp = open_test_stream ("foo", 3);
++  the_cookie.in_error_after = EINVAL;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, 3);
++  TEST_COMPARE_BLOB (lineptr, 4, "foo", 4);
++  TEST_COMPARE (errno, EINVAL);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  /* Make sure error state is sticky.  */
++  the_cookie.in_error = 0;
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  fclose (fp);
++  /* Test EBADF error as a representative example of an fgetc error
++     resulting in an error from wrap_getline.  We don't try to cover all
++     error cases for fgetc here.  */
++  verbose_printf ("Testing EBADF error\n");
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  fp = xfopen ("/dev/null", "r");
++  xclose (fileno (fp));
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  fclose (fp);
++  /* Test EAGAIN error as an example of an fgetc error on a valid file
++     descriptor.  */
++  verbose_printf ("Testing EAGAIN error\n");
++  free (lineptr);
++  lineptr = NULL;
++  size = 0;
++  int pipefd[2];
++  xpipe (pipefd);
++  ret = fcntl (pipefd[0], F_SETFL, O_NONBLOCK);
++  TEST_VERIFY_EXIT (ret == 0);
++  fp = fdopen (pipefd[0], "r");
++  TEST_VERIFY_EXIT (fp != NULL);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (errno, EAGAIN);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  /* Make sure error state is sticky (even after more data is
++     available to read).  */
++  xwrite (pipefd[1], "x\n", 2);
++  ret = wrap_getline (&lineptr, &size, fp);
++  TEST_COMPARE (ret, -1);
++  TEST_COMPARE (!!ferror (fp), 1);
++  TEST_COMPARE (feof (fp), 0);
++  fclose (fp);
++  free (lineptr);
++  return 0;
++}
++
++#include <support/test-driver.c>

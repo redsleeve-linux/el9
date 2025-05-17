@@ -1,0 +1,41 @@
+commit 75819cdd29a193cc2db980878bec305905b22bbc
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Sep 20 13:10:54 2024 +0200
+
+    iconv: Multiple - on command line should not fail (bug 32050)
+    
+    Usually, the second and subsequent - return EOF immediately
+    and do not contribute to the output, but this is not an error.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+diff --git a/iconv/iconv_prog.c b/iconv/iconv_prog.c
+index 3e02db7319..dd4bc3a59a 100644
+--- a/iconv/iconv_prog.c
++++ b/iconv/iconv_prog.c
+@@ -287,7 +287,8 @@ conversions from `%s' and to `%s' are not supported"),
+ 		ret = process_fd (cd, fd);
+ 
+ 		/* Now close the file.  */
+-		close (fd);
++		if (fd != STDIN_FILENO)
++		  close (fd);
+ 
+ 		if (ret != 0)
+ 		  {
+diff --git a/iconv/tst-iconv_prog-buffer.sh b/iconv/tst-iconv_prog-buffer.sh
+index 54ff871d32..a9c3729d94 100644
+--- a/iconv/tst-iconv_prog-buffer.sh
++++ b/iconv/tst-iconv_prog-buffer.sh
+@@ -265,6 +265,11 @@ expect_exit 1 run_iconv -o "$tmp/out" "$tmp/abc" "$tmp/0xff" "$tmp/def"
+ expect_exit 1 run_iconv -o "$tmp/out" "$tmp/abc" - < "$tmp/0xff" "$tmp/def"
+ ! test -e "$tmp/out"
+ 
++# Listing standard input multiple times should not fail (bug 32050).
++
++run_iconv -o "$tmp/out" "$tmp/xy" - - "$tmp/zt" < "$tmp/abc"
++expect_files xy abc zt
++
+ if $failure ; then
+     exit 1
+ fi

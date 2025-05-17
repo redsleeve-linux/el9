@@ -1,0 +1,114 @@
+commit bde47662b74b883149c3001e2c052dea5d3cd92f
+Author: Sergey Kolosov <skolosov@redhat.com>
+Date:   Wed Nov 6 15:24:06 2024 +0100
+
+    nptl: Add new test for pthread_spin_trylock
+    
+    Add a threaded test for pthread_spin_trylock attempting to lock already
+    acquired spin lock and checking for correct return code.
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+Conflicts:
+	sysdeps/pthread/Makefile (add new test)
+
+diff --git a/sysdeps/pthread/Makefile b/sysdeps/pthread/Makefile
+index d99c161c827ef4b8..6355e94171fbcdc3 100644
+--- a/sysdeps/pthread/Makefile
++++ b/sysdeps/pthread/Makefile
+@@ -127,6 +127,7 @@ tests += tst-cnd-basic tst-mtx-trylock tst-cnd-broadcast \
+ 	 tst-pthread_kill-exited \
+ 	 tst-pthread_kill-exiting \
+ 	 tst-cancel30 \
++  tst-spin5 \
+ 	 # tests
+ 
+ tests-time64 := \
+diff --git a/sysdeps/pthread/tst-spin5.c b/sysdeps/pthread/tst-spin5.c
+new file mode 100644
+index 0000000000000000..5c23bd48ef27b3ce
+--- /dev/null
++++ b/sysdeps/pthread/tst-spin5.c
+@@ -0,0 +1,82 @@
++/* Threaded test the pthread_spin_trylock function.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <errno.h>
++#include <support/check.h>
++#include <support/support.h>
++#include <support/xunistd.h>
++#include <support/xthread.h>
++
++pthread_spinlock_t lock;
++
++void *
++thread (void *arg)
++{
++  int ret;
++  int thr_id = *(int *) arg;
++
++  ret = pthread_spin_trylock (&lock);
++  if (thr_id == 1)
++    /* thread with already acquired lock.  */
++    {
++      if (ret != EBUSY)
++        {
++          FAIL_EXIT1 ("pthread_spin_trylock should fail with EBUSY");
++        }
++    }
++  else if (thr_id == 2)
++    /* thread with released spin lock.  */
++    {
++      if (ret != 0)
++        {
++          FAIL_EXIT1 ("pthread_spin_trylock should be able to acquire lock");
++        }
++    }
++  return NULL;
++}
++
++static int
++do_test (void)
++{
++  pthread_t thr1, thr2;
++  int ret;
++  int thr1_id = 1, thr2_id = 2;
++
++  pthread_spin_init (&lock, PTHREAD_PROCESS_PRIVATE);
++  /* lock spin in main thread.  */
++  ret = pthread_spin_trylock (&lock);
++  if (ret != 0)
++    {
++      FAIL_EXIT1 ("Main thread should be able to acquire spin lock");
++    }
++
++  /* create first thread to try locking already acquired spin lock.  */
++  thr1 = xpthread_create (NULL, thread, &thr1_id);
++  xpthread_join (thr1);
++
++  /* release spin lock and create thread to acquire released spin lock.  */
++  pthread_spin_unlock (&lock);
++  thr2 = xpthread_create (NULL, thread, &thr2_id);
++  xpthread_join (thr2);
++
++  pthread_spin_destroy (&lock);
++  return 0;
++}
++
++#include <support/test-driver.c>
