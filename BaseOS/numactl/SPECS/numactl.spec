@@ -1,7 +1,7 @@
 Name:		numactl
 Summary:	Library for tuning for Non Uniform Memory Access machines
-Version:	2.0.18
-Release:	2%{dist}.redsleeve
+Version:	2.0.19
+Release:	1%{dist}
 # libnuma is LGPLv2 and GPLv2
 # numactl binaries are GPLv2 only
 License:	LGPL-2.1-only and GPL-2.0-only
@@ -11,7 +11,7 @@ Source0:	%{url}/releases/download/v%{version}/%{name}-%{version}.tar.gz
 BuildRequires: make
 BuildRequires:	libtool automake autoconf
 
-ExcludeArch: s390
+ExcludeArch: s390 %{arm}
 
 #START INSERT
 #
@@ -38,14 +38,6 @@ ExcludeArch: s390
 # Patches 601 onward are generic patches
 #
 #Patch601: 0001-fix-typo-in-memhog.8.patch
-Patch601: 0001-Fix-fallback-for-set_mempolicy_home_node-syscall.patch
-Patch602: 0002-Add-w-and-weighted-interleave-for-weighted-interleav.patch
-Patch603: 0003-numademo-Fix-the-using-of-the-uninitialized-value.patch
-Patch604: 0004-numactl-Fix-RESOURCE_LEAK-in-show.patch
-Patch605: 0005-numactl-Add-documentation-for-weighted-interleave.patch
-Patch606: 0006-Don-t-fail-build-when-set_mempolicy_home_node-syscal.patch
-Patch607: 0007-numastat-eliminate-hard-coded-tables.patch
-Patch608: 0008-Update-numactl.c.patch
 
 
 
@@ -72,6 +64,8 @@ Provides development headers for numa library calls
 
 %prep
 %autosetup
+# Fix the missing of  standard autotools auxiliary files
+autoreconf -i
 
 
 %build
@@ -115,8 +109,8 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man3/*.3*
 
 %changelog
-* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org>  2.0.18-1.redsleeve
-- remove %{arm} from excludearchs
+* Mon Nov 18 2024 Pingfan Liu <piliu@redhat.com> - 2.0.19-1
+- rebase to v2.0.19
 
 * Tue Jul 30 2024 Pingfan Liu <piliu@redhat.com> - 2.0.18-1
 - rebase to v2.0.18

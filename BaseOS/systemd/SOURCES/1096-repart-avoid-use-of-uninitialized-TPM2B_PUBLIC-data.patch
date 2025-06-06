@@ -1,0 +1,36 @@
+From 834137e727d27a0fa1247a5233db033a9074265b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Daniel=20P=2E=20Berrang=C3=A9?= <berrange@redhat.com>
+Date: Tue, 17 Oct 2023 16:45:52 +0100
+Subject: [PATCH] repart: avoid use of uninitialized TPM2B_PUBLIC data
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The 'TPM2B public' struct is only initialized if the public key
+is non-NULL, however, it is unconditionally passed to
+tpm2_calculate_sealing_policy, resulting in use of uninitialized
+data. If the uninitialized data is lucky enough to be all zeroes,
+this results eventually results in an error message from
+tpm2_calculate_name about an unsupported nameAlg field value.
+
+Signed-off-by: Daniel P. Berrangé <berrange@redhat.com>
+(cherry picked from commit a3ad5c3140b941d3703c63c902e58f4e2d295829)
+
+Resolves: RHEL-56793
+---
+ src/partition/repart.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/partition/repart.c b/src/partition/repart.c
+index eeb31a6160..5db931e7bc 100644
+--- a/src/partition/repart.c
++++ b/src/partition/repart.c
+@@ -3073,7 +3073,7 @@ static int partition_encrypt(
+                 }
+ 
+                 TPM2B_DIGEST policy = TPM2B_DIGEST_MAKE(NULL, TPM2_SHA256_DIGEST_SIZE);
+-                r = tpm2_calculate_sealing_policy(arg_tpm2_hash_pcr_values, arg_tpm2_n_hash_pcr_values, &public, /* use_pin= */ false, &policy);
++                r = tpm2_calculate_sealing_policy(arg_tpm2_hash_pcr_values, arg_tpm2_n_hash_pcr_values, pubkey ? &public : NULL, /* use_pin= */ false, &policy);
+                 if (r < 0)
+                         return log_error_errno(r, "Could not calculate sealing policy digest: %m");
+ 

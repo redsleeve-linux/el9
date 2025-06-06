@@ -1,0 +1,46 @@
+From 3f9329109403b981a01e64b41c0fcca02920bb23 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 8 Jun 2023 11:11:28 +0200
+Subject: [PATCH] unit: don't gc unit in oom queue
+
+This is a follow-up for 8db998981a4fefd0122bcf5f965726b63c9045c2, and
+follows a similar logic: a pending OOM event really trumps everything:
+we should not GC a unit while it is pending.
+
+(cherry picked from commit 935f80428fd3220c83163cc4b5a637873e68babb)
+
+Related: RHEL-55301
+---
+ src/core/cgroup.c | 2 ++
+ src/core/unit.c   | 5 ++++-
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/cgroup.c b/src/core/cgroup.c
+index fa3e7fca05..7d6b1119be 100644
+--- a/src/core/cgroup.c
++++ b/src/core/cgroup.c
+@@ -3184,6 +3184,8 @@ static int on_cgroup_oom_event(sd_event_source *s, void *userdata) {
+         }
+ 
+         (void) unit_check_oom(u);
++        unit_add_to_gc_queue(u);
++
+         return 0;
+ }
+ 
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 08f87851d9..4360351bd9 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -417,7 +417,10 @@ bool unit_may_gc(Unit *u) {
+         if (u->perpetual)
+                 return false;
+ 
+-        if (u->in_cgroup_empty_queue)
++        /* if we saw a cgroup empty event for this unit, stay around until we processed it so that we remove
++         * the empty cgroup if possible. Similar, process any pending OOM events if they are already queued
++         * before we release the unit. */
++        if (u->in_cgroup_empty_queue || u->in_cgroup_oom_queue)
+                 return false;
+ 
+         if (sd_bus_track_count(u->bus_track) > 0)

@@ -1,0 +1,62 @@
+From 250b4c9364ee455034ff93a2ac379268963a39a9 Mon Sep 17 00:00:00 2001
+From: Richard Phibel <rphibel@googlemail.com>
+Date: Thu, 25 May 2023 19:49:11 +0200
+Subject: [PATCH] core: Handle cgroup pruning in on_cgroup_empty_event
+
+This change removes the pruning of cgroups for FAILED/INACTIVE units
+from per-unit-type handlers and moves it in on_cgroup_empty_event.
+
+(cherry picked from commit 380dd177798507ced9cde580c04539f54bb980c8)
+
+Related: RHEL-55301
+---
+ src/core/cgroup.c  | 4 +++-
+ src/core/scope.c   | 5 -----
+ src/core/service.c | 3 +--
+ 3 files changed, 4 insertions(+), 8 deletions(-)
+
+diff --git a/src/core/cgroup.c b/src/core/cgroup.c
+index c44966839c..fa3e7fca05 100644
+--- a/src/core/cgroup.c
++++ b/src/core/cgroup.c
+@@ -3007,7 +3007,9 @@ static int on_cgroup_empty_event(sd_event_source *s, void *userdata) {
+ 
+         unit_add_to_gc_queue(u);
+ 
+-        if (UNIT_VTABLE(u)->notify_cgroup_empty)
++        if (IN_SET(unit_active_state(u), UNIT_INACTIVE, UNIT_FAILED))
++                unit_prune_cgroup(u);
++        else if (UNIT_VTABLE(u)->notify_cgroup_empty)
+                 UNIT_VTABLE(u)->notify_cgroup_empty(u);
+ 
+         return 0;
+diff --git a/src/core/scope.c b/src/core/scope.c
+index e2fc4cc995..087ac2853a 100644
+--- a/src/core/scope.c
++++ b/src/core/scope.c
+@@ -628,11 +628,6 @@ static void scope_notify_cgroup_empty_event(Unit *u) {
+ 
+         if (IN_SET(s->state, SCOPE_RUNNING, SCOPE_ABANDONED, SCOPE_STOP_SIGTERM, SCOPE_STOP_SIGKILL))
+                 scope_enter_dead(s, SCOPE_SUCCESS);
+-
+-        /* If the cgroup empty notification comes when the unit is not active, we must have failed to clean
+-         * up the cgroup earlier and should do it now. */
+-        if (IN_SET(s->state, SCOPE_DEAD, SCOPE_FAILED))
+-                unit_prune_cgroup(u);
+ }
+ 
+ static void scope_notify_cgroup_oom_event(Unit *u, bool managed_oom) {
+diff --git a/src/core/service.c b/src/core/service.c
+index 902948905f..433df0afe3 100644
+--- a/src/core/service.c
++++ b/src/core/service.c
+@@ -3446,8 +3446,7 @@ static void service_notify_cgroup_empty_event(Unit *u) {
+ 
+         /* If the cgroup empty notification comes when the unit is not active, we must have failed to clean
+          * up the cgroup earlier and should do it now. */
+-        case SERVICE_DEAD:
+-        case SERVICE_FAILED:
++        case SERVICE_AUTO_RESTART:
+                 unit_prune_cgroup(u);
+                 break;
+ 

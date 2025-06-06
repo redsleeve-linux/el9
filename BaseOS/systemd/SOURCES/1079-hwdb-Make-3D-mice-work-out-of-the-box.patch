@@ -1,0 +1,116 @@
+From 662acac8d35ae2939b999a96136629e6b2bb0ebf Mon Sep 17 00:00:00 2001
+From: Bastien Nocera <hadess@hadess.net>
+Date: Fri, 29 Nov 2024 22:20:29 +0100
+Subject: [PATCH] hwdb: Make 3D mice work out-of-the-box
+
+According to https://en.wikipedia.org/wiki/3Dconnexion, 3D mice are:
+human interface devices for manipulating and navigating
+computer-generated 3D imagery. These devices are often referred to as
+3D motion controllers, 3D navigation devices, 6DOF devices (six
+degrees of freedom) or a 3D mouse.
+
+Applications that want to support 3D mice on Linux are expected to
+either use spacenavd and its library, or consume the HID output
+directly.
+
+This patch makes it possible for a number of applications that use 3D
+mice directly to work out of the box, such as PrusaSlicer and its
+derivatives.
+
+(cherry picked from commit e1c681919243daaca35053826686009260f34eaf)
+
+Resolves: RHEL-49810
+---
+ hwdb.d/70-mouse.hwdb        | 38 +++++++++++++++++++++++++++++++++++++
+ hwdb.d/parse_hwdb.py        |  1 +
+ rules.d/70-uaccess.rules.in |  4 ++++
+ 3 files changed, 43 insertions(+)
+
+diff --git a/hwdb.d/70-mouse.hwdb b/hwdb.d/70-mouse.hwdb
+index fcd9acd2b4..6e2a588a5d 100644
+--- a/hwdb.d/70-mouse.hwdb
++++ b/hwdb.d/70-mouse.hwdb
+@@ -41,6 +41,7 @@
+ #   udevadm info /dev/input/eventXX.
+ #
+ # Allowed properties are:
++#   ID_INPUT_3D_MOUSE
+ #   ID_INPUT_TRACKBALL
+ #   MOUSE_DPI
+ #   MOUSE_WHEEL_CLICK_ANGLE
+@@ -49,6 +50,15 @@
+ #   MOUSE_WHEEL_CLICK_COUNT_HORIZONTAL
+ #
+ #########################################
++#         ID_INPUT_3D_MOUSE             #
++#########################################
++#
++# Specified if the device is a 3D mouse[1]. This gives access to the
++# hidraw device node to applications that consume its events directly.
++#
++# [1]: See https://en.wikipedia.org/wiki/3Dconnexion for definition
++#
++#########################################
+ #         ID_INPUT_TRACKBALL            #
+ #########################################
+ #
+@@ -143,6 +153,34 @@ mouse:*:name:*trackball*:*
+ mouse:*:name:*TrackBall*:*
+  ID_INPUT_TRACKBALL=1
+ 
++##########################################
++# 3D Connexion
++##########################################
++# From https://github.com/FreeSpacenav/spacenavd/blob/39856625a6de1e8c4b57c5938e1bf29d13cf1a9f/src/dev.c#L63
++mouse:usb:v046dpc603:name:*
++mouse:usb:v046dpc605:name:*
++mouse:usb:v046dpc606:name:*
++mouse:usb:v046dpc621:name:*
++mouse:usb:v046dpc623:name:*
++mouse:usb:v046dpc625:name:*
++mouse:usb:v046dpc626:name:*
++mouse:usb:v046dpc627:name:*
++mouse:usb:v046dpc628:name:*
++mouse:usb:v046dpc629:name:*
++mouse:usb:v046dpc62b:name:*
++mouse:usb:v046dpc640:name:*
++mouse:usb:v256fpc62e:name:*
++mouse:usb:v256fpc62f:name:*
++mouse:usb:v256fpc631:name:*
++mouse:usb:v256fpc632:name:*
++mouse:usb:v256fpc633:name:*
++mouse:usb:v256fpc635:name:*
++mouse:usb:v256fpc636:name:*
++ ID_INPUT_3D_MOUSE=1
++
++mouse:bluetooth:v256fpc63a:name:*
++ ID_INPUT_3D_MOUSE=1
++
+ ##########################################
+ # Apple
+ ##########################################
+diff --git a/hwdb.d/parse_hwdb.py b/hwdb.d/parse_hwdb.py
+index b2580c8dcf..b4de194ba4 100755
+--- a/hwdb.d/parse_hwdb.py
++++ b/hwdb.d/parse_hwdb.py
+@@ -155,6 +155,7 @@ def property_grammar():
+              ('MOUSE_WHEEL_CLICK_ANGLE_HORIZONTAL', INTEGER),
+              ('MOUSE_WHEEL_CLICK_COUNT', INTEGER),
+              ('MOUSE_WHEEL_CLICK_COUNT_HORIZONTAL', INTEGER),
++             ('ID_INPUT_3D_MOUSE', Or((Literal('0'), Literal('1')))),
+              ('ID_AUTOSUSPEND', Or((Literal('0'), Literal('1')))),
+              ('ID_AUTOSUSPEND_DELAY_MS', INTEGER),
+              ('ID_AV_PRODUCTION_CONTROLLER', Or((Literal('0'), Literal('1')))),
+diff --git a/rules.d/70-uaccess.rules.in b/rules.d/70-uaccess.rules.in
+index 796e384e57..58cf32826a 100644
+--- a/rules.d/70-uaccess.rules.in
++++ b/rules.d/70-uaccess.rules.in
+@@ -101,4 +101,8 @@ SUBSYSTEM=="usb", ENV{ID_AV_PRODUCTION_CONTROLLER}=="1", TAG+="uaccess"
+ SUBSYSTEM=="usb", ENV{ID_HARDWARE_WALLET}=="1", TAG+="uaccess"
+ SUBSYSTEM=="hidraw", ENV{ID_HARDWARE_WALLET}=="1", TAG+="uaccess"
+ 
++# 3D mice
++# As defined in https://en.wikipedia.org/wiki/3Dconnexion
++SUBSYSTEM=="hidraw", ENV{ID_INPUT_3D_MOUSE}=="1", TAG+="uaccess"
++
+ LABEL="uaccess_end"

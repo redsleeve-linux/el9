@@ -1,0 +1,50 @@
+From 0b3c0a40c1d4a6be0c259795248f963d1ac17e9f Mon Sep 17 00:00:00 2001
+From: Richard Phibel <rphibel@googlemail.com>
+Date: Tue, 30 May 2023 00:45:09 +0200
+Subject: [PATCH] Fix failing test
+
+In test-execute, only the unit was started, not the slice. Because of
+that the slice cgroup was pruned even if it was still needed. From what
+I can tell, this is because, in the test, we don't have all the
+mechanics that starts the slice for a service. To fix the issue the
+slice is started manually.
+
+(cherry picked from commit fc6172b1d844fb2e93cb1180810eba561aead3b8)
+
+Related: RHEL-55301
+---
+ src/test/test-execute.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/test/test-execute.c b/src/test/test-execute.c
+index 1f838e5c91..20d6035cee 100644
+--- a/src/test/test-execute.c
++++ b/src/test/test-execute.c
+@@ -207,6 +207,17 @@ static bool is_inaccessible_available(void) {
+         return true;
+ }
+ 
++static void start_parent_slices(Unit *unit) {
++        Unit *slice;
++
++        slice = UNIT_GET_SLICE(unit);
++        if (slice) {
++                start_parent_slices(slice);
++                int r = unit_start(slice, NULL);
++                assert_se(r >= 0 || r == -EALREADY);
++        }
++}
++
+ static void _test(const char *file, unsigned line, const char *func,
+                   Manager *m, const char *unit_name, int status_expected, int code_expected) {
+         Unit *unit;
+@@ -214,6 +225,9 @@ static void _test(const char *file, unsigned line, const char *func,
+         assert_se(unit_name);
+ 
+         assert_se(manager_load_startable_unit_or_warn(m, unit_name, NULL, &unit) >= 0);
++        /* We need to start the slices as well otherwise the slice cgroups might be pruned
++         * in on_cgroup_empty_event. */
++        start_parent_slices(unit);
+         assert_se(unit_start(unit, NULL) >= 0);
+         check_main_result(file, line, func, m, unit, status_expected, code_expected);
+ }

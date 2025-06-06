@@ -1,0 +1,78 @@
+From 4d70b84f429d8fa34eceea483acbcb23e4cddb01 Mon Sep 17 00:00:00 2001
+From: Bastien Nocera <hadess@hadess.net>
+Date: Thu, 12 Dec 2024 14:23:46 +0100
+Subject: [PATCH] hwdb: Make remote controllable lights work out-of-the-box
+
+Give access to USB/Bluetooth lights such as the Logitech Litra family of
+devices.
+
+The Logitech devices in particular are accessible through USB
+and Bluetooth.
+
+(cherry picked from commit 106f64cbd66b8aa76333c3f11177f53e79e2cd82)
+
+Resolves: RHEL-49810
+---
+ hwdb.d/70-lights.hwdb       | 24 ++++++++++++++++++++++++
+ hwdb.d/parse_hwdb.py        |  1 +
+ rules.d/70-uaccess.rules.in |  4 ++++
+ 3 files changed, 29 insertions(+)
+ create mode 100644 hwdb.d/70-lights.hwdb
+
+diff --git a/hwdb.d/70-lights.hwdb b/hwdb.d/70-lights.hwdb
+new file mode 100644
+index 0000000000..7811be61f5
+--- /dev/null
++++ b/hwdb.d/70-lights.hwdb
+@@ -0,0 +1,24 @@
++# This file is part of systemd.
++#
++# Database for remote controllable lights that should be accessible to the seat owner,
++# such as Bluetooth or USB lights that are used in conjuction with the computer like
++# streaming lights.
++#
++# To add local entries, copy this file to
++#   /etc/udev/hwdb.d/
++# and add your rules there. To load the new rules execute (as root):
++#   systemd-hwdb update
++#   udevadm trigger
++
++################
++# Logitech
++################
++# Litra Beam
++bluetooth:v046dpc901*
++usb:v046dpc901*
++ ID_AV_LIGHTS=1
++
++# Litra Glow
++bluetooth:v046dpc900*
++usb:v046dpc900*
++ ID_AV_LIGHTS=1
+diff --git a/hwdb.d/parse_hwdb.py b/hwdb.d/parse_hwdb.py
+index b4de194ba4..bac5dcc4c8 100755
+--- a/hwdb.d/parse_hwdb.py
++++ b/hwdb.d/parse_hwdb.py
+@@ -159,6 +159,7 @@ def property_grammar():
+              ('ID_AUTOSUSPEND', Or((Literal('0'), Literal('1')))),
+              ('ID_AUTOSUSPEND_DELAY_MS', INTEGER),
+              ('ID_AV_PRODUCTION_CONTROLLER', Or((Literal('0'), Literal('1')))),
++             ('ID_AV_LIGHTS', Or((Literal('0'), Literal('1')))),
+              ('ID_PERSIST', Or((Literal('0'), Literal('1')))),
+              ('ID_PDA', Or((Literal('0'), Literal('1')))),
+              ('ID_INPUT', id_input_setting),
+diff --git a/rules.d/70-uaccess.rules.in b/rules.d/70-uaccess.rules.in
+index 58cf32826a..7facd52537 100644
+--- a/rules.d/70-uaccess.rules.in
++++ b/rules.d/70-uaccess.rules.in
+@@ -97,6 +97,10 @@ SUBSYSTEM=="hidraw", ENV{ID_AV_PRODUCTION_CONTROLLER}=="1", TAG+="uaccess"
+ # This also allows accessing HID devices with the libusb backend of hidapi.
+ SUBSYSTEM=="usb", ENV{ID_AV_PRODUCTION_CONTROLLER}=="1", TAG+="uaccess"
+ 
++# USB and Bluetooth controllable lights
++SUBSYSTEM=="hidraw", ENV{ID_AV_LIGHTS}=="1", TAG+="uaccess"
++SUBSYSTEM=="usb", ENV{ID_AV_LIGHTS}=="1", TAG+="uaccess"
++
+ # Hardware wallets
+ SUBSYSTEM=="usb", ENV{ID_HARDWARE_WALLET}=="1", TAG+="uaccess"
+ SUBSYSTEM=="hidraw", ENV{ID_HARDWARE_WALLET}=="1", TAG+="uaccess"

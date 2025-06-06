@@ -1,0 +1,20 @@
+From edd8e9d6c36b08ff89d0c2345015191cf26e8de4 Mon Sep 17 00:00:00 2001
+From: Nick Clifton <nickc@redhat.com>
+Date: Mon, 9 Dec 2024 13:13:38 +0000
+Subject: [PATCH] Add linker diagnostic message about missing static libraries
+
+--- binutils.orig/ld/ldfile.c	2025-01-06 12:07:44.535653316 +0000
++++ binutils-2.35.2/ld/ldfile.c	2025-01-06 12:55:36.693479042 +0000
+@@ -464,6 +464,12 @@ ldfile_open_file (lang_input_statement_t
+ 	  else
+ 	    einfo (_("%P: cannot find %s\n"), entry->local_sym_name);
+ 
++	  /* Be kind to users who are creating static executables, but
++	     have forgotten to install the necessary static libraries.  */
++	  if (entry->flags.dynamic == FALSE && strncmp (entry->local_sym_name, "-l", 2) == 0)
++	    einfo (_("%P: have you installed the static version of the %s library ?\n"),
++		     entry->local_sym_name + 2);
++
+ 	  /* PR 25747: Be kind to users who forgot to add the
+ 	     "lib" prefix to their library when it was created.  */
+ 	  for (arch = search_arch_head; arch != NULL; arch = arch->next)

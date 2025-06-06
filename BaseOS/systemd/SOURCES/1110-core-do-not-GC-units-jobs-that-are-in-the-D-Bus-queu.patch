@@ -1,0 +1,81 @@
+From 31f8d699974e114868a90b49141d4130287a499d Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 8 Jun 2023 11:11:49 +0200
+Subject: [PATCH] core: do not GC units/jobs that are in the D-Bus queue
+
+Let's make sure that D-Bus messages are always sent out when pending,
+before we might GC a unit/job.
+
+This is kinda a follow-up for 8db998981a4fefd0122bcf5f965726b63c9045c2,
+and a similar logic really applies: GC should only be done if we
+processed everything else, generated evertyhing else and really don't
+need it anymore.
+
+(cherry picked from commit af05bb971731fe7280e4e85fde71c2e671772c18)
+
+Related: RHEL-55301
+---
+ src/core/dbus-job.c  | 3 +++
+ src/core/dbus-unit.c | 3 +++
+ src/core/job.c       | 4 ++++
+ src/core/unit.c      | 4 ++++
+ 4 files changed, 14 insertions(+)
+
+diff --git a/src/core/dbus-job.c b/src/core/dbus-job.c
+index 9792a5c44a..c88d8c2dd5 100644
+--- a/src/core/dbus-job.c
++++ b/src/core/dbus-job.c
+@@ -241,6 +241,9 @@ void bus_job_send_change_signal(Job *j) {
+         if (j->in_dbus_queue) {
+                 LIST_REMOVE(dbus_queue, j->manager->dbus_job_queue, j);
+                 j->in_dbus_queue = false;
++
++                /* The job might be good to be GC once its pending signals have been sent */
++                job_add_to_gc_queue(j);
+         }
+ 
+         r = bus_foreach_bus(j->manager, j->bus_track, j->sent_dbus_new_signal ? send_changed_signal : send_new_signal, j);
+diff --git a/src/core/dbus-unit.c b/src/core/dbus-unit.c
+index b45b3fdb53..9d3c3be4e9 100644
+--- a/src/core/dbus-unit.c
++++ b/src/core/dbus-unit.c
+@@ -1629,6 +1629,9 @@ void bus_unit_send_change_signal(Unit *u) {
+         if (u->in_dbus_queue) {
+                 LIST_REMOVE(dbus_queue, u->manager->dbus_unit_queue, u);
+                 u->in_dbus_queue = false;
++
++                /* The unit might be good to be GC once its pending signals have been sent */
++                unit_add_to_gc_queue(u);
+         }
+ 
+         if (!u->id)
+diff --git a/src/core/job.c b/src/core/job.c
+index 032554a0ac..bd3a741ffd 100644
+--- a/src/core/job.c
++++ b/src/core/job.c
+@@ -1407,6 +1407,10 @@ bool job_may_gc(Job *j) {
+         if (!UNIT_VTABLE(j->unit)->gc_jobs)
+                 return false;
+ 
++        /* Make sure to send out pending D-Bus events before we unload the unit */
++        if (j->in_dbus_queue)
++                return false;
++
+         if (sd_bus_track_count(j->bus_track) > 0)
+                 return false;
+ 
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 4360351bd9..03eb3aaecf 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -423,6 +423,10 @@ bool unit_may_gc(Unit *u) {
+         if (u->in_cgroup_empty_queue || u->in_cgroup_oom_queue)
+                 return false;
+ 
++        /* Make sure to send out D-Bus events before we unload the unit */
++        if (u->in_dbus_queue)
++                return false;
++
+         if (sd_bus_track_count(u->bus_track) > 0)
+                 return false;
+ 

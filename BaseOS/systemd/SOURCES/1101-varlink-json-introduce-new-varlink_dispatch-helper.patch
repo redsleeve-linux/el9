@@ -1,0 +1,944 @@
+From a92665de198ca2ace3f5835f6c819b6e669cbb77 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 1 Nov 2023 18:36:12 +0100
+Subject: [PATCH] varlink,json: introduce new varlink_dispatch() helper
+
+varlink_dispatch() is a simple wrapper around json_dispatch() that
+returns clean, standards-compliant InvalidParameter error back to
+clients, if the specified JSON cannot be parsed properly.
+
+For this json_dispatch() is extended to return the offending field's
+name. Because it already has quite a few parameters, I then renamed
+json_dispatch() to json_dispatch_full() and made json_dispatch() a
+wrapper around it that passes the new argument as NULL. While doing so I
+figured we should also get rid of the bad= argument in the short
+wrapper, since it's only used in the OCI code.
+
+To simplify the OCI code this adds a second wrapper oci_dispatch()
+around json_dispatch_full(), that fills in bad= the way we want.
+
+Net result: instead of one json_dispatch() call there are now:
+
+1. json_dispatch_full() for the fully feature mother of all dispathers.
+2. json_dispatch() for the simpler version that you want to use most of
+   the time.
+3. varlink_dispatch() that generates nice Varlink errors
+4. oci_dispatch() that does the OCI specific error handling
+
+And that's all there is.
+
+(cherry picked from commit f1b622a00ce614654fcdff309a2394cfae3b3a88)
+
+Related: RHEL-55266
+---
+ src/core/core-varlink.c        | 12 ++++----
+ src/fuzz/fuzz-bootspec.c       |  2 +-
+ src/home/homed-varlink.c       | 12 ++++----
+ src/machine/machined-varlink.c | 12 ++++----
+ src/nspawn/nspawn-oci.c        | 54 ++++++++++++++++++----------------
+ src/nss-resolve/nss-resolve.c  | 18 ++++++------
+ src/oom/oomd-manager.c         |  2 +-
+ src/resolve/resolvectl.c       |  4 +--
+ src/resolve/resolved-varlink.c |  8 ++---
+ src/shared/group-record.c      | 10 +++----
+ src/shared/json.c              | 41 ++++++++++++++++++++++++--
+ src/shared/json.h              |  3 +-
+ src/shared/user-record.c       | 18 ++++++------
+ src/shared/userdb.c            |  6 ++--
+ src/shared/varlink.c           | 20 +++++++++++++
+ src/shared/varlink.h           |  3 ++
+ src/userdb/userwork.c          | 12 ++++----
+ 17 files changed, 150 insertions(+), 87 deletions(-)
+
+diff --git a/src/core/core-varlink.c b/src/core/core-varlink.c
+index 843271593d..776a3eebab 100644
+--- a/src/core/core-varlink.c
++++ b/src/core/core-varlink.c
+@@ -281,8 +281,8 @@ static int vl_method_get_user_record(Varlink *link, JsonVariant *parameters, Var
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (!streq_ptr(p.service, "io.systemd.DynamicUser"))
+@@ -388,8 +388,8 @@ static int vl_method_get_group_record(Varlink *link, JsonVariant *parameters, Va
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (!streq_ptr(p.service, "io.systemd.DynamicUser"))
+@@ -464,8 +464,8 @@ static int vl_method_get_memberships(Varlink *link, JsonVariant *parameters, Var
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (!streq_ptr(p.service, "io.systemd.DynamicUser"))
+diff --git a/src/fuzz/fuzz-bootspec.c b/src/fuzz/fuzz-bootspec.c
+index c08f76c14a..c6d24e7b55 100644
+--- a/src/fuzz/fuzz-bootspec.c
++++ b/src/fuzz/fuzz-bootspec.c
+@@ -98,7 +98,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+         if (r < 0)
+                 return 0;
+ 
+-        r = json_dispatch(v, data_dispatch, NULL, 0, &config);
++        r = json_dispatch(v, data_dispatch, 0, &config);
+         if (r < 0)
+                 return 0;
+ 
+diff --git a/src/home/homed-varlink.c b/src/home/homed-varlink.c
+index 540a612554..1cef25f563 100644
+--- a/src/home/homed-varlink.c
++++ b/src/home/homed-varlink.c
+@@ -90,8 +90,8 @@ int vl_method_get_user_record(Varlink *link, JsonVariant *parameters, VarlinkMet
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (!streq_ptr(p.service, m->userdb_service))
+@@ -204,8 +204,8 @@ int vl_method_get_group_record(Varlink *link, JsonVariant *parameters, VarlinkMe
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (!streq_ptr(p.service, m->userdb_service))
+@@ -270,8 +270,8 @@ int vl_method_get_memberships(Varlink *link, JsonVariant *parameters, VarlinkMet
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (!streq_ptr(p.service, m->userdb_service))
+diff --git a/src/machine/machined-varlink.c b/src/machine/machined-varlink.c
+index ec625ad7b4..8b230b0078 100644
+--- a/src/machine/machined-varlink.c
++++ b/src/machine/machined-varlink.c
+@@ -156,8 +156,8 @@ static int vl_method_get_user_record(Varlink *link, JsonVariant *parameters, Var
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (!streq_ptr(p.service, "io.systemd.Machine"))
+@@ -321,8 +321,8 @@ static int vl_method_get_group_record(Varlink *link, JsonVariant *parameters, Va
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (!streq_ptr(p.service, "io.systemd.Machine"))
+@@ -366,8 +366,8 @@ static int vl_method_get_memberships(Varlink *link, JsonVariant *parameters, Var
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (!streq_ptr(p.service, "io.systemd.Machine"))
+diff --git a/src/nspawn/nspawn-oci.c b/src/nspawn/nspawn-oci.c
+index 117a31e6b2..7fbc4dd6f0 100644
+--- a/src/nspawn/nspawn-oci.c
++++ b/src/nspawn/nspawn-oci.c
+@@ -84,6 +84,10 @@ static int oci_unexpected(const char *name, JsonVariant *v, JsonDispatchFlags fl
+                         "Unexpected OCI element '%s' of type '%s'.", name, json_variant_type_to_string(json_variant_type(v)));
+ }
+ 
++static int oci_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchFlags flags, void *userdata) {
++        return json_dispatch_full(v, table, oci_unexpected, flags, userdata, /* reterr_bad_field= */ NULL);
++}
++
+ static int oci_unsupported(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
+         return json_log(v, flags, SYNTHETIC_ERRNO(EOPNOTSUPP),
+                         "Unsupported OCI element '%s' of type '%s'.", name, json_variant_type_to_string(json_variant_type(v)));
+@@ -122,7 +126,7 @@ static int oci_console_size(const char *name, JsonVariant *v, JsonDispatchFlags
+                 {}
+         };
+ 
+-        return json_dispatch(v, table, oci_unexpected, flags, userdata);
++        return oci_dispatch(v, table, flags, userdata);
+ }
+ 
+ static int oci_absolute_path(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
+@@ -251,7 +255,7 @@ static int oci_rlimits(const char *name, JsonVariant *v, JsonDispatchFlags flags
+                         {}
+                 };
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, &data);
++                r = oci_dispatch(e, table, flags, &data);
+                 if (r < 0)
+                         return r;
+ 
+@@ -319,7 +323,7 @@ static int oci_capabilities(const char *name, JsonVariant *v, JsonDispatchFlags
+         Settings *s = ASSERT_PTR(userdata);
+         int r;
+ 
+-        r = json_dispatch(v, table, oci_unexpected, flags, &s->full_capabilities);
++        r = oci_dispatch(v, table, flags, &s->full_capabilities);
+         if (r < 0)
+                 return r;
+ 
+@@ -402,7 +406,7 @@ static int oci_user(const char *name, JsonVariant *v, JsonDispatchFlags flags, v
+                 {}
+         };
+ 
+-        return json_dispatch(v, table, oci_unexpected, flags, userdata);
++        return oci_dispatch(v, table, flags, userdata);
+ }
+ 
+ static int oci_process(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
+@@ -423,7 +427,7 @@ static int oci_process(const char *name, JsonVariant *v, JsonDispatchFlags flags
+                 {}
+         };
+ 
+-        return json_dispatch(v, table, oci_unexpected, flags, userdata);
++        return oci_dispatch(v, table, flags, userdata);
+ }
+ 
+ static int oci_root(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
+@@ -436,7 +440,7 @@ static int oci_root(const char *name, JsonVariant *v, JsonDispatchFlags flags, v
+                 {}
+         };
+ 
+-        r = json_dispatch(v, table, oci_unexpected, flags, s);
++        r = oci_dispatch(v, table, flags, s);
+         if (r < 0)
+                 return r;
+ 
+@@ -536,7 +540,7 @@ static int oci_mounts(const char *name, JsonVariant *v, JsonDispatchFlags flags,
+                 CustomMount *m;
+                 _cleanup_(cleanup_oci_mount_data) oci_mount_data data = {};
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, &data);
++                r = oci_dispatch(e, table, flags, &data);
+                 if (r < 0)
+                         return r;
+ 
+@@ -631,7 +635,7 @@ static int oci_namespaces(const char *name, JsonVariant *v, JsonDispatchFlags fl
+                         {}
+                 };
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, &data);
++                r = oci_dispatch(e, table, flags, &data);
+                 if (r < 0) {
+                         free(data.path);
+                         return r;
+@@ -729,7 +733,7 @@ static int oci_uid_gid_mappings(const char *name, JsonVariant *v, JsonDispatchFl
+ 
+         assert_se(e = json_variant_by_index(v, 0));
+ 
+-        r = json_dispatch(e, table, oci_unexpected, flags, &data);
++        r = oci_dispatch(e, table, flags, &data);
+         if (r < 0)
+                 return r;
+ 
+@@ -858,7 +862,7 @@ static int oci_devices(const char *name, JsonVariant *v, JsonDispatchFlags flags
+                         .mode = 0644,
+                 };
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, node);
++                r = oci_dispatch(e, table, flags, node);
+                 if (r < 0)
+                         goto fail_element;
+ 
+@@ -1008,7 +1012,7 @@ static int oci_cgroup_devices(const char *name, JsonVariant *v, JsonDispatchFlag
+                         {}
+                 };
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, &data);
++                r = oci_dispatch(e, table, flags, &data);
+                 if (r < 0)
+                         return r;
+ 
+@@ -1190,7 +1194,7 @@ static int oci_cgroup_memory(const char *name, JsonVariant *v, JsonDispatchFlags
+         Settings *s = userdata;
+         int r;
+ 
+-        r = json_dispatch(v, table, oci_unexpected, flags, &data);
++        r = oci_dispatch(v, table, flags, &data);
+         if (r < 0)
+                 return r;
+ 
+@@ -1306,7 +1310,7 @@ static int oci_cgroup_cpu(const char *name, JsonVariant *v, JsonDispatchFlags fl
+         Settings *s = userdata;
+         int r;
+ 
+-        r = json_dispatch(v, table, oci_unexpected, flags, &data);
++        r = oci_dispatch(v, table, flags, &data);
+         if (r < 0) {
+                 cpu_set_reset(&data.cpu_set);
+                 return r;
+@@ -1388,7 +1392,7 @@ static int oci_cgroup_block_io_weight_device(const char *name, JsonVariant *v, J
+ 
+                 _cleanup_free_ char *path = NULL;
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, &data);
++                r = oci_dispatch(e, table, flags, &data);
+                 if (r < 0)
+                         return r;
+ 
+@@ -1445,7 +1449,7 @@ static int oci_cgroup_block_io_throttle(const char *name, JsonVariant *v, JsonDi
+ 
+                 _cleanup_free_ char *path = NULL;
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, &data);
++                r = oci_dispatch(e, table, flags, &data);
+                 if (r < 0)
+                         return r;
+ 
+@@ -1482,7 +1486,7 @@ static int oci_cgroup_block_io(const char *name, JsonVariant *v, JsonDispatchFla
+                 {}
+         };
+ 
+-        return json_dispatch(v, table, oci_unexpected, flags, userdata);
++        return oci_dispatch(v, table, flags, userdata);
+ }
+ 
+ static int oci_cgroup_pids(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
+@@ -1497,7 +1501,7 @@ static int oci_cgroup_pids(const char *name, JsonVariant *v, JsonDispatchFlags f
+         uint64_t m;
+         int r;
+ 
+-        r = json_dispatch(v, table, oci_unexpected, flags, &k);
++        r = oci_dispatch(v, table, flags, &k);
+         if (r < 0)
+                 return r;
+ 
+@@ -1540,7 +1544,7 @@ static int oci_resources(const char *name, JsonVariant *v, JsonDispatchFlags fla
+                 {}
+         };
+ 
+-        return json_dispatch(v, table, oci_unexpected, flags, userdata);
++        return oci_dispatch(v, table, flags, userdata);
+ }
+ 
+ static bool sysctl_key_valid(const char *s) {
+@@ -1801,7 +1805,7 @@ static int oci_seccomp_args(const char *name, JsonVariant *v, JsonDispatchFlags
+                         .op = 0,
+                 };
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, p);
++                r = oci_dispatch(e, table, flags, p);
+                 if (r < 0)
+                         return r;
+ 
+@@ -1834,7 +1838,7 @@ static int oci_seccomp_syscalls(const char *name, JsonVariant *v, JsonDispatchFl
+                         .action = UINT32_MAX,
+                 };
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, &rule);
++                r = oci_dispatch(e, table, flags, &rule);
+                 if (r < 0)
+                         goto fail_rule;
+ 
+@@ -1901,7 +1905,7 @@ static int oci_seccomp(const char *name, JsonVariant *v, JsonDispatchFlags flags
+         if (!sc)
+                 return json_log(v, flags, SYNTHETIC_ERRNO(ENOMEM), "Couldn't allocate seccomp object.");
+ 
+-        r = json_dispatch(v, table, oci_unexpected, flags, sc);
++        r = oci_dispatch(v, table, flags, sc);
+         if (r < 0)
+                 return r;
+ 
+@@ -2026,7 +2030,7 @@ static int oci_linux(const char *name, JsonVariant *v, JsonDispatchFlags flags,
+                 {}
+         };
+ 
+-        return json_dispatch(v, table, oci_unexpected, flags, userdata);
++        return oci_dispatch(v, table, flags, userdata);
+ }
+ 
+ static int oci_hook_timeout(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
+@@ -2083,7 +2087,7 @@ static int oci_hooks_array(const char *name, JsonVariant *v, JsonDispatchFlags f
+                         .timeout = USEC_INFINITY,
+                 };
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, new_item);
++                r = oci_dispatch(e, table, flags, new_item);
+                 if (r < 0) {
+                         free(new_item->path);
+                         strv_free(new_item->args);
+@@ -2106,7 +2110,7 @@ static int oci_hooks(const char *name, JsonVariant *v, JsonDispatchFlags flags,
+                 {}
+         };
+ 
+-        return json_dispatch(v, table, oci_unexpected, flags, userdata);
++        return oci_dispatch(v, table, flags, userdata);
+ }
+ 
+ static int oci_annotations(const char *name, JsonVariant *v, JsonDispatchFlags flags, void *userdata) {
+@@ -2191,7 +2195,7 @@ int oci_load(FILE *f, const char *bundle, Settings **ret) {
+         if (!s->bundle)
+                 return log_oom();
+ 
+-        r = json_dispatch(oci, table, oci_unexpected, 0, s);
++        r = oci_dispatch(oci, table, 0, s);
+         if (r < 0)
+                 return r;
+ 
+diff --git a/src/nss-resolve/nss-resolve.c b/src/nss-resolve/nss-resolve.c
+index 0226752275..350bbffb04 100644
+--- a/src/nss-resolve/nss-resolve.c
++++ b/src/nss-resolve/nss-resolve.c
+@@ -272,7 +272,7 @@ enum nss_status _nss_resolve_gethostbyname4_r(
+                 goto not_found;
+         }
+ 
+-        r = json_dispatch(rparams, resolve_hostname_reply_dispatch_table, NULL, json_dispatch_flags, &p);
++        r = json_dispatch(rparams, resolve_hostname_reply_dispatch_table, json_dispatch_flags, &p);
+         if (r < 0)
+                 goto fail;
+         if (json_variant_is_blank_object(p.addresses))
+@@ -282,7 +282,7 @@ enum nss_status _nss_resolve_gethostbyname4_r(
+         JSON_VARIANT_ARRAY_FOREACH(entry, p.addresses) {
+                 AddressParameters q = {};
+ 
+-                r = json_dispatch(entry, address_parameters_dispatch_table, NULL, json_dispatch_flags, &q);
++                r = json_dispatch(entry, address_parameters_dispatch_table, json_dispatch_flags, &q);
+                 if (r < 0)
+                         goto fail;
+ 
+@@ -320,7 +320,7 @@ enum nss_status _nss_resolve_gethostbyname4_r(
+         JSON_VARIANT_ARRAY_FOREACH(entry, p.addresses) {
+                 AddressParameters q = {};
+ 
+-                r = json_dispatch(entry, address_parameters_dispatch_table, NULL, json_dispatch_flags, &q);
++                r = json_dispatch(entry, address_parameters_dispatch_table, json_dispatch_flags, &q);
+                 if (r < 0)
+                         goto fail;
+ 
+@@ -428,7 +428,7 @@ enum nss_status _nss_resolve_gethostbyname3_r(
+                 goto not_found;
+         }
+ 
+-        r = json_dispatch(rparams, resolve_hostname_reply_dispatch_table, NULL, json_dispatch_flags, &p);
++        r = json_dispatch(rparams, resolve_hostname_reply_dispatch_table, json_dispatch_flags, &p);
+         if (r < 0)
+                 goto fail;
+         if (json_variant_is_blank_object(p.addresses))
+@@ -438,7 +438,7 @@ enum nss_status _nss_resolve_gethostbyname3_r(
+         JSON_VARIANT_ARRAY_FOREACH(entry, p.addresses) {
+                 AddressParameters q = {};
+ 
+-                r = json_dispatch(entry, address_parameters_dispatch_table, NULL, json_dispatch_flags, &q);
++                r = json_dispatch(entry, address_parameters_dispatch_table, json_dispatch_flags, &q);
+                 if (r < 0)
+                         goto fail;
+ 
+@@ -484,7 +484,7 @@ enum nss_status _nss_resolve_gethostbyname3_r(
+         JSON_VARIANT_ARRAY_FOREACH(entry, p.addresses) {
+                 AddressParameters q = {};
+ 
+-                r = json_dispatch(entry, address_parameters_dispatch_table, NULL, json_dispatch_flags, &q);
++                r = json_dispatch(entry, address_parameters_dispatch_table, json_dispatch_flags, &q);
+                 if (r < 0)
+                         goto fail;
+ 
+@@ -640,7 +640,7 @@ enum nss_status _nss_resolve_gethostbyaddr2_r(
+                 goto not_found;
+         }
+ 
+-        r = json_dispatch(rparams, resolve_address_reply_dispatch_table, NULL, json_dispatch_flags, &p);
++        r = json_dispatch(rparams, resolve_address_reply_dispatch_table, json_dispatch_flags, &p);
+         if (r < 0)
+                 goto fail;
+         if (json_variant_is_blank_object(p.names))
+@@ -651,7 +651,7 @@ enum nss_status _nss_resolve_gethostbyaddr2_r(
+         JSON_VARIANT_ARRAY_FOREACH(entry, p.names) {
+                 _cleanup_(name_parameters_destroy) NameParameters q = {};
+ 
+-                r = json_dispatch(entry, name_parameters_dispatch_table, NULL, json_dispatch_flags, &q);
++                r = json_dispatch(entry, name_parameters_dispatch_table, json_dispatch_flags, &q);
+                 if (r < 0)
+                         goto fail;
+ 
+@@ -692,7 +692,7 @@ enum nss_status _nss_resolve_gethostbyaddr2_r(
+         JSON_VARIANT_ARRAY_FOREACH(entry, p.names) {
+                 _cleanup_(name_parameters_destroy) NameParameters q = {};
+ 
+-                r = json_dispatch(entry, name_parameters_dispatch_table, NULL, json_dispatch_flags, &q);
++                r = json_dispatch(entry, name_parameters_dispatch_table, json_dispatch_flags, &q);
+                 if (r < 0)
+                         goto fail;
+ 
+diff --git a/src/oom/oomd-manager.c b/src/oom/oomd-manager.c
+index 4a43807b87..66c41c1cfa 100644
+--- a/src/oom/oomd-manager.c
++++ b/src/oom/oomd-manager.c
+@@ -72,7 +72,7 @@ static int process_managed_oom_message(Manager *m, uid_t uid, JsonVariant *param
+                 if (!json_variant_is_object(c))
+                         continue;
+ 
+-                r = json_dispatch(c, dispatch_table, NULL, 0, &message);
++                r = json_dispatch(c, dispatch_table, 0, &message);
+                 if (r == -ENOMEM)
+                         return r;
+                 if (r < 0)
+diff --git a/src/resolve/resolvectl.c b/src/resolve/resolvectl.c
+index e22e06d054..0782e48e04 100644
+--- a/src/resolve/resolvectl.c
++++ b/src/resolve/resolvectl.c
+@@ -2598,7 +2598,7 @@ static int monitor_rkey_from_json(JsonVariant *v, DnsResourceKey **ret_key) {
+         assert(v);
+         assert(ret_key);
+ 
+-        r = json_dispatch(v, dispatch_table, NULL, 0, NULL);
++        r = json_dispatch(v, dispatch_table, 0, NULL);
+         if (r < 0)
+                 return r;
+ 
+@@ -2697,7 +2697,7 @@ static void monitor_query_dump(JsonVariant *v) {
+                 {}
+         };
+ 
+-        r = json_dispatch(v, dispatch_table, NULL, 0, NULL);
++        r = json_dispatch(v, dispatch_table, 0, NULL);
+         if (r < 0)
+                 return (void) log_warning("Received malformed monitor message, ignoring.");
+ 
+diff --git a/src/resolve/resolved-varlink.c b/src/resolve/resolved-varlink.c
+index 8ba5eb9833..1c5ce8315c 100644
+--- a/src/resolve/resolved-varlink.c
++++ b/src/resolve/resolved-varlink.c
+@@ -312,8 +312,8 @@ static int vl_method_resolve_hostname(Varlink *link, JsonVariant *parameters, Va
+         if (FLAGS_SET(flags, VARLINK_METHOD_ONEWAY))
+                 return -EINVAL;
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (p.ifindex < 0)
+@@ -492,8 +492,8 @@ static int vl_method_resolve_address(Varlink *link, JsonVariant *parameters, Var
+         if (FLAGS_SET(flags, VARLINK_METHOD_ONEWAY))
+                 return -EINVAL;
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         if (p.ifindex < 0)
+diff --git a/src/shared/group-record.c b/src/shared/group-record.c
+index 2f12ac1c22..728471b2b6 100644
+--- a/src/shared/group-record.c
++++ b/src/shared/group-record.c
+@@ -50,7 +50,7 @@ static int dispatch_privileged(const char *name, JsonVariant *variant, JsonDispa
+                 {},
+         };
+ 
+-        return json_dispatch(variant, privileged_dispatch_table, NULL, flags, userdata);
++        return json_dispatch(variant, privileged_dispatch_table, flags, userdata);
+ }
+ 
+ static int dispatch_binding(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
+@@ -78,7 +78,7 @@ static int dispatch_binding(const char *name, JsonVariant *variant, JsonDispatch
+         if (!m)
+                 return 0;
+ 
+-        return json_dispatch(m, binding_dispatch_table, NULL, flags, userdata);
++        return json_dispatch(m, binding_dispatch_table, flags, userdata);
+ }
+ 
+ static int dispatch_per_machine(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
+@@ -131,7 +131,7 @@ static int dispatch_per_machine(const char *name, JsonVariant *variant, JsonDisp
+                 if (!matching)
+                         continue;
+ 
+-                r = json_dispatch(e, per_machine_dispatch_table, NULL, flags, userdata);
++                r = json_dispatch(e, per_machine_dispatch_table, flags, userdata);
+                 if (r < 0)
+                         return r;
+         }
+@@ -164,7 +164,7 @@ static int dispatch_status(const char *name, JsonVariant *variant, JsonDispatchF
+         if (!m)
+                 return 0;
+ 
+-        return json_dispatch(m, status_dispatch_table, NULL, flags, userdata);
++        return json_dispatch(m, status_dispatch_table, flags, userdata);
+ }
+ 
+ static int group_record_augment(GroupRecord *h, JsonDispatchFlags json_flags) {
+@@ -230,7 +230,7 @@ int group_record_load(
+         if (r < 0)
+                 return r;
+ 
+-        r = json_dispatch(h->json, group_dispatch_table, NULL, json_flags, h);
++        r = json_dispatch(h->json, group_dispatch_table, json_flags, h);
+         if (r < 0)
+                 return r;
+ 
+diff --git a/src/shared/json.c b/src/shared/json.c
+index eda7bb1956..e346bb0a01 100644
+--- a/src/shared/json.c
++++ b/src/shared/json.c
+@@ -4227,7 +4227,13 @@ static void *dispatch_userdata(const JsonDispatch *p, void *userdata) {
+         return SIZE_TO_PTR(p->offset);
+ }
+ 
+-int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallback bad, JsonDispatchFlags flags, void *userdata) {
++int json_dispatch_full(
++                JsonVariant *v,
++                const JsonDispatch table[],
++                JsonDispatchCallback bad,
++                JsonDispatchFlags flags,
++                void *userdata,
++                const char **reterr_bad_field) {
+         size_t m;
+         int r, done = 0;
+         bool *found;
+@@ -4238,6 +4244,9 @@ int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallba
+                 if (flags & JSON_PERMISSIVE)
+                         return 0;
+ 
++                if (reterr_bad_field)
++                        *reterr_bad_field = NULL;
++
+                 return -EINVAL;
+         }
+ 
+@@ -4260,7 +4269,7 @@ int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallba
+                             streq_ptr(json_variant_string(key), p->name))
+                                 break;
+ 
+-                if (p->name) { /* Found a matching entry! :-) */
++                if (p->name) { /* Found a matching entry! 🙂 */
+                         JsonDispatchFlags merged_flags;
+ 
+                         merged_flags = flags | p->flags;
+@@ -4275,6 +4284,9 @@ int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallba
+                                 if (merged_flags & JSON_PERMISSIVE)
+                                         continue;
+ 
++                                if (reterr_bad_field)
++                                        *reterr_bad_field = p->name;
++
+                                 return -EINVAL;
+                         }
+ 
+@@ -4284,6 +4296,9 @@ int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallba
+                                 if (merged_flags & JSON_PERMISSIVE)
+                                         continue;
+ 
++                                if (reterr_bad_field)
++                                        *reterr_bad_field = p->name;
++
+                                 return -ENOTUNIQ;
+                         }
+ 
+@@ -4295,13 +4310,16 @@ int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallba
+                                         if (merged_flags & JSON_PERMISSIVE)
+                                                 continue;
+ 
++                                        if (reterr_bad_field)
++                                                *reterr_bad_field = json_variant_string(key);
++
+                                         return r;
+                                 }
+                         }
+ 
+                         done ++;
+ 
+-                } else { /* Didn't find a matching entry! :-( */
++                } else { /* Didn't find a matching entry! ☹️ */
+ 
+                         if (bad) {
+                                 r = bad(json_variant_string(key), value, flags, userdata);
+@@ -4309,6 +4327,9 @@ int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallba
+                                         if (flags & JSON_PERMISSIVE)
+                                                 continue;
+ 
++                                        if (reterr_bad_field)
++                                                *reterr_bad_field = json_variant_string(key);
++
+                                         return r;
+                                 } else
+                                         done ++;
+@@ -4319,6 +4340,9 @@ int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallba
+                                 if (flags & JSON_PERMISSIVE)
+                                         continue;
+ 
++                                if (reterr_bad_field)
++                                        *reterr_bad_field = json_variant_string(key);
++
+                                 return -EADDRNOTAVAIL;
+                         }
+                 }
+@@ -4333,6 +4357,9 @@ int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallba
+                         if ((merged_flags & JSON_PERMISSIVE))
+                                 continue;
+ 
++                        if (reterr_bad_field)
++                                *reterr_bad_field = p->name;
++
+                         return -ENXIO;
+                 }
+         }
+@@ -4340,6 +4367,14 @@ int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallba
+         return done;
+ }
+ 
++int json_dispatch(
++                JsonVariant *v,
++                const JsonDispatch table[],
++                JsonDispatchFlags flags,
++                void *userdata) {
++        return json_dispatch_full(v, table, NULL, flags, userdata, NULL);
++}
++
+ int json_dispatch_boolean(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
+         bool *b = ASSERT_PTR(userdata);
+ 
+diff --git a/src/shared/json.h b/src/shared/json.h
+index 5993e05299..e62c71a249 100644
+--- a/src/shared/json.h
++++ b/src/shared/json.h
+@@ -363,7 +363,8 @@ typedef struct JsonDispatch {
+         JsonDispatchFlags flags;
+ } JsonDispatch;
+ 
+-int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallback bad, JsonDispatchFlags flags, void *userdata);
++int json_dispatch_full(JsonVariant *v, const JsonDispatch table[], JsonDispatchCallback bad, JsonDispatchFlags flags, void *userdata, const char **reterr_bad_field);
++int json_dispatch(JsonVariant *v, const JsonDispatch table[], JsonDispatchFlags flags, void *userdata);
+ 
+ int json_dispatch_string(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
+ int json_dispatch_const_string(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata);
+diff --git a/src/shared/user-record.c b/src/shared/user-record.c
+index 84cbdb1d30..1c37444349 100644
+--- a/src/shared/user-record.c
++++ b/src/shared/user-record.c
+@@ -653,7 +653,7 @@ static int dispatch_secret(const char *name, JsonVariant *variant, JsonDispatchF
+                 {},
+         };
+ 
+-        return json_dispatch(variant, secret_dispatch_table, NULL, flags, userdata);
++        return json_dispatch(variant, secret_dispatch_table, flags, userdata);
+ }
+ 
+ static int dispatch_pkcs11_uri(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
+@@ -782,7 +782,7 @@ static int dispatch_pkcs11_key(const char *name, JsonVariant *variant, JsonDispa
+                 k = h->pkcs11_encrypted_key + h->n_pkcs11_encrypted_key;
+                 *k = (Pkcs11EncryptedKey) {};
+ 
+-                r = json_dispatch(e, pkcs11_key_dispatch_table, NULL, flags, k);
++                r = json_dispatch(e, pkcs11_key_dispatch_table, flags, k);
+                 if (r < 0) {
+                         pkcs11_encrypted_key_done(k);
+                         return r;
+@@ -916,7 +916,7 @@ static int dispatch_fido2_hmac_salt(const char *name, JsonVariant *variant, Json
+                         .client_pin = -1,
+                 };
+ 
+-                r = json_dispatch(e, fido2_hmac_salt_dispatch_table, NULL, flags, k);
++                r = json_dispatch(e, fido2_hmac_salt_dispatch_table, flags, k);
+                 if (r < 0) {
+                         fido2_hmac_salt_done(k);
+                         return r;
+@@ -956,7 +956,7 @@ static int dispatch_recovery_key(const char *name, JsonVariant *variant, JsonDis
+                 k = h->recovery_key + h->n_recovery_key;
+                 *k = (RecoveryKey) {};
+ 
+-                r = json_dispatch(e, recovery_key_dispatch_table, NULL, flags, k);
++                r = json_dispatch(e, recovery_key_dispatch_table, flags, k);
+                 if (r < 0) {
+                         recovery_key_done(k);
+                         return r;
+@@ -1038,7 +1038,7 @@ static int dispatch_privileged(const char *name, JsonVariant *variant, JsonDispa
+                 {},
+         };
+ 
+-        return json_dispatch(variant, privileged_dispatch_table, NULL, flags, userdata);
++        return json_dispatch(variant, privileged_dispatch_table, flags, userdata);
+ }
+ 
+ static int dispatch_binding(const char *name, JsonVariant *variant, JsonDispatchFlags flags, void *userdata) {
+@@ -1077,7 +1077,7 @@ static int dispatch_binding(const char *name, JsonVariant *variant, JsonDispatch
+         if (!m)
+                 return 0;
+ 
+-        return json_dispatch(m, binding_dispatch_table, NULL, flags, userdata);
++        return json_dispatch(m, binding_dispatch_table, flags, userdata);
+ }
+ 
+ int per_machine_id_match(JsonVariant *ids, JsonDispatchFlags flags) {
+@@ -1276,7 +1276,7 @@ static int dispatch_per_machine(const char *name, JsonVariant *variant, JsonDisp
+                 if (!matching)
+                         continue;
+ 
+-                r = json_dispatch(e, per_machine_dispatch_table, NULL, flags, userdata);
++                r = json_dispatch(e, per_machine_dispatch_table, flags, userdata);
+                 if (r < 0)
+                         return r;
+         }
+@@ -1325,7 +1325,7 @@ static int dispatch_status(const char *name, JsonVariant *variant, JsonDispatchF
+         if (!m)
+                 return 0;
+ 
+-        return json_dispatch(m, status_dispatch_table, NULL, flags, userdata);
++        return json_dispatch(m, status_dispatch_table, flags, userdata);
+ }
+ 
+ int user_record_build_image_path(UserStorage storage, const char *user_name_and_realm, char **ret) {
+@@ -1615,7 +1615,7 @@ int user_record_load(UserRecord *h, JsonVariant *v, UserRecordLoadFlags load_fla
+         if (r < 0)
+                 return r;
+ 
+-        r = json_dispatch(h->json, user_dispatch_table, NULL, json_flags, h);
++        r = json_dispatch(h->json, user_dispatch_table, json_flags, h);
+         if (r < 0)
+                 return r;
+ 
+diff --git a/src/shared/userdb.c b/src/shared/userdb.c
+index 3f64ec8942..4ea4ac4d72 100644
+--- a/src/shared/userdb.c
++++ b/src/shared/userdb.c
+@@ -189,7 +189,7 @@ static int userdb_on_query_reply(
+ 
+                 assert_se(!iterator->found_user);
+ 
+-                r = json_dispatch(parameters, dispatch_table, NULL, 0, &user_data);
++                r = json_dispatch(parameters, dispatch_table, 0, &user_data);
+                 if (r < 0)
+                         goto finish;
+ 
+@@ -246,7 +246,7 @@ static int userdb_on_query_reply(
+ 
+                 assert_se(!iterator->found_group);
+ 
+-                r = json_dispatch(parameters, dispatch_table, NULL, 0, &group_data);
++                r = json_dispatch(parameters, dispatch_table, 0, &group_data);
+                 if (r < 0)
+                         goto finish;
+ 
+@@ -302,7 +302,7 @@ static int userdb_on_query_reply(
+                 assert(!iterator->found_user_name);
+                 assert(!iterator->found_group_name);
+ 
+-                r = json_dispatch(parameters, dispatch_table, NULL, 0, &membership_data);
++                r = json_dispatch(parameters, dispatch_table, 0, &membership_data);
+                 if (r < 0)
+                         goto finish;
+ 
+diff --git a/src/shared/varlink.c b/src/shared/varlink.c
+index 4d2cfee491..49593aa05a 100644
+--- a/src/shared/varlink.c
++++ b/src/shared/varlink.c
+@@ -1771,6 +1771,26 @@ int varlink_notifyb(Varlink *v, ...) {
+         return varlink_notify(v, parameters);
+ }
+ 
++int varlink_dispatch(Varlink *v, JsonVariant *parameters, const JsonDispatch table[], void *userdata) {
++        const char *bad_field = NULL;
++        int r;
++
++        assert_return(v, -EINVAL);
++        assert_return(table, -EINVAL);
++
++        /* A wrapper around json_dispatch_full() that returns a nice InvalidParameter error if we hit a problem with some field. */
++
++        r = json_dispatch_full(parameters, table, /* bad= */ NULL, /* flags= */ 0, userdata, &bad_field);
++        if (r < 0) {
++                if (bad_field)
++                        return varlink_errorb(v, VARLINK_ERROR_INVALID_PARAMETER,
++                                              JSON_BUILD_OBJECT(JSON_BUILD_PAIR("parameter", JSON_BUILD_STRING(bad_field))));
++                return r;
++        }
++
++        return 0;
++}
++
+ int varlink_bind_reply(Varlink *v, VarlinkReply callback) {
+         assert_return(v, -EINVAL);
+ 
+diff --git a/src/shared/varlink.h b/src/shared/varlink.h
+index 9518cd9098..e51ccd9107 100644
+--- a/src/shared/varlink.h
++++ b/src/shared/varlink.h
+@@ -107,6 +107,9 @@ int varlink_error_errno(Varlink *v, int error);
+ int varlink_notify(Varlink *v, JsonVariant *parameters);
+ int varlink_notifyb(Varlink *v, ...);
+ 
++/* Parsing incoming data via json_dispatch() and generate a nice error on parse errors */
++int varlink_dispatch(Varlink *v, JsonVariant *parameters, const JsonDispatch table[], void *userdata);
++
+ /* Bind a disconnect, reply or timeout callback */
+ int varlink_bind_reply(Varlink *v, VarlinkReply reply);
+ 
+diff --git a/src/userdb/userwork.c b/src/userdb/userwork.c
+index 21a869df1b..569dba3285 100644
+--- a/src/userdb/userwork.c
++++ b/src/userdb/userwork.c
+@@ -147,8 +147,8 @@ static int vl_method_get_user_record(Varlink *link, JsonVariant *parameters, Var
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         r = userdb_flags_from_service(link, p.service, &userdb_flags);
+@@ -283,8 +283,8 @@ static int vl_method_get_group_record(Varlink *link, JsonVariant *parameters, Va
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         r = userdb_flags_from_service(link, p.service, &userdb_flags);
+@@ -366,8 +366,8 @@ static int vl_method_get_memberships(Varlink *link, JsonVariant *parameters, Var
+ 
+         assert(parameters);
+ 
+-        r = json_dispatch(parameters, dispatch_table, NULL, 0, &p);
+-        if (r < 0)
++        r = varlink_dispatch(link, parameters, dispatch_table, &p);
++        if (r != 0)
+                 return r;
+ 
+         r = userdb_flags_from_service(link, p.service, &userdb_flags);

@@ -1,0 +1,36 @@
+From 6f792eb8679a20dd1e604bcd9cd18566658c3ff3 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 18 Sep 2024 12:54:51 +0200
+Subject: [PATCH] test: drop removed SCSI passthrough feature
+
+This feature has been deprecated since QEMU 5.0 and finally removed in
+QEMU 9.1 [0] which now causes issues when running the storage tests on
+latest Arch:
+
+------ testcase_long_sysfs_path: BEGIN ------
+...
+qemu-system-x86_64: -device virtio-blk-pci,drive=drive0,scsi=off,bus=pci_bridge25: Property 'virtio-blk-pci.scsi' not found
+E: qemu failed with exit code 1
+
+[0] https://github.com/qemu/qemu/commit/a271b8d7b2f39275a05e49deb7c8edc20b7a8279
+
+(cherry picked from commit cd57920fbf6a8f7769a82cfc9bebc12965de0199)
+
+Related: RHEL-70884
+---
+ test/TEST-64-UDEV-STORAGE/test.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/TEST-64-UDEV-STORAGE/test.sh b/test/TEST-64-UDEV-STORAGE/test.sh
+index f93b92e3c3..3911926b02 100755
+--- a/test/TEST-64-UDEV-STORAGE/test.sh
++++ b/test/TEST-64-UDEV-STORAGE/test.sh
+@@ -474,7 +474,7 @@ EOF
+         qemu_opts+=("-device pci-bridge,id=pci_bridge$brid,bus=pci_bridge$((brid-1)),chassis_nr=$((64+brid))")
+     done
+ 
+-    qemu_opts+=("-device virtio-blk-pci,drive=drive0,scsi=off,bus=pci_bridge$brid")
++    qemu_opts+=("-device virtio-blk-pci,drive=drive0,bus=pci_bridge$brid")
+ 
+     KERNEL_APPEND="systemd.setenv=TEST_FUNCTION_NAME=${FUNCNAME[0]} ${USER_KERNEL_APPEND:-}"
+     QEMU_OPTIONS="${qemu_opts[*]} ${USER_QEMU_OPTIONS:-}"

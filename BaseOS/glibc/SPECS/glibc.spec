@@ -157,7 +157,7 @@ end \
 Summary: The GNU libc libraries
 Name: glibc
 Version: %{glibcversion}
-Release: 168%{?dist}.14.redsleeve
+Release: 168%{?dist}.14
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -220,11 +220,6 @@ Source13: nscd-sysusers.conf
 %global glibc_has_libnldbl 0
 %global glibc_has_libmvec 0
 %endif
-%ifarch armv6hl
-%global glibc_ldso /lib/ld-linux-armhf.so.3
-%global glibc_has_libnldbl 0
-%global glibc_has_libmvec 0
-%endif
 %ifarch ppc
 %global glibc_ldso /lib/ld.so.1
 %global glibc_has_libnldbl 1
@@ -272,8 +267,6 @@ Source13: nscd-sysusers.conf
 %global glibc_has_libnldbl 0
 %global glibc_has_libmvec 0
 %endif
-
-Source1000: glibc-arm-dl-tunables.list
 
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
@@ -2007,10 +2000,6 @@ that can be installed across architectures.
 %prep
 %autosetup -n %{glibcsrcdir} -p1
 
-%ifarch %{arm}
-cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
-%endif
-
 ##############################################################################
 # %%prep - Additional prep required...
 ##############################################################################
@@ -3170,9 +3159,6 @@ update_gconv_modules_cache ()
 %endif
 
 %changelog
-* Sat May 17 2025Jacco Ligthart <jacco@redsleeve.org> - 2.34-168.14.redsleeve
-- add dl-tunables.list for arm
-
 * Tue Apr  8 2025 Florian Weimer <fweimer@redhat.com> - 2.34-168.14
 - Increase reliability of stdio-common/tst-setvbuf2 (RHEL-83982)
 

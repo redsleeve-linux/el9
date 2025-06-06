@@ -1,0 +1,532 @@
+From 2bf1f788bd7941375af27741715af645faa1cee6 Mon Sep 17 00:00:00 2001
+From: Jens Remus <jremus@linux.ibm.com>
+Date: Thu, 23 Nov 2023 15:48:15 +0100
+Subject: [PATCH] s390: Add missing extended mnemonics
+
+Commit: 2bf1f788bd79
+
+Add extended mnemonics specified in the z/Architecture Principles of
+Operation [1] and z/Architecture Reference Summary [2], that were
+previously missing from the opcode table.
+
+The following added extended mnemonics are synonyms to a base mnemonic
+and therefore disassemble into their base mnemonic:
+jc, jcth, lfi, llgfi, llghi
+
+The following added extended mnemonics are more specific than their base
+mnemonic and therefore disassemble into the added extended mnemonic:
+risbhgz, risblgz, rnsbgt, rosbgt, rxsbgt
+
+The following added extended mnemonics are more specific than their base
+mnemonic, but disassemble into their base mnemonic due to design
+constraints:
+notr, notgr
+
+The missing extended mnemonic jl* conditional jump long flavors cannot
+be added, as they would clash with the existing non-standard extended
+mnemonic j* conditional jump flavors jle and jlh. The missing extended
+mnemonic jlc jump long conditional is not added, as the related jl*
+flavors cannot be added.
+Note that these missing jl* conditional jump long flavors are already
+defined as non-standard jg* flavors instead. While the related missing
+extended mnemonic jlc could be added as non-standard jgc instead it is
+forgone in favor of not adding further non-standard mnemonics.
+
+The missing extended mnemonics sllhh, sllhl, slllh, srlhh, srlhl, and
+srllh cannot be implemented using the current design, as they require
+computed operands. For that reason the following missing extended
+mnemonics are not added as well, as they fall into the same category of
+instructions that operate on high and low words of registers. They
+should better be added together, not to confuse the user, which of those
+instructions are currently implemented or not.
+lhhr, lhlr, llhfr, llchhr, llchlr, llclhr, llhhhr, llhhlr, llhlhr,
+nhhr, nhlr, nlhr, ohhr, ohlr, olhr, xhhr, xhlr, xlhr
+
+[1] IBM z/Architecture Principles of Operation, SA22-7832-13, IBM z16,
+    https://publibfp.dhe.ibm.com/epubs/pdf/a227832d.pdf
+[2] IBM z/Architecture Reference Summary, SA22-7871-11,
+    https://www.ibm.com/support/pages/sites/default/files/2022-09/SA22-7871-11.pdf
+
+opcodes/
+	* s390-opc.c: Define operand formats R_CP16_28, U6_18, and
+	  U5_27. Define instruction formats RIE_RRUUU3, RIE_RRUUU4,
+	  and RRF_R0RR4.
+	* s390-opc.txt: Add extended mnemonics jc, jcth, lfi, llgfi,
+	  llghi, notgr, notr, risbhgz, risblgz, rnsbgt, rosbgt, and
+	  rxsbgt.
+
+gas/
+	* config/tc-s390.c: Add support to insert operand for format
+	  R_CP16_28, reusing existing logic for format V_CP16_12.
+	* testsuite/gas/s390/esa-g5.s: Add test for extended mnemonic
+	  jc.
+	* testsuite/gas/s390/esa-g5.d: Likewise.
+	* testsuite/gas/s390/zarch-z900.s: Add test for extended
+	  mnemonic llghi.
+	* testsuite/gas/s390/zarch-z900.d: Likewise.
+	* testsuite/gas/s390/zarch-z9-109.s: Add tests for extended
+	  mnemonics lfi and llgfi.
+	* testsuite/gas/s390/zarch-z9-109.d: Likewise.
+	* testsuite/gas/s390/zarch-z10.s: Add tests for extended
+	  mnemonics rnsbgt, rosbgt, and rxsbgt.
+	* testsuite/gas/s390/zarch-z10.d: Likewise.
+	* testsuite/gas/s390/zarch-z196.s: Add tests for extended
+	  mnemonics jcth, risbhgz, and risblgz.
+	* testsuite/gas/s390/zarch-z196.d: Likewise.
+	* testsuite/gas/s390/zarch-arch13.s: Add tests for extended
+	  mnemonics notr and notgr.
+	* testsuite/gas/s390/zarch-arch13.d: Likewise.
+
+Signed-off-by: Jens Remus <jremus@linux.ibm.com>
+Reviewed-by: Andreas Krebbel <krebbel@linux.ibm.com>
+---
+ gas/config/tc-s390.c                  | 12 ++++++++----
+ gas/testsuite/gas/s390/esa-g5.d       |  1 +
+ gas/testsuite/gas/s390/esa-g5.s       |  1 +
+ gas/testsuite/gas/s390/zarch-arch13.d |  4 ++++
+ gas/testsuite/gas/s390/zarch-arch13.s |  4 ++++
+ gas/testsuite/gas/s390/zarch-z10.d    | 12 ++++++++++++
+ gas/testsuite/gas/s390/zarch-z10.s    | 12 ++++++++++++
+ gas/testsuite/gas/s390/zarch-z196.d   | 10 +++++++++-
+ gas/testsuite/gas/s390/zarch-z196.s   |  9 +++++++++
+ gas/testsuite/gas/s390/zarch-z9-109.d |  2 ++
+ gas/testsuite/gas/s390/zarch-z9-109.s |  2 ++
+ gas/testsuite/gas/s390/zarch-z900.d   |  5 +++--
+ gas/testsuite/gas/s390/zarch-z900.s   |  1 +
+ opcodes/s390-opc.c                    | 22 +++++++++++++++++-----
+ opcodes/s390-opc.txt                  | 14 ++++++++++++++
+ 15 files changed, 99 insertions(+), 12 deletions(-)
+
+diff --git a/gas/config/tc-s390.c b/gas/config/tc-s390.c
+index 765a9a2e6bd..d601618d9dc 100644
+--- a/gas/config/tc-s390.c
++++ b/gas/config/tc-s390.c
+@@ -699,13 +699,17 @@ s390_insert_operand (unsigned char *insn,
+   if (operand->flags & S390_OPERAND_OR8)
+     uval |= 8;
+ 
+-  /* Duplicate the operand at bit pos 12 to 16.  */
++  /* Duplicate the GPR/VR operand at bit pos 12 to 16.  */
+   if (operand->flags & S390_OPERAND_CP16)
+     {
+-      /* Copy VR operand at bit pos 12 to bit pos 16.  */
++      /* Copy GPR/VR operand at bit pos 12 to bit pos 16.  */
+       insn[2] |= uval << 4;
+-      /* Copy the flag in the RXB field.  */
+-      insn[4] |= (insn[4] & 4) >> 1;
++
++      if (operand->flags & S390_OPERAND_VR)
++        {
++          /* Copy the VR flag in the RXB field.  */
++          insn[4] |= (insn[4] & 4) >> 1;
++        }
+     }
+ 
+   /* Insert fragments of the operand byte for byte.  */
+diff --git a/gas/testsuite/gas/s390/esa-g5.d b/gas/testsuite/gas/s390/esa-g5.d
+index 7422e88b127..d276af1a70d 100644
+--- a/gas/testsuite/gas/s390/esa-g5.d
++++ b/gas/testsuite/gas/s390/esa-g5.d
+@@ -80,6 +80,7 @@ Disassembly of section .text:
+  *([\da-f]+):	a7 95 00 00 [	 ]*bras	%r9,\1 <foo\+0x\1>
+  *([\da-f]+):	a7 65 00 00 [	 ]*bras	%r6,\1 <foo\+0x\1>
+  *([\da-f]+):	a7 64 00 00 [	 ]*jlh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 64 00 00 [	 ]*jlh	\1 <foo\+0x\1>
+  *([\da-f]+):	a7 66 00 00 [	 ]*brct	%r6,\1 <foo\+0x\1>
+  *([\da-f]+):	a7 66 00 00 [	 ]*brct	%r6,\1 <foo\+0x\1>
+  *([\da-f]+):	84 69 00 00 [	 ]*brxh	%r6,%r9,\1 <foo\+0x\1>
+diff --git a/gas/testsuite/gas/s390/esa-g5.s b/gas/testsuite/gas/s390/esa-g5.s
+index ee3d6319b19..2901a866ec9 100644
+--- a/gas/testsuite/gas/s390/esa-g5.s
++++ b/gas/testsuite/gas/s390/esa-g5.s
+@@ -74,6 +74,7 @@ foo:
+ 	bras	%r9,.
+ 	jas	%r6,.
+ 	brc	6,.
++	jc	6,.
+ 	brct	6,.
+ 	jct	%r6,.
+ 	brxh	%r6,%r9,.
+diff --git a/gas/testsuite/gas/s390/zarch-arch13.d b/gas/testsuite/gas/s390/zarch-arch13.d
+index fecbeb548c0..3ebdd9c17f3 100644
+--- a/gas/testsuite/gas/s390/zarch-arch13.d
++++ b/gas/testsuite/gas/s390/zarch-arch13.d
+@@ -12,7 +12,11 @@ Disassembly of section .text:
+ .*:	b9 74 b0 69 [	 ]*nnrk	%r6,%r9,%r11
+ .*:	b9 64 b0 69 [	 ]*nngrk	%r6,%r9,%r11
+ .*:	b9 76 b0 69 [	 ]*nork	%r6,%r9,%r11
++.*:	b9 76 70 67 [	 ]*nork	%r6,%r7,%r7
++.*:	b9 76 70 67 [	 ]*nork	%r6,%r7,%r7
+ .*:	b9 66 b0 69 [	 ]*nogrk	%r6,%r9,%r11
++.*:	b9 66 70 67 [	 ]*nogrk	%r6,%r7,%r7
++.*:	b9 66 70 67 [	 ]*nogrk	%r6,%r7,%r7
+ .*:	b9 77 b0 69 [	 ]*nxrk	%r6,%r9,%r11
+ .*:	b9 67 b0 69 [	 ]*nxgrk	%r6,%r9,%r11
+ .*:	b9 75 b0 69 [	 ]*ocrk	%r6,%r9,%r11
+diff --git a/gas/testsuite/gas/s390/zarch-arch13.s b/gas/testsuite/gas/s390/zarch-arch13.s
+index 9563a1b4698..a830b20b3a5 100644
+--- a/gas/testsuite/gas/s390/zarch-arch13.s
++++ b/gas/testsuite/gas/s390/zarch-arch13.s
+@@ -6,7 +6,11 @@ foo:
+ 	nnrk	%r6,%r9,%r11
+ 	nngrk	%r6,%r9,%r11
+ 	nork	%r6,%r9,%r11
++	nork	%r6,%r7,%r7
++	notr	%r6,%r7
+ 	nogrk	%r6,%r9,%r11
++	nogrk	%r6,%r7,%r7
++	notgr	%r6,%r7
+ 	nxrk	%r6,%r9,%r11
+ 	nxgrk	%r6,%r9,%r11
+ 	ocrk	%r6,%r9,%r11
+diff --git a/gas/testsuite/gas/s390/zarch-z10.d b/gas/testsuite/gas/s390/zarch-z10.d
+index 4aca8372363..4a051533f93 100644
+--- a/gas/testsuite/gas/s390/zarch-z10.d
++++ b/gas/testsuite/gas/s390/zarch-z10.d
+@@ -361,10 +361,22 @@ Disassembly of section .text:
+  *([\da-f]+):	c6 a2 00 00 00 00 [	 ]*pfdrl	10,\1 <foo\+0x\1>
+ .*:	ec 67 d2 dc e6 54 [	 ]*rnsbg	%r6,%r7,210,220,230
+ .*:	ec 67 d2 dc 00 54 [	 ]*rnsbg	%r6,%r7,210,220
++.*:	ec 67 92 dc e6 54 [	 ]*rnsbgt	%r6,%r7,18,220,230
++.*:	ec 67 92 dc 00 54 [	 ]*rnsbgt	%r6,%r7,18,220
++.*:	ec 67 92 1c 26 54 [	 ]*rnsbgt	%r6,%r7,18,28,38
++.*:	ec 67 92 1c 00 54 [	 ]*rnsbgt	%r6,%r7,18,28
+ .*:	ec 67 d2 dc e6 57 [	 ]*rxsbg	%r6,%r7,210,220,230
+ .*:	ec 67 d2 dc 00 57 [	 ]*rxsbg	%r6,%r7,210,220
++.*:	ec 67 92 dc e6 57 [	 ]*rxsbgt	%r6,%r7,18,220,230
++.*:	ec 67 92 dc 00 57 [	 ]*rxsbgt	%r6,%r7,18,220
++.*:	ec 67 92 1c 26 57 [	 ]*rxsbgt	%r6,%r7,18,28,38
++.*:	ec 67 92 1c 00 57 [	 ]*rxsbgt	%r6,%r7,18,28
+ .*:	ec 67 d2 dc e6 56 [	 ]*rosbg	%r6,%r7,210,220,230
+ .*:	ec 67 d2 dc 00 56 [	 ]*rosbg	%r6,%r7,210,220
++.*:	ec 67 92 dc e6 56 [	 ]*rosbgt	%r6,%r7,18,220,230
++.*:	ec 67 92 dc 00 56 [	 ]*rosbgt	%r6,%r7,18,220
++.*:	ec 67 92 1c 26 56 [	 ]*rosbgt	%r6,%r7,18,28,38
++.*:	ec 67 92 1c 00 56 [	 ]*rosbgt	%r6,%r7,18,28
+ .*:	ec 67 d2 14 e6 55 [	 ]*risbg	%r6,%r7,210,20,230
+ .*:	ec 67 d2 14 00 55 [	 ]*risbg	%r6,%r7,210,20
+ .*:	ec 67 d2 bc e6 55 [	 ]*risbgz	%r6,%r7,210,60,230
+diff --git a/gas/testsuite/gas/s390/zarch-z10.s b/gas/testsuite/gas/s390/zarch-z10.s
+index 3ed61a4f0fd..45bb8944793 100644
+--- a/gas/testsuite/gas/s390/zarch-z10.s
++++ b/gas/testsuite/gas/s390/zarch-z10.s
+@@ -355,10 +355,22 @@ foo:
+ 	pfdrl	10,.
+ 	rnsbg	%r6,%r7,210,220,230
+ 	rnsbg	%r6,%r7,210,220
++	rnsbg	%r6,%r7,146,220,230
++	rnsbg	%r6,%r7,146,220
++	rnsbgt	%r6,%r7,18,28,38
++	rnsbgt	%r6,%r7,18,28
+ 	rxsbg	%r6,%r7,210,220,230
+ 	rxsbg	%r6,%r7,210,220
++	rxsbg	%r6,%r7,146,220,230
++	rxsbg	%r6,%r7,146,220
++	rxsbgt	%r6,%r7,18,28,38
++	rxsbgt	%r6,%r7,18,28
+ 	rosbg	%r6,%r7,210,220,230
+ 	rosbg	%r6,%r7,210,220
++	rosbg	%r6,%r7,146,220,230
++	rosbg	%r6,%r7,146,220
++	rosbgt	%r6,%r7,18,28,38
++	rosbgt	%r6,%r7,18,28
+ 	risbg	%r6,%r7,210,20,230
+ 	risbg	%r6,%r7,210,20
+ 	risbg	%r6,%r7,210,188,230
+diff --git a/gas/testsuite/gas/s390/zarch-z196.d b/gas/testsuite/gas/s390/zarch-z196.d
+index b9db65f43ee..ac2478d6219 100644
+--- a/gas/testsuite/gas/s390/zarch-z196.d
++++ b/gas/testsuite/gas/s390/zarch-z196.d
+@@ -14,6 +14,7 @@ Disassembly of section .text:
+ .*:	cc 6a 00 00 fd e8 [	 ]*alsih	%r6,65000
+ .*:	cc 6b 00 00 fd e8 [	 ]*alsihn	%r6,65000
+  *([\da-f]+):	cc 66 00 00 00 00 [	 ]*brcth	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	cc 66 00 00 00 00 [	 ]*brcth	%r6,\1 <foo\+0x\1>
+ .*:	b9 cd 00 67 [	 ]*chhr	%r6,%r7
+ .*:	b9 dd 00 67 [	 ]*chlr	%r6,%r7
+ .*:	e3 67 85 b3 01 cd [	 ]*chf	%r6,5555\(%r7,%r8\)
+@@ -30,8 +31,16 @@ Disassembly of section .text:
+ .*:	e3 67 8a 4d fe c6 [	 ]*llhh	%r6,-5555\(%r7,%r8\)
+ .*:	ec 67 0c 0d 0e 5d [	 ]*risbhg	%r6,%r7,12,13,14
+ .*:	ec 67 0c 0d 00 5d [	 ]*risbhg	%r6,%r7,12,13
++.*:	ec 67 0c 8d 0e 5d [	 ]*risbhgz	%r6,%r7,12,13,14
++.*:	ec 67 0c 8d 00 5d [	 ]*risbhgz	%r6,%r7,12,13
++.*:	ec 67 0c 8d 0e 5d [	 ]*risbhgz	%r6,%r7,12,13,14
++.*:	ec 67 0c 8d 00 5d [	 ]*risbhgz	%r6,%r7,12,13
+ .*:	ec 67 0c 0d 0e 51 [	 ]*risblg	%r6,%r7,12,13,14
+ .*:	ec 67 0c 0d 00 51 [	 ]*risblg	%r6,%r7,12,13
++.*:	ec 67 0c 8d 0e 51 [	 ]*risblgz	%r6,%r7,12,13,14
++.*:	ec 67 0c 8d 00 51 [	 ]*risblgz	%r6,%r7,12,13
++.*:	ec 67 0c 8d 0e 51 [	 ]*risblgz	%r6,%r7,12,13,14
++.*:	ec 67 0c 8d 00 51 [	 ]*risblgz	%r6,%r7,12,13
+ .*:	e3 67 8a 4d fe c3 [	 ]*stch	%r6,-5555\(%r7,%r8\)
+ .*:	e3 67 8a 4d fe c7 [	 ]*sthh	%r6,-5555\(%r7,%r8\)
+ .*:	e3 67 8a 4d fe cb [	 ]*stfh	%r6,-5555\(%r7,%r8\)
+@@ -261,4 +270,3 @@ Disassembly of section .text:
+ .*:	b9 2c 00 00 [	 ]*pcc
+ .*:	b9 2d 60 59 [	 ]*kmctr	%r5,%r6,%r9
+ .*:	b9 28 00 00 [	 ]*pckmo
+-.*:	07 07 [	 ]*nopr	%r7
+diff --git a/gas/testsuite/gas/s390/zarch-z196.s b/gas/testsuite/gas/s390/zarch-z196.s
+index 213c2a1e676..bd594259532 100644
+--- a/gas/testsuite/gas/s390/zarch-z196.s
++++ b/gas/testsuite/gas/s390/zarch-z196.s
+@@ -8,6 +8,7 @@ foo:
+ 	alsih	%r6,65000
+ 	alsihn	%r6,65000
+ 	brcth	%r6,.
++	jcth	%r6,.
+ 	chhr	%r6,%r7
+ 	chlr	%r6,%r7
+ 	chf	%r6,5555(%r7,%r8)
+@@ -24,8 +25,16 @@ foo:
+ 	llhh	%r6,-5555(%r7,%r8)
+ 	risbhg	%r6,%r7,12,13,14
+ 	risbhg	%r6,%r7,12,13
++	risbhg	%r6,%r7,12,141,14
++	risbhg	%r6,%r7,12,141
++	risbhgz	%r6,%r7,12,13,14
++	risbhgz	%r6,%r7,12,13
+ 	risblg	%r6,%r7,12,13,14
+ 	risblg	%r6,%r7,12,13
++	risblg	%r6,%r7,12,141,14
++	risblg	%r6,%r7,12,141
++	risblgz	%r6,%r7,12,13,14
++	risblgz	%r6,%r7,12,13
+ 	stch	%r6,-5555(%r7,%r8)
+ 	sthh	%r6,-5555(%r7,%r8)
+ 	stfh	%r6,-5555(%r7,%r8)
+diff --git a/gas/testsuite/gas/s390/zarch-z9-109.d b/gas/testsuite/gas/s390/zarch-z9-109.d
+index 5a9717c24ac..012270e733f 100644
+--- a/gas/testsuite/gas/s390/zarch-z9-109.d
++++ b/gas/testsuite/gas/s390/zarch-z9-109.d
+@@ -36,6 +36,7 @@ Disassembly of section .text:
+ .*:	b9 85 00 69 [	 ]*llghr	%r6,%r9
+ .*:	c0 6e ff ff ff ff [	 ]*llihf	%r6,4294967295
+ .*:	c0 6f ff ff ff ff [	 ]*llilf	%r6,4294967295
++.*:	c0 6f ff ff ff ff [	 ]*llilf	%r6,4294967295
+ .*:	c0 6c ff ff ff ff [	 ]*oihf	%r6,4294967295
+ .*:	c0 6d ff ff ff ff [	 ]*oilf	%r6,4294967295
+ .*:	c2 65 ff ff ff ff [	 ]*slfi	%r6,4294967295
+@@ -70,4 +71,5 @@ Disassembly of section .text:
+ .*:	ed 95 af ff 60 38 [	 ]*mayl	%f6,%f9,4095\(%r5,%r10\)
+ .*:	b9 be 00 67 [	 ]*srstu	%r6,%r7
+ .*:	d0 16 5f ff ad 05 [	 ]*trtr	4095\(23,%r5\),3333\(%r10\)
++.*:	c0 69 ff ff ff ff [	 ]*iilf	%r6,4294967295
+ .*:	07 07 [	 ]*nopr	%r7
+diff --git a/gas/testsuite/gas/s390/zarch-z9-109.s b/gas/testsuite/gas/s390/zarch-z9-109.s
+index 10d77ac673e..22dca84fd32 100644
+--- a/gas/testsuite/gas/s390/zarch-z9-109.s
++++ b/gas/testsuite/gas/s390/zarch-z9-109.s
+@@ -30,6 +30,7 @@ foo:
+ 	llghr	%r6,%r9
+ 	llihf	%r6,4294967295
+ 	llilf	%r6,4294967295
++	llgfi	%r6,4294967295
+ 	oihf	%r6,4294967295
+ 	oilf	%r6,4294967295
+ 	slfi	%r6,4294967295
+@@ -64,3 +65,4 @@ foo:
+ 	mayl	%f6,%f9,4095(%r5,%r10)
+ 	srstu	%r6,%r7
+ 	trtr	4095(23,%r5),3333(%r10)
++	lfi	%r6,4294967295
+diff --git a/gas/testsuite/gas/s390/zarch-z900.d b/gas/testsuite/gas/s390/zarch-z900.d
+index 93aee212785..88751711c1b 100644
+--- a/gas/testsuite/gas/s390/zarch-z900.d
++++ b/gas/testsuite/gas/s390/zarch-z900.d
+@@ -85,6 +85,7 @@ Disassembly of section .text:
+ .*:	a5 9d ff ff [ 	]*llihl	%r9,65535
+ .*:	a5 9e ff ff [ 	]*llilh	%r9,65535
+ .*:	a5 9f ff ff [ 	]*llill	%r9,65535
++.*:	a5 9f ff ff [ 	]*llill	%r9,65535
+ .*:	ef 96 5f ff af ff [ 	]*lmd	%r9,%r6,4095\(%r5\),4095\(%r10\)
+ .*:	eb 96 5f ff 00 04 [ 	]*lmg	%r9,%r6,4095\(%r5\)
+ .*:	eb 96 5f ff 00 96 [ 	]*lmh	%r9,%r6,4095\(%r5\)
+@@ -153,6 +154,6 @@ Disassembly of section .text:
+  *([\da-f]+):	c0 65 00 00 00 00 [ 	]*brasl	%r6,\1 <foo\+0x\1>
+  *([\da-f]+):	c0 65 80 00 00 00 [ 	]*brasl	%r6,ffffffff0+\1 <foo\+0xffffffff0+\1>
+  *([\da-f]+):	c0 65 80 00 00 00 [ 	]*brasl	%r6,ffffffff0+\1 <foo\+0xffffffff0+\1>
+-.*:	c0 65 7f ff ff ff [ 	]*brasl	%r6,1000002d0 <foo\+0x1000002d0>
+-.*:	c0 65 7f ff ff ff [ 	]*brasl	%r6,1000002d6 <foo\+0x1000002d6>
++.*:	c0 65 7f ff ff ff [ 	]*brasl	%r6,1000002d4 <foo\+0x1000002d4>
++.*:	c0 65 7f ff ff ff [ 	]*brasl	%r6,1000002da <foo\+0x1000002da>
+ .*:	07 07 [	 ]*nopr	%r7
+diff --git a/gas/testsuite/gas/s390/zarch-z900.s b/gas/testsuite/gas/s390/zarch-z900.s
+index 22fa1da5a30..8890fbb78a0 100644
+--- a/gas/testsuite/gas/s390/zarch-z900.s
++++ b/gas/testsuite/gas/s390/zarch-z900.s
+@@ -79,6 +79,7 @@ foo:
+ 	llihl	%r9,65535
+ 	llilh	%r9,65535
+ 	llill	%r9,65535
++	llghi	%r9,65535
+ 	lmd	%r9,%r6,4095(%r5),4095(%r10)
+ 	lmg	%r9,%r6,4095(%r5)
+ 	lmh	%r9,%r6,4095(%r5)
+diff --git a/opcodes/s390-opc.c b/opcodes/s390-opc.c
+index b52fc8c3b62..0427bd8b2e0 100644
+--- a/opcodes/s390-opc.c
++++ b/opcodes/s390-opc.c
+@@ -62,7 +62,9 @@ const struct s390_operand s390_operands[] =
+   { 4, 24, S390_OPERAND_GPR },
+ #define R_28        (R_24 + 1)    /* GPR starting at position 28 */
+   { 4, 28, S390_OPERAND_GPR },
+-#define R_32        (R_28 + 1)    /* GPR starting at position 32 */
++#define R_CP16_28   (R_28 + 1)    /* GPR starting at position 28 */
++  { 4, 28, S390_OPERAND_GPR | S390_OPERAND_CP16 }, /* with a copy at pos 16 */
++#define R_32        (R_CP16_28+1) /* GPR starting at position 32 */
+   { 4, 32, S390_OPERAND_GPR },
+ 
+ /* General purpose register pair operands.  */
+@@ -222,9 +224,13 @@ const struct s390_operand s390_operands[] =
+   { 4, 36, 0 },
+ #define U8_8        (U4_36 + 1)   /* 8 bit unsigned value starting at 8 */
+   { 8, 8, 0 },
+-#define U8_16       (U8_8 + 1)    /* 8 bit unsigned value starting at 16 */
++#define U6_18       (U8_8 + 1)    /* 6 bit unsigned value starting at 18 */
++  { 6, 18, 0 },
++#define U8_16       (U6_18 + 1)   /* 8 bit unsigned value starting at 16 */
+   { 8, 16, 0 },
+-#define U6_26       (U8_16 + 1)   /* 6 bit unsigned value starting at 26 */
++#define U5_27       (U8_16 + 1)   /* 5 bit unsigned value starting at 27 */
++  { 5, 27, 0 },
++#define U6_26       (U5_27 + 1)   /* 6 bit unsigned value starting at 26 */
+   { 6, 26, 0 },
+ #define U8_24       (U6_26 + 1)   /* 8 bit unsigned value starting at 24 */
+   { 8, 24, 0 },
+@@ -289,7 +295,7 @@ static inline void unused_s390_operands_static_asserts(void)
+       p - pc relative
+       r - general purpose register
+       re - gpr extended operand, a valid general purpose register pair
+-      u - unsigned integer, 4, 8, 16 or 32 bit
++      u - unsigned integer, 4, 6, 8, 16 or 32 bit
+       m - mode field, 4 bit
+       0 - operand skipped.
+       The order of the letters reflects the layout of the format in
+@@ -325,7 +331,9 @@ static inline void unused_s390_operands_static_asserts(void)
+ #define INSTR_RIE_R0U0     6, { R_8,U16_16,0,0,0,0 }             /* e.g. clfitne */
+ #define INSTR_RIE_RUI0     6, { R_8,I16_16,U4_12,0,0,0 }         /* e.g. lochi */
+ #define INSTR_RIE_RRUUU    6, { R_8,R_12,U8_16,U8_24,U8_32,0 }   /* e.g. rnsbg */
+-#define INSTR_RIE_RRUUU2   6, { R_8,R_12,U8_16,U6_26,U8_32,0 }   /* e.g. rnsbg */
++#define INSTR_RIE_RRUUU2   6, { R_8,R_12,U8_16,U6_26,U8_32,0 }   /* e.g. risbgz */
++#define INSTR_RIE_RRUUU3   6, { R_8,R_12,U8_16,U5_27,U8_32,0 }   /* e.g. risbhg */
++#define INSTR_RIE_RRUUU4   6, { R_8,R_12,U6_18,U8_24,U8_32,0 }   /* e.g. rnsbgt */
+ #define INSTR_RIL_0P       6, { J32_16,0,0,0,0 }                 /* e.g. jg    */
+ #define INSTR_RIL_RP       6, { R_8,J32_16,0,0,0,0 }             /* e.g. brasl */
+ #define INSTR_RIL_UP       6, { U4_8,J32_16,0,0,0,0 }            /* e.g. brcl  */
+@@ -374,6 +382,7 @@ static inline void unused_s390_operands_static_asserts(void)
+ #define INSTR_RRF_R0RR2    4, { R_24,R_28,R_16,0,0,0 }           /* e.g. ark   */
+ #define INSTR_RRF_R0RER    4, { RE_24,R_28,R_16,0,0,0 }          /* e.g. mgrk  */
+ #define INSTR_RRF_R0RR3    4, { R_24,R_28,R_16,0,0,0 }           /* e.g. selrz */
++#define INSTR_RRF_R0RR4    4, { R_24,R_CP16_28,0,0,0,0 }         /* e.g. notr  */
+ #define INSTR_RRF_U0FF     4, { F_24,U4_16,F_28,0,0,0 }          /* e.g. fidbr */
+ #define INSTR_RRF_U0FEFE   4, { FE_24,U4_16,FE_28,0,0,0 }        /* e.g. fixbr */
+ #define INSTR_RRF_U0RF     4, { R_24,U4_16,F_28,0,0,0 }          /* e.g. cfebr */
+@@ -550,6 +559,8 @@ static inline void unused_s390_operands_static_asserts(void)
+ #define MASK_RIE_RUI0     { 0xff, 0x00, 0x00, 0x00, 0xff, 0xff }
+ #define MASK_RIE_RRUUU    { 0xff, 0x00, 0x00, 0x00, 0x00, 0xff }
+ #define MASK_RIE_RRUUU2   { 0xff, 0x00, 0x00, 0xc0, 0x00, 0xff }
++#define MASK_RIE_RRUUU3   { 0xff, 0x00, 0x00, 0xe0, 0x00, 0xff }
++#define MASK_RIE_RRUUU4   { 0xff, 0x00, 0xc0, 0x00, 0x00, 0xff }
+ #define MASK_RIL_0P       { 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 }
+ #define MASK_RIL_RP       { 0xff, 0x0f, 0x00, 0x00, 0x00, 0x00 }
+ #define MASK_RIL_UP       { 0xff, 0x0f, 0x00, 0x00, 0x00, 0x00 }
+@@ -598,6 +609,7 @@ static inline void unused_s390_operands_static_asserts(void)
+ #define MASK_RRF_R0RR2    { 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 }
+ #define MASK_RRF_R0RER    { 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 }
+ #define MASK_RRF_R0RR3    { 0xff, 0xff, 0x0f, 0x00, 0x00, 0x00 }
++#define MASK_RRF_R0RR4    { 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 }
+ #define MASK_RRF_U0FF     { 0xff, 0xff, 0x0f, 0x00, 0x00, 0x00 }
+ #define MASK_RRF_U0FEFE   { 0xff, 0xff, 0x0f, 0x00, 0x00, 0x00 }
+ #define MASK_RRF_U0RF     { 0xff, 0xff, 0x0f, 0x00, 0x00, 0x00 }
+diff --git a/opcodes/s390-opc.txt b/opcodes/s390-opc.txt
+index 9aeb2cc7ad1..674c0cf1987 100644
+--- a/opcodes/s390-opc.txt
++++ b/opcodes/s390-opc.txt
+@@ -272,6 +272,7 @@ a701 tml RI_RU "test under mask low" g5 esa,zarch
+ 4700 nop RX_0RRD "no operation" g5 esa,zarch optparm
+ 4700 b*8 RX_0RRD "conditional branch" g5 esa,zarch
+ 47f0 b RX_0RRD "unconditional branch" g5 esa,zarch
++a704 jc RI_UP "conditional jump" g5 esa,zarch
+ a704 jnop RI_0P "nop jump" g5 esa,zarch
+ a704 j*8 RI_0P "conditional jump" g5 esa,zarch
+ a704 br*8 RI_0P "conditional jump" g5 esa,zarch
+@@ -473,8 +474,10 @@ eb0000000080 icmh RSE_RURD "insert characters under mask high" z900 zarch
+ a702 tmhh RI_RU "test under mask high high" z900 zarch
+ a703 tmhl RI_RU "test under mask high low" z900 zarch
+ c004 brcl RIL_UP "branch relative on condition long" z900 esa,zarch
++# jlc omitted due to missing jl* (see jl*8) and not added as non-standard jgc
+ c004 jgnop RIL_0P "nop jump long" z900 esa,zarch
+ c004 jg*8 RIL_0P "conditional jump long" z900 esa,zarch
++# jl*8 omitted due to clash with non-standard j*8 flavors jle and jlh; exists as non-standard jg*8 instead
+ c004 br*8l RIL_0P "conditional jump long" z900 esa,zarch
+ c0f4 jg RIL_0P "unconditional jump long" z900 esa,zarch
+ c0f4 brul RIL_0P "unconditional jump long" z900 esa,zarch
+@@ -523,6 +526,7 @@ a50c llihh RI_RU "load logical immediate high high" z900 zarch
+ a50d llihl RI_RU "load logical immediate high low" z900 zarch
+ a50e llilh RI_RU "load logical immediate low high" z900 zarch
+ a50f llill RI_RU "load logical immediate low low" z900 zarch
++a50f llghi RI_RU "load logical immediate" z900 zarch
+ b2b1 stfl S_RD "store facility list" z900 esa,zarch
+ b2b2 lpswe S_RD "load psw extended" z900 zarch
+ b90d dsgr RRE_RER "divide single 64" z900 zarch
+@@ -750,6 +754,7 @@ c006 xihf RIL_RU "exclusive or immediate high" z9-109 zarch
+ c007 xilf RIL_RU "exclusive or immediate low" z9-109 zarch
+ c008 iihf RIL_RU "insert immediate high" z9-109 zarch
+ c009 iilf RIL_RU "insert immediate low" z9-109 zarch
++c009 lfi RIL_RU "insert immediate 32" z9-109 zarch
+ # z9-109 misc instruction
+ b983 flogr RRE_RER "find leftmost one" z9-109 zarch
+ e30000000012 lt RXY_RRRD "load and test 32" z9-109 zarch
+@@ -767,6 +772,7 @@ b995 llhr RRE_RR "load logical halfword 32" z9-109 zarch
+ b985 llghr RRE_RR "load logical halfword 64" z9-109 zarch
+ c00e llihf RIL_RU "load logical immediate high" z9-109 zarch
+ c00f llilf RIL_RU "load logical immediate low" z9-109 zarch
++c00f llgfi RIL_RU "load logical immediate" z9-109 zarch
+ c00c oihf RIL_RU "or immediate high" z9-109 zarch
+ c00d oilf RIL_RU "or immediate low" z9-109 zarch
+ c205 slfi RIL_RU "subtract logical immediate 32" z9-109 zarch
+@@ -969,8 +975,11 @@ c200 msgfi RIL_RI "multiply single immediate (64)" z10 zarch
+ e30000000036 pfd RXY_URRD "prefetch data" z10 zarch
+ c602 pfdrl RIL_UP "prefetch data relative long" z10 zarch
+ ec0000000054 rnsbg RIE_RRUUU "rotate then and selected bits" z10 zarch optparm
++ec0080000054 rnsbgt RIE_RRUUU4 "rotate then and selected bits and test results" z10 zarch optparm
+ ec0000000057 rxsbg RIE_RRUUU "rotate then exclusive or selected bits" z10 zarch optparm
++ec0080000057 rxsbgt RIE_RRUUU4 "rotate then exclusive or selected bits and test results" z10 zarch optparm
+ ec0000000056 rosbg RIE_RRUUU "rotate then or selected bits" z10 zarch optparm
++ec0080000056 rosbgt RIE_RRUUU4 "rotate then or selected bits and test results" z10 zarch optparm
+ ec0000000055 risbg RIE_RRUUU "rotate then insert selected bits" z10 zarch optparm
+ ec0000800055 risbgz RIE_RRUUU2 "rotate then insert selected bits and zero remaining bits" z10 zarch optparm
+ c40f strl RIL_RP "store relative long (32)" z10 zarch
+@@ -1003,6 +1012,7 @@ b9da alhhlr RRF_R0RR2 "add logical high low" z196 zarch
+ cc0a alsih RIL_RI "add logical with signed immediate high with cc" z196 zarch
+ cc0b alsihn RIL_RI "add logical with signed immediate high no cc" z196 zarch
+ cc06 brcth RIL_RP "branch relative on count high" z196 zarch
++cc06 jcth RIL_RP "jump on count high" z196 zarch
+ b9cd chhr RRE_RR "compare high high" z196 zarch
+ b9dd chlr RRE_RR "compare high low" z196 zarch
+ e300000000cd chf RXY_RRRD "compare high" z196 zarch
+@@ -1017,7 +1027,9 @@ e300000000ca lfh RXY_RRRD "load high" z196 zarch
+ e300000000c2 llch RXY_RRRD "load logical character high" z196 zarch
+ e300000000c6 llhh RXY_RRRD "load logical halfword high" z196 zarch
+ ec000000005d risbhg RIE_RRUUU "rotate then insert selected bits high" z196 zarch optparm
++ec000080005d risbhgz RIE_RRUUU3 "rotate then insert selected bits high and zero remaining bits" z196 zarch optparm
+ ec0000000051 risblg RIE_RRUUU "rotate then insert selected bits low" z196 zarch optparm
++ec0000800051 risblgz RIE_RRUUU3 "rotate then insert selected bits low and zero remaining bits" z196 zarch optparm
+ e300000000c3 stch RXY_RRRD "store character high" z196 zarch
+ e300000000c7 sthh RXY_RRRD "store halfword high" z196 zarch
+ e300000000cb stfh RXY_RRRD "store high" z196 zarch
+@@ -1913,7 +1925,9 @@ e50a mvcrl SSE_RDRD "move right to left" arch13 zarch
+ b974 nnrk RRF_R0RR2 "nand 32 bit" arch13 zarch
+ b964 nngrk RRF_R0RR2 "nand 64 bit" arch13 zarch
+ b976 nork RRF_R0RR2 "nor 32 bit" arch13 zarch
++b976 notr RRF_R0RR4 "not 32 bit" arch13 zarch
+ b966 nogrk RRF_R0RR2 "nor 64 bit" arch13 zarch
++b966 notgr RRF_R0RR4 "not 64 bit" arch13 zarch
+ b977 nxrk RRF_R0RR2 "not exclusive or 32 bit" arch13 zarch
+ b967 nxgrk RRF_R0RR2 "not exclusive or 64 bit" arch13 zarch
+ b975 ocrk RRF_R0RR2 "or with complement 32 bit" arch13 zarch
+-- 
+2.47.0
+

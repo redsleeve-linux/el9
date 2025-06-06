@@ -1,0 +1,137 @@
+From 3c1844015ff471ca28b7359624323948cc1303f5 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 15 Oct 2024 13:40:24 +0200
+Subject: [PATCH] sd-varlink: add new sd_varlink_error_is_invalid_parameter()
+ helper
+
+(cherry picked from commit 12641ecd67875b7bf18db06c0afa40c37d804750)
+
+Related: RHEL-55266
+---
+ src/shared/varlink.c    | 20 +++++++++++++++
+ src/shared/varlink.h    |  2 ++
+ src/test/test-varlink.c | 56 ++++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 77 insertions(+), 1 deletion(-)
+
+diff --git a/src/shared/varlink.c b/src/shared/varlink.c
+index 49593aa05a..0f5db09cea 100644
+--- a/src/shared/varlink.c
++++ b/src/shared/varlink.c
+@@ -2687,3 +2687,23 @@ int varlink_server_deserialize_one(VarlinkServer *s, const char *value, FDSet *f
+         LIST_PREPEND(sockets, s->sockets, TAKE_PTR(ss));
+         return 0;
+ }
++
++int varlink_error_is_invalid_parameter(const char *error, JsonVariant *parameter, const char *name) {
++
++        /* Returns true if the specified error result is an invalid parameter error for the parameter 'name' */
++
++        if (!streq_ptr(error, VARLINK_ERROR_INVALID_PARAMETER))
++                return false;
++
++        if (!name)
++                return true;
++
++        if (!json_variant_is_object(parameter))
++                return false;
++
++        JsonVariant *e = json_variant_by_key(parameter, "parameter");
++        if (!e || !json_variant_is_string(e))
++                return false;
++
++        return streq(json_variant_string(e), name);
++}
+diff --git a/src/shared/varlink.h b/src/shared/varlink.h
+index e51ccd9107..a4170737db 100644
+--- a/src/shared/varlink.h
++++ b/src/shared/varlink.h
+@@ -161,6 +161,8 @@ unsigned varlink_server_current_connections(VarlinkServer *s);
+ 
+ int varlink_server_set_description(VarlinkServer *s, const char *description);
+ 
++int varlink_error_is_invalid_parameter(const char *error, JsonVariant *parameter, const char *name);
++
+ DEFINE_TRIVIAL_CLEANUP_FUNC(Varlink *, varlink_unref);
+ DEFINE_TRIVIAL_CLEANUP_FUNC(Varlink *, varlink_close_unref);
+ DEFINE_TRIVIAL_CLEANUP_FUNC(Varlink *, varlink_flush_close_unref);
+diff --git a/src/test/test-varlink.c b/src/test/test-varlink.c
+index 634baf1ae8..13f772cf4e 100644
+--- a/src/test/test-varlink.c
++++ b/src/test/test-varlink.c
+@@ -10,6 +10,7 @@
+ #include "json.h"
+ #include "rm-rf.h"
+ #include "strv.h"
++#include "tests.h"
+ #include "tmpfile-util.h"
+ #include "user-util.h"
+ #include "varlink.h"
+@@ -184,7 +185,7 @@ static int block_fd_handler(sd_event_source *s, int fd, uint32_t revents, void *
+         return 0;
+ }
+ 
+-int main(int argc, char *argv[]) {
++TEST(chat) {
+         _cleanup_(sd_event_source_unrefp) sd_event_source *block_event = NULL;
+         _cleanup_(varlink_server_unrefp) VarlinkServer *s = NULL;
+         _cleanup_(varlink_flush_close_unrefp) Varlink *c = NULL;
+@@ -234,6 +235,59 @@ int main(int argc, char *argv[]) {
+         assert_se(sd_event_loop(e) >= 0);
+ 
+         assert_se(pthread_join(t, NULL) == 0);
++}
++
++static int method_invalid(Varlink *link, JsonVariant *parameters, VarlinkMethodFlags flags, void *userdata) {
++        int r;
++
++        JsonDispatch table[] = {
++                { "iexist", JSON_VARIANT_STRING, json_dispatch_const_string, 0, JSON_MANDATORY },
++                {}
++        };
++
++        const char *p = NULL;
++
++        r = varlink_dispatch(link, parameters, table, &p);
++        if (r != 0)
++                return r;
+ 
++        assert_not_reached();
++}
++
++static int reply_invalid(Varlink *link, JsonVariant *parameters, const char *error_id, VarlinkReplyFlags flags, void *userdata) {
++        assert(varlink_error_is_invalid_parameter(error_id, parameters, "idontexist"));
++        assert(sd_event_exit(varlink_get_event(link), EXIT_SUCCESS) >= 0);
+         return 0;
+ }
++
++TEST(invalid_parameter) {
++        _cleanup_(sd_event_unrefp) sd_event *e = NULL;
++        assert_se(sd_event_default(&e) >= 0);
++
++        _cleanup_(varlink_server_unrefp) VarlinkServer *s = NULL;
++        assert_se(varlink_server_new(&s, 0) >= 0);
++
++        assert_se(varlink_server_attach_event(s, e, 0) >= 0);
++
++        assert_se(varlink_server_bind_method(s, "foo.mytest.Invalid", method_invalid) >= 0);
++
++        int connfd[2];
++        assert_se(socketpair(AF_UNIX, SOCK_STREAM|SOCK_NONBLOCK|SOCK_CLOEXEC, 0, connfd) >= 0);
++        assert_se(varlink_server_add_connection(s, connfd[0], /* ret= */ NULL) >= 0);
++
++        _cleanup_(varlink_unrefp) Varlink *c = NULL;
++        assert_se(varlink_connect_fd(&c, connfd[1]) >= 0);
++
++        assert_se(varlink_attach_event(c, e, 0) >= 0);
++
++        assert_se(varlink_bind_reply(c, reply_invalid) >= 0);
++
++        assert_se(varlink_invokeb(c, "foo.mytest.Invalid", JSON_BUILD_OBJECT(
++                                      JSON_BUILD_PAIR_STRING("iexist", "foo"),
++                                      JSON_BUILD_PAIR_STRING("idontexist", "bar"))) >= 0);
++
++
++        assert_se(sd_event_loop(e) >= 0);
++}
++
++DEFINE_TEST_MAIN(LOG_DEBUG);

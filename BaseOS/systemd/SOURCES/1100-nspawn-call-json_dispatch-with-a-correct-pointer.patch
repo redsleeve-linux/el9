@@ -1,0 +1,53 @@
+From ef5d328d13eae49e415c8968d0625fa29ff2daf4 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Mon, 15 May 2023 19:45:13 +0200
+Subject: [PATCH] nspawn: call json_dispatch() with a correct pointer
+
+Otherwise hilarity ensues:
+
+ AddressSanitizer:DEADLYSIGNAL
+ =================================================================
+ ==722==ERROR: AddressSanitizer: SEGV on unknown address 0xffffffff00000000 (pc 0x7f8d50ca9ffb bp 0x7fff11b0d4a0 sp 0x7fff11b0cc30 T0)
+ ==722==The signal is caused by a READ memory access.
+     #0 0x7f8d50ca9ffb in __interceptor_strcmp.part.0 (/lib64/libasan.so.8+0xa9ffb)
+     #1 0x7f8d4f9cf5a1 in strcmp_ptr ../src/fundamental/string-util-fundamental.h:33
+     #2 0x7f8d4f9cf5f8 in streq_ptr ../src/fundamental/string-util-fundamental.h:46
+     #3 0x7f8d4f9d74d2 in free_and_strdup ../src/basic/string-util.c:948
+     #4 0x49139a in free_and_strdup_warn ../src/basic/string-util.h:197
+     #5 0x4923eb in oci_absolute_path ../src/nspawn/nspawn-oci.c:139
+     #6 0x7f8d4f6bd359 in json_dispatch ../src/shared/json.c:4395
+     #7 0x4a8831 in oci_hooks_array ../src/nspawn/nspawn-oci.c:2089
+     #8 0x7f8d4f6bd359 in json_dispatch ../src/shared/json.c:4395
+     #9 0x4a8b56 in oci_hooks ../src/nspawn/nspawn-oci.c:2112
+     #10 0x7f8d4f6bd359 in json_dispatch ../src/shared/json.c:4395
+     #11 0x4aa298 in oci_load ../src/nspawn/nspawn-oci.c:2197
+     #12 0x446cec in load_oci_bundle ../src/nspawn/nspawn.c:4744
+     #13 0x44ffa7 in run ../src/nspawn/nspawn.c:5477
+     #14 0x4552fb in main ../src/nspawn/nspawn.c:5920
+     #15 0x7f8d4e04a50f in __libc_start_call_main (/lib64/libc.so.6+0x2750f)
+     #16 0x7f8d4e04a5c8 in __libc_start_main@GLIBC_2.2.5 (/lib64/libc.so.6+0x275c8)
+     #17 0x40d284 in _start (/usr/bin/systemd-nspawn+0x40d284)
+ AddressSanitizer can not provide additional info.
+ SUMMARY: AddressSanitizer: SEGV (/lib64/libasan.so.8+0xa9ffb) in __interceptor_strcmp.part.0
+ ==722==ABORTING
+
+(cherry picked from commit f4e5c042c9a5659a5eebb4c91c0f1132f02a2c59)
+
+Related: RHEL-55266
+---
+ src/nspawn/nspawn-oci.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/nspawn/nspawn-oci.c b/src/nspawn/nspawn-oci.c
+index 02142a9352..117a31e6b2 100644
+--- a/src/nspawn/nspawn-oci.c
++++ b/src/nspawn/nspawn-oci.c
+@@ -2083,7 +2083,7 @@ static int oci_hooks_array(const char *name, JsonVariant *v, JsonDispatchFlags f
+                         .timeout = USEC_INFINITY,
+                 };
+ 
+-                r = json_dispatch(e, table, oci_unexpected, flags, userdata);
++                r = json_dispatch(e, table, oci_unexpected, flags, new_item);
+                 if (r < 0) {
+                         free(new_item->path);
+                         strv_free(new_item->args);

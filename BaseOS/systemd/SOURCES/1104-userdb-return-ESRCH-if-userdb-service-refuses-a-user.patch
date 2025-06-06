@@ -1,0 +1,39 @@
+From ba1ea0689633b7e61f50277dcfdec80ff50eb746 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Tue, 15 Oct 2024 13:59:57 +0200
+Subject: [PATCH] userdb: return ESRCH if userdb service refuses a user/group
+ name as invalid
+
+if a userdb service refuse a user/group name as invalid, let's turn this
+into ESRCH client-side following that there definitely is no user/group
+record for a completely invalid user/group name.
+
+Replaces: #34558
+(cherry picked from commit 69cc4ee134f420dcdd6aac08446bd852d8739694)
+
+Resolves: RHEL-55266
+---
+ src/shared/userdb.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/src/shared/userdb.c b/src/shared/userdb.c
+index 4ea4ac4d72..ceb285c8d8 100644
+--- a/src/shared/userdb.c
++++ b/src/shared/userdb.c
+@@ -159,9 +159,15 @@ static int userdb_on_query_reply(
+         if (error_id) {
+                 log_debug("Got lookup error: %s", error_id);
+ 
++                /* Convert various forms of record not found into -ESRCH, since NSS typically doesn't care,
++                 * about the details. Note that if a userName specification is refused as invalid parameter,
++                 * we also turn this into -ESRCH following the logic that there cannot be a user record for a
++                 * completely invalid user name. */
+                 if (STR_IN_SET(error_id,
+                                "io.systemd.UserDatabase.NoRecordFound",
+-                               "io.systemd.UserDatabase.ConflictingRecordFound"))
++                               "io.systemd.UserDatabase.ConflictingRecordFound") ||
++                    varlink_error_is_invalid_parameter(error_id, parameters, "userName") ||
++                    varlink_error_is_invalid_parameter(error_id, parameters, "groupName"))
+                         r = -ESRCH;
+                 else if (streq(error_id, "io.systemd.UserDatabase.ServiceNotAvailable"))
+                         r = -EHOSTDOWN;

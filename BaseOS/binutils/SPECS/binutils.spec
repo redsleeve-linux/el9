@@ -2,7 +2,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 54%{?dist}.redsleeve
+Release: 63%{?dist}
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -33,6 +33,17 @@ URL: https://sourceware.org/binutils
 # Create deterministic archives (ie ones without timestamps).
 # Default is off because of BZ 1195883.
 %define enable_deterministic_archives 0
+
+# Generate a warning when linking creates an executable stack
+%define warn_for_executable_stacks 1
+
+# Generate a warning when linking creates a segment with read, write and execute permissions
+%define warn_for_rwx_segments 1
+
+# Turn the above warnings into errors.
+# Only effective if the warnings are enabled.
+%define error_for_executable_stacks 0
+%define error_for_rwx_segments 0
 
 # Enable support for GCC LTO compilation.
 # Disable if it is necessary to work around bugs in LTO.
@@ -465,6 +476,40 @@ Patch71: binutils-relro.patch
 # Lifetime: Fixed in 2.44
 Patch72: binutils-relro-padding.patch
 
+# Purpose:  Add linker warning/error messages for RWX segments and executable stacks.
+# Lifetime: Fixed in 2.41
+Patch73: binutils-rwx-seg-execstack-err-warn.patch
+
+# Purpose:  Add support for the arch14 (z16) and arch15 extensions to the
+#            s390 architecture.
+# Lifetime: Fixed in 2.43
+# Note commit 69341966def7 has already been applied as Patch55.
+Patch74: binutils-s390-arch15-01.patch
+Patch75: binutils-s390-arch15-02.patch
+Patch76: binutils-s390-arch15-03.patch
+Patch77: binutils-s390-arch15-04.patch
+Patch78: binutils-s390-arch15-05.patch
+Patch79: binutils-s390-arch15-06.patch
+Patch80: binutils-s390-arch15-07.patch
+Patch81: binutils-s390-arch15-08.patch
+Patch82: binutils-s390-arch15-09.patch
+Patch83: binutils-s390-arch15-10.patch
+Patch84: binutils-s390-arch15-11.patch
+Patch85: binutils-s390-arch15-12.patch
+Patch86: binutils-s390-arch15-13.patch
+Patch87: binutils-s390-arch15-14.patch
+Patch88: binutils-s390-arch15-15.patch
+Patch89: binutils-s390-arch15-16.patch
+Patch90: binutils-s390-arch15-gas-tests-fixes.patch
+
+# Purpose:  Add linker diagnostic message for missing static libraries
+# Lifetime: Fixed in 2.44
+Patch91: binutils-linker-diagnostic-message.patch
+
+# Purpose:  Fixes an illegal memory access by the AArch64 linker when constructing the small PLT
+# Lifetime: Fixed in 2.45
+Patch92: binutils-aarch64-small-plt0.patch
+
 #----------------------------------------------------------------------------
 
 Provides: bundled(libiberty)
@@ -530,7 +575,6 @@ Requires(post): coreutils
 BuildRequires: elfutils-debuginfod-client-devel
 %endif
 
-Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 %description
@@ -741,6 +785,25 @@ set_build_configuration()
     CARGS="$CARGS	--enable-deterministic-archives"
 %else
     CARGS="$CARGS --enable-deterministic-archives=no"
+%endif
+
+%if %{warn_for_executable_stacks}
+    CARGS="$CARGS --enable-warn-execstack=yes"
+    CARGS="$CARGS --enable-default-execstack=no"
+%if %{error_for_executable_stacks}
+    CARGS="$CARGS --enable-error-execstack=yes"
+%endif
+%else
+    CARGS="$CARGS --enable-warn-execstack=no"
+%endif
+
+%if %{warn_for_rwx_segments}
+    CARGS="$CARGS --enable-warn-rwx-segments=yes"
+%if %{error_for_rwx_segments}
+    CARGS="$CARGS --enable-error-rwx-segments=yes"
+%endif
+%else
+    CARGS="$CARGS --enable-warn-rwx-segments=no"
 %endif
 
 %if %{enable_lto}
@@ -1306,8 +1369,32 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
-* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-54.redsleeve
-- minor adjustments for armv6
+* Fri Feb 07 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-63
+- Fix seg-fault in AArch64 linker when building u-boot.  (RHEL-78350)
+
+* Thu Jan 30 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-62
+- Retire: binutils-rhivos-segment-gap.patch.  (RHEL-60807)
+
+* Thu Jan 23 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-61
+- Add an option to objcopy that creates padding sections that eliminate gaps between segments.  (RHEL-60807)
+
+* Mon Jan 06 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-60
+- Add a helpful linker diagnostic message about missing static libraries.  (RHEL-69758)
+
+* Thu Dec 12 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-59
+- Fix assembler testsuite problems with new s390 tests.  (RHEL-50068)
+
+* Mon Nov 18 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-58
+- Extend support for the arch15 and arch16 extensions to the s390 architecture.  (RHEL-50068)
+
+* Wed Nov 13 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-57
+- Add support for the arch15 and arch16 extensions to the s390 architecture.  (RHEL-50068)
+
+* Mon Oct 28 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-56
+- Stop the new warnings from being treated as errors by default.  (RHEL-62707)
+
+* Tue Oct 01 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-55
+- Add linker error/warning messages for executable stacks and RWX segments.  (RHEL-59801, RHEL-59802)
 
 * Wed Aug 14 2024 Nick Clifton  <nickc@redhat.com> - 2.35.2-54
 - Re fix AArch64 EFI test after applying previous delta.  (RHEL-39953)

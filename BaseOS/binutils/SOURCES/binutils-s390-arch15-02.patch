@@ -1,0 +1,648 @@
+From 9c422a59953cd6b64bc8ed5f3d6e72a180f13540 Mon Sep 17 00:00:00 2001
+From: Jens Remus <jremus@linux.ibm.com>
+Date: Thu, 23 Nov 2023 15:43:36 +0100
+Subject: [PATCH] s390: Position independent verification of relative
+ addressing
+
+Commit: 9c422a59953c
+
+Opcode test cases for z/Architecture instructions that use relative
+addressing contained hardcoded offsets in the test verification
+patterns. Inserting or reordering of instructions into those test cases
+therefore required updating of those hardcoded offsets.
+
+Use regular expressions with backreferences to verify results of test
+cases containing instructions with relative addressing. This makes the
+verification position independent.
+
+gas/
+	* testsuite/gas/s390/esa-g5.d: Make opcode test verification
+	  pattern position independent where possible.
+	* testsuite/gas/s390/esa-z900.d: Likewise.
+	* testsuite/gas/s390/zarch-z900.d: Likewise.
+	* testsuite/gas/s390/zarch-z10.d: Likewise.
+	* testsuite/gas/s390/zarch-z196.d: Likewise.
+	* testsuite/gas/s390/zarch-zEC12.d: Likewise.
+
+Signed-off-by: Jens Remus <jremus@linux.ibm.com>
+Reviewed-by: Andreas Krebbel <krebbel@linux.ibm.com>
+---
+ gas/testsuite/gas/s390/esa-g5.d      | 104 +++++------
+ gas/testsuite/gas/s390/esa-z900.d    |  96 +++++-----
+ gas/testsuite/gas/s390/zarch-z10.d   | 254 +++++++++++++--------------
+ gas/testsuite/gas/s390/zarch-z196.d  |   2 +-
+ gas/testsuite/gas/s390/zarch-z900.d  |  12 +-
+ gas/testsuite/gas/s390/zarch-zEC12.d |   6 +-
+ 6 files changed, 237 insertions(+), 237 deletions(-)
+
+diff --git a/gas/testsuite/gas/s390/esa-g5.d b/gas/testsuite/gas/s390/esa-g5.d
+index 67a971bef15..7422e88b127 100644
+--- a/gas/testsuite/gas/s390/esa-g5.d
++++ b/gas/testsuite/gas/s390/esa-g5.d
+@@ -77,15 +77,15 @@ Disassembly of section .text:
+ .*:	47 25 af ff [	 ]*bh	4095\(%r5,%r10\)
+ .*:	07 29 [	 ]*bhr	%r9
+ .*:	07 f9 [	 ]*br	%r9
+-.*:	a7 95 00 00 [	 ]*bras	%r9,e2 <foo\+0xe2>
+-.*:	a7 65 00 00 [	 ]*bras	%r6,e6 <foo\+0xe6>
+-.*:	a7 64 00 00 [	 ]*jlh	ea <foo\+0xea>
+-.*:	a7 66 00 00 [	 ]*brct	%r6,ee <foo\+0xee>
+-.*:	a7 66 00 00 [	 ]*brct	%r6,f2 <foo\+0xf2>
+-.*:	84 69 00 00 [	 ]*brxh	%r6,%r9,f6 <foo\+0xf6>
+-.*:	84 69 00 00 [	 ]*brxh	%r6,%r9,fa <foo\+0xfa>
+-.*:	85 69 00 00 [	 ]*brxle	%r6,%r9,fe <foo\+0xfe>
+-.*:	85 69 00 00 [	 ]*brxle	%r6,%r9,102 <foo\+0x102>
++ *([\da-f]+):	a7 95 00 00 [	 ]*bras	%r9,\1 <foo\+0x\1>
++ *([\da-f]+):	a7 65 00 00 [	 ]*bras	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	a7 64 00 00 [	 ]*jlh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 66 00 00 [	 ]*brct	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	a7 66 00 00 [	 ]*brct	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	84 69 00 00 [	 ]*brxh	%r6,%r9,\1 <foo\+0x\1>
++ *([\da-f]+):	84 69 00 00 [	 ]*brxh	%r6,%r9,\1 <foo\+0x\1>
++ *([\da-f]+):	85 69 00 00 [	 ]*brxle	%r6,%r9,\1 <foo\+0x\1>
++ *([\da-f]+):	85 69 00 00 [	 ]*brxle	%r6,%r9,\1 <foo\+0x\1>
+ .*:	b2 5a 00 69 [	 ]*bsa	%r6,%r9
+ .*:	b2 58 00 69 [	 ]*bsg	%r6,%r9
+ .*:	0b 69 [	 ]*bsm	%r6,%r9
+@@ -184,49 +184,49 @@ Disassembly of section .text:
+ .*:	b2 21 00 69 [	 ]*ipte	%r6,%r9
+ .*:	b2 29 00 69 [	 ]*iske	%r6,%r9
+ .*:	b2 23 00 69 [	 ]*ivsk	%r6,%r9
+-.*:	a7 f4 00 00 [	 ]*j	288 <foo\+0x288>
+-.*:	a7 84 00 00 [	 ]*je	28c <foo\+0x28c>
+-.*:	a7 24 00 00 [	 ]*jh	290 <foo\+0x290>
+-.*:	a7 a4 00 00 [	 ]*jhe	294 <foo\+0x294>
+-.*:	a7 44 00 00 [	 ]*jl	298 <foo\+0x298>
+-.*:	a7 c4 00 00 [	 ]*jle	29c <foo\+0x29c>
+-.*:	a7 64 00 00 [	 ]*jlh	2a0 <foo\+0x2a0>
+-.*:	a7 44 00 00 [	 ]*jl	2a4 <foo\+0x2a4>
+-.*:	a7 74 00 00 [	 ]*jne	2a8 <foo\+0x2a8>
+-.*:	a7 d4 00 00 [	 ]*jnh	2ac <foo\+0x2ac>
+-.*:	a7 54 00 00 [	 ]*jnhe	2b0 <foo\+0x2b0>
+-.*:	a7 b4 00 00 [	 ]*jnl	2b4 <foo\+0x2b4>
+-.*:	a7 34 00 00 [	 ]*jnle	2b8 <foo\+0x2b8>
+-.*:	a7 94 00 00 [	 ]*jnlh	2bc <foo\+0x2bc>
+-.*:	a7 b4 00 00 [	 ]*jnl	2c0 <foo\+0x2c0>
+-.*:	a7 e4 00 00 [	 ]*jno	2c4 <foo\+0x2c4>
+-.*:	a7 d4 00 00 [	 ]*jnh	2c8 <foo\+0x2c8>
+-.*:	a7 74 00 00 [	 ]*jne	2cc <foo\+0x2cc>
+-.*:	a7 14 00 00 [	 ]*jo	2d0 <foo\+0x2d0>
+-.*:	a7 24 00 00 [	 ]*jh	2d4 <foo\+0x2d4>
+-.*:	a7 84 00 00 [	 ]*je	2d8 <foo\+0x2d8>
+-.*:	a7 04 00 00 [	 ]*jnop	2dc <foo\+0x2dc>
+-.*:	a7 14 00 00 [	 ]*jo	2e0 <foo\+0x2e0>
+-.*:	a7 24 00 00 [	 ]*jh	2e4 <foo\+0x2e4>
+-.*:	a7 24 00 00 [	 ]*jh	2e8 <foo\+0x2e8>
+-.*:	a7 34 00 00 [	 ]*jnle	2ec <foo\+0x2ec>
+-.*:	a7 44 00 00 [	 ]*jl	2f0 <foo\+0x2f0>
+-.*:	a7 44 00 00 [	 ]*jl	2f4 <foo\+0x2f4>
+-.*:	a7 54 00 00 [	 ]*jnhe	2f8 <foo\+0x2f8>
+-.*:	a7 64 00 00 [	 ]*jlh	2fc <foo\+0x2fc>
+-.*:	a7 74 00 00 [	 ]*jne	300 <foo\+0x300>
+-.*:	a7 74 00 00 [	 ]*jne	304 <foo\+0x304>
+-.*:	a7 84 00 00 [	 ]*je	308 <foo\+0x308>
+-.*:	a7 84 00 00 [	 ]*je	30c <foo\+0x30c>
+-.*:	a7 94 00 00 [	 ]*jnlh	310 <foo\+0x310>
+-.*:	a7 a4 00 00 [	 ]*jhe	314 <foo\+0x314>
+-.*:	a7 b4 00 00 [	 ]*jnl	318 <foo\+0x318>
+-.*:	a7 b4 00 00 [	 ]*jnl	31c <foo\+0x31c>
+-.*:	a7 c4 00 00 [	 ]*jle	320 <foo\+0x320>
+-.*:	a7 d4 00 00 [	 ]*jnh	324 <foo\+0x324>
+-.*:	a7 d4 00 00 [	 ]*jnh	328 <foo\+0x328>
+-.*:	a7 e4 00 00 [	 ]*jno	32c <foo\+0x32c>
+-.*:	a7 f4 00 00 [	 ]*j	330 <foo\+0x330>
++ *([\da-f]+):	a7 f4 00 00 [	 ]*j	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 84 00 00 [	 ]*je	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 24 00 00 [	 ]*jh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 a4 00 00 [	 ]*jhe	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 44 00 00 [	 ]*jl	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 c4 00 00 [	 ]*jle	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 64 00 00 [	 ]*jlh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 44 00 00 [	 ]*jl	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 74 00 00 [	 ]*jne	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 d4 00 00 [	 ]*jnh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 54 00 00 [	 ]*jnhe	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 b4 00 00 [	 ]*jnl	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 34 00 00 [	 ]*jnle	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 94 00 00 [	 ]*jnlh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 b4 00 00 [	 ]*jnl	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 e4 00 00 [	 ]*jno	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 d4 00 00 [	 ]*jnh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 74 00 00 [	 ]*jne	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 14 00 00 [	 ]*jo	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 24 00 00 [	 ]*jh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 84 00 00 [	 ]*je	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 04 00 00 [	 ]*jnop	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 14 00 00 [	 ]*jo	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 24 00 00 [	 ]*jh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 24 00 00 [	 ]*jh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 34 00 00 [	 ]*jnle	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 44 00 00 [	 ]*jl	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 44 00 00 [	 ]*jl	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 54 00 00 [	 ]*jnhe	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 64 00 00 [	 ]*jlh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 74 00 00 [	 ]*jne	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 74 00 00 [	 ]*jne	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 84 00 00 [	 ]*je	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 84 00 00 [	 ]*je	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 94 00 00 [	 ]*jnlh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 a4 00 00 [	 ]*jhe	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 b4 00 00 [	 ]*jnl	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 b4 00 00 [	 ]*jnl	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 c4 00 00 [	 ]*jle	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 d4 00 00 [	 ]*jnh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 d4 00 00 [	 ]*jnh	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 e4 00 00 [	 ]*jno	\1 <foo\+0x\1>
++ *([\da-f]+):	a7 f4 00 00 [	 ]*j	\1 <foo\+0x\1>
+ .*:	ed 65 af ff 00 18 [	 ]*kdb	%f6,4095\(%r5,%r10\)
+ .*:	b3 18 00 69 [	 ]*kdbr	%f6,%f9
+ .*:	ed 65 af ff 00 08 [	 ]*keb	%f6,4095\(%r5,%r10\)
+diff --git a/gas/testsuite/gas/s390/zarch-z10.d b/gas/testsuite/gas/s390/zarch-z10.d
+index 183e98ee741..2c7c485a1a1 100644
+--- a/gas/testsuite/gas/s390/zarch-z10.d
++++ b/gas/testsuite/gas/s390/zarch-z10.d
+@@ -10,9 +10,9 @@ Disassembly of section .text:
+ .*:	eb d6 65 b3 01 7a [	 ]*agsi	5555\(%r6\),-42
+ .*:	eb d6 65 b3 01 6e [	 ]*alsi	5555\(%r6\),-42
+ .*:	eb d6 65 b3 01 7e [	 ]*algsi	5555\(%r6\),-42
+-.*:	c6 6d 00 00 00 00 [	 ]*crl	%r6,18 <foo\+0x18>
+-.*:	c6 68 00 00 00 00 [	 ]*cgrl	%r6,1e <foo\+0x1e>
+-.*:	c6 6c 00 00 00 00 [	 ]*cgfrl	%r6,24 <foo\+0x24>
++ *([\da-f]+):	c6 6d 00 00 00 00 [	 ]*crl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c6 68 00 00 00 00 [	 ]*cgrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c6 6c 00 00 00 00 [	 ]*cgfrl	%r6,\1 <foo\+0x\1>
+ .*:	ec 67 84 57 a0 f6 [	 ]*crbnl	%r6,%r7,1111\(%r8\)
+ .*:	ec 67 84 57 20 f6 [	 ]*crbh	%r6,%r7,1111\(%r8\)
+ .*:	ec 67 84 57 20 f6 [	 ]*crbh	%r6,%r7,1111\(%r8\)
+@@ -39,32 +39,32 @@ Disassembly of section .text:
+ .*:	ec 67 84 57 a0 e4 [	 ]*cgrbnl	%r6,%r7,1111\(%r8\)
+ .*:	ec 67 84 57 c0 e4 [	 ]*cgrbnh	%r6,%r7,1111\(%r8\)
+ .*:	ec 67 84 57 c0 e4 [	 ]*cgrbnh	%r6,%r7,1111\(%r8\)
+-.*:	ec 67 00 00 a0 76 [	 ]*crjnl	%r6,%r7,c6 <foo\+0xc6>
+-.*:	ec 67 00 00 20 76 [	 ]*crjh	%r6,%r7,cc <foo\+0xcc>
+-.*:	ec 67 00 00 20 76 [	 ]*crjh	%r6,%r7,d2 <foo\+0xd2>
+-.*:	ec 67 00 00 40 76 [	 ]*crjl	%r6,%r7,d8 <foo\+0xd8>
+-.*:	ec 67 00 00 40 76 [	 ]*crjl	%r6,%r7,de <foo\+0xde>
+-.*:	ec 67 00 00 60 76 [	 ]*crjne	%r6,%r7,e4 <foo\+0xe4>
+-.*:	ec 67 00 00 60 76 [	 ]*crjne	%r6,%r7,ea <foo\+0xea>
+-.*:	ec 67 00 00 80 76 [	 ]*crje	%r6,%r7,f0 <foo\+0xf0>
+-.*:	ec 67 00 00 80 76 [	 ]*crje	%r6,%r7,f6 <foo\+0xf6>
+-.*:	ec 67 00 00 a0 76 [	 ]*crjnl	%r6,%r7,fc <foo\+0xfc>
+-.*:	ec 67 00 00 a0 76 [	 ]*crjnl	%r6,%r7,102 <foo\+0x102>
+-.*:	ec 67 00 00 c0 76 [	 ]*crjnh	%r6,%r7,108 <foo\+0x108>
+-.*:	ec 67 00 00 c0 76 [	 ]*crjnh	%r6,%r7,10e <foo\+0x10e>
+-.*:	ec 67 00 00 a0 64 [	 ]*cgrjnl	%r6,%r7,114 <foo\+0x114>
+-.*:	ec 67 00 00 20 64 [	 ]*cgrjh	%r6,%r7,11a <foo\+0x11a>
+-.*:	ec 67 00 00 20 64 [	 ]*cgrjh	%r6,%r7,120 <foo\+0x120>
+-.*:	ec 67 00 00 40 64 [	 ]*cgrjl	%r6,%r7,126 <foo\+0x126>
+-.*:	ec 67 00 00 40 64 [	 ]*cgrjl	%r6,%r7,12c <foo\+0x12c>
+-.*:	ec 67 00 00 60 64 [	 ]*cgrjne	%r6,%r7,132 <foo\+0x132>
+-.*:	ec 67 00 00 60 64 [	 ]*cgrjne	%r6,%r7,138 <foo\+0x138>
+-.*:	ec 67 00 00 80 64 [	 ]*cgrje	%r6,%r7,13e <foo\+0x13e>
+-.*:	ec 67 00 00 80 64 [	 ]*cgrje	%r6,%r7,144 <foo\+0x144>
+-.*:	ec 67 00 00 a0 64 [	 ]*cgrjnl	%r6,%r7,14a <foo\+0x14a>
+-.*:	ec 67 00 00 a0 64 [	 ]*cgrjnl	%r6,%r7,150 <foo\+0x150>
+-.*:	ec 67 00 00 c0 64 [	 ]*cgrjnh	%r6,%r7,156 <foo\+0x156>
+-.*:	ec 67 00 00 c0 64 [	 ]*cgrjnh	%r6,%r7,15c <foo\+0x15c>
++ *([\da-f]+):	ec 67 00 00 a0 76 [	 ]*crjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 20 76 [	 ]*crjh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 20 76 [	 ]*crjh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 40 76 [	 ]*crjl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 40 76 [	 ]*crjl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 60 76 [	 ]*crjne	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 60 76 [	 ]*crjne	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 80 76 [	 ]*crje	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 80 76 [	 ]*crje	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 a0 76 [	 ]*crjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 a0 76 [	 ]*crjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 c0 76 [	 ]*crjnh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 c0 76 [	 ]*crjnh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 a0 64 [	 ]*cgrjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 20 64 [	 ]*cgrjh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 20 64 [	 ]*cgrjh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 40 64 [	 ]*cgrjl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 40 64 [	 ]*cgrjl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 60 64 [	 ]*cgrjne	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 60 64 [	 ]*cgrjne	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 80 64 [	 ]*cgrje	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 80 64 [	 ]*cgrje	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 a0 64 [	 ]*cgrjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 a0 64 [	 ]*cgrjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 c0 64 [	 ]*cgrjnh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 c0 64 [	 ]*cgrjnh	%r6,%r7,\1 <foo\+0x\1>
+ .*:	ec 6a 74 57 d6 fe [	 ]*cibnl	%r6,-42,1111\(%r7\)
+ .*:	ec 62 74 57 d6 fe [	 ]*cibh	%r6,-42,1111\(%r7\)
+ .*:	ec 62 74 57 d6 fe [	 ]*cibh	%r6,-42,1111\(%r7\)
+@@ -91,32 +91,32 @@ Disassembly of section .text:
+ .*:	ec 6a 74 57 d6 fc [	 ]*cgibnl	%r6,-42,1111\(%r7\)
+ .*:	ec 6c 74 57 d6 fc [	 ]*cgibnh	%r6,-42,1111\(%r7\)
+ .*:	ec 6c 74 57 d6 fc [	 ]*cgibnh	%r6,-42,1111\(%r7\)
+-.*:	ec 6a 00 00 d6 7e [	 ]*cijnl	%r6,-42,1fe <foo\+0x1fe>
+-.*:	ec 62 00 00 d6 7e [	 ]*cijh	%r6,-42,204 <foo\+0x204>
+-.*:	ec 62 00 00 d6 7e [	 ]*cijh	%r6,-42,20a <foo\+0x20a>
+-.*:	ec 64 00 00 d6 7e [	 ]*cijl	%r6,-42,210 <foo\+0x210>
+-.*:	ec 64 00 00 d6 7e [	 ]*cijl	%r6,-42,216 <foo\+0x216>
+-.*:	ec 66 00 00 d6 7e [	 ]*cijne	%r6,-42,21c <foo\+0x21c>
+-.*:	ec 66 00 00 d6 7e [	 ]*cijne	%r6,-42,222 <foo\+0x222>
+-.*:	ec 68 00 00 d6 7e [	 ]*cije	%r6,-42,228 <foo\+0x228>
+-.*:	ec 68 00 00 d6 7e [	 ]*cije	%r6,-42,22e <foo\+0x22e>
+-.*:	ec 6a 00 00 d6 7e [	 ]*cijnl	%r6,-42,234 <foo\+0x234>
+-.*:	ec 6a 00 00 d6 7e [	 ]*cijnl	%r6,-42,23a <foo\+0x23a>
+-.*:	ec 6c 00 00 d6 7e [	 ]*cijnh	%r6,-42,240 <foo\+0x240>
+-.*:	ec 6c 00 00 d6 7e [	 ]*cijnh	%r6,-42,246 <foo\+0x246>
+-.*:	ec 6a 00 00 d6 7c [	 ]*cgijnl	%r6,-42,24c <foo\+0x24c>
+-.*:	ec 62 00 00 d6 7c [	 ]*cgijh	%r6,-42,252 <foo\+0x252>
+-.*:	ec 62 00 00 d6 7c [	 ]*cgijh	%r6,-42,258 <foo\+0x258>
+-.*:	ec 64 00 00 d6 7c [	 ]*cgijl	%r6,-42,25e <foo\+0x25e>
+-.*:	ec 64 00 00 d6 7c [	 ]*cgijl	%r6,-42,264 <foo\+0x264>
+-.*:	ec 66 00 00 d6 7c [	 ]*cgijne	%r6,-42,26a <foo\+0x26a>
+-.*:	ec 66 00 00 d6 7c [	 ]*cgijne	%r6,-42,270 <foo\+0x270>
+-.*:	ec 68 00 00 d6 7c [	 ]*cgije	%r6,-42,276 <foo\+0x276>
+-.*:	ec 68 00 00 d6 7c [	 ]*cgije	%r6,-42,27c <foo\+0x27c>
+-.*:	ec 6a 00 00 d6 7c [	 ]*cgijnl	%r6,-42,282 <foo\+0x282>
+-.*:	ec 6a 00 00 d6 7c [	 ]*cgijnl	%r6,-42,288 <foo\+0x288>
+-.*:	ec 6c 00 00 d6 7c [	 ]*cgijnh	%r6,-42,28e <foo\+0x28e>
+-.*:	ec 6c 00 00 d6 7c [	 ]*cgijnh	%r6,-42,294 <foo\+0x294>
++ *([\da-f]+):	ec 6a 00 00 d6 7e [	 ]*cijnl	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 62 00 00 d6 7e [	 ]*cijh	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 62 00 00 d6 7e [	 ]*cijh	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 64 00 00 d6 7e [	 ]*cijl	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 64 00 00 d6 7e [	 ]*cijl	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 66 00 00 d6 7e [	 ]*cijne	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 66 00 00 d6 7e [	 ]*cijne	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 68 00 00 d6 7e [	 ]*cije	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 68 00 00 d6 7e [	 ]*cije	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6a 00 00 d6 7e [	 ]*cijnl	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6a 00 00 d6 7e [	 ]*cijnl	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6c 00 00 d6 7e [	 ]*cijnh	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6c 00 00 d6 7e [	 ]*cijnh	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6a 00 00 d6 7c [	 ]*cgijnl	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 62 00 00 d6 7c [	 ]*cgijh	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 62 00 00 d6 7c [	 ]*cgijh	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 64 00 00 d6 7c [	 ]*cgijl	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 64 00 00 d6 7c [	 ]*cgijl	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 66 00 00 d6 7c [	 ]*cgijne	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 66 00 00 d6 7c [	 ]*cgijne	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 68 00 00 d6 7c [	 ]*cgije	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 68 00 00 d6 7c [	 ]*cgije	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6a 00 00 d6 7c [	 ]*cgijnl	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6a 00 00 d6 7c [	 ]*cgijnl	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6c 00 00 d6 7c [	 ]*cgijnh	%r6,-42,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6c 00 00 d6 7c [	 ]*cgijnh	%r6,-42,\1 <foo\+0x\1>
+ .*:	b9 72 a0 67 [	 ]*crtnl	%r6,%r7
+ .*:	b9 72 20 67 [	 ]*crth	%r6,%r7
+ .*:	b9 72 20 67 [	 ]*crth	%r6,%r7
+@@ -173,16 +173,16 @@ Disassembly of section .text:
+ .*:	e5 54 64 57 8a d0 [	 ]*chhsi	1111\(%r6\),-30000
+ .*:	e5 5c 64 57 8a d0 [	 ]*chsi	1111\(%r6\),-30000
+ .*:	e5 58 64 57 8a d0 [	 ]*cghsi	1111\(%r6\),-30000
+-.*:	c6 65 00 00 00 00 [	 ]*chrl	%r6,3b6 <foo\+0x3b6>
+-.*:	c6 64 00 00 00 00 [	 ]*cghrl	%r6,3bc <foo\+0x3bc>
++ *([\da-f]+):	c6 65 00 00 00 00 [	 ]*chrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c6 64 00 00 00 00 [	 ]*cghrl	%r6,\1 <foo\+0x\1>
+ .*:	e5 55 64 57 9c 40 [	 ]*clhhsi	1111\(%r6\),40000
+ .*:	e5 5d 64 57 9c 40 [	 ]*clfhsi	1111\(%r6\),40000
+ .*:	e5 59 64 57 9c 40 [	 ]*clghsi	1111\(%r6\),40000
+-.*:	c6 6f 00 00 00 00 [	 ]*clrl	%r6,3d4 <foo\+0x3d4>
+-.*:	c6 6a 00 00 00 00 [	 ]*clgrl	%r6,3da <foo\+0x3da>
+-.*:	c6 6e 00 00 00 00 [	 ]*clgfrl	%r6,3e0 <foo\+0x3e0>
+-.*:	c6 67 00 00 00 00 [	 ]*clhrl	%r6,3e6 <foo\+0x3e6>
+-.*:	c6 66 00 00 00 00 [	 ]*clghrl	%r6,3ec <foo\+0x3ec>
++ *([\da-f]+):	c6 6f 00 00 00 00 [	 ]*clrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c6 6a 00 00 00 00 [	 ]*clgrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c6 6e 00 00 00 00 [	 ]*clgfrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c6 67 00 00 00 00 [	 ]*clhrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c6 66 00 00 00 00 [	 ]*clghrl	%r6,\1 <foo\+0x\1>
+ .*:	ec 67 84 57 a0 f7 [	 ]*clrbnl	%r6,%r7,1111\(%r8\)
+ .*:	ec 67 84 57 20 f7 [	 ]*clrbh	%r6,%r7,1111\(%r8\)
+ .*:	ec 67 84 57 20 f7 [	 ]*clrbh	%r6,%r7,1111\(%r8\)
+@@ -209,32 +209,32 @@ Disassembly of section .text:
+ .*:	ec 67 84 57 a0 e5 [	 ]*clgrbnl	%r6,%r7,1111\(%r8\)
+ .*:	ec 67 84 57 c0 e5 [	 ]*clgrbnh	%r6,%r7,1111\(%r8\)
+ .*:	ec 67 84 57 c0 e5 [	 ]*clgrbnh	%r6,%r7,1111\(%r8\)
+-.*:	ec 67 00 00 a0 77 [	 ]*clrjnl	%r6,%r7,48e <foo\+0x48e>
+-.*:	ec 67 00 00 20 77 [	 ]*clrjh	%r6,%r7,494 <foo\+0x494>
+-.*:	ec 67 00 00 20 77 [	 ]*clrjh	%r6,%r7,49a <foo\+0x49a>
+-.*:	ec 67 00 00 40 77 [	 ]*clrjl	%r6,%r7,4a0 <foo\+0x4a0>
+-.*:	ec 67 00 00 40 77 [	 ]*clrjl	%r6,%r7,4a6 <foo\+0x4a6>
+-.*:	ec 67 00 00 60 77 [	 ]*clrjne	%r6,%r7,4ac <foo\+0x4ac>
+-.*:	ec 67 00 00 60 77 [	 ]*clrjne	%r6,%r7,4b2 <foo\+0x4b2>
+-.*:	ec 67 00 00 80 77 [	 ]*clrje	%r6,%r7,4b8 <foo\+0x4b8>
+-.*:	ec 67 00 00 80 77 [	 ]*clrje	%r6,%r7,4be <foo\+0x4be>
+-.*:	ec 67 00 00 a0 77 [	 ]*clrjnl	%r6,%r7,4c4 <foo\+0x4c4>
+-.*:	ec 67 00 00 a0 77 [	 ]*clrjnl	%r6,%r7,4ca <foo\+0x4ca>
+-.*:	ec 67 00 00 c0 77 [	 ]*clrjnh	%r6,%r7,4d0 <foo\+0x4d0>
+-.*:	ec 67 00 00 c0 77 [	 ]*clrjnh	%r6,%r7,4d6 <foo\+0x4d6>
+-.*:	ec 67 00 00 a0 65 [	 ]*clgrjnl	%r6,%r7,4dc <foo\+0x4dc>
+-.*:	ec 67 00 00 20 65 [	 ]*clgrjh	%r6,%r7,4e2 <foo\+0x4e2>
+-.*:	ec 67 00 00 20 65 [	 ]*clgrjh	%r6,%r7,4e8 <foo\+0x4e8>
+-.*:	ec 67 00 00 40 65 [	 ]*clgrjl	%r6,%r7,4ee <foo\+0x4ee>
+-.*:	ec 67 00 00 40 65 [	 ]*clgrjl	%r6,%r7,4f4 <foo\+0x4f4>
+-.*:	ec 67 00 00 60 65 [	 ]*clgrjne	%r6,%r7,4fa <foo\+0x4fa>
+-.*:	ec 67 00 00 60 65 [	 ]*clgrjne	%r6,%r7,500 <foo\+0x500>
+-.*:	ec 67 00 00 80 65 [	 ]*clgrje	%r6,%r7,506 <foo\+0x506>
+-.*:	ec 67 00 00 80 65 [	 ]*clgrje	%r6,%r7,50c <foo\+0x50c>
+-.*:	ec 67 00 00 a0 65 [	 ]*clgrjnl	%r6,%r7,512 <foo\+0x512>
+-.*:	ec 67 00 00 a0 65 [	 ]*clgrjnl	%r6,%r7,518 <foo\+0x518>
+-.*:	ec 67 00 00 c0 65 [	 ]*clgrjnh	%r6,%r7,51e <foo\+0x51e>
+-.*:	ec 67 00 00 c0 65 [	 ]*clgrjnh	%r6,%r7,524 <foo\+0x524>
++ *([\da-f]+):	ec 67 00 00 a0 77 [	 ]*clrjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 20 77 [	 ]*clrjh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 20 77 [	 ]*clrjh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 40 77 [	 ]*clrjl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 40 77 [	 ]*clrjl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 60 77 [	 ]*clrjne	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 60 77 [	 ]*clrjne	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 80 77 [	 ]*clrje	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 80 77 [	 ]*clrje	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 a0 77 [	 ]*clrjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 a0 77 [	 ]*clrjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 c0 77 [	 ]*clrjnh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 c0 77 [	 ]*clrjnh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 a0 65 [	 ]*clgrjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 20 65 [	 ]*clgrjh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 20 65 [	 ]*clgrjh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 40 65 [	 ]*clgrjl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 40 65 [	 ]*clgrjl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 60 65 [	 ]*clgrjne	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 60 65 [	 ]*clgrjne	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 80 65 [	 ]*clgrje	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 80 65 [	 ]*clgrje	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 a0 65 [	 ]*clgrjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 a0 65 [	 ]*clgrjnl	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 c0 65 [	 ]*clgrjnh	%r6,%r7,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 67 00 00 c0 65 [	 ]*clgrjnh	%r6,%r7,\1 <foo\+0x\1>
+ .*:	ec 6a 74 57 c8 ff [	 ]*clibnl	%r6,200,1111\(%r7\)
+ .*:	ec 62 74 57 c8 ff [	 ]*clibh	%r6,200,1111\(%r7\)
+ .*:	ec 62 74 57 c8 ff [	 ]*clibh	%r6,200,1111\(%r7\)
+@@ -261,32 +261,32 @@ Disassembly of section .text:
+ .*:	ec 6a 74 57 c8 fd [	 ]*clgibnl	%r6,200,1111\(%r7\)
+ .*:	ec 6c 74 57 c8 fd [	 ]*clgibnh	%r6,200,1111\(%r7\)
+ .*:	ec 6c 74 57 c8 fd [	 ]*clgibnh	%r6,200,1111\(%r7\)
+-.*:	ec 6a 00 00 c8 7f [	 ]*clijnl	%r6,200,5c6 <foo\+0x5c6>
+-.*:	ec 62 00 00 c8 7f [	 ]*clijh	%r6,200,5cc <foo\+0x5cc>
+-.*:	ec 62 00 00 c8 7f [	 ]*clijh	%r6,200,5d2 <foo\+0x5d2>
+-.*:	ec 64 00 00 c8 7f [	 ]*clijl	%r6,200,5d8 <foo\+0x5d8>
+-.*:	ec 64 00 00 c8 7f [	 ]*clijl	%r6,200,5de <foo\+0x5de>
+-.*:	ec 66 00 00 c8 7f [	 ]*clijne	%r6,200,5e4 <foo\+0x5e4>
+-.*:	ec 66 00 00 c8 7f [	 ]*clijne	%r6,200,5ea <foo\+0x5ea>
+-.*:	ec 68 00 00 c8 7f [	 ]*clije	%r6,200,5f0 <foo\+0x5f0>
+-.*:	ec 68 00 00 c8 7f [	 ]*clije	%r6,200,5f6 <foo\+0x5f6>
+-.*:	ec 6a 00 00 c8 7f [	 ]*clijnl	%r6,200,5fc <foo\+0x5fc>
+-.*:	ec 6a 00 00 c8 7f [	 ]*clijnl	%r6,200,602 <foo\+0x602>
+-.*:	ec 6c 00 00 c8 7f [	 ]*clijnh	%r6,200,608 <foo\+0x608>
+-.*:	ec 6c 00 00 c8 7f [	 ]*clijnh	%r6,200,60e <foo\+0x60e>
+-.*:	ec 6a 00 00 c8 7d [	 ]*clgijnl	%r6,200,614 <foo\+0x614>
+-.*:	ec 62 00 00 c8 7d [	 ]*clgijh	%r6,200,61a <foo\+0x61a>
+-.*:	ec 62 00 00 c8 7d [	 ]*clgijh	%r6,200,620 <foo\+0x620>
+-.*:	ec 64 00 00 c8 7d [	 ]*clgijl	%r6,200,626 <foo\+0x626>
+-.*:	ec 64 00 00 c8 7d [	 ]*clgijl	%r6,200,62c <foo\+0x62c>
+-.*:	ec 66 00 00 c8 7d [	 ]*clgijne	%r6,200,632 <foo\+0x632>
+-.*:	ec 66 00 00 c8 7d [	 ]*clgijne	%r6,200,638 <foo\+0x638>
+-.*:	ec 68 00 00 c8 7d [	 ]*clgije	%r6,200,63e <foo\+0x63e>
+-.*:	ec 68 00 00 c8 7d [	 ]*clgije	%r6,200,644 <foo\+0x644>
+-.*:	ec 6a 00 00 c8 7d [	 ]*clgijnl	%r6,200,64a <foo\+0x64a>
+-.*:	ec 6a 00 00 c8 7d [	 ]*clgijnl	%r6,200,650 <foo\+0x650>
+-.*:	ec 6c 00 00 c8 7d [	 ]*clgijnh	%r6,200,656 <foo\+0x656>
+-.*:	ec 6c 00 00 c8 7d [	 ]*clgijnh	%r6,200,65c <foo\+0x65c>
++ *([\da-f]+):	ec 6a 00 00 c8 7f [	 ]*clijnl	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 62 00 00 c8 7f [	 ]*clijh	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 62 00 00 c8 7f [	 ]*clijh	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 64 00 00 c8 7f [	 ]*clijl	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 64 00 00 c8 7f [	 ]*clijl	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 66 00 00 c8 7f [	 ]*clijne	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 66 00 00 c8 7f [	 ]*clijne	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 68 00 00 c8 7f [	 ]*clije	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 68 00 00 c8 7f [	 ]*clije	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6a 00 00 c8 7f [	 ]*clijnl	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6a 00 00 c8 7f [	 ]*clijnl	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6c 00 00 c8 7f [	 ]*clijnh	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6c 00 00 c8 7f [	 ]*clijnh	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6a 00 00 c8 7d [	 ]*clgijnl	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 62 00 00 c8 7d [	 ]*clgijh	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 62 00 00 c8 7d [	 ]*clgijh	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 64 00 00 c8 7d [	 ]*clgijl	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 64 00 00 c8 7d [	 ]*clgijl	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 66 00 00 c8 7d [	 ]*clgijne	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 66 00 00 c8 7d [	 ]*clgijne	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 68 00 00 c8 7d [	 ]*clgije	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 68 00 00 c8 7d [	 ]*clgije	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6a 00 00 c8 7d [	 ]*clgijnl	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6a 00 00 c8 7d [	 ]*clgijnl	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6c 00 00 c8 7d [	 ]*clgijnh	%r6,200,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 6c 00 00 c8 7d [	 ]*clgijnh	%r6,200,\1 <foo\+0x\1>
+ .*:	b9 73 a0 67 [	 ]*clrtnl	%r6,%r7
+ .*:	b9 73 20 67 [	 ]*clrth	%r6,%r7
+ .*:	b9 73 20 67 [	 ]*clrth	%r6,%r7
+@@ -340,16 +340,16 @@ Disassembly of section .text:
+ .*:	ec 60 75 30 c0 71 [	 ]*clgitnh	%r6,30000
+ .*:	ec 60 75 30 c0 71 [	 ]*clgitnh	%r6,30000
+ .*:	eb 67 84 57 00 4c [	 ]*ecag	%r6,%r7,1111\(%r8\)
+-.*:	c4 6d 00 00 00 00 [	 ]*lrl	%r6,76c <foo\+0x76c>
+-.*:	c4 68 00 00 00 00 [	 ]*lgrl	%r6,772 <foo\+0x772>
+-.*:	c4 6c 00 00 00 00 [	 ]*lgfrl	%r6,778 <foo\+0x778>
++ *([\da-f]+):	c4 6d 00 00 00 00 [	 ]*lrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c4 68 00 00 00 00 [	 ]*lgrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c4 6c 00 00 00 00 [	 ]*lgfrl	%r6,\1 <foo\+0x\1>
+ .*:	e3 67 85 b3 01 75 [	 ]*laey	%r6,5555\(%r7,%r8\)
+ .*:	e3 67 85 b3 01 32 [	 ]*ltgf	%r6,5555\(%r7,%r8\)
+-.*:	c4 65 00 00 00 00 [	 ]*lhrl	%r6,78a <foo\+0x78a>
+-.*:	c4 64 00 00 00 00 [	 ]*lghrl	%r6,790 <foo\+0x790>
+-.*:	c4 6e 00 00 00 00 [	 ]*llgfrl	%r6,796 <foo\+0x796>
+-.*:	c4 62 00 00 00 00 [	 ]*llhrl	%r6,79c <foo\+0x79c>
+-.*:	c4 66 00 00 00 00 [	 ]*llghrl	%r6,7a2 <foo\+0x7a2>
++ *([\da-f]+):	c4 65 00 00 00 00 [	 ]*lhrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c4 64 00 00 00 00 [	 ]*lghrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c4 6e 00 00 00 00 [	 ]*llgfrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c4 62 00 00 00 00 [	 ]*llhrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c4 66 00 00 00 00 [	 ]*llghrl	%r6,\1 <foo\+0x\1>
+ .*:	e5 44 64 57 8a d0 [	 ]*mvhhi	1111\(%r6\),-30000
+ .*:	e5 4c 64 57 8a d0 [	 ]*mvhi	1111\(%r6\),-30000
+ .*:	e5 48 64 57 8a d0 [	 ]*mvghi	1111\(%r6\),-30000
+@@ -358,17 +358,17 @@ Disassembly of section .text:
+ .*:	c2 61 ff fe 79 60 [	 ]*msfi	%r6,-100000
+ .*:	c2 60 ff fe 79 60 [	 ]*msgfi	%r6,-100000
+ .*:	e3 a6 75 b3 01 36 [	 ]*pfd	10,5555\(%r6,%r7\)
+-.*:	c6 a2 00 00 00 00 [	 ]*pfdrl	10,7d8 <foo\+0x7d8>
++ *([\da-f]+):	c6 a2 00 00 00 00 [	 ]*pfdrl	10,\1 <foo\+0x\1>
+ .*:	ec 67 d2 dc e6 54 [	 ]*rnsbg	%r6,%r7,210,220,230
+ .*:	ec 67 d2 dc e6 57 [	 ]*rxsbg	%r6,%r7,210,220,230
+ .*:	ec 67 d2 dc e6 56 [	 ]*rosbg	%r6,%r7,210,220,230
+ .*:	ec 67 d2 14 e6 55 [	 ]*risbg	%r6,%r7,210,20,230
+ .*:	ec 67 d2 bc e6 55 [	 ]*risbgz	%r6,%r7,210,60,230
+ .*:	ec 67 d2 94 e6 55 [	 ]*risbgz	%r6,%r7,210,20,230
+-.*:	c4 6f 00 00 00 00 [	 ]*strl	%r6,802 <foo\+0x802>
+-.*:	c4 6b 00 00 00 00 [	 ]*stgrl	%r6,808 <foo\+0x808>
+-.*:	c4 67 00 00 00 00 [	 ]*sthrl	%r6,80e <foo\+0x80e>
+-.*:	c6 60 00 00 00 00 [	 ]*exrl	%r6,814 <foo\+0x814>
++ *([\da-f]+):	c4 6f 00 00 00 00 [	 ]*strl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c4 6b 00 00 00 00 [	 ]*stgrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c4 67 00 00 00 00 [	 ]*sthrl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c6 60 00 00 00 00 [	 ]*exrl	%r6,\1 <foo\+0x\1>
+ .*:	af ee 6d 05 [	 ]*mc	3333\(%r6\),238
+ .*:	b9 a2 00 60 [	 ]*ptf	%r6
+ .*:	b9 af 00 67 [	 ]*pfmf	%r6,%r7
+diff --git a/gas/testsuite/gas/s390/zarch-z196.d b/gas/testsuite/gas/s390/zarch-z196.d
+index 3889d32e02f..0f8bfeafa25 100644
+--- a/gas/testsuite/gas/s390/zarch-z196.d
++++ b/gas/testsuite/gas/s390/zarch-z196.d
+@@ -13,7 +13,7 @@ Disassembly of section .text:
+ .*:	b9 da 80 67 [	 ]*alhhlr	%r6,%r7,%r8
+ .*:	cc 6a 00 00 fd e8 [	 ]*alsih	%r6,65000
+ .*:	cc 6b 00 00 fd e8 [	 ]*alsihn	%r6,65000
+-.*:	cc 66 00 00 00 00 [	 ]*brcth	%r6,22 <foo\+0x22>
++ *([\da-f]+):	cc 66 00 00 00 00 [	 ]*brcth	%r6,\1 <foo\+0x\1>
+ .*:	b9 cd 00 67 [	 ]*chhr	%r6,%r7
+ .*:	b9 dd 00 67 [	 ]*chlr	%r6,%r7
+ .*:	e3 67 85 b3 01 cd [	 ]*chf	%r6,5555\(%r7,%r8\)
+diff --git a/gas/testsuite/gas/s390/zarch-z900.d b/gas/testsuite/gas/s390/zarch-z900.d
+index 8d292dfc11b..2848dc1eb7c 100644
+--- a/gas/testsuite/gas/s390/zarch-z900.d
++++ b/gas/testsuite/gas/s390/zarch-z900.d
+@@ -19,12 +19,12 @@ Disassembly of section .text:
+ .*:	b9 0a 00 96 [ 	]*algr	%r9,%r6
+ .*:	e3 95 af ff 00 46 [ 	]*bctg	%r9,4095\(%r5,%r10\)
+ .*:	b9 46 00 96 [ 	]*bctgr	%r9,%r6
+-.*:	a7 97 00 00 [	 ]*brctg	%r9,40 \<foo\+0x40\>
+-.*:	a7 67 00 00 [	 ]*brctg	%r6,44 <foo\+0x44>
+-.*:	ec 96 00 00 00 44 [ 	]*brxhg	%r9,%r6,48 <foo\+0x48>
+-.*:	ec 69 00 00 00 44 [	 ]*brxhg	%r6,%r9,4e <foo\+0x4e>
+-.*:	ec 96 00 00 00 45 [ 	]*brxlg	%r9,%r6,54 <foo\+0x54>
+-.*:	ec 69 00 00 00 45 [	 ]*brxlg	%r6,%r9,5a <foo\+0x5a>
++ *([\da-f]+):	a7 97 00 00 [	 ]*brctg	%r9,\1 <foo\+0x\1>
++ *([\da-f]+):	a7 67 00 00 [	 ]*brctg	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 96 00 00 00 44 [ 	]*brxhg	%r9,%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 69 00 00 00 44 [	 ]*brxhg	%r6,%r9,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 96 00 00 00 45 [ 	]*brxlg	%r9,%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	ec 69 00 00 00 45 [	 ]*brxlg	%r6,%r9,\1 <foo\+0x\1>
+ .*:	eb 96 5f ff 00 44 [ 	]*bxhg	%r9,%r6,4095\(%r5\)
+ .*:	eb 96 5f ff 00 45 [ 	]*bxleg	%r9,%r6,4095\(%r5\)
+ .*:	b3 a5 00 96 [ 	]*cdgbr	%f9,%r6
+diff --git a/gas/testsuite/gas/s390/zarch-zEC12.d b/gas/testsuite/gas/s390/zarch-zEC12.d
+index e25ac134e1f..96bf59b9fb0 100644
+--- a/gas/testsuite/gas/s390/zarch-zEC12.d
++++ b/gas/testsuite/gas/s390/zarch-zEC12.d
+@@ -57,12 +57,12 @@ Disassembly of section .text:
+ .*:	b9 8f 60 59 [	 ]*crdte	%r5,%r6,%r9
+ .*:	b9 8f 61 59 [	 ]*crdte	%r5,%r6,%r9,1
+ .*:	c5 a0 0c 00 00 0c [	 ]*bprp	10,136 <bar>,136 <bar>
+-.*:	c5 a0 00 00 00 00 [	 ]*bprp	10,124 <foo\+0x124>,124 <foo\+0x124>
++ *([\da-f]+):	c5 a0 00 00 00 00 [	 ]*bprp	10,\1 <foo\+0x\1>,\1 <foo\+0x\1>
+ [	 ]*125: R_390_PLT12DBL	bar\+0x1
+ [	 ]*127: R_390_PLT24DBL	bar\+0x3
+-.*:	c7 a0 00 00 00 00 [	 ]*bpp	10,12a <foo\+0x12a>,0
++ *([\da-f]+):	c7 a0 00 00 00 00 [	 ]*bpp	10,\1 <foo\+0x\1>,0
+ [	 ]*12e: R_390_PLT16DBL	bar\+0x4
+-.*:	c7 a0 00 00 00 00 [	 ]*bpp	10,130 <foo\+0x130>,0
++ *([\da-f]+):	c7 a0 00 00 00 00 [	 ]*bpp	10,\1 <foo\+0x\1>,0
+ [	 ]*134: R_390_PC16DBL	baz\+0x4
+ 
+ 
+--- binutils.orig/gas/testsuite/gas/s390/esa-z900.d	2024-11-13 10:32:16.825266042 +0000
++++ binutils-2.35.2/gas/testsuite/gas/s390/esa-z900.d	2024-11-13 10:37:48.206888790 +0000
+@@ -7,51 +7,51 @@ Disassembly of section .text:
+ 
+ .* <foo>:
+ .*:	c0 f4 00 00 00 00 [	 ]*jg	0 <foo>
+-.*:	c0 04 00 00 00 00 [	 ]*jgnop	6 <foo\+0x6>
+-.*:	c0 14 00 00 00 00 [	 ]*jgo	c <foo\+0xc>
+-.*:	c0 24 00 00 00 00 [	 ]*jgh	12 <foo\+0x12>
+-.*:	c0 24 00 00 00 00 [	 ]*jgh	18 <foo\+0x18>
+-.*:	c0 34 00 00 00 00 [	 ]*jgnle	1e <foo\+0x1e>
+-.*:	c0 44 00 00 00 00 [	 ]*jgl	24 <foo\+0x24>
+-.*:	c0 44 00 00 00 00 [	 ]*jgl	2a <foo\+0x2a>
+-.*:	c0 54 00 00 00 00 [	 ]*jgnhe	30 <foo\+0x30>
+-.*:	c0 64 00 00 00 00 [	 ]*jglh	36 <foo\+0x36>
+-.*:	c0 74 00 00 00 00 [	 ]*jgne	3c <foo\+0x3c>
+-.*:	c0 74 00 00 00 00 [	 ]*jgne	42 <foo\+0x42>
+-.*:	c0 84 00 00 00 00 [	 ]*jge	48 <foo\+0x48>
+-.*:	c0 84 00 00 00 00 [	 ]*jge	4e <foo\+0x4e>
+-.*:	c0 94 00 00 00 00 [	 ]*jgnlh	54 <foo\+0x54>
+-.*:	c0 a4 00 00 00 00 [	 ]*jghe	5a <foo\+0x5a>
+-.*:	c0 b4 00 00 00 00 [	 ]*jgnl	60 <foo\+0x60>
+-.*:	c0 b4 00 00 00 00 [	 ]*jgnl	66 <foo\+0x66>
+-.*:	c0 c4 00 00 00 00 [	 ]*jgle	6c <foo\+0x6c>
+-.*:	c0 d4 00 00 00 00 [	 ]*jgnh	72 <foo\+0x72>
+-.*:	c0 d4 00 00 00 00 [	 ]*jgnh	78 <foo\+0x78>
+-.*:	c0 e4 00 00 00 00 [	 ]*jgno	7e <foo\+0x7e>
+-.*:	c0 f4 00 00 00 00 [	 ]*jg	84 <foo\+0x84>
+-.*:	c0 14 00 00 00 00 [	 ]*jgo	8a <foo\+0x8a>
+-.*:	c0 24 00 00 00 00 [	 ]*jgh	90 <foo\+0x90>
+-.*:	c0 24 00 00 00 00 [	 ]*jgh	96 <foo\+0x96>
+-.*:	c0 34 00 00 00 00 [	 ]*jgnle	9c <foo\+0x9c>
+-.*:	c0 44 00 00 00 00 [	 ]*jgl	a2 <foo\+0xa2>
+-.*:	c0 44 00 00 00 00 [	 ]*jgl	a8 <foo\+0xa8>
+-.*:	c0 54 00 00 00 00 [	 ]*jgnhe	ae <foo\+0xae>
+-.*:	c0 64 00 00 00 00 [	 ]*jglh	b4 <foo\+0xb4>
+-.*:	c0 74 00 00 00 00 [	 ]*jgne	ba <foo\+0xba>
+-.*:	c0 74 00 00 00 00 [	 ]*jgne	c0 <foo\+0xc0>
+-.*:	c0 84 00 00 00 00 [	 ]*jge	c6 <foo\+0xc6>
+-.*:	c0 84 00 00 00 00 [	 ]*jge	cc <foo\+0xcc>
+-.*:	c0 94 00 00 00 00 [	 ]*jgnlh	d2 <foo\+0xd2>
+-.*:	c0 a4 00 00 00 00 [	 ]*jghe	d8 <foo\+0xd8>
+-.*:	c0 b4 00 00 00 00 [	 ]*jgnl	de <foo\+0xde>
+-.*:	c0 b4 00 00 00 00 [	 ]*jgnl	e4 <foo\+0xe4>
+-.*:	c0 c4 00 00 00 00 [	 ]*jgle	ea <foo\+0xea>
+-.*:	c0 d4 00 00 00 00 [	 ]*jgnh	f0 <foo\+0xf0>
+-.*:	c0 d4 00 00 00 00 [	 ]*jgnh	f6 <foo\+0xf6>
+-.*:	c0 e4 00 00 00 00 [	 ]*jgno	fc <foo\+0xfc>
+-.*:	c0 f4 00 00 00 00 [	 ]*jg	102 <foo\+0x102>
+-.*:	c0 65 00 00 00 00 [	 ]*brasl	%r6,108 <foo\+0x108>
+-.*:	c0 65 00 00 00 00 [	 ]*brasl	%r6,10e <foo\+0x10e>
++*([\da-f]+):	c0 04 00 00 00 00 [	 ]*jgnop	\1 <foo\+0x\1>
++*([\da-f]+):	c0 14 00 00 00 00 [	 ]*jgo	\1 <foo\+0x\1>
++*([\da-f]+):	c0 24 00 00 00 00 [	 ]*jgh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 24 00 00 00 00 [	 ]*jgh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 34 00 00 00 00 [	 ]*jgnle	\1 <foo\+0x\1>
++*([\da-f]+):	c0 44 00 00 00 00 [	 ]*jgl	\1 <foo\+0x\1>
++*([\da-f]+):	c0 44 00 00 00 00 [	 ]*jgl	\1 <foo\+0x\1>
++*([\da-f]+):	c0 54 00 00 00 00 [	 ]*jgnhe	\1 <foo\+0x\1>
++*([\da-f]+):	c0 64 00 00 00 00 [	 ]*jglh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 74 00 00 00 00 [	 ]*jgne	\1 <foo\+0x\1>
++*([\da-f]+):	c0 74 00 00 00 00 [	 ]*jgne	\1 <foo\+0x\1>
++*([\da-f]+):	c0 84 00 00 00 00 [	 ]*jge	\1 <foo\+0x\1>
++*([\da-f]+):	c0 84 00 00 00 00 [	 ]*jge	\1 <foo\+0x\1>
++*([\da-f]+):	c0 94 00 00 00 00 [	 ]*jgnlh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 a4 00 00 00 00 [	 ]*jghe	\1 <foo\+0x\1>
++*([\da-f]+):	c0 b4 00 00 00 00 [	 ]*jgnl	\1 <foo\+0x\1>
++*([\da-f]+):	c0 b4 00 00 00 00 [	 ]*jgnl	\1 <foo\+0x\1>
++*([\da-f]+):	c0 c4 00 00 00 00 [	 ]*jgle	\1 <foo\+0x\1>
++*([\da-f]+):	c0 d4 00 00 00 00 [	 ]*jgnh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 d4 00 00 00 00 [	 ]*jgnh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 e4 00 00 00 00 [	 ]*jgno	\1 <foo\+0x\1>
++*([\da-f]+):	c0 f4 00 00 00 00 [	 ]*jg	\1 <foo\+0x\1>
++*([\da-f]+):	c0 14 00 00 00 00 [	 ]*jgo	\1 <foo\+0x\1>
++*([\da-f]+):	c0 24 00 00 00 00 [	 ]*jgh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 24 00 00 00 00 [	 ]*jgh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 34 00 00 00 00 [	 ]*jgnle	\1 <foo\+0x\1>
++*([\da-f]+):	c0 44 00 00 00 00 [	 ]*jgl	\1 <foo\+0x\1>
++*([\da-f]+):	c0 44 00 00 00 00 [	 ]*jgl	\1 <foo\+0x\1>
++*([\da-f]+):	c0 54 00 00 00 00 [	 ]*jgnhe	\1 <foo\+0x\1>
++*([\da-f]+):	c0 64 00 00 00 00 [	 ]*jglh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 74 00 00 00 00 [	 ]*jgne	\1 <foo\+0x\1>
++*([\da-f]+):	c0 74 00 00 00 00 [	 ]*jgne	\1 <foo\+0x\1>
++*([\da-f]+):	c0 84 00 00 00 00 [	 ]*jge	\1 <foo\+0x\1>
++*([\da-f]+):	c0 84 00 00 00 00 [	 ]*jge	\1 <foo\+0x\1>
++*([\da-f]+):	c0 94 00 00 00 00 [	 ]*jgnlh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 a4 00 00 00 00 [	 ]*jghe	\1 <foo\+0x\1>
++*([\da-f]+):	c0 b4 00 00 00 00 [	 ]*jgnl	\1 <foo\+0x\1>
++*([\da-f]+):	c0 b4 00 00 00 00 [	 ]*jgnl	\1 <foo\+0x\1>
++*([\da-f]+):	c0 c4 00 00 00 00 [	 ]*jgle	\1 <foo\+0x\1>
++*([\da-f]+):	c0 d4 00 00 00 00 [	 ]*jgnh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 d4 00 00 00 00 [	 ]*jgnh	\1 <foo\+0x\1>
++*([\da-f]+):	c0 e4 00 00 00 00 [	 ]*jgno	\1 <foo\+0x\1>
++*([\da-f]+):	c0 f4 00 00 00 00 [	 ]*jg	\1 <foo\+0x\1>
++*([\da-f]+):	c0 65 00 00 00 00 [	 ]*brasl	%r6,\1 <foo\+0x\1>
++*([\da-f]+):	c0 65 00 00 00 00 [	 ]*brasl	%r6,\1 <foo\+0x\1>
+ .*:	01 0b [	 ]*tam
+ .*:	01 0c [	 ]*sam24
+ .*:	01 0d [	 ]*sam31
+@@ -62,7 +62,7 @@ Disassembly of section .text:
+ .*:	b9 97 00 69 [	 ]*dlr	%r6,%r9
+ .*:	b9 98 00 69 [	 ]*alcr	%r6,%r9
+ .*:	b9 99 00 69 [	 ]*slbr	%r6,%r9
+-.*:	c0 60 00 00 00 00 [	 ]*larl	%r6,136 <foo\+0x136>
++*([\da-f]+):	c0 60 00 00 00 00 [	 ]*larl	%r6,\1 <foo\+0x\1>
+ .*:	e3 65 af ff 00 1e [	 ]*lrv	%r6,4095\(%r5,%r10\)
+ .*:	e3 65 af ff 00 1f [	 ]*lrvh	%r6,4095\(%r5,%r10\)
+ .*:	e3 65 af ff 00 3e [	 ]*strv	%r6,4095\(%r5,%r10\)

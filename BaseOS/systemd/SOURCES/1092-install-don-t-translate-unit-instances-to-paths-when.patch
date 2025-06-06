@@ -1,0 +1,105 @@
+From e60e2e0344001483c85424698546e9465614befb Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 6 Dec 2023 16:24:21 +0100
+Subject: [PATCH] install: don't translate unit instances to paths when
+ reenabling them
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+For unit instances install_info_discover() returns path to the template,
+which then generates confusing errors when passed to
+do_unit_file_enable():
+
+~# build/systemctl --root=/tmp/systemctl-test.N9ysbz reenable templ1@two.service
+Unit name: templ1@two.service; p: /etc/systemd/system/templ1@.service
+Removed "/tmp/systemctl-test.N9ysbz/etc/systemd/system/services.target.wants/templ1@two.service".
+Failed to reenable templ1@.service, destination unit services.target is a non-template unit.
+
+This can also be seen with a different reproducer using getty@.service
+and a simple bind mount to / - there's no error this time, but it tries
+to create a symlink for the default instance (from DefaultInstance=tty1),
+which is also incorrect:
+
+~# SYSTEMD_LOG_LEVEL=debug systemctl --root /mnt/bindroot/ reenable getty@test.service
+Symlink /mnt/bindroot/etc/systemd/system/getty.target.wants/getty@tty1.service → /usr/lib/systemd/system/getty@.service already exists
+
+Follow-up to: 29a7c59abbe
+Resolves upstream issue #24740
+
+(cherry picked from commit fe6e0cfa19dd1de4ac599ae207182fd556adcfa7)
+
+Resolves: RHEL-5956
+---
+ src/shared/install.c          |  2 +-
+ test/test-systemctl-enable.sh | 30 +++++++++++++++++++++++++++++-
+ 2 files changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/src/shared/install.c b/src/shared/install.c
+index 8d4aa5ab2c..eaad368d1c 100644
+--- a/src/shared/install.c
++++ b/src/shared/install.c
+@@ -2875,7 +2875,7 @@ static int normalize_linked_files(
+                         return log_debug_errno(SYNTHETIC_ERRNO(EISDIR),
+                                                "Unexpected path to a directory \"%s\", refusing.", *a);
+ 
+-                if (!is_path(*a)) {
++                if (!is_path(*a) && !unit_name_is_valid(*a, UNIT_NAME_INSTANCE)) {
+                         r = install_info_discover(&ctx, lp, n, SEARCH_LOAD|SEARCH_FOLLOW_CONFIG_SYMLINKS, &i, NULL, NULL);
+                         if (r < 0)
+                                 log_debug_errno(r, "Failed to discover unit \"%s\", operating on name: %m", n);
+diff --git a/test/test-systemctl-enable.sh b/test/test-systemctl-enable.sh
+index 7d5667f297..a0a183e92b 100644
+--- a/test/test-systemctl-enable.sh
++++ b/test/test-systemctl-enable.sh
+@@ -97,7 +97,7 @@ test ! -e "$root/etc/systemd/system/test1-badalias.target"
+ test ! -e "$root/etc/systemd/system/test1-badalias.socket"
+ test -h "$root/etc/systemd/system/test1-goodalias2.service"
+ 
+-: '-------aliases in reeanble----------------------------------'
++: '-------aliases in reeanable----------------------------------'
+ ( ! "$systemctl" --root="$root" reenable test1 )
+ test -h "$root/etc/systemd/system/default.target.wants/test1.service"
+ test ! -e "$root/etc/systemd/system/test1-goodalias.service"
+@@ -246,6 +246,29 @@ islink "$root/etc/systemd/system/paths.target.wants/link1.path" "/link1.path"
+ islink "$root/etc/systemd/system/link1.path" "/link1.path"
+ islink "$root/etc/systemd/system/paths.target.wants/link1.path" "/link1.path"
+ 
++: '-------link instance and enable-------------------------------------'
++cat >"$root/link-instance@.service" <<EOF
++[Service]
++ExecStart=true
++[Install]
++WantedBy=services.target
++EOF
++
++"$systemctl" --root="$root" link '/link-instance@.service'
++islink "$root/etc/systemd/system/link-instance@.service" "/link-instance@.service"
++
++"$systemctl" --root="$root" enable 'link-instance@first.service'
++islink "$root/etc/systemd/system/link-instance@first.service" "/link-instance@.service"
++islink "$root/etc/systemd/system/services.target.wants/link-instance@first.service" "/link-instance@.service"
++
++SYSTEMD_LOG_LEVEL=debug "$systemctl" --root="$root" reenable 'link-instance@first.service'
++islink "$root/etc/systemd/system/link-instance@first.service" "/link-instance@.service"
++islink "$root/etc/systemd/system/services.target.wants/link-instance@first.service" "/link-instance@.service"
++
++"$systemctl" --root="$root" disable 'link-instance@first.service'
++test ! -h "$root/etc/systemd/system/link-instance@first.service"
++test ! -h "$root/etc/systemd/system/services.target.wants/link-instance@first.service"
++
+ : '-------manual link------------------------------------------'
+ cat >"$root/link3.suffix" <<EOF
+ [Install]
+@@ -314,6 +337,11 @@ test ! -h "$root/etc/systemd/system/services.target.wants/templ1@.service"
+ islink "$root/etc/systemd/system/services.target.wants/templ1@one.service" "/etc/systemd/system/templ1@.service"
+ islink "$root/etc/systemd/system/services.target.wants/templ1@two.service" "/etc/systemd/system/templ1@.service"
+ 
++"$systemctl" --root="$root" reenable 'templ1@two.service'
++test ! -h "$root/etc/systemd/system/services.target.wants/templ1@.service"
++islink "$root/etc/systemd/system/services.target.wants/templ1@one.service" "/etc/systemd/system/templ1@.service"
++islink "$root/etc/systemd/system/services.target.wants/templ1@two.service" "/etc/systemd/system/templ1@.service"
++
+ "$systemctl" --root="$root" disable 'templ1@one.service'
+ test ! -h "$root/etc/systemd/system/services.target.wants/templ1@.service"
+ test ! -h "$root/etc/systemd/system/services.target.wants/templ1@one.service"

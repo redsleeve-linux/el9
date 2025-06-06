@@ -21,7 +21,7 @@
 Name: systemd
 Url: https://systemd.io
 Version: 252
-Release: 46%{?dist}.3.redsleeve
+Release: 51%{?dist}
 # For a breakdown of the licensing, see README
 License: LGPLv2+ and MIT and GPLv2+
 Summary: System and Service Manager
@@ -1125,8 +1125,74 @@ Patch1039: 1039-efi-add-helper-API-for-detecting-confidential-virtua.patch
 Patch1040: 1040-efi-don-t-pull-kernel-cmdline-from-SMBIOS-in-a-confi.patch
 Patch1041: 1041-Fix-detection-of-TDX-confidential-VM-on-Azure-platfo.patch
 Patch1042: 1042-ukify-Skip-test-on-architectures-without-UEFI.patch
-
-Patch2000: arm32-patch-for-disable-service.patch
+Patch1043: 1043-man-using-WantedBy-default.target-is-not-a-good-idea.patch
+Patch1044: 1044-logind-tighten-for-which-classes-of-sessions-we-do-s.patch
+Patch1045: 1045-Fix-configuration-for-Packit-1.0.0.patch
+Patch1046: 1046-udev-net_id-introduce-naming-scheme-for-RHEL-9.6.patch
+Patch1047: 1047-hwdb-Fix-accelerometer-mount-matrix-for-ASUS-T100TAS.patch
+Patch1048: 1048-hwdb.d-60-keyboard.hwdb-add-Clevo-mic-mute-quirk-for.patch
+Patch1049: 1049-hwdb-add-entry-for-Dell-AlpsPS-2-ALPS-DualPoint-Touc.patch
+Patch1050: 1050-hwdb-Mark-Apple-Wireless-keyboards-as-not-having-Num.patch
+Patch1051: 1051-update-keyboard-hwdb-to-add-acer-Predator-PHN16-72.patch
+Patch1052: 1052-hwdb-death-to-tabs.patch
+Patch1053: 1053-hwdb.d-60-keyboard.hwdb-add-Clevo-mic-mute-quirk-for.patch
+Patch1054: 1054-Add-ACCEL_MOUNT_MATRIX-for-Chuwi-Hi10-Max.patch
+Patch1055: 1055-Add-HUAWEI-MateBook-D-15-AMD-ACCEL-properties.patch
+Patch1056: 1056-hwdb-add-Kensington-SlimBlade-Pro-trackball-Bluetoot.patch
+Patch1057: 1057-hwdb-Add-accel-orientation-quirk-for-the-IdeaPad-Due.patch
+Patch1058: 1058-hwdb-add-keymaps-for-Acer-Nitro-5-AN515-47-34493.patch
+Patch1059: 1059-hwdb-make-key-map-match-comment-for-one-laptop.patch
+Patch1060: 1060-hwdb-there-s-KEY_BRIGHTNESS_AUTO-these-days-hence-ho.patch
+Patch1061: 1061-hwdb-use-KEY_ROTATE_DISPLAY-for-various-cases-of-dis.patch
+Patch1062: 1062-hwbd-use-newer-KEY_PICKUP_PHONE-KEY_HANGUP_PHONE-KEY.patch
+Patch1063: 1063-hwdb-add-SCAI-SKU-prefix-for-Samsung-keyboard-mappin.patch
+Patch1064: 1064-tree-wide-drop-doubled-empty-lines.patch
+Patch1065: 1065-hwdb-move-key-66-65-handling-from-specific-to-generi.patch
+Patch1066: 1066-hwdb-fix-key-toggle-touchpad-and-programmable-buttom.patch
+Patch1067: 1067-hwdb-add-Stream-Deck-Neo-34903.patch
+Patch1068: 1068-hwdb-update-autosuspend-rules.patch
+Patch1069: 1069-hwdb-import-newest-autosuspend-rules-from-chromeos.patch
+Patch1070: 1070-update-hwdb.patch
+Patch1071: 1071-Update-hwdb.patch
+Patch1072: 1072-hwdb-fix-broken-numpad-paren-keys-on-Lenovo-Thinkboo.patch
+Patch1073: 1073-Update-hwdb.patch
+Patch1074: 1074-hwdb-add-new-Cube-Mix-Plus-i18D-rotation-info.patch
+Patch1075: 1075-hwdb-Add-quirk-for-Logitech-MX-Keys-for-Mac.patch
+Patch1076: 1076-hwdb-add-support-for-PineTab2-to-60-sensor.hwdb-3530.patch
+Patch1077: 1077-hwdb-add-entry-for-Chuwi-Hi10-X1-35331.patch
+Patch1078: 1078-hwdb-update.patch
+Patch1079: 1079-hwdb-Make-3D-mice-work-out-of-the-box.patch
+Patch1080: 1080-hwdb-Add-Chuwi-MiniBook-X-trackpad-fuzz.patch
+Patch1081: 1081-Update-hwdb.patch
+Patch1082: 1082-hwdb-disable-inclusion-of-the-PCI-domain-in-MANA-net.patch
+Patch1083: 1083-hwdb-move-down-touchpad-toggle-section-from-generic-.patch
+Patch1084: 1084-hwdb-add-scancodes-for-HP-Elitebook-2170p-runnning-c.patch
+Patch1085: 1085-hwdb-Make-remote-controllable-lights-work-out-of-the.patch
+Patch1086: 1086-hwdb-fix-key-toggle-touchpad-for-VAIO-VJFH52-35645.patch
+Patch1087: 1087-hwdb-comment-out-the-entry-for-Logitech-MX-Keys-for-.patch
+Patch1088: 1088-60-sensor.hwdb-Loosen-model-mask-to-include-entire-s.patch
+Patch1089: 1089-Correct-ACCEL_MOUNT_MATRIX-for-Chuwi-Hi10-Max.patch
+Patch1090: 1090-hwdb-Add-macro-keys-for-HP-430-Programmable-Wireless.patch
+Patch1091: 1091-journal-again-create-user-journals-for-users-with-hi.patch
+Patch1092: 1092-install-don-t-translate-unit-instances-to-paths-when.patch
+Patch1093: 1093-test-systemctl-enable-fix-typo.patch
+Patch1094: 1094-udev-Handle-PTP-device-symlink-properly-on-udev-acti.patch
+Patch1095: 1095-systemctl-print-warning-about-missing-proc-only-as-d.patch
+Patch1096: 1096-repart-avoid-use-of-uninitialized-TPM2B_PUBLIC-data.patch
+Patch1097: 1097-ci-use-ubuntu-22-04-for-deploy-of-man-pages.patch
+Patch1098: 1098-man-tmpfiles-fix-off-by-one-in-example.patch
+Patch1099: 1099-test-drop-removed-SCSI-passthrough-feature.patch
+Patch1100: 1100-nspawn-call-json_dispatch-with-a-correct-pointer.patch
+Patch1101: 1101-varlink-json-introduce-new-varlink_dispatch-helper.patch
+Patch1102: 1102-json-add-json_dispatch_const_user_group_name.patch
+Patch1103: 1103-sd-varlink-add-new-sd_varlink_error_is_invalid_param.patch
+Patch1104: 1104-userdb-return-ESRCH-if-userdb-service-refuses-a-user.patch
+Patch1105: 1105-test-rename-assert.sh-to-util.sh.patch
+Patch1106: 1106-core-Don-t-GC-unit-if-it-is-in-cgroup_empty_queue.patch
+Patch1107: 1107-core-Handle-cgroup-pruning-in-on_cgroup_empty_event.patch
+Patch1108: 1108-Fix-failing-test.patch
+Patch1109: 1109-unit-don-t-gc-unit-in-oom-queue.patch
+Patch1110: 1110-core-do-not-GC-units-jobs-that-are-in-the-D-Bus-queu.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -1184,7 +1250,7 @@ BuildRequires: libseccomp-devel
 BuildRequires: meson >= 0.43
 BuildRequires: gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires: valgrind-devel
+BuildRequires: valgrind-devel
 BuildRequires: pkgconfig(bash-completion)
 BuildRequires: pkgconfig(tss2-esys)
 BuildRequires: pkgconfig(tss2-rc)
@@ -1758,9 +1824,10 @@ getent group cdrom &>/dev/null || groupadd -r -g 11 cdrom &>/dev/null || :
 getent group utmp &>/dev/null || groupadd -r -g 22 utmp &>/dev/null || :
 getent group tape &>/dev/null || groupadd -r -g 33 tape &>/dev/null || :
 getent group dialout &>/dev/null || groupadd -r -g 18 dialout &>/dev/null || :
-getent group input &>/dev/null || groupadd -r input &>/dev/null || :
+getent group input &>/dev/null || groupadd -r -g 104 input &>/dev/null || :
 getent group kvm &>/dev/null || groupadd -r -g 36 kvm &>/dev/null || :
-getent group render &>/dev/null || groupadd -r render &>/dev/null || :
+getent group render &>/dev/null || groupadd -r -g 105 render &>/dev/null || :
+getent group sgx &>/dev/null || groupadd -r -g 106 sgx &>/dev/null || :
 getent group systemd-journal &>/dev/null || groupadd -r -g 190 systemd-journal 2>&1 || :
 
 getent group systemd-coredump &>/dev/null || groupadd -r systemd-coredump 2>&1 || :
@@ -1823,13 +1890,6 @@ fi
 
 %systemd_postun_with_restart systemd-timedated.service systemd-hostnamed.service systemd-journald.service systemd-localed.service
 
-%posttrans
-if [ $1 -eq 1 ]; then
-    # Initial installation
-    # HACK: apparently there are RPM dependency loops which prevent us from using semodule in %%post so insert policy module again
-    %selinux_modules_install -s %{selinuxtype} %{_datadir}/selinux/packages/%{selinuxtype}/%{modulename}.pp.bz2
-fi
-
 %post libs
 %{?ldconfig}
 
@@ -1872,7 +1932,7 @@ fi
 
 %{?ldconfig:%postun libs -p %ldconfig}
 
-%global udev_services systemd-udev{d,-settle,-trigger}.service systemd-udevd-{control,kernel}.socket %{?have_gnu_efi:systemd-boot-update.service}
+%global udev_services systemd-udev{d,-settle,-trigger}.service systemd-udevd-{control,kernel}.socket %{?have_gnu_efi:systemd-boot-update.service} systemd-pstore.service
 
 %post udev
 # Move old stuff around in /var/lib
@@ -2010,22 +2070,88 @@ systemd-hwdb update &>/dev/null || :
 %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
 
 %changelog
-* Sun Mar 23 2025 Jacco Ligthart <jacco@redsleeve.org> - 252-46.3.redsleeve
-- removed valgrind
-- added a patch form upstrem to de able to disable services.
-
-* Tue Mar 18 2025 Release Engineering <releng@rockylinux.org> - 252-46
+* Tue Apr 22 2025 Release Engineering <releng@rockylinux.org> - 252-51
 - Set support URL to the wiki
 - Set sbat mail to security@rockylinux.org
 
-* Fri Jan 31 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-46.3
-- get rid of SELinux policy module (RHEL-76033)
+* Tue Jan 28 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-51
+- ci: use ubuntu 22:04 for deploy of man pages (RHEL-70884)
+- man/tmpfiles: fix off-by-one in example (RHEL-74015)
+- test: drop removed SCSI passthrough feature (RHEL-70884)
+- nspawn: call json_dispatch() with a correct pointer (RHEL-55266)
+- varlink,json: introduce new varlink_dispatch() helper (RHEL-55266)
+- json: add json_dispatch_const_user_group_name() (RHEL-55266)
+- sd-varlink: add new sd_varlink_error_is_invalid_parameter() helper (RHEL-55266)
+- userdb: return ESRCH if userdb service refuses a user/group name as invalid (RHEL-55266)
+- test: rename assert.sh to util.sh (RHEL-55301)
+- core: Don't GC unit if it is in cgroup_empty_queue (RHEL-55301)
+- core: Handle cgroup pruning in on_cgroup_empty_event (RHEL-55301)
+- Fix failing test (RHEL-55301)
+- unit: don't gc unit in oom queue (RHEL-55301)
+- core: do not GC units/jobs that are in the D-Bus queue (RHEL-55301)
 
-* Tue Sep 10 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-46.2
-- add %%posttrans scriptlet to make sure our SELinux policy module is actually installed (RHEL-46339)
+* Tue Jan 14 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-50
+- journal: again create user journals for users with high uids (RHEL-70103)
+- install: don't translate unit instances to paths when reenabling them (RHEL-5956)
+- test-systemctl-enable: fix typo (RHEL-5956)
+- udev: Handle PTP device symlink properly on udev action 'change' (RHEL-59088)
+- systemctl: print warning about missing /proc only as debug message (RHEL-3906)
+- repart: avoid use of uninitialized TPM2B_PUBLIC data (RHEL-56793)
 
-* Tue Sep 03 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-46.1
-- version bump (RHEL-56019)
+* Tue Jan 07 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-49
+- logind: tighten for which classes of sessions we do stop-on-idle (RHEL-24340)
+- Fix configuration for Packit 1.0.0 (RHEL-70884)
+- udev/net_id: introduce naming scheme for RHEL-9.6 (RHEL-25515)
+- hwdb: Fix accelerometer mount matrix for ASUS T100TAS (RHEL-49810)
+- hwdb.d/60-keyboard.hwdb: add Clevo mic mute quirk for V5x dGPU (RHEL-49810)
+- hwdb: add entry for Dell AlpsPS/2 ALPS DualPoint TouchPad (RHEL-49810)
+- hwdb: Mark Apple Wireless keyboards as not having NumLock LED (RHEL-49810)
+- update keyboard hwdb to add acer Predator PHN16-72 (RHEL-49810)
+- hwdb: death to tabs! (RHEL-49810)
+-  hwdb.d/60-keyboard.hwdb: add Clevo mic mute quirk for V5x iGPU, NV41PZ (RHEL-49810)
+- Add ACCEL_MOUNT_MATRIX for Chuwi Hi10 Max. (RHEL-49810)
+- Add HUAWEI MateBook D 15 AMD ACCEL properties (RHEL-49810)
+- hwdb: add Kensington SlimBlade Pro trackball (Bluetooth mode) (RHEL-49810)
+- hwdb: Add accel orientation quirk for the IdeaPad Duet 3 10IGL5-LTE (RHEL-49810)
+- hwdb: add keymaps for Acer Nitro 5 AN515-47 (#34493) (RHEL-49810)
+- hwdb: make key map match comment for one laptop (RHEL-49810)
+- hwdb: there's KEY_BRIGHTNESS_AUTO these days, hence hook it up where a FIXME suggests that (RHEL-49810)
+- hwdb: use KEY_ROTATE_DISPLAY for various cases of display rotation keys (RHEL-49810)
+- hwbd: use newer KEY_PICKUP_PHONE, KEY_HANGUP_PHONE, KEY_SELECTIVE_SCREENSHOT, KEY_NOTIFICATION_CENTER keycodes where appropriate (RHEL-49810)
+- hwdb: add SCAI SKU prefix for Samsung keyboard mapping (#34648) (RHEL-49810)
+- tree-wide: drop doubled empty lines (RHEL-49810)
+- hwdb: move key 66/65 handling from specific to generic HP laptop coverage (RHEL-49810)
+- hwdb: fix key toggle touchpad and programmable buttom for Positivo V142N (#34725) (RHEL-49810)
+- hwdb: add Stream Deck Neo (#34903) (RHEL-49810)
+- hwdb: update autosuspend rules (RHEL-49810)
+- hwdb: import newest autosuspend rules from chromeos (RHEL-49810)
+- update hwdb (RHEL-49810)
+- Update hwdb (RHEL-49810)
+- hwdb: fix broken numpad paren keys on Lenovo Thinkbook 16 G6+ 2024 (RHEL-49810)
+- Update hwdb (RHEL-49810)
+- hwdb: add new Cube Mix Plus (i18D) rotation info (RHEL-49810)
+- hwdb: Add quirk for Logitech MX Keys for Mac (RHEL-49810)
+- hwdb: add support for PineTab2 to 60-sensor.hwdb (#35304) (RHEL-49810)
+- hwdb: add entry for Chuwi Hi10 X1 (#35331) (RHEL-49810)
+- hwdb: update (RHEL-49810)
+- hwdb: Make 3D mice work out-of-the-box (RHEL-49810)
+- hwdb: Add Chuwi MiniBook X trackpad fuzz (RHEL-49810)
+- Update hwdb (RHEL-49810)
+- hwdb: disable inclusion of the PCI domain in MANA network interface naming (RHEL-49810)
+- hwdb: move down touchpad toggle section from generic to product specific (RHEL-49810)
+- hwdb: add scancodes for HP Elitebook 2170p runnning coreboot (RHEL-49810)
+- hwdb: Make remote controllable lights work out-of-the-box (RHEL-49810)
+- hwdb: fix key toggle touchpad for VAIO VJFH52 (#35645) (RHEL-49810)
+- hwdb: comment out the entry for Logitech MX Keys for Mac (RHEL-49810)
+- 60-sensor.hwdb: Loosen model mask to include entire series (RHEL-49810)
+- Correct ACCEL_MOUNT_MATRIX for Chuwi Hi10 Max (RHEL-49810)
+- hwdb: Add macro keys for HP 430 Programmable Wireless Keypad (RHEL-49810)
+
+* Tue Oct 15 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-48
+- man: using WantedBy=default.target is not a good idea (RHEL-36531)
+
+* Tue Sep 10 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-47
+- get rid of SELinux policy module (RHEL-58179)
 
 * Fri Aug 30 2024 systemd maintenance team <systemd-maint@redhat.com> - 252-46
 - ukify: Skip test on architectures without UEFI (RHEL-56019)

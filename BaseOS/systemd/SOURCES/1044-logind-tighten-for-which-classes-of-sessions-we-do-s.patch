@@ -1,0 +1,47 @@
+From 855452031835240ca981fe74faa3fce8f32642b7 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Thu, 4 Jan 2024 13:40:00 +0100
+Subject: [PATCH] logind: tighten for which classes of sessions we do
+ stop-on-idle
+
+We only want to do this for fully set up, interactive sessions, i.e.
+user and user-early, but not for any others, hence restrict the rules a
+bit.
+
+Follow-up for: 508b4786e8592e82eb4832549f74aaa54335d14c
+
+(cherry picked from commit ad23439eae718ac3634f260be0d29e01445983a8)
+
+Related: RHEL-24340
+---
+ src/login/logind-session.c | 2 +-
+ src/login/logind-session.h | 3 +++
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/login/logind-session.c b/src/login/logind-session.c
+index af5817e2b6..8c8dd0d43e 100644
+--- a/src/login/logind-session.c
++++ b/src/login/logind-session.c
+@@ -735,7 +735,7 @@ static int session_setup_stop_on_idle_timer(Session *s) {
+ 
+         assert(s);
+ 
+-        if (s->manager->stop_idle_session_usec == USEC_INFINITY || IN_SET(s->class, SESSION_GREETER, SESSION_LOCK_SCREEN))
++        if (s->manager->stop_idle_session_usec == USEC_INFINITY || !SESSION_CLASS_CAN_STOP_ON_IDLE(s->class))
+                 return 0;
+ 
+         r = sd_event_add_time_relative(
+diff --git a/src/login/logind-session.h b/src/login/logind-session.h
+index 4c28607986..5ee059aa4f 100644
+--- a/src/login/logind-session.h
++++ b/src/login/logind-session.h
+@@ -27,6 +27,9 @@ typedef enum SessionClass {
+         _SESSION_CLASS_INVALID = -EINVAL,
+ } SessionClass;
+ 
++/* Which sessions classes should be subject to stop-in-idle */
++#define SESSION_CLASS_CAN_STOP_ON_IDLE(class) (IN_SET((class), SESSION_USER))
++
+ typedef enum SessionType {
+         SESSION_UNSPECIFIED,
+         SESSION_TTY,

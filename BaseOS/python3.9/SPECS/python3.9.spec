@@ -17,12 +17,8 @@ URL: https://www.python.org/
 #global prerel ...
 %global upstream_version %{general_version}%{?prerel}
 Version: %{general_version}%{?prerel:~%{prerel}}
-Release: 1%{?dist}.redsleeve
+Release: 2%{?dist}
 License: Python
-
-%ifarch armv6hl
-%define _gnu "-gnueabihf"
-%endif
 
 
 # ==================================
@@ -430,7 +426,7 @@ Patch397: 00397-tarfile-filter.patch
 #
 # Upstream PR: https://github.com/python/cpython/pull/111116
 #
-# Second patch implmenets the possibility to restore the old behavior via
+# This patch implements the possibility to restore the old behavior via
 # config file or environment variable.
 Patch415: 00415-cve-2023-27043-gh-102988-reject-malformed-addresses-in-email-parseaddr-111116.patch
 
@@ -440,6 +436,10 @@ Patch415: 00415-cve-2023-27043-gh-102988-reject-malformed-addresses-in-email-par
 # Feeding the parser by too small chunks defers parsing to prevent
 # CVE-2023-52425. Future versions of Expat may be more reactive.
 Patch422: 00422-fix-tests-for-xmlpullparser-with-expat-2-6-0.patch
+
+# 00450 # 4ab8663661748eb994c09e4ae89f59eb84c5d3ea
+# CVE-2025-0938: Disallow square brackets ([ and ]) in domain names for parsed URLs
+Patch450: 00450-cve-2025-0938-disallow-square-brackets-and-in-domain-names-for-parsed-urls.patch
 
 # (New patches go here ^^^)
 #
@@ -1042,10 +1042,10 @@ InstallPython() {
 %endif # with gdb_hooks
 
   # Rename the -devel script that differs on different arches to arch specific name
-#  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
-#  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
-#    %{buildroot}%{_bindir}/python${LDVersion}-config
-#    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
+  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
+  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
+    %{buildroot}%{_bindir}/python${LDVersion}-config
+    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
 
   # Make python3-devel multilib-ready
   mv %{buildroot}%{_includedir}/python${LDVersion}/pyconfig.h \
@@ -1230,7 +1230,7 @@ ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python
 ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python%{pybasever}
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python-config
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-config
-#ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
+ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
 # There were also executables with %%{LDVERSION_optimized} in RHEL 8,
 # but since Python 3.8 %%{LDVERSION_optimized} == %%{pybasever}.
 # We list both in the %%files section to assert this.
@@ -1238,7 +1238,7 @@ ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-p
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python-debug
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}
 ln -s %{_bindir}/python%{LDVERSION_debug}-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-config
-#ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
+ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
 %endif
 %endif
 
@@ -1622,7 +1622,7 @@ CheckPython optimized
 
 %{_bindir}/python%{pybasever}-config
 %{_bindir}/python%{LDVERSION_optimized}-config
-#%{_bindir}/python%{LDVERSION_optimized}-*-config
+%{_bindir}/python%{LDVERSION_optimized}-*-config
 %{_libdir}/libpython%{LDVERSION_optimized}.so
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}.pc
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}-embed.pc
@@ -1633,8 +1633,8 @@ CheckPython optimized
 %{_libexecdir}/platform-python-config
 %{_libexecdir}/platform-python%{pybasever}-config
 %{_libexecdir}/platform-python%{LDVERSION_optimized}-config
-#%{_libexecdir}/platform-python%{pybasever}-*-config
-#%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
+%{_libexecdir}/platform-python%{pybasever}-*-config
+%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
 %endif
 
 
@@ -1794,7 +1794,7 @@ CheckPython optimized
 %{pylibdir}/config-%{LDVERSION_debug}-%{platform_triplet}
 %{_includedir}/python%{LDVERSION_debug}
 %{_bindir}/python%{LDVERSION_debug}-config
-#%{_bindir}/python%{LDVERSION_debug}-*-config
+%{_bindir}/python%{LDVERSION_debug}-*-config
 %{_libdir}/libpython%{LDVERSION_debug}.so
 %{_libdir}/libpython%{LDVERSION_debug}.so.%{py_SOVERSION}
 %{_libdir}/pkgconfig/python-%{LDVERSION_debug}.pc
@@ -1804,7 +1804,7 @@ CheckPython optimized
 %{_libexecdir}/platform-python-debug
 %{_libexecdir}/platform-python%{LDVERSION_debug}
 %{_libexecdir}/platform-python%{LDVERSION_debug}-config
-#%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
+%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
 %endif
 
 # Analog of the -tools subpackage's files:
@@ -1845,18 +1845,19 @@ CheckPython optimized
 # ======================================================
 
 %changelog
-* Tue Jan 21 2025 Jacco Ligthart <jacco@redsleeve.org> - 3.9.21-1.redsleeve
-- three minor changes for armv6
+* Mon Feb 10 2025 Charalampos Stratakis <cstratak@redhat.com> - 3.9.21-2
+- Security fix for CVE-2025-0938
+Resolves: RHEL-77263
 
-* Thu Dec 05 2024 Tomáš Hrnčiar <thrnciar@redhat.com> - 3.9.21-1
+* Wed Dec 04 2024 Tomáš Hrnčiar <thrnciar@redhat.com> - 3.9.21-1
 - Update to 3.9.21
 - Security fix for CVE-2024-11168 and CVE-2024-9287
-Resolves: RHEL-64888
-Resolves: RHEL-67259
+Resolves: RHEL-64889
+Resolves: RHEL-69942
 
-* Wed Sep 11 2024 Lumír Balhar <lbalhar@redhat.com> - 3.9.19-8.1
-- Security fix for CVE-2024-6232
-Resolves: RHEL-57420
+* Mon Sep 09 2024 Tomáš Hrnčiar <thrnciar@redhat.com> - 3.9.20-1
+- Update to 3.9.20
+Resolves: RHEL-57422
 
 * Fri Aug 23 2024 Charalampos Stratakis <cstratak@redhat.com> - 3.9.19-8
 - Security fix for CVE-2024-8088

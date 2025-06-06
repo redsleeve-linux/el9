@@ -1,0 +1,63 @@
+From 3f3c1e513bdf53d78adbde7f9d300c2281de21b9 Mon Sep 17 00:00:00 2001
+From: Jens Remus <jremus@linux.ibm.com>
+Date: Thu, 23 Nov 2023 15:44:41 +0100
+Subject: [PATCH] s390: Add brasl edge test cases from ESA to z/Architecture
+
+Commit: 3f3c1e513bdf 
+
+The ESA opcode test cases for IBM z900 contain a few edge cases. They
+exercise the brasl mnemonic with its largest allowed negative and
+positive offsets. Linux on zSeries in ESA mode executes in 31-bit
+addressing mode. Therefore the ESA test cases are assembled with -m31.
+In 31-bit addressing mode the address computation using those large
+offsets wraps, which is correctly reflected in the disassembly.
+
+Linux on Z in z/Architecture mode executes in 64-bit addressing mode.
+Therefore the z/Architecture (zarch) test cases are assembled with -m64.
+In 64-bit addressing mode the address computation using those large
+offsets does not necessarily wrap.
+
+gas/
+	* testsuite/gas/s390/zarch-z900.s: Add brasl tests from ESA that
+	  exercise edge cases.
+	* testsuite/gas/s390/zarch-z900.d: Likewise.
+
+Signed-off-by: Jens Remus <jremus@linux.ibm.com>
+Reviewed-by: Andreas Krebbel <krebbel@linux.ibm.com>
+---
+ gas/testsuite/gas/s390/zarch-z900.d | 6 ++++++
+ gas/testsuite/gas/s390/zarch-z900.s | 6 ++++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/gas/testsuite/gas/s390/zarch-z900.d b/gas/testsuite/gas/s390/zarch-z900.d
+index 2848dc1eb7c..93aee212785 100644
+--- a/gas/testsuite/gas/s390/zarch-z900.d
++++ b/gas/testsuite/gas/s390/zarch-z900.d
+@@ -149,4 +149,10 @@ Disassembly of section .text:
+ .*:	eb 96 5f ff 00 0f [ 	]*tracg	%r9,%r6,4095\(%r5\)
+ .*:	e3 95 af ff 00 82 [ 	]*xg	%r9,4095\(%r5,%r10\)
+ .*:	b9 82 00 96 [ 	]*xgr	%r9,%r6
++ *([\da-f]+):	c0 65 00 00 00 00 [ 	]*brasl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c0 65 00 00 00 00 [ 	]*brasl	%r6,\1 <foo\+0x\1>
++ *([\da-f]+):	c0 65 80 00 00 00 [ 	]*brasl	%r6,ffffffff0+\1 <foo\+0xffffffff0+\1>
++ *([\da-f]+):	c0 65 80 00 00 00 [ 	]*brasl	%r6,ffffffff0+\1 <foo\+0xffffffff0+\1>
++.*:	c0 65 7f ff ff ff [ 	]*brasl	%r6,1000002d0 <foo\+0x1000002d0>
++.*:	c0 65 7f ff ff ff [ 	]*brasl	%r6,1000002d6 <foo\+0x1000002d6>
+ .*:	07 07 [	 ]*nopr	%r7
+diff --git a/gas/testsuite/gas/s390/zarch-z900.s b/gas/testsuite/gas/s390/zarch-z900.s
+index 96d27e7b7e2..22fa1da5a30 100644
+--- a/gas/testsuite/gas/s390/zarch-z900.s
++++ b/gas/testsuite/gas/s390/zarch-z900.s
+@@ -143,3 +143,9 @@ foo:
+ 	tracg	%r9,%r6,4095(%r5)
+ 	xg	%r9,4095(%r5,%r10)
+ 	xgr	%r9,%r6
++	brasl	%r6,.
++	jasl	%r6,.
++	brasl	%r6,.-0x100000000
++	jasl	%r6,.-0x100000000
++	brasl	%r6,.+0xfffffffe
++	jasl	%r6,.+0xfffffffe
+-- 
+2.47.0
+

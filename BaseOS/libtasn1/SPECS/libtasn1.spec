@@ -1,7 +1,7 @@
 Summary:	The ASN.1 library used in GNUTLS
 Name:		libtasn1
 Version:	4.16.0
-Release:	8%{?dist}.redsleeve
+Release:	9%{?dist}
 
 # The libtasn1 library is LGPLv2+, utilities are GPLv3+
 License:	GPLv3+ and LGPLv2+
@@ -12,12 +12,13 @@ Source2:	gpgkey-1F42418905D8206AA754CCDC29EE58B996865171.gpg
 Patch1:		libtasn1-3.4-rpath.patch
 Patch200:	libtasn1-4.16-coverity.patch
 Patch300:	libtasn1-4.19-CVE-2021-46848.patch
+Patch301:	libtasn1-4.20-CVE-2024-12133.patch
 
 BuildRequires:	gnupg2
 BuildRequires:	gcc
 BuildRequires:	bison, pkgconfig, help2man
 BuildRequires:	autoconf, automake, libtool
-#BuildRequires:	valgrind-devel
+BuildRequires:	valgrind-devel
 BuildRequires: make
 # Wildcard bundling exception https://fedorahosted.org/fpc/ticket/174
 Provides: bundled(gnulib) = 20130324
@@ -59,6 +60,7 @@ gpgv2 --keyring %{SOURCE2} %{SOURCE1} %{SOURCE0}
 %patch1 -p1 -b .rpath
 %patch200 -p1 -b .coverity
 %patch300 -p1 -b .CVE-2021-46848
+%patch301 -p1 -b .CVE-2024-12133
 
 %build
 autoreconf -v -f --install
@@ -97,10 +99,10 @@ make check
 
 
 %changelog
-* Sat Feb 04 2023 Jacco Ligthart <jacco@redsleeve.org> - .4.16.0-8.redsleeve
-- no valgrind on arm
+* Wed Feb 12 2025 Alexander Sosedkin <asosedki@redhat.com> - 4.16.0-9
+- Backport the fix for CVE-2024-12133 (RHEL-78580)
 
-* Wed Nov 30 2022 Simo Sorce <simo@redhat.com> - 4.16.0-9
+* Wed Nov 30 2022 Simo Sorce <simo@redhat.com> - 4.16.0-8
 - Resolves: rhbz#2140602
 
 * Mon Aug 09 2021 Mohan Boddu <mboddu@redhat.com> - 4.16.0-7
