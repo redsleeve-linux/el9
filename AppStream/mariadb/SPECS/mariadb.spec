@@ -158,7 +158,7 @@ ExcludeArch: %{ix86}
 
 Name:             mariadb
 Version:          10.5.27
-Release:          1%{?with_debug:.debug}%{?dist}
+Release:          1%{?with_debug:.debug}%{?dist}.redsleeve
 Epoch:            3
 
 Summary:          A very fast and robust SQL database server
@@ -225,6 +225,8 @@ Patch10:          %{pkgnamepatch}-ssl-cipher-tests.patch
 
 #   Patch14: make MTR port calculation reasonably predictable
 Patch14:          %{pkgnamepatch}-mtr.patch
+
+Patch1000:        1063738-revert-c432c9ef.patch
 
 BuildRequires:    make
 BuildRequires:    cmake gcc-c++
@@ -751,6 +753,7 @@ rm -r storage/rocksdb/
 %patch7 -p1
 %patch9 -p1
 %patch14 -p1
+%patch1000 -p1
 # The test in Patch 10 has been recently updated by upstream
 # and the test was disabled in the testuite run
 #   main.ssl_cipher     [ disabled ]  MDEV-17184 - Failures with OpenSSL 1.1.1
@@ -1655,6 +1658,9 @@ fi
 %endif
 
 %changelog
+* Sat Mar 22 2025 Jacco Ligthart <jacco@redsleeve.org> 3:10.5.27-1.redsleeve
+- Added a patch to fix FTBFS on 32 bit
+
 * Tue Dec 03 2024 Michal Schorm <mschorm@redhat.com> - 3:10.5.27-1
 - Rebase to 10.5.27
 
