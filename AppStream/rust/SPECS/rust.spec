@@ -1,6 +1,6 @@
 Name:           rust
-Version:        1.79.0
-Release:        2%{?dist}.redsleeve
+Version:        1.84.1
+Release:        1%{?dist}
 Summary:        The Rust Programming Language
 License:        (Apache-2.0 OR MIT) AND (Artistic-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unicode-DFS-2016)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -8,15 +8,15 @@ URL:            https://www.rust-lang.org
 
 # Only x86_64, i686, and aarch64 are Tier 1 platforms at this time.
 # https://doc.rust-lang.org/nightly/rustc/platform-support.html
-%global rust_arches x86_64 i686 aarch64 ppc64le s390x armv6hl
+%global rust_arches x86_64 i686 aarch64 ppc64le s390x
 ExclusiveArch:  %{rust_arches}
 
 # To bootstrap from scratch, set the channel and date from src/stage0.json
 # e.g. 1.59.0 wants rustc: 1.58.0-2022-01-13
 # or nightly wants some beta-YYYY-MM-DD
-%global bootstrap_version 1.78.0
-%global bootstrap_channel 1.78.0
-%global bootstrap_date 2024-05-02
+%global bootstrap_version 1.83.0
+%global bootstrap_channel 1.83.0
+%global bootstrap_date 2024-11-28
 
 # Only the specified arches will use bootstrap binaries.
 # NOTE: Those binaries used to be uploaded with every new release, but that was
@@ -25,34 +25,10 @@ ExclusiveArch:  %{rust_arches}
 # add them to sources. Remember to remove them again after the bootstrap build!
 #global bootstrap_arches %%{rust_arches}
 
-# Define a space-separated list of targets to ship rust-std-static-$triple for
-# cross-compilation. The packages are noarch, but they're not fully
-# reproducible between hosts, so only x86_64 actually builds it.
-%ifarch x86_64
-%if 0%{?fedora}
-%global mingw_targets i686-pc-windows-gnu x86_64-pc-windows-gnu
-%endif
-# NB: wasm32-wasi is being gradually replaced by wasm32-wasip1
-# https://blog.rust-lang.org/2024/04/09/updates-to-rusts-wasi-targets.html
-%global wasm_targets wasm32-unknown-unknown wasm32-wasi wasm32-wasip1
-%if 0%{?fedora} || 0%{?rhel} >= 10
-%global extra_targets x86_64-unknown-none x86_64-unknown-uefi
-%endif
-%endif
-%ifarch aarch64
-%if 0%{?fedora} || 0%{?rhel} >= 10
-%global extra_targets aarch64-unknown-none-softfloat
-%endif
-%endif
-%global all_targets %{?mingw_targets} %{?wasm_targets} %{?extra_targets}
-%define target_enabled() %{lua:
-  print(string.find(rpm.expand(" %{all_targets} "), rpm.expand(" %1 "), 1, true) or 0)
-}
-
 # We need CRT files for *-wasi targets, at least as new as the commit in
 # src/ci/docker/host-x86_64/dist-various-2/build-wasi-toolchain.sh
 %global wasi_libc_url https://github.com/WebAssembly/wasi-libc
-%global wasi_libc_ref wasi-sdk-22
+%global wasi_libc_ref wasi-sdk-25
 %global wasi_libc_name wasi-libc-%{wasi_libc_ref}
 %global wasi_libc_source %{wasi_libc_url}/archive/%{wasi_libc_ref}/%{wasi_libc_name}.tar.gz
 %global wasi_libc_dir %{_builddir}/%{wasi_libc_name}
@@ -66,27 +42,36 @@ ExclusiveArch:  %{rust_arches}
 %bcond_with llvm_static
 
 # We can also choose to just use Rust's bundled LLVM, in case the system LLVM
-# is insufficient.  Rust currently requires LLVM 17.0+.
-%global min_llvm_version 17.0.0
-%global bundled_llvm_version 18.1.7
+# is insufficient.  Rust currently requires LLVM 18.0+.
+%global min_llvm_version 18.0.0
+%global bundled_llvm_version 19.1.5
 #global llvm_compat_version 17
 %global llvm llvm%{?llvm_compat_version}
 %bcond_with bundled_llvm
 
-# Requires stable libgit2 1.7, and not the next minor soname change.
+# Requires stable libgit2 1.8, and not the next minor soname change.
 # This needs to be consistent with the bindings in vendor/libgit2-sys.
-%global min_libgit2_version 1.7.2
-%global next_libgit2_version 1.8.0~
-%global bundled_libgit2_version 1.7.2
-%if 0%{?fedora} >= 39
+%global min_libgit2_version 1.8.1
+%global next_libgit2_version 1.9.0~
+%global bundled_libgit2_version 1.8.1
+%if 0%{?fedora} >= 41
 %bcond_with bundled_libgit2
 %else
 %bcond_without bundled_libgit2
 %endif
 
+# Try to use system oniguruma (only used at build time for rust-docs)
+# src/tools/rustbook -> ... -> onig_sys v69.8.1 needs at least 6.9.3
+%global min_oniguruma_version 6.9.3
+%if 0%{?rhel} && 0%{?rhel} < 9
+%bcond_without bundled_oniguruma
+%else
+%bcond_with bundled_oniguruma
+%endif
+
 # Cargo uses UPSERTs with omitted conflict targets
 %global min_sqlite3_version 3.35
-%global bundled_sqlite3_version 3.45.0
+%global bundled_sqlite3_version 3.46.0
 %if 0%{?rhel} && 0%{?rhel} < 10
 %bcond_without bundled_sqlite3
 %else
@@ -152,16 +137,10 @@ Patch4:         0001-bootstrap-allow-disabling-target-self-contained.patch
 Patch5:         0002-set-an-external-library-path-for-wasm32-wasi.patch
 
 # We don't want to use the bundled library in libsqlite3-sys
-Patch6:         rustc-1.79.0-unbundle-sqlite.patch
+Patch6:         rustc-1.84.0-unbundle-sqlite.patch
 
-# https://github.com/rust-lang/rust/pull/124597
-Patch7:         0001-Use-an-explicit-x86-64-cpu-in-tests-that-are-sensiti.patch
-
-# Fix codegen test failure on big endian: https://github.com/rust-lang/rust/pull/126263
-Patch8:         0001-Make-issue-122805.rs-big-endian-compatible.patch
-
-# https://github.com/rust-lang/rust/pull/128271
-Patch9:         0001-Disable-jump-threading-of-float-equality.patch
+# https://github.com/rust-lang/cc-rs/issues/1354
+Patch7:         0001-Only-translate-profile-flags-for-Clang.patch
 
 ### RHEL-specific patches below ###
 
@@ -171,19 +150,14 @@ Source101:      cargo_vendor.attr
 Source102:      cargo_vendor.prov
 
 # Disable cargo->libgit2->libssh2 on RHEL, as it's not approved for FIPS (rhbz1732949)
-Patch100:       rustc-1.79.0-disable-libssh2.patch
+Patch100:       rustc-1.84.0-disable-libssh2.patch
 
-# Get the Rust triple for any arch.
-%{lua: function rust_triple(arch)
-  local abi = "gnu"
+# Get the Rust triple for any architecture and ABI.
+%{lua: function rust_triple(arch, abi)
+  abi = abi or "gnu"
   if arch == "armv7hl" then
     arch = "armv7"
-    abi = "gnueabihf"
-  elseif arch == "armv6hl" then
-    arch = "arm"
-    abi = "gnueabihf"
-  elseif arch == "ppc64" then
-    arch = "powerpc64"
+    abi = abi.."eabihf"
   elseif arch == "ppc64le" then
     arch = "powerpc64le"
   elseif arch == "riscv64" then
@@ -192,11 +166,42 @@ Patch100:       rustc-1.79.0-disable-libssh2.patch
   return arch.."-unknown-linux-"..abi
 end}
 
-%global rust_triple %{lua: print(rust_triple(rpm.expand("%{_target_cpu}")))}
+%define rust_triple() %{lua: print(rust_triple(
+  rpm.expand("%{?1}%{!?1:%{_target_cpu}}"),
+  rpm.expand("%{?2}%{!?2:gnu}")
+))}
 
-# Get the environment form of the Rust triple
-%global rust_triple_env %{lua:
-  print(string.upper(string.gsub(rpm.expand("%{rust_triple}"), "-", "_")))
+# Get the environment variable form of the Rust triple.
+%define rust_triple_env() %{lua:
+  print(rpm.expand("%{rust_triple %*}"):gsub("-", "_"):upper())
+}
+
+# Define a space-separated list of targets to ship rust-std-static-$triple for
+# cross-compilation. The packages are noarch, but they're not fully
+# reproducible between hosts, so only x86_64 actually builds it.
+%ifarch x86_64
+%if 0%{?fedora}
+%global mingw_targets i686-pc-windows-gnu x86_64-pc-windows-gnu
+%endif
+%global wasm_targets wasm32-unknown-unknown wasm32-wasip1
+%if 0%{?fedora}
+%global extra_targets x86_64-unknown-none x86_64-unknown-uefi
+%endif
+%if 0%{?rhel} >= 10
+%global extra_targets x86_64-unknown-none
+%endif
+%endif
+%ifarch aarch64
+%if 0%{?fedora}
+%global extra_targets aarch64-unknown-none-softfloat aarch64-unknown-uefi
+%endif
+%if 0%{?rhel} >= 10
+%global extra_targets aarch64-unknown-none-softfloat
+%endif
+%endif
+%global all_targets %{?mingw_targets} %{?wasm_targets} %{?extra_targets}
+%define target_enabled() %{lua:
+  print(string.find(rpm.expand(" %{all_targets} "), rpm.expand(" %1 "), 1, true) or 0)
 }
 
 %if %defined bootstrap_arches
@@ -230,7 +235,7 @@ end}
 %global local_rust_root %{_builddir}/rust-%{bootstrap_suffix}
 Provides:       bundled(%{name}-bootstrap) = %{bootstrap_version}
 %else
-BuildRequires:  cargo >= %{bootstrap_version}
+BuildRequires:  (cargo >= %{bootstrap_version} with cargo <= %{version})
 BuildRequires:  (%{name} >= %{bootstrap_version} with %{name} <= %{version})
 %global local_rust_root %{_prefix}
 %endif
@@ -248,6 +253,10 @@ BuildRequires:  pkgconfig(zlib)
 
 %if %{without bundled_libgit2}
 BuildRequires:  (pkgconfig(libgit2) >= %{min_libgit2_version} with pkgconfig(libgit2) < %{next_libgit2_version})
+%endif
+
+%if %{without bundled_oniguruma}
+BuildRequires:  pkgconfig(oniguruma) >= %{min_oniguruma_version}
 %endif
 
 %if %{without bundled_sqlite3}
@@ -297,7 +306,10 @@ BuildRequires:  python3-rpm
 BuildRequires:  glibc-static
 
 # For tests/run-make/pgo-branch-weights
+# riscv64 does not support binutils-gold yet
+%ifnarch riscv64
 BuildRequires:  binutils-gold
+%endif
 
 # Virtual provides for folks who attempt "dnf install rustc"
 Provides:       rustc = %{version}-%{release}
@@ -427,18 +439,6 @@ BuildArch:      noarch
 %target_description wasm32-unknown-unknown WebAssembly
 %endif
 
-%if %target_enabled wasm32-wasi
-%target_package wasm32-wasi
-Requires:       lld >= 8.0
-%if %with bundled_wasi_libc
-Provides:       bundled(wasi-libc)
-%else
-Requires:       wasi-libc-static
-%endif
-BuildArch:      noarch
-%target_description wasm32-wasi WebAssembly
-%endif
-
 %if %target_enabled wasm32-wasip1
 %target_package wasm32-wasip1
 Requires:       lld >= 8.0
@@ -448,6 +448,8 @@ Provides:       bundled(wasi-libc)
 Requires:       wasi-libc-static
 %endif
 BuildArch:      noarch
+# https://blog.rust-lang.org/2024/04/09/updates-to-rusts-wasi-targets.html
+Obsoletes:      %{name}-std-static-wasm32-wasi < 1.84.0~
 %target_description wasm32-wasip1 WebAssembly
 %endif
 
@@ -455,6 +457,12 @@ BuildArch:      noarch
 %target_package x86_64-unknown-none
 Requires:       lld
 %target_description x86_64-unknown-none embedded
+%endif
+
+%if %target_enabled aarch64-unknown-uefi
+%target_package aarch64-unknown-uefi
+Requires:       lld
+%target_description aarch64-unknown-uefi embedded
 %endif
 
 %if %target_enabled x86_64-unknown-uefi
@@ -560,6 +568,9 @@ A tool for formatting Rust code according to style guidelines.
 %package analyzer
 Summary:        Rust implementation of the Language Server Protocol
 
+# /usr/bin/rust-analyzer is dynamically linked against internal rustc libs
+Requires:       %{name}%{?_isa} = %{version}-%{release}
+
 # The standard library sources are needed for most functionality.
 Recommends:     %{name}-src
 
@@ -645,9 +656,7 @@ rm -rf %{wasi_libc_dir}/dlmalloc/
 %if %without bundled_sqlite3
 %patch -P6 -p1
 %endif
-%patch -P7 -p1
-%patch -P8 -p1
-%patch -P9 -p1
+%patch -P7 -p1 -d vendor/cc-1.2.5
 
 %if %with disabled_libssh2
 %patch -P100 -p1
@@ -664,6 +673,10 @@ rm -rf src/llvm-project/
 mkdir -p src/llvm-project/libunwind/
 %endif
 
+# Remove submodules we don't need.
+rm -rf src/gcc
+rm -rf src/tools/enzyme
+rm -rf src/tools/rustc-perf
 
 # Remove other unused vendored libraries. This leaves the directory in place,
 # because some build scripts watch them, e.g. "cargo:rerun-if-changed=curl".
@@ -680,6 +693,10 @@ mkdir -p src/llvm-project/libunwind/
 
 %if %without bundled_libgit2
 %clear_dir vendor/libgit2-sys*/libgit2/
+%endif
+
+%if %without bundled_oniguruma
+%clear_dir vendor/onig_sys*/oniguruma/
 %endif
 
 %if %without bundled_sqlite3
@@ -734,6 +751,7 @@ end}
 %global rust_env %{shrink:
   %{?rustflags:RUSTFLAGS="%{rustflags}"}
   %{rustc_target_cpus}
+  %{!?with_bundled_oniguruma:RUSTONIG_SYSTEM_LIBONIG=1}
   %{!?with_bundled_sqlite3:LIBSQLITE3_SYS_USE_PKG_CONFIG=1}
   %{!?with_disabled_libssh2:LIBSSH2_SYS_USE_PKG_CONFIG=1}
 }
@@ -743,12 +761,23 @@ end}
 %{export_rust_env}
 
 # Some builders have relatively little memory for their CPU count.
-# At least 2GB per CPU is a good rule of thumb for building rustc.
-ncpus=$(/usr/bin/getconf _NPROCESSORS_ONLN)
-max_cpus=$(( ($(free -g | awk '/^Mem:/{print $2}') + 1) / 2 ))
-if [ "$max_cpus" -ge 1 -a "$max_cpus" -lt "$ncpus" ]; then
-  ncpus="$max_cpus"
-fi
+# At least 4GB per CPU is a good rule of thumb for building rustc.
+%if ! %defined constrain_build
+%define constrain_build(m:) %{lua:
+  for l in io.lines('/proc/meminfo') do
+    if l:sub(1, 9) == "MemTotal:" then
+      local opt_m = math.tointeger(rpm.expand("%{-m*}"))
+      local mem_total = math.tointeger(string.match(l, "MemTotal:%s+(%d+)"))
+      local cpu_limit = math.max(1, mem_total // (opt_m * 1024))
+      if cpu_limit < math.tointeger(rpm.expand("%_smp_build_ncpus")) then
+        rpm.define("_smp_build_ncpus " .. cpu_limit)
+      end
+      break
+    end
+  end
+}
+%endif
+%constrain_build -m 4096
 
 %if %defined mingw_targets
 %define mingw_target_config %{shrink:
@@ -768,16 +797,12 @@ fi
 %if %defined wasm_targets
 %if %with bundled_wasi_libc
 %define wasi_libc_flags MALLOC_IMPL=emmalloc CC=clang AR=llvm-ar NM=llvm-nm
-%make_build --quiet -C %{wasi_libc_dir} %{wasi_libc_flags} TARGET_TRIPLE=wasm32-wasi
 %make_build --quiet -C %{wasi_libc_dir} %{wasi_libc_flags} TARGET_TRIPLE=wasm32-wasip1
 %define wasm_target_config %{shrink:
-  --set target.wasm32-wasi.wasi-root=%{wasi_libc_dir}/sysroot
   --set target.wasm32-wasip1.wasi-root=%{wasi_libc_dir}/sysroot
 }
 %else
 %define wasm_target_config %{shrink:
-  --set target.wasm32-wasi.wasi-root=%{_prefix}/wasm32-wasi
-  --set target.wasm32-wasi.self-contained=false
   --set target.wasm32-wasip1.wasi-root=%{_prefix}/wasm32-wasi
   --set target.wasm32-wasip1.self-contained=false
 }
@@ -789,12 +814,7 @@ fi
 # clang_resource_dir is not defined for compat builds.
 %define profiler /usr/lib/clang/%{llvm_compat_version}/lib/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
 %else
-%if 0%{?clang_major_version} >= 17
-%define profiler %{clang_resource_dir}/lib/%{_arch}-redhat-linux-gnueabihf/libclang_rt.profile.a
-%else
-# The exact profiler path is version dependent..
-%define profiler %(echo %{_libdir}/clang/??/lib/libclang_rt.profile-*.a)
-%endif
+%define profiler %{clang_resource_dir}/lib/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
 %endif
 test -r "%{profiler}"
 
@@ -817,14 +837,18 @@ test -r "%{profiler}"
     %{!?llvm_has_filecheck: --disable-codegen-tests} \
     %{!?with_llvm_static: --enable-llvm-link-shared } } \
   --disable-llvm-static-stdcpp \
+  --disable-llvm-bitcode-linker \
+  --disable-lld \
   --disable-rpath \
   %{enable_debuginfo} \
   %{enable_rust_opts} \
+  --set build.jobs=%_smp_build_ncpus \
   --set build.build-stage=2 \
   --set build.doc-stage=2 \
   --set build.install-stage=2 \
   --set build.test-stage=2 \
   --set build.optimized-compiler-builtins=false \
+  --set rust.llvm-tools=false \
   --enable-extended \
   --tools=cargo,clippy,rls,rust-analyzer,rustfmt,src \
   --enable-vendor \
@@ -839,7 +863,7 @@ test -r "%{profiler}"
 %define profraw $PWD/build/profiles
 %define profdata $PWD/build/rustc.profdata
 mkdir -p "%{profraw}"
-%{__x} build -j "$ncpus" sysroot --rust-profile-generate="%{profraw}"
+%{__x} build sysroot --rust-profile-generate="%{profraw}"
 # Build cargo as a workload to generate compiler profiles
 env LLVM_PROFILE_FILE="%{profraw}/default_%%m_%%p.profraw" \
   %{__x} --keep-stage=0 --keep-stage=1 build cargo
@@ -851,7 +875,7 @@ rm -r "%{profraw}" build/%{rust_triple}/stage2*/
 %endif
 
 # Build the compiler normally (with or without PGO)
-%{__x} build -j "$ncpus" sysroot
+%{__x} build sysroot
 
 # Build everything else normally
 %{__x} build
@@ -882,7 +906,7 @@ rm -rf ./build/dist/ ./build/tmp/
 # Some of the components duplicate-install binaries, leaving backups we don't want
 rm -f %{buildroot}%{_bindir}/*.old
 
-# Make sure the shared libraries are in the proper libdir
+# Make sure the compiler's shared libraries are in the proper libdir
 %if "%{_libdir}" != "%{common_libdir}"
 mkdir -p %{buildroot}%{_libdir}
 find %{buildroot}%{common_libdir} -maxdepth 1 -type f -name '*.so' \
@@ -893,18 +917,12 @@ find %{buildroot}%{common_libdir} -maxdepth 1 -type f -name '*.so' \
 find %{buildroot}%{_libdir} -maxdepth 1 -type f -name '*.so' \
   -exec chmod -v +x '{}' '+'
 
-# The libdir libraries are identical to those under rustlib/.  It's easier on
-# library loading if we keep them in libdir, but we do need them in rustlib/
-# to support dynamic linking for compiler plugins, so we'll symlink.
-find %{buildroot}%{rustlibdir}/%{rust_triple}/lib/ -maxdepth 1 -type f -name '*.so' |
-while read lib; do
- lib2="%{buildroot}%{_libdir}/${lib##*/}"
- if [ -f "$lib2" ]; then
-   # make sure they're actually identical!
-   cmp "$lib" "$lib2"
-   ln -v -f -r -s -T "$lib2" "$lib"
- fi
-done
+# The shared standard library is excluded from Provides, because it has no
+# stable ABI. However, we still ship it alongside the static target libraries
+# to enable some niche local use-cases, like the `evcxr` REPL.
+# Make sure those libraries are also executable for debuginfo extraction.
+find %{buildroot}%{rustlibdir} -type f -name '*.so' \
+  -exec chmod -v +x '{}' '+'
 
 # Remove installer artifacts (manifests, uninstall scripts, etc.)
 find %{buildroot}%{rustlibdir} -maxdepth 1 -type f -exec rm -v '{}' '+'
@@ -977,9 +995,12 @@ rm -rf "$TMP_HELLO"
 # The results are not stable on koji, so mask errors and just log it.
 # Some of the larger test artifacts are manually cleaned to save space.
 
-# Bootstrap is excluded because it's not something we ship, and a lot of its
-# tests are geared toward the upstream CI environment.
-%{__x} test --no-fail-fast --skip src/bootstrap || :
+# - Bootstrap is excluded because it's not something we ship, and a lot of its
+#   tests are geared toward the upstream CI environment.
+# - Crashes are excluded because they are less reliable, especially stuff like
+#   SIGSEGV across different arches -- UB can do all kinds of weird things.
+#   They're only meant to notice "accidental" fixes anyway, not *should* crash.
+%{__x} test --no-fail-fast --skip={src/bootstrap,tests/crashes} || :
 rm -rf "./build/%{rust_triple}/test/"
 
 %ifarch aarch64
@@ -1004,14 +1025,10 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 %doc README.md
 %{_bindir}/rustc
 %{_bindir}/rustdoc
-%{_libdir}/*.so
+%{_libdir}/librustc_driver-*.so
 %{_libexecdir}/rust-analyzer-proc-macro-srv
 %{_mandir}/man1/rustc.1*
 %{_mandir}/man1/rustdoc.1*
-%dir %{rustlibdir}
-%dir %{rustlibdir}/%{rust_triple}
-%dir %{rustlibdir}/%{rust_triple}/lib
-%{rustlibdir}/%{rust_triple}/lib/*.so
 
 
 %files std-static
@@ -1019,6 +1036,7 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 %dir %{rustlibdir}/%{rust_triple}
 %dir %{rustlibdir}/%{rust_triple}/lib
 %{rustlibdir}/%{rust_triple}/lib/*.rlib
+%{rustlibdir}/%{rust_triple}/lib/*.so
 
 %global target_files()      \
 %files std-static-%1        \
@@ -1045,15 +1063,6 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 %target_files wasm32-unknown-unknown
 %endif
 
-%if %target_enabled wasm32-wasi
-%target_files wasm32-wasi
-%if %with bundled_wasi_libc
-%dir %{rustlibdir}/wasm32-wasi/lib/self-contained
-%{rustlibdir}/wasm32-wasi/lib/self-contained/crt*.o
-%{rustlibdir}/wasm32-wasi/lib/self-contained/libc.a
-%endif
-%endif
-
 %if %target_enabled wasm32-wasip1
 %target_files wasm32-wasip1
 %if %with bundled_wasi_libc
@@ -1065,6 +1074,10 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 
 %if %target_enabled x86_64-unknown-none
 %target_files x86_64-unknown-none
+%endif
+
+%if %target_enabled aarch64-unknown-uefi
+%target_files aarch64-unknown-uefi
 %endif
 
 %if %target_enabled x86_64-unknown-uefi
@@ -1149,8 +1162,24 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 
 
 %changelog
-* Mon Dec 23 2024 Jacco Ligthart <jacco@redsleeve.org> - 1.79.0-2.redsleeve
-- added armv6 to rust_arches
+* Tue Feb 04 2025 Josh Stone <jistone@redhat.com> - 1.84.1-1
+- Update to 1.84.1
+
+* Wed Jan 15 2025 Josh Stone <jistone@redhat.com> - 1.84.0-1
+- Update to 1.84.0
+
+* Thu Dec 05 2024 Josh Stone <jistone@redhat.com> - 1.83.0-1
+- Update to 1.83.0
+- Remove the subshell in the cargo_install macro
+
+* Tue Nov 05 2024 Josh Stone <jistone@redhat.com> - 1.82.0-1
+- Update to 1.82.0
+
+* Fri Oct 25 2024 Josh Stone <jistone@redhat.com> - 1.81.0-1
+- Update to 1.81.0
+
+* Tue Oct 22 2024 Josh Stone <jistone@redhat.com> - 1.80.1-1
+- Update to 1.80.1
 
 * Tue Aug 13 2024 Josh Stone <jistone@redhat.com> - 1.79.0-2
 - Disable jump threading of float equality

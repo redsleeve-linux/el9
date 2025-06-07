@@ -6,8 +6,8 @@
 
 Summary:              Red Hat specific rpm configuration files
 Name:                 redhat-rpm-config
-Version:              208
-Release:              1%{?dist}.redsleeve
+Version:              209
+Release:              1%{?dist}
 # No version specified.
 License:              GPL+
 URL:                  https://src.fedoraproject.org/rpms/redhat-rpm-config
@@ -37,6 +37,7 @@ Source102:            macros.mono-srpm
 Source103:            macros.nodejs-srpm
 Source104:            macros.ldc-srpm
 Source105:            macros.valgrind-srpm
+Source106:            macros.java-srpm
 
 # Other misc macros
 Source150:            macros.dwz
@@ -88,7 +89,6 @@ Source801:            forge.lua
 # Documentation
 Source900:            buildflags.md
 
-Patch1: macros-arm.patch
 
 BuildArch:            noarch
 BuildRequires:        perl-generators
@@ -174,8 +174,6 @@ mkdir -p %{buildroot}%{_rpmluadir}/fedora/{rpm,srpm}
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora common.lua
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
 
-patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
-
 # This trigger is used to decide which version of the annobin plugin for gcc
 # should be used.  See comments in the script for full details.
 #
@@ -258,13 +256,11 @@ patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
 %doc buildflags.md
 
 %changelog
-* Mon Dec 02 2024 Jacco Ligthart <jaco@redsleeve.org> 208-1.el9.redsleeve
-- patched for sha1 build-ids on arm when using clang
-- cherry picked from https://src.fedoraproject.org/rpms/redhat-rpm-config/pull-request/155
-
-
-* Tue Nov 12 2024 Release Engineering <releng@rockylinux.org> - 208-1
+* Tue Apr 22 2025 Release Engineering <releng@rockylinux.org> - 209-1
 - Add Rocky to dist.sh
+
+* Wed Dec 11 2024 Mikolaj Izdebski <mizdebsk@redhat.com> - 209-1
+- Add java_arches macro
 
 * Fri Jul 19 2024 Michal Domonkos <mdomonko@redhat.com> - 208-1
 - brp-mangle-shebangs: Strip env flags when mangling shebangs (RHEL-26961)

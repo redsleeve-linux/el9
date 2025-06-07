@@ -1,0 +1,129 @@
+From 17ff6161b83e6a5e86fcb6a13c5551bba1438405 Mon Sep 17 00:00:00 2001
+From: Erick Ochoa <github@ceci-nest-pas.me>
+Date: Thu, 12 Sep 2024 21:16:58 -0400
+Subject: [PATCH 1/9] [CMake] Add missing dependency (#108461)
+
+The [`mlir-capi-execution-engine-test` test
+executable](https://github.com/llvm/llvm-project/blob/main/mlir/test/CAPI/CMakeLists.txt#L26-L34)
+
+```cmake
+if(MLIR_ENABLE_EXECUTION_ENGINE)
+  _add_capi_test_executable(mlir-capi-execution-engine-test
+    execution_engine.c
+  LINK_LIBS PRIVATE
+    MLIRCAPIConversion
+    MLIRCAPIExecutionEngine
+    MLIRCAPIRegisterEverything
+)
+endif()
+```
+
+
+is run by lit tests, but it is not properly listed as a dependency. It
+is added in places conditionally across the file
+[`tests/CMakeLists.txt`](https://github.com/llvm/llvm-project/blob/main/mlir/test/CMakeLists.txt#L130-L143)
+
+```cmake
+# The native target may not be enabled, in this case we won't
+# run tests that involves executing on the host: do not build
+# useless binaries.
+if(LLVM_ENABLE_PIC AND TARGET ${LLVM_NATIVE_ARCH})
+  list(APPEND MLIR_TEST_DEPENDS
+    mlir-cpu-runner
+    llc
+    mlir_async_runtime
+    mlir-capi-execution-engine-test
+    mlir_c_runner_utils
+    mlir_runner_utils
+    mlir_float16_utils
+  )
+endif()
+```
+
+But this condition is not the same as the one where the test executable
+is added. [It has been reported on discord that the following error
+occurred:](https://discord.com/channels/636084430946959380/642426447167881246/1283811636725022730)
+
+```
+FAIL: MLIR :: CAPI/execution_engine.c (2 of 2121)
+******************** TEST 'MLIR :: CAPI/execution_engine.c' FAILED ********************
+Exit Code: 127
+Command Output (stdout):
+--
+# RUN: at line 10
+/usr/bin/mlir-capi-execution-engine-test 2>&1 | /usr/bin/FileCheck /builddir/build/BUILD/mlir-19.1.0_rc4-build/mlir-19.1.0-rc4.src/test/CAPI/execution_engine.c
+# executed command: /usr/bin/mlir-capi-execution-engine-test
+# .---command stderr------------
+# | '/usr/bin/mlir-capi-execution-engine-test': command not found
+# `-----------------------------
+```
+
+This error will not be deterministic and is dependent on the order in
+which tools are built. If by any chance,
+`mlir-capi-execution-engine-test` is built before the lit tests run,
+then nothing will happen. But lit tests can be run before
+`mlir-capi-execution-engine-test` is built.
+
+This patch adds the `mlir-capi-execution-engine` to the
+`MLIR_TEST_DEPENDS` list when the `MLIR_ENABLE_EXECUTION_ENGINE` flag is
+present.
+
+Happy to make changes like:
+* removing `mlir-capi-execution-engine-test` from the other place where
+it is included in the tests
+* and merge and sort alphabetically these two commands
+
+```cmake
+set(MLIR_TEST_DEPENDS
+FileCheck count not split-file
+mlir-capi-ir-test
+mlir-capi-irdl-test
+mlir-capi-llvm-test
+mlir-capi-pass-test
+mlir-capi-quant-test
+mlir-capi-rewrite-test
+mlir-capi-sparse-tensor-test
+mlir-capi-transform-test
+mlir-capi-transform-interpreter-test
+mlir-capi-translation-test
+mlir-linalg-ods-yaml-gen
+mlir-lsp-server
+mlir-opt
+  mlir-query
+  mlir-reduce
+  mlir-tblgen
+  mlir-translate
+  tblgen-lsp-server
+  tblgen-to-irdl
+  )
+
+set(MLIR_TEST_DEPENDS ${MLIR_TEST_DEPENDS}
+  mlir-capi-pdl-test
+  mlir-pdll-lsp-server
+  mlir-pdll
+  )
+```
+
+Co-authored-by: Erick Ochoa <erick@ceci-nest-pas.me>
+---
+ mlir/test/CMakeLists.txt | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/mlir/test/CMakeLists.txt b/mlir/test/CMakeLists.txt
+index df95e5db11f1..4d2d738b734e 100644
+--- a/mlir/test/CMakeLists.txt
++++ b/mlir/test/CMakeLists.txt
+@@ -150,6 +150,10 @@ if(MLIR_ENABLE_CUDA_RUNNER)
+   list(APPEND MLIR_TEST_DEPENDS mlir_cuda_runtime)
+ endif()
+ 
++if(MLIR_ENABLE_EXECUTION_ENGINE)
++  list(APPEND MLIR_TEST_DEPENDS mlir-capi-execution-engine-test)
++endif()
++
+ if(MLIR_ENABLE_ROCM_RUNNER)
+   list(APPEND MLIR_TEST_DEPENDS mlir_rocm_runtime)
+ endif()
+-- 
+2.46.0
+

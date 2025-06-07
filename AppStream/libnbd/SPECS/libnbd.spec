@@ -20,8 +20,8 @@
 %global source_directory 1.20-stable
 
 Name:           libnbd
-Version:        1.20.2
-Release:        2%{?dist}.redsleeve
+Version:        1.20.3
+Release:        1%{?dist}
 Summary:        NBD client library in userspace
 
 License:        LGPL-2.0-or-later AND BSD-3-Clause
@@ -38,8 +38,9 @@ Source2:       libguestfs.keyring
 Source3:        copy-patches.sh
 
 # Patches are stored in the upstream repository:
-# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.5/
+# https://gitlab.com/nbdkit/libnbd/-/commits/rhel-9.6/
 
+# Patches.
 Patch0001:     0001-generator-Print-full-error-in-handle_reply_error.patch
 Patch0002:     0002-lib-Don-t-overwrite-error-in-nbd_opt_-go-info.patch
 Patch0003:     0003-generator-Restore-assignment-to-local-err.patch
@@ -100,7 +101,7 @@ BuildRequires:  util-linux
 # nbdkit for i686.  These are only needed for the test suite so make
 # them optional.  This reduces our test exposure on 32 bit platforms,
 # although there is still Fedora/armv7 and some upstream testing.
-%ifnarch %{ix86} %{arm}
+%ifnarch %{ix86}
 BuildRequires:  qemu-img
 BuildRequires:  nbdkit
 BuildRequires:  nbdkit-data-plugin
@@ -389,8 +390,8 @@ make %{?_smp_mflags} check || {
 
 
 %changelog
-* Sat Jan 04 2025 Jacco Ligthart <jacco@redsleeve.org> - 1.20.2-2.redsleeve
-- fixed builddeps for arm
+* Sat Sep 28 2024 Richard W.M. Jones <rjones@redhat.com> - 1.20.3-1
+- Rebase to libnbd 1.20.3
 
 * Fri Jul 26 2024 Richard W.M. Jones <rjones@redhat.com> - 1.20.2-2
 - Rebase to libnbd 1.20.2

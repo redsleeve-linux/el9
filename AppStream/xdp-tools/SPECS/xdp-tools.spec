@@ -1,13 +1,14 @@
 Name:             xdp-tools
-Version:          1.4.2
-Release:          1%{?dist}.redsleeve
+Version:          1.5.1
+Release:          1%{?dist}
 Summary:          Utilities and example programs for use with XDP
-%global _soversion 1.4.0
+%global _soversion 1.5.0
 
 License:          GPL-2.0-only
 URL:              https://github.com/xdp-project/%{name}
 Source0:          https://github.com/xdp-project/%{name}/releases/download/v%{version}/xdp-tools-%{version}.tar.gz
 
+BuildRequires:    kernel-headers
 BuildRequires:    libbpf-devel
 BuildRequires:    elfutils-libelf-devel
 BuildRequires:    zlib-devel
@@ -21,7 +22,7 @@ BuildRequires:    m4
 BuildRequires:    emacs-nox
 BuildRequires:    wireshark-cli
 
-%ifnarch i686 %{arm}
+%ifnarch i686
 BuildRequires:    bpftool
 %endif
 
@@ -39,7 +40,6 @@ Utilities and example programs for use with XDP
 %package -n libxdp
 Summary:          XDP helper library
 License:          LGPL-2.1-only OR BSD-2-Clause
-Requires:         kernel-headers
 
 %package -n libxdp-devel
 Summary:          Development files for libxdp
@@ -50,7 +50,6 @@ Requires:         libxdp = %{version}-%{release}
 %package -n libxdp-static
 Summary:          Static library files for libxdp
 License:          LGPL-2.1-only OR BSD-2-Clause
-Requires:         kernel-headers
 Requires:         libxdp-devel = %{version}-%{release}
 
 %description -n libxdp
@@ -96,8 +95,9 @@ make install V=1
 %{_sbindir}/xdp-filter
 %{_sbindir}/xdp-loader
 %{_sbindir}/xdpdump
-%ifnarch i686 %{arm}
+%ifnarch i686
 %{_sbindir}/xdp-bench
+%{_sbindir}/xdp-forward
 %{_sbindir}/xdp-monitor
 %{_sbindir}/xdp-trafficgen
 %endif
@@ -124,8 +124,11 @@ make install V=1
 %{_libdir}/pkgconfig/libxdp.pc
 
 %changelog
-* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> 1.4.2-1.redsleeve
-- do not require bpftool for arm
+* Tue Jan 14 2025 Toke Høiland-Jørgensen <toke@redhat.com> 1.5.1-1
+- Upstream version bump
+
+* Thu Jan 9 2025 Toke Høiland-Jørgensen <toke@redhat.com> 1.5.0-1
+- Upstream version bump
 
 * Tue Feb 6 2024 Toke Høiland-Jørgensen <toke@redhat.com> 1.4.2-1
 - Upstream version bump

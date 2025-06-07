@@ -11,32 +11,33 @@ Version:   3.6.0
 %global golang_arches   %{ix86} %{golang_arches_future}
 %global gccgo_arches    %{mips}
 %if 0%{?rhel} >= 9
-%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
+%global golang_arches   x86_64 aarch64 ppc64le s390x
 %endif
 # Go sources can contain arch-specific files and our macros will package the
 # correct files for each architecture. Therefore, move gopath to _libdir and
 # make Go devel packages archful
 %global gopath          %{_datadir}/gocode
 
-# whether to bundle golist or require it as a dependency
 %global bundle_golist 1
 
-%if 0%{?bundle_golist}
-# do not create debuginfo packages when we add a build section
-%global debug_package %{nil}
 %global golist_version 0.10.4
-%global golist_builddir %{_builddir}/golist-%{golist_version}/_build
+%if 0%{?bundle_golist}
+%global golist_builddir golist-%{golist_version}
 %global golist_goipath pagure.io/golist
 # where to bundle the golist executable
-%global golist_execdir %{_libexecdir}/go-rpm-macros/
+%global golist_execdir %{_libexecdir}/go-rpm-macros
 # define gobuild to avoid this package requiring itself to build
-%define gobuild(o:) GO111MODULE=off go build -buildmode pie -compiler gc -tags="rpm_crashtraceback ${BUILDTAGS:-}" -ldflags "${LDFLAGS:-} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -extldflags '-Wl,-z,relro -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld '" -a -v %{?**};
+%undefine _auto_set_build_flags
+%global _dwz_low_mem_die_limit 0
+%define gobuild(o:) GO111MODULE=on go build -buildmode pie -compiler gc -tags="rpm_crashtraceback ${GO_BUILDTAGS-${BUILDTAGS-}}" -a -v -x -ldflags "${GO_LDFLAGS-${LDFLAGS-}}  -B 0x$(echo "%{name}-%{version}-%{release}-${SOURCE_DATE_EPOCH:-}" | sha1sum | cut -d ' ' -f1) -compressdwarf=false -linkmode=external -extldflags '%{build_ldflags}'"  %{?**};
+%else
+%global debug_package %{nil}
 %endif
 
 ExclusiveArch: %{golang_arches} %{gccgo_arches}
 
 Name:      go-rpm-macros
-Release:   3%{?dist}.redsleeve
+Release:   7%{?dist}
 Summary:   Build-stage rpm automation for Go packages
 
 License:   GPLv3+
@@ -51,6 +52,7 @@ Requires:  go-filesystem  = %{version}-%{release}
 
 %if 0%{?bundle_golist}
 BuildRequires: golang
+Provides:  bundled(golist) = %{golist_version}
 %else
 Requires:  golist
 %endif
@@ -142,23 +144,11 @@ done
 %if 0%{?bundle_golist}
 # Add libexec to PATH
 %patch2 -p1
-pushd %{_builddir}
-tar -xf %{_sourcedir}/golist-%{golist_version}.tar.gz
-cd golist-%{golist_version}
+tar -xf %{SOURCE1}
+pushd %{golist_builddir}
 %patch1 -p1
-cp %{_builddir}/golist-%{golist_version}/LICENSE %{_builddir}/go-rpm-macros-%{version}/LICENSE-golist
 popd
-
-# create directory structure for a Go build
-if [[ ! -e %{golist_builddir}/bin ]]; then
-  install -m 0755 -vd %{golist_builddir}/bin
-  export GOPATH=%{golist_builddir}:${GOPATH:+${GOPATH}:}/usr/share/gocode
-fi
-if [[ ! -e %{golist_builddir}/src/%{golist_goipath} ]]; then
-  install -m 0755 -vd %{golist_builddir}/src/pagure.io
-  ln -sf $(dirname %{golist_builddir}) %{golist_builddir}/src/%{golist_goipath}
-
-fi
+cp %{golist_builddir}/LICENSE LICENSE-golist
 %endif
 
 %patch3 -p1
@@ -167,15 +157,22 @@ fi
 %build
 # build golist
 %if 0%{?bundle_golist}
-pushd %{golist_builddir}/src/%{golist_goipath}
-export GOPATH=%{golist_builddir}:${GOPATH:+${GOPATH}:}/usr/share/gocode
+pushd %{golist_builddir}
+go mod init %{golist_goipath} && go mod tidy
 for cmd in cmd/* ; do
-  %gobuild -o %{golist_builddir}/bin/$(basename $cmd) %{golist_goipath}/$cmd
+  %gobuild -o bin/$(basename $cmd) ./$cmd
 done
 popd
 %endif
 
 %install
+install -m 0755 -vd   %{buildroot}%{rpmmacrodir}
+
+install -m 0755 -vd   %{buildroot}%{_rpmluadir}/fedora/srpm
+install -m 0644 -vp   rpm/lua/srpm/*lua \
+                      %{buildroot}%{_rpmluadir}/fedora/srpm
+
+%ifarch %{golang_arches} %{gccgo_arches}
 # Some of those probably do not work with gcc-go right now
 # This is not intentional, but mips is not a primary Fedora architecture
 # Patches and PRs are welcome
@@ -184,20 +181,14 @@ install -m 0755 -vd   %{buildroot}%{gopath}/src
 
 install -m 0755 -vd   %{buildroot}%{_spectemplatedir}
 
-if ls templates/rpm/*\.spec; then
-  install -m 0644 -vp   templates/rpm/*spec \
-                        %{buildroot}%{_spectemplatedir}
-fi
+install -m 0644 -vp   templates/rpm/*spec \
+                      %{buildroot}%{_spectemplatedir}
 
 install -m 0755 -vd   %{buildroot}%{_bindir}
 install -m 0755 bin/* %{buildroot}%{_bindir}
 
-install -m 0755 -vd   %{buildroot}%{rpmmacrodir}
-install -m 0644 -vp   rpm/macros.d/macros.go-* \
+install -m 0644 -vp   rpm/macros.d/macros.go-*rpm* \
                       %{buildroot}%{rpmmacrodir}
-install -m 0755 -vd   %{buildroot}%{_rpmluadir}/fedora/srpm
-install -m 0644 -vp   rpm/lua/srpm/*lua \
-                      %{buildroot}%{_rpmluadir}/fedora/srpm
 install -m 0755 -vd   %{buildroot}%{_rpmluadir}/fedora/rpm
 install -m 0644 -vp   rpm/lua/rpm/*lua \
                       %{buildroot}%{_rpmluadir}/fedora/rpm
@@ -206,47 +197,50 @@ install -m 0644 -vp   rpm/fileattrs/*.attr \
                       %{buildroot}%{_rpmconfigdir}/fileattrs/
 install -m 0755 -vp   rpm/*\.{prov,deps} \
                       %{buildroot}%{_rpmconfigdir}/
+%else
+install -m 0644 -vp   rpm/macros.d/macros.go-srpm \
+                      %{buildroot}%{rpmmacrodir}
+%endif
 
 %ifarch %{golang_arches}
-install -m 0644 -vp   rpm/macros.d/macros.go-compilers-golang \
-                      %{buildroot}%{_rpmconfigdir}/macros.d/macros.go-compiler-golang
+install -m 0644 -vp   rpm/macros.d/macros.go-compilers-golang{,-pie} \
+                      %{buildroot}%{_rpmconfigdir}/macros.d/
 %endif
 
 %ifarch %{gccgo_arches}
 install -m 0644 -vp   rpm/macros.d/macros.go-compilers-gcc \
-                      %{buildroot}%{_rpmconfigdir}/macros.d/macros.go-compiler-gcc
+                      %{buildroot}%{_rpmconfigdir}/macros.d/
 %endif
 
 # install golist
 %if 0%{?bundle_golist}
 install -m 0755 -vd                     %{buildroot}%{golist_execdir}
 install -m 0755 -vp %{golist_builddir}/bin/* %{buildroot}%{golist_execdir}/
+sed -i "s,golist ,%{golist_execdir}/golist ,g" \
+  %{buildroot}%{_bindir}/go-rpm-integration \
+  %{buildroot}%{_rpmconfigdir}/gosymlink.deps \
+  %{buildroot}%{_rpmmacrodir}/macros.go-rpm
 %endif
 
+%ifarch %{golang_arches} %{gccgo_arches}
 %files
-%license LICENSE.txt LICENSE-golist
+%license LICENSE.txt
+%if %{defined bundle_golist}
+%license LICENSE-golist
+%endif
 %doc README.md
 %{_bindir}/*
 %{_rpmconfigdir}/fileattrs/*.attr
 %{_rpmconfigdir}/*.prov
 %{_rpmconfigdir}/*.deps
-%{_rpmconfigdir}/macros.d/macros.go-rpm*
-%{_rpmconfigdir}/macros.d/macros.go-compiler*
+%{_rpmmacrodir}/macros.go-rpm*
+%{_rpmmacrodir}/macros.go-compiler*
 %{_rpmluadir}/fedora/rpm/*.lua
 # package golist
 %if 0%{?bundle_golist}
 %{golist_execdir}/golist
 %endif
 
-%files -n go-srpm-macros
-%license LICENSE.txt
-%doc README.md
-%{_rpmconfigdir}/macros.d/macros.go-srpm
-%{_rpmluadir}/fedora/srpm/*.lua
-
-%files -n go-filesystem
-%dir %{gopath}
-%dir %{gopath}/src
 
 %files -n go-rpm-templates
 %license LICENSE-templates.txt
@@ -256,9 +250,35 @@ install -m 0755 -vp %{golist_builddir}/bin/* %{buildroot}%{golist_execdir}/
 %dir %{_spectemplatedir}
 %{_spectemplatedir}/*.spec
 
+%files -n go-filesystem
+%dir %{gopath}
+%dir %{gopath}/src
+%endif
+
+# we only build go-srpm-macros on all architectures
+%files -n go-srpm-macros
+%license LICENSE.txt
+%doc README.md
+%{_rpmmacrodir}/macros.go-srpm
+%{_rpmluadir}/fedora/srpm/*.lua
+
 %changelog
-* Tue Dec 24 2024 Jaccco Ligthart <jacco@redsleeve.org> 3.6.0-3.redsleeve
-- added arm to golang_arches
+* Wed Nov 13 2024 Alejandro Sáez <asm@redhat.com>
+- Revert go-rpm-templates to noarch
+- Resolves: RHEL-67300
+- Related: RHEL-52226
+
+* Wed Nov 06 2024 Alejandro Sáez <asm@redhat.com> - 3.6.0-6
+- Add back again ExclusiveArch, it was removed by mistake.
+- Resolves: RHEL-52226
+
+* Mon Nov 04 2024 Alejandro Sáez <asm@redhat.com> - 3.6.0-5
+- Make golist non optional
+- Resolves: RHEL-52226
+
+* Thu Oct 31 2024 Alejandro Sáez <asm@redhat.com> - 3.6.0-4
+- Enable debuginfo package
+- Resolves: RHEL-52226
 
 * Wed Jul 31 2024 Alejandro Sáez <asm@redhat.com> - 3.6.0-3
 - Fix typo in add-gobuild-and-gotest.patch

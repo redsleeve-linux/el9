@@ -1,0 +1,187 @@
+From ee0f56cff40b324bb06e034e247ec85ae9a846bf Mon Sep 17 00:00:00 2001
+From: Nikita Popov <npopov@redhat.com>
+Date: Wed, 8 Jan 2025 08:28:18 +0100
+Subject: [PATCH] [PATCH] [Bolt][CMake] Don't export bolt libraries in
+ LLVMExports.cmake
+
+Bolt makes use of add_llvm_library and as such ends up exporting
+its libraries from LLVMExports.cmake, which is not correct.
+
+Bolt doesn't have its own exports file, and I assume that there
+is no desire to have one either -- Bolt libraries are not intended
+to be consumed as a cmake module, right?
+
+As such, this PR adds a NO_EXPORT option to simplify exclude these
+libraries from the exports file.
+
+---
+This patch originates from this PR:
+
+https://patch-diff.githubusercontent.com/raw/llvm/llvm-project/pull/121936.
+
+The commit was:
+
+https://github.com/nikic/llvm-project/commit/4333a4dd270b5c046c5469b97846e3dae58fb221.patch
+
+And then it was rebased onto llvmorg-19.1.6.
+---
+ bolt/lib/Core/CMakeLists.txt           |  1 +
+ bolt/lib/Passes/CMakeLists.txt         |  1 +
+ bolt/lib/Profile/CMakeLists.txt        |  1 +
+ bolt/lib/Rewrite/CMakeLists.txt        |  1 +
+ bolt/lib/RuntimeLibs/CMakeLists.txt    |  1 +
+ bolt/lib/Target/AArch64/CMakeLists.txt |  1 +
+ bolt/lib/Target/RISCV/CMakeLists.txt   |  1 +
+ bolt/lib/Target/X86/CMakeLists.txt     |  1 +
+ bolt/lib/Utils/CMakeLists.txt          |  1 +
+ llvm/cmake/modules/AddLLVM.cmake       | 12 +++++++++---
+ 10 files changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/bolt/lib/Core/CMakeLists.txt b/bolt/lib/Core/CMakeLists.txt
+index bb58667066fd..8c1f5d0bb37b 100644
+--- a/bolt/lib/Core/CMakeLists.txt
++++ b/bolt/lib/Core/CMakeLists.txt
+@@ -35,6 +35,7 @@ add_llvm_library(LLVMBOLTCore
+   ParallelUtilities.cpp
+   Relocation.cpp
+ 
++  NO_EXPORT
+   DISABLE_LLVM_LINK_LLVM_DYLIB
+   LINK_LIBS
+   ${LLVM_PTHREAD_LIB}
+diff --git a/bolt/lib/Passes/CMakeLists.txt b/bolt/lib/Passes/CMakeLists.txt
+index 407d8b03f739..7367b541545d 100644
+--- a/bolt/lib/Passes/CMakeLists.txt
++++ b/bolt/lib/Passes/CMakeLists.txt
+@@ -45,6 +45,7 @@ add_llvm_library(LLVMBOLTPasses
+   VeneerElimination.cpp
+   RetpolineInsertion.cpp
+ 
++  NO_EXPORT
+   DISABLE_LLVM_LINK_LLVM_DYLIB
+ 
+   LINK_LIBS
+diff --git a/bolt/lib/Profile/CMakeLists.txt b/bolt/lib/Profile/CMakeLists.txt
+index 9aa4ba0490b0..a2bb4aa074c7 100644
+--- a/bolt/lib/Profile/CMakeLists.txt
++++ b/bolt/lib/Profile/CMakeLists.txt
+@@ -7,6 +7,7 @@ add_llvm_library(LLVMBOLTProfile
+   YAMLProfileReader.cpp
+   YAMLProfileWriter.cpp
+ 
++  NO_EXPORT
+   DISABLE_LLVM_LINK_LLVM_DYLIB
+ 
+   LINK_COMPONENTS
+diff --git a/bolt/lib/Rewrite/CMakeLists.txt b/bolt/lib/Rewrite/CMakeLists.txt
+index 34993af2623b..6737e89b8451 100644
+--- a/bolt/lib/Rewrite/CMakeLists.txt
++++ b/bolt/lib/Rewrite/CMakeLists.txt
+@@ -26,6 +26,7 @@ add_llvm_library(LLVMBOLTRewrite
+   RewriteInstance.cpp
+   SDTRewriter.cpp
+ 
++  NO_EXPORT
+   DISABLE_LLVM_LINK_LLVM_DYLIB
+ 
+   LINK_LIBS
+diff --git a/bolt/lib/RuntimeLibs/CMakeLists.txt b/bolt/lib/RuntimeLibs/CMakeLists.txt
+index d3ac71d3e797..b8db7e4a1553 100644
+--- a/bolt/lib/RuntimeLibs/CMakeLists.txt
++++ b/bolt/lib/RuntimeLibs/CMakeLists.txt
+@@ -11,6 +11,7 @@ add_llvm_library(LLVMBOLTRuntimeLibs
+   HugifyRuntimeLibrary.cpp
+   InstrumentationRuntimeLibrary.cpp
+ 
++  NO_EXPORT
+   DISABLE_LLVM_LINK_LLVM_DYLIB
+   )
+ 
+diff --git a/bolt/lib/Target/AArch64/CMakeLists.txt b/bolt/lib/Target/AArch64/CMakeLists.txt
+index be03e247aa96..526a9645cb54 100644
+--- a/bolt/lib/Target/AArch64/CMakeLists.txt
++++ b/bolt/lib/Target/AArch64/CMakeLists.txt
+@@ -7,6 +7,7 @@ set(LLVM_LINK_COMPONENTS
+ add_llvm_library(LLVMBOLTTargetAArch64
+   AArch64MCPlusBuilder.cpp
+ 
++  NO_EXPORT
+   DISABLE_LLVM_LINK_LLVM_DYLIB
+ 
+   DEPENDS
+diff --git a/bolt/lib/Target/RISCV/CMakeLists.txt b/bolt/lib/Target/RISCV/CMakeLists.txt
+index 7f9557606320..3955cfc0f089 100644
+--- a/bolt/lib/Target/RISCV/CMakeLists.txt
++++ b/bolt/lib/Target/RISCV/CMakeLists.txt
+@@ -7,6 +7,7 @@ set(LLVM_LINK_COMPONENTS
+ add_llvm_library(LLVMBOLTTargetRISCV
+   RISCVMCPlusBuilder.cpp
+ 
++  NO_EXPORT
+   DISABLE_LLVM_LINK_LLVM_DYLIB
+ 
+   DEPENDS
+diff --git a/bolt/lib/Target/X86/CMakeLists.txt b/bolt/lib/Target/X86/CMakeLists.txt
+index 2b769bc7e7f5..00100e9b84c9 100644
+--- a/bolt/lib/Target/X86/CMakeLists.txt
++++ b/bolt/lib/Target/X86/CMakeLists.txt
+@@ -9,6 +9,7 @@ add_llvm_library(LLVMBOLTTargetX86
+   X86MCPlusBuilder.cpp
+   X86MCSymbolizer.cpp
+ 
++  NO_EXPORT
+   DISABLE_LLVM_LINK_LLVM_DYLIB
+ 
+   DEPENDS
+diff --git a/bolt/lib/Utils/CMakeLists.txt b/bolt/lib/Utils/CMakeLists.txt
+index d1403314274b..ceddcfc8f57a 100644
+--- a/bolt/lib/Utils/CMakeLists.txt
++++ b/bolt/lib/Utils/CMakeLists.txt
+@@ -2,6 +2,7 @@ add_llvm_library(LLVMBOLTUtils
+   CommandLineOpts.cpp
+   Utils.cpp
+ 
++  NO_EXPORT
+   DISABLE_LLVM_LINK_LLVM_DYLIB
+ 
+   LINK_LIBS
+diff --git a/llvm/cmake/modules/AddLLVM.cmake b/llvm/cmake/modules/AddLLVM.cmake
+index 03f4e1f190fd..addf083b7c71 100644
+--- a/llvm/cmake/modules/AddLLVM.cmake
++++ b/llvm/cmake/modules/AddLLVM.cmake
+@@ -897,7 +897,7 @@ endfunction()
+ 
+ macro(add_llvm_library name)
+   cmake_parse_arguments(ARG
+-    "SHARED;BUILDTREE_ONLY;MODULE;INSTALL_WITH_TOOLCHAIN"
++    "SHARED;BUILDTREE_ONLY;MODULE;INSTALL_WITH_TOOLCHAIN;NO_EXPORT"
+     ""
+     ""
+     ${ARGN})
+@@ -932,7 +932,11 @@ macro(add_llvm_library name)
+         set(umbrella)
+       endif()
+ 
+-      get_target_export_arg(${name} LLVM export_to_llvmexports ${umbrella})
++      if(ARG_NO_EXPORT)
++        set(export_to_llvmexports)
++      else()
++        get_target_export_arg(${name} LLVM export_to_llvmexports ${umbrella})
++      endif()
+       install(TARGETS ${name}
+               ${export_to_llvmexports}
+               LIBRARY DESTINATION lib${LLVM_LIBDIR_SUFFIX} COMPONENT ${name}
+@@ -945,7 +949,9 @@ macro(add_llvm_library name)
+                                  COMPONENT ${name})
+       endif()
+     endif()
+-    set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS ${name})
++    if(NOT ARG_NO_EXPORT)
++      set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS ${name})
++    endif()
+   endif()
+ 
+   get_subproject_title(subproject_title)
+-- 
+2.47.1
+

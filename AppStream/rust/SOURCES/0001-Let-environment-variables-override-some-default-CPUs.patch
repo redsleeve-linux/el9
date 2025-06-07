@@ -1,4 +1,4 @@
-From 184d61d2c12aa2db01de9a14ccb2be0cfae5039b Mon Sep 17 00:00:00 2001
+From 5273432acfae75d6e509bbebcf8d28b0f3d820d0 Mon Sep 17 00:00:00 2001
 From: Josh Stone <jistone@redhat.com>
 Date: Fri, 9 Jun 2023 15:23:08 -0700
 Subject: [PATCH] Let environment variables override some default CPUs
@@ -10,12 +10,12 @@ Subject: [PATCH] Let environment variables override some default CPUs
  3 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/compiler/rustc_target/src/spec/targets/powerpc64le_unknown_linux_gnu.rs b/compiler/rustc_target/src/spec/targets/powerpc64le_unknown_linux_gnu.rs
-index 194c3170e683..9806ca78297c 100644
+index 23913687a1fd..3253fbc84c74 100644
 --- a/compiler/rustc_target/src/spec/targets/powerpc64le_unknown_linux_gnu.rs
 +++ b/compiler/rustc_target/src/spec/targets/powerpc64le_unknown_linux_gnu.rs
 @@ -2,7 +2,7 @@
  
- pub fn target() -> Target {
+ pub(crate) fn target() -> Target {
      let mut base = base::linux_gnu::opts();
 -    base.cpu = "ppc64le".into();
 +    base.cpu = option_env!("RUSTC_TARGET_CPU_PPC64LE").unwrap_or("ppc64le").into();
@@ -23,25 +23,25 @@ index 194c3170e683..9806ca78297c 100644
      base.max_atomic_width = Some(64);
      base.stack_probes = StackProbeType::Inline;
 diff --git a/compiler/rustc_target/src/spec/targets/s390x_unknown_linux_gnu.rs b/compiler/rustc_target/src/spec/targets/s390x_unknown_linux_gnu.rs
-index 6fc410eb2235..c8f84edb9715 100644
+index a84a18a433ff..441af1018ff3 100644
 --- a/compiler/rustc_target/src/spec/targets/s390x_unknown_linux_gnu.rs
 +++ b/compiler/rustc_target/src/spec/targets/s390x_unknown_linux_gnu.rs
-@@ -5,7 +5,7 @@ pub fn target() -> Target {
+@@ -5,7 +5,7 @@ pub(crate) fn target() -> Target {
      let mut base = base::linux_gnu::opts();
      base.endian = Endian::Big;
      // z10 is the oldest CPU supported by LLVM
 -    base.cpu = "z10".into();
 +    base.cpu = option_env!("RUSTC_TARGET_CPU_S390X").unwrap_or("z10").into();
-     // FIXME: The ABI implementation in cabi_s390x.rs is for now hard-coded to assume the no-vector
-     // ABI. Pass the -vector feature string to LLVM to respect this assumption. On LLVM < 16, we
-     // also strip v128 from the data_layout below to match the older LLVM's expectation.
+     base.max_atomic_width = Some(128);
+     base.min_global_align = Some(16);
+     base.stack_probes = StackProbeType::Inline;
 diff --git a/compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnu.rs b/compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnu.rs
-index 80e267c163fa..8436a00e66d5 100644
+index 59ec6c7f9d5f..b6f1be890b20 100644
 --- a/compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnu.rs
 +++ b/compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnu.rs
 @@ -2,7 +2,7 @@
  
- pub fn target() -> Target {
+ pub(crate) fn target() -> Target {
      let mut base = base::linux_gnu::opts();
 -    base.cpu = "x86-64".into();
 +    base.cpu = option_env!("RUSTC_TARGET_CPU_X86_64").unwrap_or("x86-64").into();
@@ -49,5 +49,5 @@ index 80e267c163fa..8436a00e66d5 100644
      base.max_atomic_width = Some(64);
      base.add_pre_link_args(LinkerFlavor::Gnu(Cc::Yes, Lld::No), &["-m64"]);
 -- 
-2.41.0
+2.47.1
 

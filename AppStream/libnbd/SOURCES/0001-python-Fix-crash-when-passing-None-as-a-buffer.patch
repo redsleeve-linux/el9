@@ -1,0 +1,70 @@
+From 0dc8ee268e56fb8b8dcd18fd3483045e65ffc5a2 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Tue, 26 Oct 2021 13:40:16 +0100
+Subject: [PATCH] python: Fix crash when passing None as a buffer
+
+$ nbdkit -U - null 512 --run 'nbdsh -u $uri -c "h.pwrite(None, 0)"'
+nbdkit: external command was killed by signal 11
+
+The stack trace indicated that the code was calling
+PyBuffer_Release (&buf) on an uninitialized buffer 'buf'.  What was
+happening was that PyArg_ParseTuple was recognizing the type error in
+the parameter (None is not a buffer-like object) and failing, but it
+didn't initialize the Py_buffer parameter so that contained random
+stuff from the stack, and then we tried to release it by calling
+PyBuffer_Release.
+
+To fix this, initialize the stack buffer, then avoid calling
+PyBuffer_Release if the .obj field in the Py_buffer is still NULL
+(which should be impossible if PyArg_ParseTuple set the &buf
+parameter).
+
+After this commit we see the type error:
+
+$ nbdkit -U - null 512 --run './run nbdsh -u $uri -c "h.pwrite(None, 0)"'
+Traceback (most recent call last):
+  File "/usr/lib64/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/usr/lib64/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/home/rjones/d/libnbd/python/nbd.py", line 2568, in <module>
+    nbdsh.shell()
+  File "/home/rjones/d/libnbd/python/nbdsh.py", line 138, in shell
+    exec(c, d, d)
+  File "<string>", line 1, in <module>
+  File "/home/rjones/d/libnbd/python/nbd.py", line 1610, in pwrite
+    return libnbdmod.pwrite(self._o, buf, offset, flags)
+TypeError: a bytes-like object is required, not 'NoneType'
+
+(cherry picked from commit 51195424f8ba73d0ab1fb4145ddfa81cb8056d4e)
+---
+ generator/Python.ml | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/generator/Python.ml b/generator/Python.ml
+index cd12f27..49281bf 100644
+--- a/generator/Python.ml
++++ b/generator/Python.ml
+@@ -274,7 +274,7 @@ let print_python_binding name { args; optargs; ret; may_set_error } =
+     function
+     | Bool n -> pr "  int %s;\n" n
+     | BytesIn (n, _) ->
+-       pr "  Py_buffer %s;\n" n
++       pr "  Py_buffer %s = { .obj = NULL };\n" n
+     | BytesOut (n, count) ->
+        pr "  char *%s = NULL;\n" n;
+        pr "  Py_ssize_t %s;\n" count
+@@ -552,7 +552,9 @@ let print_python_binding name { args; optargs; ret; may_set_error } =
+   List.iter (
+     function
+     | Bool _ -> ()
+-    | BytesIn (n, _) -> pr "  PyBuffer_Release (&%s);\n" n
++    | BytesIn (n, _) ->
++       pr "  if (%s.obj)\n" n;
++       pr "    PyBuffer_Release (&%s);\n" n
+     | BytesOut (n, _) -> pr "  free (%s);\n" n
+     | BytesPersistIn _ | BytesPersistOut _ -> ()
+     | Closure { cbname } ->
+-- 
+2.31.1
+

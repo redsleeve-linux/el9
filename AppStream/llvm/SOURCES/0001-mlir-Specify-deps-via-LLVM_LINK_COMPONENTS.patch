@@ -1,0 +1,80 @@
+From c8f93f1958de1f59222a89dd64a573f91105e135 Mon Sep 17 00:00:00 2001
+From: Konrad Kleine <kkleine@redhat.com>
+Date: Tue, 3 Dec 2024 20:53:29 +0100
+Subject: [PATCH] [mlir] Specify deps via `LLVM_LINK_COMPONENTS`
+
+This specifies the dependencies to link against with
+`LLVM_LINK_COMPONENTS` for the
+`mlir/test/Target/LLVM/MLIRTargetLLVMTests` binary.
+
+Before, the dependencies where directly added to the
+`target_link_libraries()` call which caused the problems I describe
+next:
+
+When doing a build of LLVM with MLIR I want to link against
+`libLLVM.so` instead of statically linking `libLLVMSupport.a`.
+MLIR on the other side seems to statically link against
+`libLLVMSupport.a` because when I link to the shared library `libLLVM.so` I get:
+
+```
+CommandLine Error: Option 'aarch64-ptrauth-auth-checks' registered more than once!
+```
+
+This error indicates that the `Support` library is linked twice in the `MLIRTargetLLVMTest` binary.
+
+Here's the creation of the `MLIRTargetLLVMTest` binary before (Notice the
+`libLLVMSupport.a`):
+
+```
+[6535/6847] : && /usr/bin/clang++ -O2 -flto=thin -ffat-lto-objects -fexceptions -g -grecord-gcc-switches -pipe -Wall -Werror=format-security -Wp,-U_FORTIFY_SOURCE,-D_FORTIFY_SOURCE=3 -Wp,-D_GLIBCXX_ASSERTIONS --config=/usr/lib/rpm/redhat/redhat-hardened-clang.cfg -fstack-protector-strong -mbranch-protection=standard -fasynchronous-unwind-tables -D_DEFAULT_SOURCE -Dasm=__asm__ -fPIC -fno-semantic-interposition -fvisibility-inlines-hidden -Werror=date-time -Werror=unguarded-availability-new -Wall -Wextra -Wno-unused-parameter -Wwrite-strings -Wcast-qual -Wmissing-field-initializers -pedantic -Wno-long-long -Wc++98-compat-extra-semi -Wimplicit-fallthrough -Wcovered-switch-default -Wno-noexcept-type -Wnon-virtual-dtor -Wdelete-non-virtual-dtor -Wsuggest-override -Wstring-conversion -Wmisleading-indentation -Wctad-maybe-unsupported -fdiagnostics-color -ffunction-sections -fdata-sections -Wundef -Werror=mismatched-tags -O2 -g -DNDEBUG -Wl,-z,relro -Wl,--as-needed  -Wl,-z,pack-relative-relocs -Wl,-z,now --config=/usr/lib/rpm/redhat/redhat-hardened-clang-ld.cfg  -flto=thin -ffat-lto-objects -Wl,--build-id=sha1    -Wl,--gc-sections  -fno-lto tools/mlir/unittests/Target/LLVM/CMakeFiles/MLIRTargetLLVMTests.dir/SerializeNVVMTarget.cpp.o tools/mlir/unittests/Target/LLVM/CMakeFiles/MLIRTargetLLVMTests.dir/SerializeROCDLTarget.cpp.o tools/mlir/unittests/Target/LLVM/CMakeFiles/MLIRTargetLLVMTests.dir/SerializeToLLVMBitcode.cpp.o -o tools/mlir/unittests/Target/LLVM/MLIRTargetLLVMTests  -Wl,-rpath,/builddir/build/BUILD/llvm-19.1.3-build/llvm-project-19.1.3.src/llvm/redhat-linux-build/lib64  lib64/libllvm_gtest_main.a  lib64/libllvm_gtest.a  lib64/libMLIRTargetLLVM.a  lib64/libMLIRNVVMTarget.a  lib64/libMLIRROCDLTarget.a  lib64/libMLIRGPUDialect.a  lib64/libMLIRNVVMDialect.a  lib64/libMLIRLLVMDialect.a  lib64/libMLIRLLVMToLLVMIRTranslation.a  lib64/libMLIRBuiltinToLLVMIRTranslation.a  lib64/libMLIRNVVMToLLVMIRTranslation.a  lib64/libMLIRROCDLToLLVMIRTranslation.a  lib64/libMLIRGPUToLLVMIRTranslation.a  lib64/libLLVMAArch64CodeGen.a  lib64/libLLVMAArch64Desc.a  lib64/libLLVMAArch64Info.a  -lpthread  lib64/libMLIRTargetLLVM.a  lib64/libMLIRROCDLDialect.a  lib64/libMLIRExecutionEngineUtils.a  lib64/libMLIRGPUDialect.a  lib64/libMLIRMemRefDialect.a  lib64/libMLIRArithUtils.a  lib64/libMLIRDialectUtils.a  lib64/libMLIRComplexDialect.a  lib64/libMLIRArithAttrToLLVMConversion.a  lib64/libMLIRArithDialect.a  lib64/libMLIRCastInterfaces.a  lib64/libMLIRDialect.a  lib64/libMLIRInferIntRangeCommon.a  lib64/libMLIRUBDialect.a  lib64/libMLIRShapedOpInterfaces.a  lib64/libMLIRTargetLLVMIRExport.a  lib64/libMLIRDLTIDialect.a  lib64/libMLIRLLVMIRTransforms.a  lib64/libMLIRNVVMDialect.a  lib64/libMLIRLLVMDialect.a  lib64/libMLIRFuncDialect.a  lib64/libMLIRTransforms.a  lib64/libMLIRMemorySlotInterfaces.a  lib64/libMLIRCopyOpInterface.a  lib64/libMLIRRuntimeVerifiableOpInterface.a  lib64/libMLIRTranslateLib.a  lib64/libMLIRParser.a  lib64/libMLIRBytecodeReader.a  lib64/libMLIRAsmParser.a  lib64/libMLIRTransformUtils.a  lib64/libMLIRSubsetOpInterface.a  lib64/libMLIRValueBoundsOpInterface.a  lib64/libMLIRDestinationStyleOpInterface.a  lib64/libMLIRRewrite.a  lib64/libMLIRRewritePDL.a  lib64/libMLIRPDLToPDLInterp.a  lib64/libMLIRPass.a  lib64/libMLIRAnalysis.a  lib64/libMLIRControlFlowInterfaces.a  lib64/libMLIRInferIntRangeInterface.a  lib64/libMLIRCallInterfaces.a  lib64/libMLIRDataLayoutInterfaces.a  lib64/libMLIRViewLikeInterface.a  lib64/libMLIRLoopLikeInterface.a  lib64/libMLIRPresburger.a  lib64/libMLIRPDLInterpDialect.a  lib64/libMLIRFunctionInterfaces.a  lib64/libMLIRPDLDialect.a  lib64/libMLIRSideEffectInterfaces.a  lib64/libMLIRInferTypeOpInterface.a  lib64/libMLIRIR.a  lib64/libMLIRSupport.a  lib64/libLLVM.so.19.1  lib64/libLLVMAArch64Utils.a  lib64/libLLVMAsmPrinter.a  lib64/libLLVMCFGuard.a  lib64/libLLVMGlobalISel.a  lib64/libLLVMSelectionDAG.a  lib64/libLLVMCodeGen.a  lib64/libLLVMScalarOpts.a  lib64/libLLVMAggressiveInstCombine.a  lib64/libLLVMInstCombine.a  lib64/libLLVMBitWriter.a  lib64/libLLVMObjCARCOpts.a  lib64/libLLVMCodeGenTypes.a  lib64/libLLVMTarget.a  lib64/libLLVMVectorize.a  lib64/libLLVMTransformUtils.a  lib64/libLLVMAnalysis.a  lib64/libLLVMProfileData.a  lib64/libLLVMSymbolize.a  lib64/libLLVMDebugInfoDWARF.a  lib64/libLLVMDebugInfoPDB.a  lib64/libLLVMObject.a  lib64/libLLVMMCParser.a  lib64/libLLVMMC.a  lib64/libLLVMIRReader.a  lib64/libLLVMBitReader.a  lib64/libLLVMAsmParser.a  lib64/libLLVMTextAPI.a  lib64/libLLVMDebugInfoCodeView.a  lib64/libLLVMDebugInfoMSF.a  lib64/libLLVMDebugInfoBTF.a  lib64/libLLVMCore.a  lib64/libLLVMBinaryFormat.a  lib64/libLLVMRemarks.a  lib64/libLLVMBitstreamReader.a  lib64/libLLVMTargetParser.a  lib64/libLLVMSupport.a  lib64/libLLVMDemangle.a  -lrt  -ldl  -lm  /usr/lib64/libz.so  /usr/lib64/libzstd.so && :
+```
+
+Here's the full error:
+
+```
+[24/25] cd /builddir/build/BUILD/llvm-19.1.3-build/llvm-project-19.1.3.src/llvm/redhat-linux-build/tools/mlir/test && /usr/bin/python3 /builddir/build/BUILD/llvm-19.1.3-build/llvm-project-19.1.3.src/llvm/redhat-linux-build/./bin/llvm-lit -vv /builddir/build/BUILD/llvm-19.1.3-build/llvm-project-19.1.3.src/llvm/redhat-linux-build/tools/mlir/test
+: CommandLine Error: Option 'aarch64-ptrauth-auth-checks' registered more than once!
+LLVM ERROR: inconsistency in registered CommandLine options
+llvm-lit: /builddir/build/BUILD/llvm-19.1.3-build/llvm-project-19.1.3.src/llvm/utils/lit/lit/formats/googletest.py:38: warning: unable to discover google-tests in '/builddir/build/BUILD/llvm-19.1.3-build/llvm-project-19.1.3.src/llvm/redhat-linux-build/tools/mlir/unittests/Target/LLVM/./MLIRTargetLLVMTests': Command '['/builddir/build/BUILD/llvm-19.1.3-build/llvm-project-19.1.3.src/llvm/redhat-linux-build/tools/mlir/unittests/Target/LLVM/./MLIRTargetLLVMTests', '--gtest_list_tests', '--gtest_filter=-*DISABLED_*']' died with <Signals.SIGABRT: 6>.. Process output: b''
+error: filter did not match any tests (of 2704 discovered).  Use '--allow-empty-runs' to suppress this error.
+FAILED: tools/mlir/test/CMakeFiles/check-mlir /builddir/build/BUILD/llvm-19.1.3-build/llvm-project-19.1.3.src/llvm/redhat-linux-build/tools/mlir/test/CMakeFiles/check-mlir
+```
+
+Here's the CMake invocation:
+
+```
+/usr/bin/cmake -S . -B redhat-linux-build -DCMAKE_C_FLAGS_RELEASE:STRING=-DNDEBUG -DCMAKE_CXX_FLAGS_RELEASE:STRING=-DNDEBUG -DCMAKE_Fortran_FLAGS_RELEASE:STRING=-DNDEBUG -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON -DCMAKE_INSTALL_DO_STRIP:BOOL=OFF -DCMAKE_INSTALL_PREFIX:PATH=/usr -DINCLUDE_INSTALL_DIR:PATH=/usr/include -DLIB_INSTALL_DIR:PATH=/usr/lib64 -DSYSCONF_INSTALL_DIR:PATH=/etc -DSHARE_INSTALL_PREFIX:PATH=/usr/share -DLIB_SUFFIX=64 -DBUILD_SHARED_LIBS:BOOL=ON -G Ninja '' -DCLANG_BUILD_EXAMPLES:BOOL=OFF -DCLANG_CONFIG_FILE_SYSTEM_DIR=/etc/clang/ -DCLANG_DEFAULT_PIE_ON_LINUX=OFF -DCLANG_DEFAULT_UNWINDLIB=libgcc -DCLANG_ENABLE_ARCMT:BOOL=ON -DCLANG_ENABLE_STATIC_ANALYZER:BOOL=ON -DCLANG_INCLUDE_DOCS:BOOL=ON -DCLANG_INCLUDE_TESTS:BOOL=ON -DCLANG_LINK_CLANG_DYLIB=ON -DCLANG_PLUGIN_SUPPORT:BOOL=ON '-DCLANG_REPOSITORY_STRING=Fedora 19.1.3-5.fc42' -DLLVM_EXTERNAL_CLANG_TOOLS_EXTRA_SOURCE_DIR=../clang-tools-extra -DCLANG_RESOURCE_DIR=../lib/clang/19 -DCOMPILER_RT_INCLUDE_TESTS:BOOL=OFF -DCOMPILER_RT_INSTALL_PATH=/usr/lib/clang/19 -DLLVM_ENABLE_DOXYGEN:BOOL=OFF -DLLVM_ENABLE_SPHINX:BOOL=ON -DLLVM_BUILD_DOCS:BOOL=ON -DSPHINX_EXECUTABLE=/usr/bin/sphinx-build-3 -DSPHINX_OUTPUT_HTML:BOOL=OFF -DSPHINX_OUTPUT_MAN:BOOL=ON -DSPHINX_WARNINGS_AS_ERRORS=OFF -DLLDB_DISABLE_CURSES:BOOL=OFF -DLLDB_DISABLE_LIBEDIT:BOOL=OFF -DLLDB_DISABLE_PYTHON:BOOL=OFF -DLLDB_ENFORCE_STRICT_TEST_REQUIREMENTS:BOOL=ON -DLLVM_APPEND_VC_REV:BOOL=OFF -DLLVM_BUILD_EXAMPLES:BOOL=OFF -DLLVM_BUILD_EXTERNAL_COMPILER_RT:BOOL=ON -DLLVM_BUILD_LLVM_DYLIB:BOOL=ON -DLLVM_BUILD_RUNTIME:BOOL=ON -DLLVM_BUILD_TOOLS:BOOL=ON -DLLVM_BUILD_UTILS:BOOL=ON -DLLVM_COMMON_CMAKE_UTILS=/usr/share/llvm/cmake -DLLVM_DEFAULT_TARGET_TRIPLE=aarch64-redhat-linux-gnu -DLLVM_DYLIB_COMPONENTS=all -DLLVM_ENABLE_EH=ON -DLLVM_ENABLE_FFI:BOOL=ON -DLLVM_ENABLE_LIBCXX:BOOL=OFF -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON '-DLLVM_ENABLE_PROJECTS=clang;clang-tools-extra;lld;lldb;mlir' -DLLVM_ENABLE_RTTI:BOOL=ON '-DLLVM_ENABLE_RUNTIMES=compiler-rt;openmp;offload' -DLLVM_ENABLE_ZLIB:BOOL=ON -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=AVR -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES:BOOL=ON -DLLVM_INCLUDE_TOOLS:BOOL=ON -DLLVM_INCLUDE_UTILS:BOOL=ON -DLLVM_INSTALL_TOOLCHAIN_ONLY:BOOL=OFF -DLLVM_INSTALL_UTILS:BOOL=ON -DLLVM_LINK_LLVM_DYLIB:BOOL=ON -DLLVM_PARALLEL_LINK_JOBS=1 -DLLVM_TARGETS_TO_BUILD=all -DLLVM_TOOLS_INSTALL_DIR:PATH=bin -DLLVM_UNREACHABLE_OPTIMIZE:BOOL=OFF -DLLVM_USE_PERF:BOOL=ON -DLLVM_UTILS_INSTALL_DIR:PATH=bin -DMLIR_INCLUDE_DOCS:BOOL=ON -DMLIR_INCLUDE_TESTS:BOOL=ON -DMLIR_INCLUDE_INTEGRATION_TESTS:BOOL=OFF -DMLIR_INSTALL_AGGREGATE_OBJECTS=OFF -DMLIR_BUILD_MLIR_C_DYLIB=ON -DMLIR_ENABLE_BINDINGS_PYTHON:BOOL=ON -DOPENMP_INSTALL_LIBDIR=lib64 -DLIBOMP_INSTALL_ALIASES=OFF -DLLVM_BUILD_TESTS:BOOL=ON -DLLVM_INCLUDE_TESTS:BOOL=ON -DLLVM_INSTALL_GTEST:BOOL=ON -DLLVM_LIT_ARGS=-vv -DLLVM_UNITTEST_LINK_FLAGS=-fno-lto -DBUILD_SHARED_LIBS:BOOL=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/usr -DENABLE_LINKER_BUILD_ID:BOOL=ON -DOFFLOAD_INSTALL_LIBDIR=lib64 -DPython3_EXECUTABLE=/usr/bin/python3 -DCMAKE_SKIP_INSTALL_RPATH:BOOL=ON -DPPC_LINUX_DEFAULT_IEEELONGDOUBLE=ON -DLLVM_LIBDIR_SUFFIX=64 -DLLVM_BINUTILS_INCDIR=/usr/include -DLLVM_VERSION_SUFFIX=
+```
+---
+ mlir/unittests/Target/LLVM/CMakeLists.txt | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/mlir/unittests/Target/LLVM/CMakeLists.txt b/mlir/unittests/Target/LLVM/CMakeLists.txt
+index 6d612548a94c..0c61d222dedf 100644
+--- a/mlir/unittests/Target/LLVM/CMakeLists.txt
++++ b/mlir/unittests/Target/LLVM/CMakeLists.txt
+@@ -1,11 +1,11 @@
++set(LLVM_LINK_COMPONENTS nativecodegen)
++
+ add_mlir_unittest(MLIRTargetLLVMTests
+   SerializeNVVMTarget.cpp
+   SerializeROCDLTarget.cpp
+   SerializeToLLVMBitcode.cpp
+ )
+ 
+-llvm_map_components_to_libnames(llvm_libs nativecodegen)
+-
+ target_link_libraries(MLIRTargetLLVMTests
+   PRIVATE
+   MLIRTargetLLVM
+@@ -19,7 +19,6 @@ target_link_libraries(MLIRTargetLLVMTests
+   MLIRNVVMToLLVMIRTranslation
+   MLIRROCDLToLLVMIRTranslation
+   MLIRGPUToLLVMIRTranslation
+-  ${llvm_libs}
+ )
+ 
+ if (DEFINED LLVM_NATIVE_TARGET)
+-- 
+2.46.0
+

@@ -1,0 +1,39 @@
+From e4e678eb9cbd90acf2ba51e9ec0209b05c4403b5 Mon Sep 17 00:00:00 2001
+From: Josh Stone <cuviper@gmail.com>
+Date: Thu, 9 Jan 2025 16:47:10 -0800
+Subject: [PATCH] Only translate profile flags for Clang
+
+---
+ src/flags.rs | 16 +++++++++-------
+ 1 file changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/src/flags.rs b/src/flags.rs
+index 81834cf625f7..1a53c1b2345c 100644
+--- a/src/flags.rs
++++ b/src/flags.rs
+@@ -201,13 +201,15 @@ impl<'this> RustcCodegenFlags<'this> {
+                 if self.no_vectorize_slp {
+                     push_if_supported("-fno-slp-vectorize".into());
+                 }
+-                // https://clang.llvm.org/docs/ClangCommandLineReference.html#cmdoption-clang-fprofile-generate
+-                if let Some(value) = self.profile_generate {
+-                    push_if_supported(format!("-fprofile-generate={value}").into());
+-                }
+-                // https://clang.llvm.org/docs/ClangCommandLineReference.html#cmdoption-clang-fprofile-use
+-                if let Some(value) = self.profile_use {
+-                    push_if_supported(format!("-fprofile-use={value}").into());
++                if let ToolFamily::Clang { .. } = family {
++                    // https://clang.llvm.org/docs/ClangCommandLineReference.html#cmdoption-clang-fprofile-generate
++                    if let Some(value) = self.profile_generate {
++                        push_if_supported(format!("-fprofile-generate={value}").into());
++                    }
++                    // https://clang.llvm.org/docs/ClangCommandLineReference.html#cmdoption-clang-fprofile-use
++                    if let Some(value) = self.profile_use {
++                        push_if_supported(format!("-fprofile-use={value}").into());
++                    }
+                 }
+                 // https://clang.llvm.org/docs/ClangCommandLineReference.html#cmdoption-clang-mguard
+                 if let Some(value) = self.control_flow_guard {
+-- 
+2.47.1
+
