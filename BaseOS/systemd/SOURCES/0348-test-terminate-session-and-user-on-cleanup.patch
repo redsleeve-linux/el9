@@ -1,0 +1,43 @@
+From a39c796e6ef6bcce655404b4aecc29603ebd4c3c Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 31 Jul 2022 00:11:59 +0900
+Subject: [PATCH] test: terminate session and user on cleanup
+
+(cherry picked from commit fe9d58b25a8b8b1029dcdfbae89fac59fb429707)
+
+Related: #2100464
+---
+ test/units/testsuite-35.sh | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/test/units/testsuite-35.sh b/test/units/testsuite-35.sh
+index d55ad6103e..b6b1639668 100755
+--- a/test/units/testsuite-35.sh
++++ b/test/units/testsuite-35.sh
+@@ -221,7 +221,7 @@ test_shutdown() {
+ cleanup_session() (
+     set +ex
+ 
+-    local uid
++    local uid s
+ 
+     uid=$(id -u logind-test-user)
+ 
+@@ -229,6 +229,17 @@ cleanup_session() (
+ 
+     systemctl stop getty@tty2.service
+ 
++    for s in $(loginctl --no-legend list-sessions | awk '$3 == "logind-test-user" { print $1 }'); do
++        echo "INFO: stopping session $s"
++        loginctl terminate-session "$s"
++    done
++
++    loginctl terminate-user logind-test-user
++
++    if ! timeout 30 bash -c "while loginctl --no-legend | grep -q logind-test-user; do sleep 1; done"; then
++        echo "WARNING: session for logind-test-user still active, ignoring."
++    fi
++
+     pkill -u "$uid"
+     sleep 1
+     pkill -KILL -u "$uid"

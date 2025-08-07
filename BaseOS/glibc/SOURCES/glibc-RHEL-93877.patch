@@ -1,0 +1,181 @@
+commit aa3d7bd5299b33bffc118aa618b59bfa66059bcb
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Feb 13 21:56:52 2025 +0100
+
+    elf: Keep using minimal malloc after early DTV resize (bug 32412)
+    
+    If an auditor loads many TLS-using modules during startup, it is
+    possible to trigger DTV resizing.  Previously, the DTV was marked
+    as allocated by the main malloc afterwards, even if the minimal
+    malloc was still in use.  With this change, _dl_resize_dtv marks
+    the resized DTV as allocated with the minimal malloc.
+    
+    The new test reuses TLS-using modules from other auditing tests.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+diff --git a/elf/Makefile b/elf/Makefile
+index b89ff11754e48fa1..41adea8d1c6d13ca 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -363,6 +363,7 @@ tests += \
+   tst-align2 \
+   tst-audit-tlsdesc \
+   tst-audit-tlsdesc-dlopen \
++  tst-audit-tlsdesc-dlopen2 \
+   tst-audit1 \
+   tst-audit2 \
+   tst-audit8 \
+@@ -744,6 +745,7 @@ modules-names = \
+   tst-auditmanymod8 \
+   tst-auditmanymod9 \
+   tst-auditmod-tlsdesc  \
++  tst-auditmod-tlsdesc2 \
+   tst-auditmod1 \
+   tst-auditmod9a \
+   tst-auditmod9b \
+@@ -2773,6 +2775,9 @@ $(objpfx)tst-audit-tlsdesc.out: $(objpfx)tst-auditmod-tlsdesc.so
+ tst-audit-tlsdesc-ENV = LD_AUDIT=$(objpfx)tst-auditmod-tlsdesc.so
+ $(objpfx)tst-audit-tlsdesc-dlopen.out: $(objpfx)tst-auditmod-tlsdesc.so
+ tst-audit-tlsdesc-dlopen-ENV = LD_AUDIT=$(objpfx)tst-auditmod-tlsdesc.so
++$(objpfx)tst-audit-tlsdesc-dlopen2.out: $(objpfx)tst-auditmod-tlsdesc2.so \
++  $(patsubst %, $(objpfx)%.so, $(tlsmod17a-modules))
++tst-audit-tlsdesc-dlopen2-ENV = LD_AUDIT=$(objpfx)tst-auditmod-tlsdesc2.so
+ 
+ $(objpfx)tst-dlmopen-twice.out: \
+   $(objpfx)tst-dlmopen-twice-mod1.so \
+diff --git a/elf/dl-tls.c b/elf/dl-tls.c
+index 99323db9ca6f76b7..1b1bc4292eb24747 100644
+--- a/elf/dl-tls.c
++++ b/elf/dl-tls.c
+@@ -534,6 +534,13 @@ _dl_resize_dtv (dtv_t *dtv, size_t max_modid)
+       if (newp == NULL)
+ 	oom ();
+       memcpy (newp, &dtv[-1], (2 + oldsize) * sizeof (dtv_t));
++#ifdef SHARED
++      /* Auditors can trigger a DTV resize event while the full malloc
++	 is not yet in use.  Mark the new DTV allocation as the
++	 initial allocation.  */
++      if (!__rtld_malloc_is_complete ())
++	GL(dl_initial_dtv) = &newp[1];
++#endif
+     }
+   else
+     {
+diff --git a/elf/tst-audit-tlsdesc-dlopen2.c b/elf/tst-audit-tlsdesc-dlopen2.c
+new file mode 100644
+index 0000000000000000..7ba2c4129a9bcc53
+--- /dev/null
++++ b/elf/tst-audit-tlsdesc-dlopen2.c
+@@ -0,0 +1,46 @@
++/* Loading TLS-using modules from auditors (bug 32412).  Main program.
++   Copyright (C) 2021-2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xdlfcn.h>
++#include <stdio.h>
++
++static int
++do_test (void)
++{
++  puts ("info: start of main program");
++
++  /* Load TLS-using modules, to trigger DTV resizing.  The dynamic
++     linker will load them again (requiring their own TLS) because the
++     dlopen calls from the auditor were in the auditing namespace.  */
++  for (int i = 1; i <= 19; ++i)
++    {
++      char dso[30];
++      snprintf (dso, sizeof (dso), "tst-tlsmod17a%d.so", i);
++      char sym[30];
++      snprintf (sym, sizeof(sym), "tlsmod17a%d", i);
++
++      void *handle = xdlopen (dso, RTLD_LAZY);
++      int (*func) (void) = xdlsym (handle, sym);
++      /* Trigger TLS allocation.  */
++      func ();
++    }
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/elf/tst-auditmod-tlsdesc2.c b/elf/tst-auditmod-tlsdesc2.c
+new file mode 100644
+index 0000000000000000..50275cd34d1219c6
+--- /dev/null
++++ b/elf/tst-auditmod-tlsdesc2.c
+@@ -0,0 +1,59 @@
++/* Loading TLS-using modules from auditors (bug 32412).  Audit module.
++   Copyright (C) 2021-2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <dlfcn.h>
++#include <link.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <unistd.h>
++
++unsigned int
++la_version (unsigned int version)
++{
++  /* Open some modules, to trigger DTV resizing before the switch to
++     the main malloc.  */
++  for (int i = 1; i <= 19; ++i)
++    {
++      char dso[30];
++      snprintf (dso, sizeof (dso), "tst-tlsmod17a%d.so", i);
++      char sym[30];
++      snprintf (sym, sizeof(sym), "tlsmod17a%d", i);
++
++      void *handle = dlopen (dso, RTLD_LAZY);
++      if (handle == NULL)
++        {
++          printf ("error: dlmopen from auditor: %s\n", dlerror  ());
++          fflush (stdout);
++          _exit (1);
++        }
++      int (*func) (void) = dlsym (handle, sym);
++      if (func == NULL)
++        {
++          printf ("error: dlsym from auditor: %s\n", dlerror  ());
++          fflush (stdout);
++          _exit (1);
++        }
++      /* Trigger TLS allocation.  */
++      func ();
++    }
++
++  puts ("info: TLS-using modules loaded from auditor");
++  fflush (stdout);
++
++  return LAV_CURRENT;
++}

@@ -157,7 +157,7 @@ end \
 Summary: The GNU libc libraries
 Name: glibc
 Version: %{glibcversion}
-Release: 168%{?dist}.14.redsleeve
+Release: 168%{?dist}.23
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -220,11 +220,6 @@ Source13: nscd-sysusers.conf
 %global glibc_has_libnldbl 0
 %global glibc_has_libmvec 0
 %endif
-%ifarch armv6hl
-%global glibc_ldso /lib/ld-linux-armhf.so.3
-%global glibc_has_libnldbl 0
-%global glibc_has_libmvec 0
-%endif
 %ifarch ppc
 %global glibc_ldso /lib/ld.so.1
 %global glibc_has_libnldbl 1
@@ -272,8 +267,6 @@ Source13: nscd-sysusers.conf
 %global glibc_has_libnldbl 0
 %global glibc_has_libmvec 0
 %endif
-
-Source1000: glibc-arm-dl-tunables.list
 
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
@@ -1173,6 +1166,24 @@ Patch858: glibc-RHEL-84306-15.patch
 Patch859: glibc-RHEL-83982-1.patch
 Patch860: glibc-RHEL-83982-2.patch
 Patch861: glibc-RHEL-83982-3.patch
+Patch862: glibc-RHEL-92690-1.patch
+Patch863: glibc-RHEL-92690-2.patch
+Patch864: glibc-RHEL-92690-3.patch
+Patch865: glibc-RHEL-92690-4.patch
+Patch866: glibc-RHEL-92690-5.patch
+Patch867: glibc-RHEL-92690-6.patch
+Patch868: glibc-RHEL-92690-7.patch
+Patch869: glibc-RHEL-92690-8.patch
+Patch870: glibc-RHEL-71583.patch
+Patch871: glibc-RHEL-93665-1.patch
+Patch872: glibc-RHEL-93665-2.patch
+Patch873: glibc-RHEL-93877.patch
+Patch874: glibc-RHEL-95547-1.patch
+Patch875: glibc-RHEL-95547-2.patch
+Patch876: glibc-RHEL-95547-3.patch
+Patch877: glibc-RHEL-104150.patch
+Patch878: glibc-RHEL-105328.patch
+Patch879: glibc-RHEL-106230.patch
 
 ##############################################################################
 # Continued list of core "glibc" package information:
@@ -2006,10 +2017,6 @@ that can be installed across architectures.
 ##############################################################################
 %prep
 %autosetup -n %{glibcsrcdir} -p1
-
-%ifarch %{arm}
-cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
-%endif
 
 ##############################################################################
 # %%prep - Additional prep required...
@@ -3170,8 +3177,32 @@ update_gconv_modules_cache ()
 %endif
 
 %changelog
-* Sat May 17 2025 Jacco Ligthart <jacco@redsleeve.org> - 2.34-168.14.redsleeve
-- add dl-tunables.list for arm
+* Tue Jul 29 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.23
+- Fix namespace pollution in inet_ntop with fortification (RHEL-106230)
+
+* Thu Jul 24 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.22
+- CVE-2025-8058: Double free in regcomp (RHEL-105328)
+
+* Wed Jul 23 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.21
+- iconv: Do not create executable output files (RHEL-104150)
+
+* Mon Jun 16 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-168.20
+- CVE-2025-5702 glibc: Vector register overwrite bug in glibc (RHEL-95547)
+
+* Wed May 28 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.19
+- elf: Keep using minimal malloc after early DTV resize (RHEL-93877)
+
+* Wed May 28 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-168.18
+- Fix deadlock in popen after multi-threaded fork (RHEL-93665)
+
+* Tue May 27 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.17
+- x86: Avoid integer truncation with large cache sizes (RHEL-71583)
+
+* Thu May 22 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.16
+- SGID test enhancements (RHEL-92690)
+
+* Wed May 21 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.15
+- CVE-2025-4802: static setuid dlopen may search LD_LIBRARY_PATH (RHEL-92690)
 
 * Tue Apr  8 2025 Florian Weimer <fweimer@redhat.com> - 2.34-168.14
 - Increase reliability of stdio-common/tst-setvbuf2 (RHEL-83982)

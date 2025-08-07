@@ -1,0 +1,30 @@
+From af95abec0f8abe5dbb53c2d47eba06c0e9473565 Mon Sep 17 00:00:00 2001
+From: msizanoen1 <msizanoen@qtmlabs.xyz>
+Date: Tue, 7 Feb 2023 20:17:21 +0700
+Subject: [PATCH] unit: always return 1 in log_kill
+
+This ensures that cg_kill_items returns the correct value to let the
+manager know that a process was killed.
+
+(cherry picked from commit 500cd2e83b8246fbf20d99db898039cfba746223)
+
+Resolves: RHEL-86239
+---
+ src/core/unit.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 03eb3aaecf..d98ecf4367 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -4542,7 +4542,9 @@ static int log_kill(pid_t pid, int sig, void *userdata) {
+         /* Don't log about processes marked with brackets, under the assumption that these are temporary processes
+            only, like for example systemd's own PAM stub process. */
+         if (comm && comm[0] == '(')
+-                return 0;
++                /* Although we didn't log anything, as this callback is used in unit_kill_context we must return 1
++                 * here to let the manager know that a process was killed. */
++                return 1;
+ 
+         log_unit_notice(userdata,
+                         "Killing process " PID_FMT " (%s) with signal SIG%s.",

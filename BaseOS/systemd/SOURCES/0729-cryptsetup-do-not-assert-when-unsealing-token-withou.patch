@@ -1,0 +1,75 @@
+From 540f1d6b38dc6f2f72785ba7b44ad3cc65243982 Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Wed, 15 Feb 2023 00:44:01 +0000
+Subject: [PATCH] cryptsetup: do not assert when unsealing token without salt
+
+Salt was added in v253. We are not checking whether it was actually found
+(non-zero size), so when an old tpm+pin enrollment is opened things go boom.
+For good measure, check both the buffer and the size in both places.
+
+Assertion 'saltlen > 0' failed at src/shared/tpm2-util.c:2490, function tpm2_util_pbkdf2_hmac_sha256(). Aborting.
+
+(cherry picked from commit 504d0acf61c8472bc93c2a927e858074873b2eaf)
+
+Resolves: RHEL-40119
+---
+ src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c | 3 ++-
+ src/cryptsetup/cryptsetup-tpm2.c              | 4 +++-
+ src/shared/tpm2-util.c                        | 1 +
+ 3 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
+index 630a2d8d3e..e353e947aa 100644
+--- a/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tokens/luks2-tpm2.c
+@@ -40,6 +40,7 @@ int acquire_luks2_key(
+         _cleanup_(erase_and_freep) char *b64_salted_pin = NULL;
+         int r;
+ 
++        assert(salt || salt_size == 0);
+         assert(ret_decrypted_key);
+         assert(ret_decrypted_key_size);
+ 
+@@ -60,7 +61,7 @@ int acquire_luks2_key(
+         if ((flags & TPM2_FLAGS_USE_PIN) && salt && !pin)
+                 return -ENOANO;
+ 
+-        if (pin) {
++        if (pin && salt_size > 0) {
+                 uint8_t salted_pin[SHA256_DIGEST_SIZE] = {};
+                 CLEANUP_ERASE(salted_pin);
+                 r = tpm2_util_pbkdf2_hmac_sha256(pin, strlen(pin), salt, salt_size, salted_pin);
+diff --git a/src/cryptsetup/cryptsetup-tpm2.c b/src/cryptsetup/cryptsetup-tpm2.c
+index c049b8a313..036f3d3a00 100644
+--- a/src/cryptsetup/cryptsetup-tpm2.c
++++ b/src/cryptsetup/cryptsetup-tpm2.c
+@@ -88,6 +88,8 @@ int acquire_tpm2_key(
+         const void *blob;
+         int r;
+ 
++        assert(salt || salt_size == 0);
++
+         if (!device) {
+                 r = tpm2_find_device_auto(&auto_device);
+                 if (r == -ENODEV)
+@@ -165,7 +167,7 @@ int acquire_tpm2_key(
+                 if (r < 0)
+                         return r;
+ 
+-                if (salt) {
++                if (salt_size > 0) {
+                         uint8_t salted_pin[SHA256_DIGEST_SIZE] = {};
+                         CLEANUP_ERASE(salted_pin);
+ 
+diff --git a/src/shared/tpm2-util.c b/src/shared/tpm2-util.c
+index 4e382f691e..1d2d4ddda4 100644
+--- a/src/shared/tpm2-util.c
++++ b/src/shared/tpm2-util.c
+@@ -6041,6 +6041,7 @@ int tpm2_util_pbkdf2_hmac_sha256(const void *pass,
+          */
+         static const uint8_t block_cnt[] = { 0, 0, 0, 1 };
+ 
++        assert (salt);
+         assert (saltlen > 0);
+         assert (saltlen <= (SIZE_MAX - sizeof(block_cnt)));
+         assert (passlen > 0);

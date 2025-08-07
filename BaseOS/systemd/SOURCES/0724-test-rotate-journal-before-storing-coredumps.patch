@@ -1,0 +1,52 @@
+From 9bac78b7b359e063bfb43a2fb358195c0a6608e8 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 24 May 2023 10:31:41 +0900
+Subject: [PATCH] test: rotate journal before storing coredumps
+
+Hopefully fixes the failure like
+https://jenkins-systemd.apps.ocp.cloud.ci.centos.org/job/upstream-vagrant-archlinux-sanitizers/2558/
+---
+[   66.708894] testsuite-74.sh[728]: + coredumpctl --json=off
+[   66.709344] testsuite-74.sh[826]: TIME                        PID UID GID SIG     COREFILE EXE             SIZE
+[   66.709773] testsuite-74.sh[826]: Tue 2023-05-23 22:10:17 UTC 739   0   0 SIGTRAP journal  /tmp/test-dump     -
+[   66.711134] testsuite-74.sh[826]: Tue 2023-05-23 22:10:18 UTC 747   0   0 SIGABRT journal  /tmp/test-dump     -
+[   66.711789] testsuite-74.sh[826]: Tue 2023-05-23 22:10:19 UTC 763   0   0 SIGTRAP present  /tmp/test-dump 53.5K
+[   66.712460] testsuite-74.sh[826]: Tue 2023-05-23 22:10:20 UTC 776   0   0 SIGABRT present  /tmp/test-dump 53.3K
+[   66.713505] testsuite-74.sh[728]: + coredumpctl --root=/
+[   66.714144] testsuite-74.sh[828]: TIME                        PID UID GID SIG     COREFILE EXE             SIZE
+[   66.714535] testsuite-74.sh[828]: Tue 2023-05-23 22:10:17 UTC 739   0   0 SIGTRAP journal  /tmp/test-dump     -
+[   66.715208] testsuite-74.sh[828]: Tue 2023-05-23 22:10:18 UTC 747   0   0 SIGABRT journal  /tmp/test-dump     -
+[   66.715907] testsuite-74.sh[828]: Tue 2023-05-23 22:10:19 UTC 763   0   0 SIGTRAP present  /tmp/test-dump 53.5K
+[   66.716565] testsuite-74.sh[828]: Tue 2023-05-23 22:10:20 UTC 776   0   0 SIGABRT present  /tmp/test-dump 53.3K
+[   66.717494] testsuite-74.sh[728]: + coredumpctl --directory=/var/log/journal
+[   66.718188] testsuite-74.sh[830]: TIME                        PID UID GID SIG     COREFILE EXE             SIZE
+[   66.882072] testsuite-74.sh[830]: Tue 2023-05-23 22:10:17 UTC 739   0   0 SIGTRAP journal  /tmp/test-dump     -
+[   66.882642] testsuite-74.sh[830]: Tue 2023-05-23 22:10:18 UTC 747   0   0 SIGABRT journal  /tmp/test-dump     -
+[   66.883450] testsuite-74.sh[830]: Tue 2023-05-23 22:10:19 UTC 763   0   0 SIGTRAP present  /tmp/test-dump 53.5K
+[   66.883944] testsuite-74.sh[830]: Tue 2023-05-23 22:10:20 UTC 776   0   0 SIGABRT present  /tmp/test-dump 53.3K
+[   66.885448] testsuite-74.sh[728]: + coredumpctl --file=/var/log/journal/2e1ed84be19a4e22adfc99ad849be1f6/system.journal
+[   66.885989] testsuite-74.sh[728]: + at_exit
+[   66.894162] coredumpctl[833]: No coredumps found.
+---
+
+(cherry picked from commit 5c4e96c28c4a2193ba0dd459ea3366614f9b262f)
+
+Related: RHEL-34061
+---
+ test/units/testsuite-74.coredump.sh | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/test/units/testsuite-74.coredump.sh b/test/units/testsuite-74.coredump.sh
+index 0e5d050f45..d5039b70f4 100755
+--- a/test/units/testsuite-74.coredump.sh
++++ b/test/units/testsuite-74.coredump.sh
+@@ -21,6 +21,9 @@ if systemd-detect-virt -cq; then
+     exit 0
+ fi
+ 
++# To make all coredump entries stored in system.journal.
++journalctl --rotate
++
+ # Check that we're the ones to receive coredumps
+ sysctl kernel.core_pattern | grep systemd-coredump
+ 

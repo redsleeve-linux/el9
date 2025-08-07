@@ -1,0 +1,56 @@
+From 1fe172a67c2bbbedfd08d6ec5a28386f197962f9 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 22 Jul 2022 15:45:24 +0900
+Subject: [PATCH] test: wait for user service or slice to be finished
+
+Hopefully fixes #24040.
+
+(cherry picked from commit 8015e2587045f8a58a15d4551c76521a4a3ff50c)
+
+Related: #2100464
+---
+ test/units/testsuite-35.sh | 27 ++++++++++++++++++++++-----
+ 1 file changed, 22 insertions(+), 5 deletions(-)
+
+diff --git a/test/units/testsuite-35.sh b/test/units/testsuite-35.sh
+index d9eccee84f..d55ad6103e 100755
+--- a/test/units/testsuite-35.sh
++++ b/test/units/testsuite-35.sh
+@@ -221,15 +221,32 @@ test_shutdown() {
+ cleanup_session() (
+     set +ex
+ 
+-    systemctl stop getty@tty2.service
+-    rm -rf /run/systemd/system/getty@tty2.service.d
+-    systemctl daemon-reload
++    local uid
++
++    uid=$(id -u logind-test-user)
+ 
+     loginctl disable-linger logind-test-user
+ 
+-    pkill -u "$(id -u logind-test-user)"
++    systemctl stop getty@tty2.service
++
++    pkill -u "$uid"
+     sleep 1
+-    pkill -KILL -u "$(id -u logind-test-user)"
++    pkill -KILL -u "$uid"
++
++    if ! timeout 30 bash -c "while systemctl is-active --quiet user@${uid}.service; do sleep 1; done"; then
++        echo "WARNING: user@${uid}.service is still active, ignoring."
++    fi
++
++    if ! timeout 30 bash -c "while systemctl is-active --quiet user-runtime-dir@${uid}.service; do sleep 1; done"; then
++        echo "WARNING: user-runtime-dir@${uid}.service is still active, ignoring."
++    fi
++
++    if ! timeout 30 bash -c "while systemctl is-active --quiet user-${uid}.slice; do sleep 1; done"; then
++        echo "WARNING: user-${uid}.slice is still active, ignoring."
++    fi
++
++    rm -rf /run/systemd/system/getty@tty2.service.d
++    systemctl daemon-reload
+ 
+     return 0
+ )

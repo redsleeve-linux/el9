@@ -1,0 +1,44 @@
+From 694ffe6e760878bf4983fc63f5c9fe109e19b80e Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Thu, 7 Jul 2022 18:27:02 +0900
+Subject: [PATCH] time-util: fix buffer-over-run
+
+Fixes #23928.
+
+(cherry picked from commit 9102c625a673a3246d7e73d8737f3494446bad4e)
+
+Resolves: #2139388
+---
+ src/basic/time-util.c     | 2 +-
+ src/test/test-time-util.c | 5 +++++
+ 2 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index c0841af8f3..4610c37273 100644
+--- a/src/basic/time-util.c
++++ b/src/basic/time-util.c
+@@ -598,7 +598,7 @@ char *format_timespan(char *buf, size_t l, usec_t t, usec_t accuracy) {
+                         t = b;
+                 }
+ 
+-                n = MIN((size_t) k, l);
++                n = MIN((size_t) k, l-1);
+ 
+                 l -= n;
+                 p += n;
+diff --git a/src/test/test-time-util.c b/src/test/test-time-util.c
+index 15f4a0c169..20ad521db7 100644
+--- a/src/test/test-time-util.c
++++ b/src/test/test-time-util.c
+@@ -238,6 +238,11 @@ TEST(format_timespan) {
+         test_format_timespan_accuracy(1);
+         test_format_timespan_accuracy(USEC_PER_MSEC);
+         test_format_timespan_accuracy(USEC_PER_SEC);
++
++        /* See issue #23928. */
++        _cleanup_free_ char *buf;
++        assert_se(buf = new(char, 5));
++        assert_se(buf == format_timespan(buf, 5, 100005, 1000));
+ }
+ 
+ TEST(verify_timezone) {

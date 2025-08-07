@@ -1,0 +1,103 @@
+From 47c1a02ba0e669484e93dd78dd475592ecaa4cbd Mon Sep 17 00:00:00 2001
+From: Jan Macku <jamacku@redhat.com>
+Date: Mon, 17 Apr 2023 14:59:55 +0200
+Subject: [PATCH] ci: first part of the source-git automation - commit linter
+
+Add a GitHub Workflow that is triggered on `workflow_run` events.
+It uses metadata provided by `redhat-plumbers-in-action/gather-pull-request-metadata`
+GitHub Action to get the PR number and the commit metadata.
+The commit metadata is then used to check if the commit message contains
+all required information (tracker and upstream reference). GitHub Action
+responsible for commit verification `redhat-plumbers-in-action/advanced-commit-linter`
+is configured via the `advanced-commit-linter.yml` file.
+
+rhel-only
+
+Related: #2184929
+---
+ .github/advanced-commit-linter.yml          | 23 +++++++++++
+ .github/workflows/source-git-automation.yml | 45 +++++++++++++++++++++
+ 2 files changed, 68 insertions(+)
+ create mode 100644 .github/advanced-commit-linter.yml
+ create mode 100644 .github/workflows/source-git-automation.yml
+
+diff --git a/.github/advanced-commit-linter.yml b/.github/advanced-commit-linter.yml
+new file mode 100644
+index 0000000000..491836abbb
+--- /dev/null
++++ b/.github/advanced-commit-linter.yml
+@@ -0,0 +1,23 @@
++policy:
++  cherry-pick:
++    upstream:
++      - github: systemd/systemd
++      - github: systemd/systemd-stable
++    exception:
++      note:
++        - rhel-only
++  tracker:
++    - keyword:
++        - 'Resolves: #?'
++        - 'Related: #?'
++        - 'Reverts: #?'
++      issue-format:
++        - '\d+$'
++      url: 'https://bugzilla.redhat.com/show_bug.cgi?id='
++    - keyword:
++        - 'Resolves: '
++        - 'Related: '
++        - 'Reverts: '
++      issue-format:
++        - 'RHEL-\d+$'
++      url: 'https://issues.redhat.com/browse/'
+diff --git a/.github/workflows/source-git-automation.yml b/.github/workflows/source-git-automation.yml
+new file mode 100644
+index 0000000000..140f21b116
+--- /dev/null
++++ b/.github/workflows/source-git-automation.yml
+@@ -0,0 +1,45 @@
++name: Source git Automation
++on:
++  workflow_run:
++    workflows: [ Gather Pull Request Metadata ]
++    types:
++      - completed
++
++permissions:
++  contents: read
++
++jobs:
++  download-metadata:
++    if: >
++      github.event.workflow_run.event == 'pull_request' &&
++      github.event.workflow_run.conclusion == 'success'
++    runs-on: ubuntu-latest
++
++    outputs:
++      pr-metadata: ${{ steps.Artifact.outputs.pr-metadata-json }}
++
++    steps:
++      - id: Artifact
++        name: Download Artifact
++        uses: redhat-plumbers-in-action/download-artifact@v1
++        with:
++          name: pr-metadata
++
++  commit-linter:
++    needs: [ download-metadata ]
++    runs-on: ubuntu-latest
++
++    outputs:
++      validated-pr-metadata: ${{ steps.commit-linter.outputs.validated-pr-metadata }}
++
++    permissions:
++      statuses: write
++      pull-requests: write
++
++    steps:
++      - id: commit-linter
++        name: Lint Commits
++        uses: redhat-plumbers-in-action/advanced-commit-linter@v1
++        with:
++          pr-metadata: ${{ needs.download-metadata.outputs.pr-metadata }}
++          token: ${{ secrets.GITHUB_TOKEN }}

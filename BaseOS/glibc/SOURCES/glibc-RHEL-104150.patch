@@ -1,0 +1,51 @@
+commit cdcf24ee14c27b77744ff52ab3ae852821207eb0
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Thu Jul 17 14:44:05 2025 +0200
+
+    iconv: iconv -o should not create executable files (bug 33164)
+    
+    The mistake is that open must use 0666 to pick up the umask,
+    and not 0777 (which is required by mkdir).
+    
+    Fixes commit 8ef3cff9d1ceafe369f982d980678d749fb93bd2
+    ("iconv: Support in-place conversions (bug 10460, bug 32033)").
+    
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+
+diff --git a/iconv/iconv_prog.c b/iconv/iconv_prog.c
+index e3b051a309ff142b..08ea99d6adf6ea86 100644
+--- a/iconv/iconv_prog.c
++++ b/iconv/iconv_prog.c
+@@ -437,7 +437,7 @@ input_error (const char *path)
+ static void
+ open_output_direct (void)
+ {
+-  output_fd = open64 (output_file, O_WRONLY | O_CREAT | O_TRUNC, 0777);
++  output_fd = open64 (output_file, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+   if (output_fd < 0)
+     output_error ();
+ }
+@@ -458,7 +458,7 @@ prepare_output_file (char **argv)
+   else
+     {
+       /* If iconv creates the output file, no overlap is possible.  */
+-      output_fd = open64 (output_file, O_WRONLY | O_CREAT | O_EXCL, 0777);
++      output_fd = open64 (output_file, O_WRONLY | O_CREAT | O_EXCL, 0666);
+       if (output_fd >= 0)
+ 	output_buffer_size = copy_buffer_size;
+       else
+diff --git a/iconv/tst-iconv_prog-buffer.sh b/iconv/tst-iconv_prog-buffer.sh
+index 23098ac56a344c48..562f90fe513e94d7 100644
+--- a/iconv/tst-iconv_prog-buffer.sh
++++ b/iconv/tst-iconv_prog-buffer.sh
+@@ -75,6 +75,10 @@ run_iconv () {
+ }
+ 
+ check_out_expected () {
++    if test -x "$tmp/out" ; then
++	echo "error: iconv output file is executable"
++	failure=true
++    fi
+     if ! cmp -s "$tmp/out" "$tmp/expected" ; then
+         echo "error: iconv output difference" >&$logfd
+         echo "*** expected ***" >&$logfd

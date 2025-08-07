@@ -1,0 +1,51 @@
+From 15d494b7ee019ab3e3a2a8e61c73ea8693ddb8ba Mon Sep 17 00:00:00 2001
+From: Jan Macku <jamacku@redhat.com>
+Date: Mon, 17 Apr 2023 14:51:19 +0200
+Subject: [PATCH] ci: workflow for gathering metadata for source-git automation
+
+Workflow gathers metadata like pull request numbers and information about commits.
+This metadata is used for commit validation and other actions.
+This workflow also triggers for rest of the source-git automation workflows.
+
+rhel-only
+
+Related: #2184929
+---
+ .github/workflows/gather-metadata.yml | 28 +++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+ create mode 100644 .github/workflows/gather-metadata.yml
+
+diff --git a/.github/workflows/gather-metadata.yml b/.github/workflows/gather-metadata.yml
+new file mode 100644
+index 0000000000..635708a71f
+--- /dev/null
++++ b/.github/workflows/gather-metadata.yml
+@@ -0,0 +1,28 @@
++name: Gather Pull Request Metadata
++on:
++  pull_request:
++    types: [ opened, reopened, synchronize ]
++    branches:
++      - main
++      - rhel-9.*.0
++
++permissions:
++  contents: read
++
++jobs:
++  gather-metadata:
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Repository checkout
++        uses: actions/checkout@v3
++
++      - id: Metadata
++        name: Gather Pull Request Metadata
++        uses: redhat-plumbers-in-action/gather-pull-request-metadata@v1
++
++      - name: Upload artifact with gathered metadata
++        uses: actions/upload-artifact@v3
++        with:
++          name: pr-metadata
++          path: ${{ steps.Metadata.outputs.metadata-file }}

@@ -21,7 +21,7 @@
 Name: systemd
 Url: https://systemd.io
 Version: 252
-Release: 51%{?dist}.redsleeve
+Release: 51%{?dist}.1
 # For a breakdown of the licensing, see README
 License: LGPLv2+ and MIT and GPLv2+
 Summary: System and Service Manager
@@ -1193,8 +1193,7 @@ Patch1107: 1107-core-Handle-cgroup-pruning-in-on_cgroup_empty_event.patch
 Patch1108: 1108-Fix-failing-test.patch
 Patch1109: 1109-unit-don-t-gc-unit-in-oom-queue.patch
 Patch1110: 1110-core-do-not-GC-units-jobs-that-are-in-the-D-Bus-queu.patch
-
-Patch2000: arm32-patch-for-disable-service.patch
+Patch1111: 1111-unit-always-return-1-in-log_kill.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -1252,7 +1251,7 @@ BuildRequires: libseccomp-devel
 BuildRequires: meson >= 0.43
 BuildRequires: gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires: valgrind-devel
+BuildRequires: valgrind-devel
 BuildRequires: pkgconfig(bash-completion)
 BuildRequires: pkgconfig(tss2-esys)
 BuildRequires: pkgconfig(tss2-rc)
@@ -2072,13 +2071,12 @@ systemd-hwdb update &>/dev/null || :
 %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
 
 %changelog
-* Fri Jun 06 2025 Jacco Ligthart <jacco@redsleeve.org> - 252-51.redsleeve
-- removed valgrind
-- added a patch from upstream to de able to disable services.
-
-* Tue Apr 22 2025 Release Engineering <releng@rockylinux.org> - 252-51
+* Tue Jun 24 2025 Release Engineering <releng@rockylinux.org> - 252-51
 - Set support URL to the wiki
 - Set sbat mail to security@rockylinux.org
+
+* Tue Apr 08 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-51.1
+- unit: always return 1 in log_kill (RHEL-86239)
 
 * Tue Jan 28 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-51
 - ci: use ubuntu 22:04 for deploy of man pages (RHEL-70884)
