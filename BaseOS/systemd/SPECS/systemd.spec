@@ -21,7 +21,7 @@
 Name: systemd
 Url: https://systemd.io
 Version: 252
-Release: 51%{?dist}
+Release: 51%{?dist}.redsleeve
 # For a breakdown of the licensing, see README
 License: LGPLv2+ and MIT and GPLv2+
 Summary: System and Service Manager
@@ -1194,6 +1194,8 @@ Patch1108: 1108-Fix-failing-test.patch
 Patch1109: 1109-unit-don-t-gc-unit-in-oom-queue.patch
 Patch1110: 1110-core-do-not-GC-units-jobs-that-are-in-the-D-Bus-queu.patch
 
+Patch2000: arm32-patch-for-disable-service.patch
+
 # Downstream-only patches (9000–9999)
 
 %ifarch %{ix86} x86_64 aarch64
@@ -1250,7 +1252,7 @@ BuildRequires: libseccomp-devel
 BuildRequires: meson >= 0.43
 BuildRequires: gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-BuildRequires: valgrind-devel
+#BuildRequires: valgrind-devel
 BuildRequires: pkgconfig(bash-completion)
 BuildRequires: pkgconfig(tss2-esys)
 BuildRequires: pkgconfig(tss2-rc)
@@ -2070,6 +2072,10 @@ systemd-hwdb update &>/dev/null || :
 %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
 
 %changelog
+* Fri Jun 06 2025 Jacco Ligthart <jacco@redsleeve.org> - 252-51.redsleeve
+- removed valgrind
+- added a patch from upstream to de able to disable services.
+
 * Tue Apr 22 2025 Release Engineering <releng@rockylinux.org> - 252-51
 - Set support URL to the wiki
 - Set sbat mail to security@rockylinux.org

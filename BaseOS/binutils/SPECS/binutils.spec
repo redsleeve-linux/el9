@@ -2,7 +2,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 63%{?dist}
+Release: 63%{?dist}.redsleeve
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -575,6 +575,7 @@ Requires(post): coreutils
 BuildRequires: elfutils-debuginfod-client-devel
 %endif
 
+Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 %description
@@ -1369,6 +1370,9 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
+* Fri Jun 06 2025 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-63.redsleeve
+- minor adjustments for armv6
+
 * Fri Feb 07 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-63
 - Fix seg-fault in AArch64 linker when building u-boot.  (RHEL-78350)
 
