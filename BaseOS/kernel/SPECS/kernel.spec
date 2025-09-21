@@ -118,7 +118,7 @@ Summary: The Linux kernel
 %global signmodules 1
 
 # Compress modules only for architectures that build modules
-%ifarch noarch %{arm}
+%ifarch noarch
 %global zipmodules 0
 %else
 %global zipmodules 1
@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 570.32.1
+%define pkgrelease 570.42.2
 %define kversion 5
-%define tarfile_release 5.14.0-570.32.1.el9_6
+%define tarfile_release 5.14.0-570.42.2.el9_6
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 570.32.1%{?buildid}%{?dist}
+%define specrelease 570.42.2%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-570.32.1.el9_6
+%define kabiversion 5.14.0-570.42.2.el9_6
 
 #
 # End of genspec.sh variables
@@ -525,7 +525,7 @@ Summary: The Linux kernel
 %define kernel_mflags KALLSYMS_EXTRA_PASS=1
 # we only build headers/perf/tools on the base arm arches
 # just like we used to only build them on i386 for x86
-%ifnarch armv7hl armv6hl
+%ifnarch armv7hl
 %define with_headers 0
 %define with_cross_headers 0
 %endif
@@ -539,11 +539,6 @@ Summary: The Linux kernel
 %define hdrarch arm64
 %define make_target vmlinuz.efi
 %define kernel_image arch/arm64/boot/vmlinuz.efi
-%endif
-
-%ifarch %{arm}
-%define asmarch arm
-%define hdrarch arm
 %endif
 
 # Should make listnewconfig fail if there's config options
@@ -625,7 +620,7 @@ Name: kernel
 License: ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-2-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR CDDL-1.0) AND ((GPL-2.0-only WITH Linux-syscall-note) OR Linux-OpenIB) AND ((GPL-2.0-only WITH Linux-syscall-note) OR MIT) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR MIT) AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSD-3-Clause-Clear AND GFDL-1.1-no-invariants-or-later AND GPL-1.0-or-later AND (GPL-1.0-or-later OR BSD-3-Clause) AND (GPL-1.0-or-later WITH Linux-syscall-note) AND GPL-2.0-only AND (GPL-2.0-only OR Apache-2.0) AND (GPL-2.0-only OR BSD-2-Clause) AND (GPL-2.0-only OR BSD-3-Clause) AND (GPL-2.0-only OR CDDL-1.0) AND (GPL-2.0-only OR GFDL-1.1-no-invariants-or-later) AND (GPL-2.0-only OR GFDL-1.2-no-invariants-only) AND (GPL-2.0-only WITH Linux-syscall-note) AND GPL-2.0-or-later AND (GPL-2.0-or-later OR BSD-2-Clause) AND (GPL-2.0-or-later OR BSD-3-Clause) AND (GPL-2.0-or-later OR CC-BY-4.0) AND (GPL-2.0-or-later WITH GCC-exception-2.0) AND (GPL-2.0-or-later WITH Linux-syscall-note) AND ISC AND LGPL-2.0-or-later AND (LGPL-2.0-or-later OR BSD-2-Clause) AND (LGPL-2.0-or-later WITH Linux-syscall-note) AND LGPL-2.1-only AND (LGPL-2.1-only OR BSD-2-Clause) AND (LGPL-2.1-only WITH Linux-syscall-note) AND LGPL-2.1-or-later AND (LGPL-2.1-or-later WITH Linux-syscall-note) AND (Linux-OpenIB OR GPL-2.0-only) AND (Linux-OpenIB OR GPL-2.0-only OR BSD-2-Clause) AND Linux-man-pages-copyleft AND MIT AND (MIT OR GPL-2.0-only) AND (MIT OR GPL-2.0-or-later) AND (MIT OR LGPL-2.1-only) AND (MPL-1.1 OR GPL-2.0-only) AND (X11 OR GPL-2.0-only) AND (X11 OR GPL-2.0-or-later) AND Zlib
 URL: https://www.kernel.org/
 Version: %{specversion}
-Release: %{pkg_release}.redsleeve
+Release: %{pkg_release}
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
 # SET %%nobuildarches (ABOVE) INSTEAD
 %if 0%{?fedora}
@@ -649,7 +644,7 @@ BuildRequires: kmod, bash, coreutils, tar, git-core, which
 BuildRequires: bzip2, xz, findutils, gzip, m4, perl-interpreter, perl-Carp, perl-devel, perl-generators, make, diffutils, gawk, %compression
 BuildRequires: gcc, binutils, redhat-rpm-config, hmaccalc, bison, flex, gcc-c++
 BuildRequires: net-tools, hostname, bc, elfutils-devel
-#BuildRequires: dwarves
+BuildRequires: dwarves
 BuildRequires: python3-devel
 BuildRequires: gcc-plugin-devel
 BuildRequires: kernel-rpm-macros >= 185-9
@@ -995,6 +990,7 @@ Recommends: linux-firmware\
 Requires(preun): systemd >= 200\
 Conflicts: xfsprogs < 4.3.0-1\
 Conflicts: xorg-x11-drv-vmmouse < 13.0.99\
+Conflicts: xdp-tools < 1.5.4\
 %{expand:%%{?kernel%{?1:_%{1}}_conflicts:Conflicts: %%{kernel%{?1:_%{1}}_conflicts}}}\
 %{expand:%%{?kernel%{?1:_%{1}}_obsoletes:Obsoletes: %%{kernel%{?1:_%{1}}_obsoletes}}}\
 %{expand:%%{?kernel%{?1:_%{1}}_provides:Provides: %%{kernel%{?1:_%{1}}_provides}}}\
@@ -2682,7 +2678,7 @@ BuildKernel %make_target %kernel_image %{_use_vdso} rt-64k
 BuildKernel %make_target %kernel_image %{_use_vdso}
 %endif
 
-%ifnarch noarch i686 %{arm}
+%ifnarch noarch i686
 %if !%{with_debug} && !%{with_zfcpdump} && !%{with_pae} && !%{with_up} && !%{with_arm64_64k} && !%{with_realtime} && !%{with_realtime_arm64_64k}
 # If only building the user space tools, then initialize the build environment
 # and some variables so that the various userspace tools can be built.
@@ -3792,12 +3788,189 @@ fi
 #
 #
 %changelog
-* Thu Aug 07 2025 Jacco Ligthart <jacco@redsleeve.org> 5.14.0-570.32.1.redsleeve
-- added flags for armv6
-
-* Thu Aug 07 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.32.1
+* Thu Sep 11 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-570.42.2
 - Porting to Rocky Linux 9, debranding and Rocky branding
 - Ensure aarch64 kernel is not compressed
+
+* Mon Sep 08 2025 Patrick Talbert <ptalbert@redhat.com> [5.14.0-570.42.2.el9_6]
+- posix-cpu-timers: fix race between handle_posix_cpu_timers() and posix_cpu_timer_del() (CKI Backport Bot) [RHEL-112780] {CVE-2025-38352}
+- powerpc/pseries/iommu: create DDW for devices with DMA mask less than 64-bits (CKI Backport Bot) [RHEL-113173]
+
+* Sat Aug 30 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.42.1.el9_6]
+- powerpc/pseries/iommu: memory notifier incorrectly adds TCEs for pmemory (Mamatha Inamdar) [RHEL-103015]
+- drm/framebuffer: Acquire internal references on GEM handles (José Expósito) [RHEL-106699] {CVE-2025-38449}
+- drm/gem: Acquire references on GEM handles for framebuffers (José Expósito) [RHEL-106699] {CVE-2025-38449}
+- drm/vkms: Fix use after free and double free on init error (CKI KWF BOT) [RHEL-99420] {CVE-2025-22097}
+- scsi: lpfc: Use memcpy() for BIOS version (Ewan D. Milne) [RHEL-105933] {CVE-2025-38332}
+
+* Thu Aug 28 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.41.1.el9_6]
+- powerpc/pseries/iommu: Fix kmemleak in TCE table userspace view (Mamatha Inamdar) [RHEL-107002]
+- net: ibmveth: make veth_pool_store stop hanging (Mamatha Inamdar) [RHEL-109494]
+- ibmveth: Always stop tx queues during close (Mamatha Inamdar) [RHEL-109494]
+- smb: client: fix race with concurrent opens in rename(2) (Paulo Alcantara) [RHEL-109723]
+- smb: client: fix race with concurrent opens in unlink(2) (Paulo Alcantara) [RHEL-109723]
+- smb: convert to ctime accessor functions (Paulo Alcantara) [RHEL-109723]
+- crypto: tegra - Fix IV usage for AES ECB (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Fix format specifier in tegra_sha_prep_cmd() (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Use HMAC fallback when keyslots are full (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Reserve keyslots to allocate dynamically (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Set IV to NULL explicitly for AES ECB (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Fix CMAC intermediate result handling (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Fix HASH intermediate result handling (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Transfer HASH init function to crypto engine (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - check return value for hash do_one_req (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - finalize crypto req on error (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Do not use fixed size buffers (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - Use separate buffer for setkey (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - remove unneeded crypto_engine_stop() call (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - remove redundant error check on ret (Nirmala Dalvi) [RHEL-107286]
+- crypto: tegra - do not transfer req when tegra init fails (Nirmala Dalvi) [RHEL-107286]
+- crypto: engine - Remove prepare/unprepare request (Nirmala Dalvi) [RHEL-107286]
+- udmabuf: fix a buf size overflow issue during udmabuf creation (CKI Backport Bot) [RHEL-99746] {CVE-2025-37803}
+
+* Wed Aug 27 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.40.1.el9_6]
+- idpf: convert control queue mutex to a spinlock (CKI Backport Bot) [RHEL-106054] {CVE-2025-38392}
+
+* Sat Aug 23 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.39.1.el9_6]
+- xfrm: interface: fix use-after-free after changing collect_md xfrm interface (CKI Backport Bot) [RHEL-109529] {CVE-2025-38500}
+- Merge: net: mana: Fix race of mana_hwc_post_rx_wqe and new hwc response [rhel-9.6.z] (Maxim Levitsky) [RHEL-58904]
+- s390/pci: Serialize device addition and removal (Mete Durlu) [RHEL-102036]
+- s390/pci: Allow re-add of a reserved but not yet removed device (Mete Durlu) [RHEL-102036]
+- s390/pci: Prevent self deletion in disable_slot() (Mete Durlu) [RHEL-102036]
+- s390/pci: Remove redundant bus removal and disable from zpci_release_device() (Mete Durlu) [RHEL-102036]
+- s390/pci: Fix duplicate pci_dev_put() in disable_slot() when PF has child VFs (Thomas Huth) [RHEL-102036] {CVE-2025-37946}
+- s390/pci: Fix missing check for zpci_create_device() error return (Mete Durlu) [RHEL-102036] {CVE-2025-37974}
+- s390/pci: Fix potential double remove of hotplug slot (Thomas Huth) [RHEL-102036] {CVE-2024-56699}
+- s390/pci: remove hotplug slot when releasing the device (Thomas Huth) [RHEL-102036]
+- s390/pci: introduce lock to synchronize state of zpci_dev's (Thomas Huth) [RHEL-102036]
+- s390/pci: rename lock member in struct zpci_dev (Thomas Huth) [RHEL-102036]
+- net/sched: Abort __tc_modify_qdisc if parent class does not exist (CKI Backport Bot) [RHEL-107895]
+- i40e: report VF tx_dropped with tx_errors instead of tx_discards (Dennis Chen) [RHEL-105137]
+- s390/pci: Fix zpci_bus_is_isolated_vf() for non-VFs (Mete Durlu) [RHEL-94815]
+- s390/pci: Fix handling of isolated VFs (CKI Backport Bot) [RHEL-85387]
+- s390/pci: Pull search for parent PF out of zpci_iov_setup_virtfn() (CKI Backport Bot) [RHEL-85387]
+- s390/pci: Fix SR-IOV for PFs initially in standby (CKI Backport Bot) [RHEL-85387]
+- tipc: Fix use-after-free in tipc_conn_close(). (CKI Backport Bot) [RHEL-106651] {CVE-2025-38464}
+- Revert "smb: client: fix TCP timers deadlock after rmmod" (Paulo Alcantara) [RHEL-106415] {CVE-2025-22077}
+- Revert "smb: client: Fix netns refcount imbalance causing leaks and use-after-free" (Paulo Alcantara) [RHEL-106415]
+- smb: client: Fix netns refcount imbalance causing leaks and use-after-free (Paulo Alcantara) [RHEL-106415]
+- watchdog/perf: properly initialize the turbo mode timestamp and rearm counter (David Arcari) [RHEL-103555]
+
+* Wed Aug 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.38.1.el9_6]
+- net/sched: ets: use old 'nbands' while purging unused classes (CKI Backport Bot) [RHEL-107537] {CVE-2025-38350}
+- net/sched: Always pass notifications when child class becomes empty (Ivan Vecera) [RHEL-93387] {CVE-2025-38350}
+- net_sched: ets: fix a race in ets_qdisc_change() (Ivan Vecera) [RHEL-107537] {CVE-2025-38107}
+- sch_htb: make htb_deactivate() idempotent (Ivan Vecera) [RHEL-93387] {CVE-2025-37953}
+- codel: remove sch->q.qlen check before qdisc_tree_reduce_backlog() (Ivan Vecera) [RHEL-93387] {CVE-2025-37798}
+- sch_qfq: make qfq_qlen_notify() idempotent (Ivan Vecera) [RHEL-93387] {CVE-2025-38350}
+- sch_drr: make drr_qlen_notify() idempotent (Ivan Vecera) [RHEL-93387] {CVE-2025-38350}
+- sch_htb: make htb_qlen_notify() idempotent (Ivan Vecera) [RHEL-93387] {CVE-2025-37932}
+- net_sched: hfsc: Fix a potential UAF in hfsc_dequeue() too (CKI Backport Bot) [RHEL-107630] {CVE-2025-37823}
+- i40e: fix MMIO write access to an invalid page in i40e_clear_hw (CKI Backport Bot) [RHEL-106046] {CVE-2025-38200}
+- vsock: Fix transport_* TOCTOU (CKI Backport Bot) [RHEL-106003] {CVE-2025-38461}
+- RDMA/iwcm: Fix use-after-free of work objects after cm_id destruction (CKI Backport Bot) [RHEL-104273] {CVE-2025-38211}
+
+* Sat Aug 16 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.37.1.el9_6]
+- ice: fix eswitch code memory leak in reset scenario (CKI Backport Bot) [RHEL-108152] {CVE-2025-38417}
+- ftrace: Clean up hash direct_functions on register failures (Gregory Bell) [RHEL-105151]
+- ethtool: Fix set RXNFC command with symmetric RSS hash (Mohammad Heib) [RHEL-103526]
+- drm/i915: Give i915 and xe each their own display tracepoints (Jocelyn Falempe) [RHEL-94419]
+
+* Wed Aug 13 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.36.1.el9_6]
+- udp: Fix memory accounting leak. (Xin Long) [RHEL-104091] {CVE-2025-22058}
+- net_sched: ets: Fix double list add in class with netem as child qdisc (CKI Backport Bot) [RHEL-104719] {CVE-2025-37914}
+- sch_ets: make est_qlen_notify() idempotent (Ivan Vecera) [RHEL-104719]
+
+* Sat Aug 09 2025 Patrick Talbert <ptalbert@redhat.com> [5.14.0-570.35.1.el9_6]
+- s390/dasd: Remove DMA alignment (CKI Backport Bot) [RHEL-91593]
+- s390/cpumf: Update CPU Measurement facility extended counter set support (CKI Backport Bot) [RHEL-103066]
+- s390/topology: Improve topology detection (CKI Backport Bot) [RHEL-92100]
+- s390/pai: export number of sysfs attribute files (CKI Backport Bot) [RHEL-87178]
+- s390/pai: fix attr_event_free upper limit for pai device drivers (CKI Backport Bot) [RHEL-87178]
+- powerpc/64s/radix/kfence: map __kfence_pool at page granularity (Mamatha Inamdar) [RHEL-92081]
+- wifi: rtw88: fix the 'para' buffer size to avoid reading out of bounds (CKI Backport Bot) [RHEL-103151] {CVE-2025-38159}
+- redhat: Mark kernel incompatible with xdp-tools<1.5.4 (Felix Maurer) [RHEL-101008]
+- bpf, test_run: Fix use-after-free issue in eth_skb_pkt_type() (CKI Backport Bot) [RHEL-101008] {CVE-2025-21867}
+- arm64: proton-pack: Add new CPUs 'k' values for branch mitigation (Waiman Long) [RHEL-100603]
+- arm64: bpf: Only mitigate cBPF programs loaded by unprivileged users (Waiman Long) [RHEL-100603] {CVE-2025-37963}
+- arm64: bpf: Add BHB mitigation to the epilogue for cBPF programs (Waiman Long) [RHEL-100603] {CVE-2025-37948}
+- arm64: proton-pack: Expose whether the branchy loop k value (Waiman Long) [RHEL-100603]
+- arm64: proton-pack: Expose whether the platform is mitigated by firmware (Waiman Long) [RHEL-100603]
+- arm64: insn: Add support for encoding DSB (Waiman Long) [RHEL-100603]
+- redhat/configs: Enable CONFIG_MITIGATION_ITS for x86 (Waiman Long) [RHEL-100603]
+- selftest/x86/bugs: Add selftests for ITS (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/ibt: Keep IBT disabled during alternative patching (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Align RETs in BHB clear sequence to avoid thunking (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Add support for RSB stuffing mitigation (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Add "vmexit" option to skip mitigation on some CPUs (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Enable Indirect Target Selection mitigation (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Add support for ITS-safe return thunk (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Add support for ITS-safe indirect thunk (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/its: Enumerate Indirect Target Selection (ITS) bug (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- Documentation: x86/bugs/its: Add ITS documentation (Waiman Long) [RHEL-100603 RHEL-92182] {CVE-2024-28956}
+- x86/bhi: Do not set BHI_DIS_S in 32-bit mode (Waiman Long) [RHEL-100603]
+- x86/bpf: Add IBHF call at end of classic BPF (Waiman Long) [RHEL-100603]
+- x86/bpf: Call branch history clearing sequence on exit (Waiman Long) [RHEL-100603]
+- arm64: errata: Assume that unknown CPUs _are_ vulnerable to Spectre BHB (Waiman Long) [RHEL-100603]
+- arm64: errata: Add QCOM_KRYO_4XX_GOLD to the spectre_bhb_k24_list (Waiman Long) [RHEL-100603]
+- x86/rfds: Exclude P-only parts from the RFDS affected list (Waiman Long) [RHEL-100603]
+- x86/cpu: Update x86_match_cpu() to also use cpu-type (Waiman Long) [RHEL-100603]
+- x86/cpu: Add cpu_type to struct x86_cpu_id (Waiman Long) [RHEL-100603]
+- x86/cpu: Shorten CPU matching macro (Waiman Long) [RHEL-100603]
+- x86/cpu: Fix the description of X86_MATCH_VFM_STEPS() (Waiman Long) [RHEL-100603]
+- selftests: Warn about skipped tests in result summary (Waiman Long) [RHEL-100603]
+- x86/cpu: Fix typo in x86_match_cpu()'s doc (Waiman Long) [RHEL-100603]
+- x86/cpu: Expose only stepping min/max interface (Waiman Long) [RHEL-100603]
+- x86/cpu: Add CPU type to struct cpuinfo_topology (Waiman Long) [RHEL-100603]
+- x86/cpufeatures: Add X86_FEATURE_AMD_HETEROGENEOUS_CORES (Waiman Long) [RHEL-100603]
+- x86/cpufeatures: Rename X86_FEATURE_FAST_CPPC to have AMD prefix (Waiman Long) [RHEL-100603]
+- tools/include: Sync x86 headers with the kernel sources (Waiman Long) [RHEL-100603]
+- selftests: ksft: Fix finished() helper exit code on skipped tests (Waiman Long) [RHEL-100603]
+- kselftest: Move ksft helper module to common directory (Waiman Long) [RHEL-100603]
+- platform/x86/intel/ifs: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- x86/platform/atom: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- cpufreq: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- x86/bugs: Add 'spectre_bhi=vmexit' cmdline option (Waiman Long) [RHEL-100603]
+- EDAC/skx: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- EDAC/i10nm: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- x86/cpu: Fix x86_match_cpu() to match just X86_VENDOR_INTEL (Waiman Long) [RHEL-100603]
+- x86/aperfmperf: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- x86/apic: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- x86/bugs: Switch to new Intel CPU model defines (Waiman Long) [RHEL-100603]
+- EDAC/i10nm: Add Intel Grand Ridge micro-server support (Waiman Long) [RHEL-100603]
+- Revert "sch_htb: make htb_qlen_notify() idempotent" (Patrick Talbert) [RHEL-108138]
+- Revert "sch_drr: make drr_qlen_notify() idempotent" (Patrick Talbert) [RHEL-108138]
+- Revert "sch_qfq: make qfq_qlen_notify() idempotent" (Patrick Talbert) [RHEL-108138]
+- Revert "codel: remove sch->q.qlen check before qdisc_tree_reduce_backlog()" (Patrick Talbert) [RHEL-108138]
+- Revert "sch_htb: make htb_deactivate() idempotent" (Patrick Talbert) [RHEL-108138]
+- Revert "net/sched: Always pass notifications when child class becomes empty" (Patrick Talbert) [RHEL-108138]
+
+* Wed Aug 06 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.34.1.el9_6]
+- i2c/designware: Fix an initialization issue (CKI Backport Bot) [RHEL-106625] {CVE-2025-38380}
+- tls: always refresh the queue when reading sock (CKI Backport Bot) [RHEL-106081] {CVE-2025-38471}
+- net: fix udp gso skb_segment after pull from frag_list (Guillaume Nault) [RHEL-103028] {CVE-2025-38124}
+- mm/hugetlb: fix huge_pmd_unshare() vs GUP-fast race (Rafael Aquini) [RHEL-101246] {CVE-2025-38085}
+- mm/hugetlb: unshare page tables during VMA split, not before (Rafael Aquini) [RHEL-101282] {CVE-2025-38084}
+- mm: fix copy_vma() error handling for hugetlb mappings (Rafael Aquini) [RHEL-101282]
+- Bluetooth: hci_core: Fix use-after-free in vhci_flush() (CKI Backport Bot) [RHEL-103256] {CVE-2025-38250}
+
+* Sat Aug 02 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.33.1.el9_6]
+- net/sched: Always pass notifications when child class becomes empty (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- sch_htb: make htb_deactivate() idempotent (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- codel: remove sch->q.qlen check before qdisc_tree_reduce_backlog() (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- sch_qfq: make qfq_qlen_notify() idempotent (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- sch_drr: make drr_qlen_notify() idempotent (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- sch_htb: make htb_qlen_notify() idempotent (CKI Backport Bot) [RHEL-93387] {CVE-2025-38350}
+- redhat: update BUILD_TARGET to rhel-9.6.0-z-test-pesign (Jan Stancek)
+- PCI: Use downstream bridges for distributing resources (Jennifer Berringer) [RHEL-102666]
+- PCI/ACS: Fix 'pci=config_acs=' parameter (Charles Mirabile) [RHEL-102652]
+- PCI: Fix pci_enable_acs() support for the ACS quirks (Charles Mirabile) [RHEL-102652]
+- Documentation: Fix pci=config_acs= example (Charles Mirabile) [RHEL-102652]
+- Revert "PCI: Wait for device readiness with Configuration RRS" (John W. Linville) [RHEL-94414]
+- bnxt_en: Skip MAC loopback selftest if it is unsupported by FW (CKI Backport Bot) [RHEL-82564]
+- bnxt_en: Skip PHY loopback ethtool selftest if unsupported by FW (CKI Backport Bot) [RHEL-82564]
+- wifi: ath12k: fix invalid access to memory (CKI Backport Bot) [RHEL-103219] {CVE-2025-38292}
+- crypto: algif_hash - fix double free in hash_accept (CKI Backport Bot) [RHEL-102235] {CVE-2025-38079}
 
 * Mon Jul 28 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-570.32.1.el9_6]
 - net_sched: hfsc: Address reentrant enqueue adding class to eltree twice (Davide Caratti) [RHEL-97522] {CVE-2025-38001 CVE-2025-37890}
