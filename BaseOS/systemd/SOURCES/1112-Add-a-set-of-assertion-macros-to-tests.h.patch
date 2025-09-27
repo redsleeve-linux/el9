@@ -1,0 +1,63 @@
+From 91a2b272197bad53fc192e72dc8fdd87f4b7989a Mon Sep 17 00:00:00 2001
+From: Unique-Usman <usmanakinyemi202@gmail.com>
+Date: Sat, 16 Mar 2024 04:04:11 +0530
+Subject: [PATCH] Add a set of assertion macros to tests.h (ASSERT_OK(),
+ ASSERT_EQ(), ASSERT_GE(), ASSERT_LE()) that log the failed condition before
+ crashing and convert test-gpt.c test file to use them
+
+[dtardon: Only the macro definitions have been backported.]
+
+(cherry picked from commit e19186359a25ec56d1dd0a68def06aff1bbb19bb)
+
+Related: RHEL-108481
+---
+ src/shared/tests.h | 39 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/src/shared/tests.h b/src/shared/tests.h
+index 3cf34d9bcc..97c83ce434 100644
+--- a/src/shared/tests.h
++++ b/src/shared/tests.h
+@@ -143,3 +143,42 @@ static inline int run_test_table(void) {
+         DEFINE_TEST_MAIN_FULL(log_level, intro, NULL)
+ #define DEFINE_TEST_MAIN(log_level)                     \
+         DEFINE_TEST_MAIN_FULL(log_level, NULL, NULL)
++
++#define ASSERT_OK(expr)                                                                                  \
++        ({                                                                                               \
++                int _result = (expr);                                                                    \
++                if (_result < 0) {                                                                       \
++                        log_error_errno("Assertion failed: %s (result: %d, error: %m)", #expr, _result); \
++                        abort();                                                                         \
++                }                                                                                        \
++        })
++
++#define ASSERT_EQ(expr1, expr2)                                                                          \
++        ({                                                                                               \
++                int _expr1 = (expr1);                                                                    \
++                int _expr2 = (expr2);                                                                    \
++                if (_expr1 != _expr2) {                                                                  \
++                        log_error("Assertion failed: expected %s == %s, but %d != %d", #expr1, #expr2, _expr1, _expr2); \
++                        abort();                                                                         \
++                }                                                                                        \
++        })
++
++#define ASSERT_GE(expr1, expr2)                                                                          \
++        ({                                                                                               \
++                int _expr1 = (expr1);                                                                    \
++                int _expr2 = (expr2);                                                                    \
++                if (_expr1 < _expr2) {                                                                   \
++                        log_error("Assertion failed: expected %s >= %s, but %d < %d", #expr1, #expr2, _expr1, _expr2); \
++                        abort();                                                                         \
++                }                                                                                        \
++        })
++
++#define ASSERT_LE(expr1, expr2)                                                                          \
++        ({                                                                                               \
++                int _expr1 = (expr1);                                                                    \
++                int _expr2 = (expr2);                                                                    \
++                if (_expr1 > _expr2) {                                                                   \
++                        log_error("Assertion failed: expected %s <= %s, but %d > %d", #expr1, #expr2, _expr1, _expr2); \
++                        abort();                                                                         \
++                }                                                                                        \
++        })

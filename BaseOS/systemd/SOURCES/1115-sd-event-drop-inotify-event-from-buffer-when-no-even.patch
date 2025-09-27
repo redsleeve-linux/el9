@@ -1,0 +1,37 @@
+From 9182df9ad2cc9e426fe1873cdcb25cc4390c0443 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 20 Jul 2025 02:12:00 +0900
+Subject: [PATCH] sd-event: drop inotify event from buffer when no event source
+ is triggered
+
+Even when we receive an inotify event, there is no relevant event source
+exists. In that case, we need to drop the event from the buffer,
+otherwise we cannot escape from the loop.
+
+Fixes #38265.
+
+(cherry picked from commit 064b9b2bb3544707171662f548677259c3d6aa7f)
+
+Resolves: RHEL-108481
+---
+ src/libsystemd/sd-event/sd-event.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/src/libsystemd/sd-event/sd-event.c b/src/libsystemd/sd-event/sd-event.c
+index f15115c57f..79b2fa6789 100644
+--- a/src/libsystemd/sd-event/sd-event.c
++++ b/src/libsystemd/sd-event/sd-event.c
+@@ -3579,9 +3579,12 @@ static int event_inotify_data_process(sd_event *e, struct inotify_data *d) {
+                         }
+                 }
+ 
+-                /* Something pending now? If so, let's finish, otherwise let's read more. */
++                /* Something pending now? If so, let's finish. */
+                 if (d->n_pending > 0)
+                         return 1;
++
++                /* otherwise, drop the event and let's read more */
++                event_inotify_data_drop(e, d, sz);
+         }
+ 
+         return 0;

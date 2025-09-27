@@ -1,0 +1,133 @@
+From db3e52ff1f2d911699e9ede04264455548ad39c9 Mon Sep 17 00:00:00 2001
+From: Unique-Usman <usmanakinyemi202@gmail.com>
+Date: Tue, 19 Mar 2024 18:20:29 +0530
+Subject: [PATCH] Follow up with the PR #31819
+
+(cherry picked from commit c0cd99eee69fd9c0a66e7167784d01a49f93b13f)
+
+Related: RHEL-108481
+---
+ src/basic/macro.h  | 13 +++++++
+ src/shared/tests.h | 85 ++++++++++++++++++++++++++++------------------
+ 2 files changed, 65 insertions(+), 33 deletions(-)
+
+diff --git a/src/basic/macro.h b/src/basic/macro.h
+index c2934f9951..8ed4270a14 100644
+--- a/src/basic/macro.h
++++ b/src/basic/macro.h
+@@ -466,4 +466,17 @@ assert_cc(sizeof(dummy_t) == 0);
+              ((long)(_current_ - _entries_) < (long)ELEMENTSOF(_entries_)) && ({ entry = *_current_; true; }); \
+              _current_++)
+ 
++#define DECIMAL_STR_FMT(x) _Generic((x),        \
++        char: "%c",                             \
++        bool: "%d",                             \
++        unsigned char: "%d",                    \
++        short: "%hd",                           \
++        unsigned short: "%hu",                  \
++        int: "%d",                              \
++        unsigned: "%u",                         \
++        long: "%ld",                            \
++        unsigned long: "%lu",                   \
++        long long: "%lld",                      \
++        unsigned long long: "%llu")
++
+ #include "log.h"
+diff --git a/src/shared/tests.h b/src/shared/tests.h
+index 97c83ce434..89248d171a 100644
+--- a/src/shared/tests.h
++++ b/src/shared/tests.h
+@@ -144,41 +144,60 @@ static inline int run_test_table(void) {
+ #define DEFINE_TEST_MAIN(log_level)                     \
+         DEFINE_TEST_MAIN_FULL(log_level, NULL, NULL)
+ 
+-#define ASSERT_OK(expr)                                                                                  \
+-        ({                                                                                               \
+-                int _result = (expr);                                                                    \
+-                if (_result < 0) {                                                                       \
+-                        log_error_errno("Assertion failed: %s (result: %d, error: %m)", #expr, _result); \
+-                        abort();                                                                         \
+-                }                                                                                        \
++#define ASSERT_OK(expr)                                                                                         \
++        ({                                                                                                      \
++                typeof(expr) _result = (expr);                                                                  \
++                if (_result < 0) {                                                                              \
++                        log_error_errno(_result, "%s:%i: Assertion failed: %s: %m",                             \
++                                        PROJECT_FILE, __LINE__, #expr);                                         \
++                        abort();                                                                                \
++                }                                                                                               \
++         })
++
++/* DECIMAL_STR_FMT() uses _Generic which cannot be used in string concatenation so we have to format the
++ * input into strings first and then format those into the final assertion message. */
++
++#define ASSERT_EQ(expr1, expr2)                                                                                  \
++        ({                                                                                                       \
++                typeof(expr1) _expr1 = (expr1);                                                                  \
++                typeof(expr2) _expr2 = (expr2);                                                                  \
++                if (_expr1 != _expr2) {                                                                          \
++                        char _sexpr1[DECIMAL_STR_MAX(typeof(expr1))];                                            \
++                        char _sexpr2[DECIMAL_STR_MAX(typeof(expr2))];                                            \
++                        xsprintf(_sexpr1, DECIMAL_STR_FMT(_expr1), _expr1);                                      \
++                        xsprintf(_sexpr2, DECIMAL_STR_FMT(_expr2), _expr2);                                      \
++                        log_error("%s:%i: Assertion failed: expected \"%s == %s\", but \"%s != %s\"",            \
++                                  PROJECT_FILE, __LINE__, #expr1, #expr2, _sexpr1, _sexpr2);                     \
++                        abort();                                                                                 \
++                }                                                                                                \
+         })
+ 
+-#define ASSERT_EQ(expr1, expr2)                                                                          \
+-        ({                                                                                               \
+-                int _expr1 = (expr1);                                                                    \
+-                int _expr2 = (expr2);                                                                    \
+-                if (_expr1 != _expr2) {                                                                  \
+-                        log_error("Assertion failed: expected %s == %s, but %d != %d", #expr1, #expr2, _expr1, _expr2); \
+-                        abort();                                                                         \
+-                }                                                                                        \
++#define ASSERT_GE(expr1, expr2)                                                                                  \
++        ({                                                                                                       \
++                typeof(expr1) _expr1 = (expr1);                                                                  \
++                typeof(expr2) _expr2 = (expr2);                                                                  \
++                if (_expr1 < _expr2) {                                                                           \
++                        char _sexpr1[DECIMAL_STR_MAX(typeof(expr1))];                                            \
++                        char _sexpr2[DECIMAL_STR_MAX(typeof(expr2))];                                            \
++                        xsprintf(_sexpr1, DECIMAL_STR_FMT(_expr1), _expr1);                                      \
++                        xsprintf(_sexpr2, DECIMAL_STR_FMT(_expr2), _expr2);                                      \
++                        log_error("%s:%i: Assertion failed: expected \"%s >= %s\", but \"%s < %s\"",             \
++                                  PROJECT_FILE, __LINE__, #expr1, #expr2, _sexpr1, _sexpr2);                     \
++                        abort();                                                                                 \
++                }                                                                                                \
+         })
+ 
+-#define ASSERT_GE(expr1, expr2)                                                                          \
+-        ({                                                                                               \
+-                int _expr1 = (expr1);                                                                    \
+-                int _expr2 = (expr2);                                                                    \
+-                if (_expr1 < _expr2) {                                                                   \
+-                        log_error("Assertion failed: expected %s >= %s, but %d < %d", #expr1, #expr2, _expr1, _expr2); \
+-                        abort();                                                                         \
+-                }                                                                                        \
+-        })
+-
+-#define ASSERT_LE(expr1, expr2)                                                                          \
+-        ({                                                                                               \
+-                int _expr1 = (expr1);                                                                    \
+-                int _expr2 = (expr2);                                                                    \
+-                if (_expr1 > _expr2) {                                                                   \
+-                        log_error("Assertion failed: expected %s <= %s, but %d > %d", #expr1, #expr2, _expr1, _expr2); \
+-                        abort();                                                                         \
+-                }                                                                                        \
++#define ASSERT_LE(expr1, expr2)                                                                                  \
++        ({                                                                                                       \
++                typeof(expr1) _expr1 = (expr1);                                                                  \
++                typeof(expr2) _expr2 = (expr2);                                                                  \
++                if (_expr1 > _expr2) {                                                                           \
++                        char _sexpr1[DECIMAL_STR_MAX(typeof(expr1))];                                            \
++                        char _sexpr2[DECIMAL_STR_MAX(typeof(expr2))];                                            \
++                        xsprintf(_sexpr1, DECIMAL_STR_FMT(_expr1), _expr1);                                      \
++                        xsprintf(_sexpr2, DECIMAL_STR_FMT(_expr2), _expr2);                                      \
++                        log_error("%s:%i: Assertion failed: expected \"%s <= %s\", but \"%s > %s\"",             \
++                                  PROJECT_FILE, __LINE__, #expr1, #expr2, _sexpr1, _sexpr2);                     \
++                        abort();                                                                                 \
++                }                                                                                                \
+         })
