@@ -37,7 +37,7 @@ Version:   3.6.0
 ExclusiveArch: %{golang_arches} %{gccgo_arches}
 
 Name:      go-rpm-macros
-Release:   7%{?dist}
+Release:   10%{?dist}
 Summary:   Build-stage rpm automation for Go packages
 
 License:   GPLv3+
@@ -45,6 +45,11 @@ URL:       %{forgeurl}
 Source0:   %{forgesource}
 %if 0%{?bundle_golist}
 Source1:   https://pagure.io/golist/archive/v%{golist_version}/golist-%{golist_version}.tar.gz
+# vendored dependency tarball, to create:
+# tar xf golist-%%{golist_version}.tar.gz ; pushd golist-%%{golist_version} ; \
+# go mod init %%{golist_goipath} && go mod tidy && go mod vendor && \
+# tar Jcf ../golist-%%{golist_version}-vendor.tar.xz go.mod go.sum vendor/ ; popd
+Source2:   golist-%{golist_version}-vendor.tar.xz
 %endif
 
 Requires:  go-srpm-macros = %{version}-%{release}
@@ -71,10 +76,6 @@ Provides:  compiler(go-compiler) = 1
 Obsoletes: go-compilers-gcc-go-compiler < %{version}-%{release}
 %endif
 
-# Replace golang-github-urfave-cli with a minimal
-# command line parser backend to bootstrap golist
-# without dependencies.
-Patch1: golist-bootstrap-cli-no-vendor.patch
 # Add libexec to PATH in order to launch golist in every script
 Patch2: 0001-Add-libexec-to-path-for-EPEL9-golist.patch
 
@@ -143,22 +144,21 @@ done
 # unpack golist and patch
 %if 0%{?bundle_golist}
 # Add libexec to PATH
-%patch2 -p1
+%patch -P 2 -p1
 tar -xf %{SOURCE1}
+tar -C %{golist_builddir} -xf %{SOURCE2}
 pushd %{golist_builddir}
-%patch1 -p1
 popd
 cp %{golist_builddir}/LICENSE LICENSE-golist
 %endif
 
-%patch3 -p1
-%patch4 -p1
+%patch -P 3 -p1
+%patch -P 4 -p1
 
 %build
 # build golist
 %if 0%{?bundle_golist}
 pushd %{golist_builddir}
-go mod init %{golist_goipath} && go mod tidy
 for cmd in cmd/* ; do
   %gobuild -o bin/$(basename $cmd) ./$cmd
 done
@@ -226,7 +226,7 @@ sed -i "s,golist ,%{golist_execdir}/golist ,g" \
 %files
 %license LICENSE.txt
 %if %{defined bundle_golist}
-%license LICENSE-golist
+%license LICENSE-golist %{golist_builddir}/vendor/modules.txt
 %endif
 %doc README.md
 %{_bindir}/*
@@ -263,6 +263,11 @@ sed -i "s,golist ,%{golist_execdir}/golist ,g" \
 %{_rpmluadir}/fedora/srpm/*.lua
 
 %changelog
+* Fri Apr 11 2025 Alejandro Sáez <asm@redhat.com> - 3.6.0-10
+- Add full golist implementation
+- Resolves: RHEL-86879
+- Resolves: RHEL-86880
+
 * Wed Nov 13 2024 Alejandro Sáez <asm@redhat.com>
 - Revert go-rpm-templates to noarch
 - Resolves: RHEL-67300

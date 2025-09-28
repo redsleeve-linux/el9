@@ -1,0 +1,172 @@
+diff --git a/src/vendor/github.com/golang-fips/openssl-fips/openssl/ecdh.go b/src/vendor/github.com/golang-fips/openssl-fips/openssl/ecdh.go
+index 56adf47bf6..9537870e3c 100644
+--- a/src/vendor/github.com/golang-fips/openssl-fips/openssl/ecdh.go
++++ b/src/vendor/github.com/golang-fips/openssl-fips/openssl/ecdh.go
+@@ -22,22 +22,10 @@ var (
+ type PublicKeyECDH struct {
+ 	_pkey *C.GO_EVP_PKEY
+ 	bytes []byte
+-
+-	// priv is only set when PublicKeyECDH is derived from a private key,
+-	// in which case priv's finalizer is responsible for freeing _pkey.
+-	// This ensures priv is not finalized while the public key is alive,
+-	// which could cause use-after-free and double-free behavior.
+-	//
+-	// We could avoid this altogether by using EVP_PKEY_up_ref
+-	// when instantiating a derived public key, unfortunately
+-	// it is not available on OpenSSL 1.0.2.
+-	priv *PrivateKeyECDH
+ }
+ 
+ func (k *PublicKeyECDH) finalize() {
+-	if k.priv == nil {
+-		C._goboringcrypto_EVP_PKEY_free(k._pkey)
+-	}
++	C._goboringcrypto_EVP_PKEY_free(k._pkey)
+ }
+ 
+ type PrivateKeyECDH struct {
+@@ -58,7 +46,7 @@ func NewPublicKeyECDH(curve string, bytes []byte) (*PublicKeyECDH, error) {
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	k := &PublicKeyECDH{pkey, append([]byte(nil), bytes...), nil}
++	k := &PublicKeyECDH{pkey, append([]byte(nil), bytes...)}
+ 	runtime.SetFinalizer(k, (*PublicKeyECDH).finalize)
+ 	return k, nil
+ }
+@@ -87,14 +75,22 @@ func (k *PrivateKeyECDH) PublicKey() (*PublicKeyECDH, error) {
+ 	var bytes []byte
+ 	var cbytes *C.uchar
+ 
+-	n := C._goboringcrypto_EVP_PKEY_get1_encoded_ecdh_public_key(k._pkey, &cbytes)
++	pkey := C._goboringcrypto_EVP_PKEY_ref(k._pkey)
++	if pkey == nil {
++		return nil, NewOpenSSLError("EVP_PKEY_ref")
++	}
++	defer func() {
++		C._goboringcrypto_EVP_PKEY_free(pkey)
++	}()
++	n := C._goboringcrypto_EVP_PKEY_get1_encoded_ecdh_public_key(pkey, &cbytes)
+ 	if n == 0 {
+ 		return nil, NewOpenSSLError("EVP_PKEY_get1_encoded_ecdh_public_key")
+ 	}
+ 	bytes = C.GoBytes(unsafe.Pointer(cbytes), C.int(n))
+ 	C.free(unsafe.Pointer(cbytes))
+ 
+-	pub := &PublicKeyECDH{k._pkey, bytes, k}
++	pub := &PublicKeyECDH{pkey, bytes}
++	pkey = nil
+ 	runtime.SetFinalizer(pub, (*PublicKeyECDH).finalize)
+ 	return pub, nil
+ }
+diff --git a/src/vendor/github.com/golang-fips/openssl-fips/openssl/goopenssl.h b/src/vendor/github.com/golang-fips/openssl-fips/openssl/goopenssl.h
+index a900b3f9e7..03367d5520 100644
+--- a/src/vendor/github.com/golang-fips/openssl-fips/openssl/goopenssl.h
++++ b/src/vendor/github.com/golang-fips/openssl-fips/openssl/goopenssl.h
+@@ -827,6 +827,9 @@ DEFINEFUNC(GO_EVP_PKEY *, EVP_PKEY_new, (void), ())
+ DEFINEFUNC(void, EVP_PKEY_free, (GO_EVP_PKEY * arg0), (arg0))
+ DEFINEFUNC(int, EVP_PKEY_set1_RSA, (GO_EVP_PKEY * arg0, GO_RSA *arg1), (arg0, arg1))
+ DEFINEFUNC(int, EVP_PKEY_set1_EC_KEY, (GO_EVP_PKEY * arg0, GO_EC_KEY *arg1), (arg0, arg1))
++DEFINEFUNC(const GO_EC_KEY *, EVP_PKEY_get0_EC_KEY, (const GO_EVP_PKEY *pkey), (pkey))
++GO_EVP_PKEY *_goboringcrypto_EVP_PKEY_ref(GO_EVP_PKEY *pkey);
++
+ DEFINEFUNC(int, EVP_PKEY_verify,
+ 	(EVP_PKEY_CTX *ctx, const unsigned char *sig, unsigned int siglen, const unsigned char *tbs, size_t tbslen),
+ 	(ctx, sig, siglen, tbs, tbslen))
+@@ -1083,15 +1086,6 @@ enum {
+ #if OPENSSL_VERSION_NUMBER >= 0x10100000L
+ DEFINEFUNC(int, EVP_PKEY_set1_encoded_public_key, (GO_EVP_PKEY *pkey, const unsigned char *pub, size_t publen), (pkey, pub, publen))
+ DEFINEFUNC(size_t, EVP_PKEY_get1_encoded_public_key, (GO_EVP_PKEY *pkey, unsigned char **ppub), (pkey, ppub))
+-
+-DEFINEFUNC(const GO_EC_KEY *, EVP_PKEY_get0_EC_KEY, (const GO_EVP_PKEY *pkey), (pkey))
+-#else
+-DEFINEFUNCINTERNAL(void *, EVP_PKEY_get0, (const GO_EVP_PKEY *pkey), (pkey))
+-static const GO_EC_KEY *
+-_goboringcrypto_EVP_PKEY_get0_EC_KEY(const GO_EVP_PKEY *pkey)
+-{
+-  return _goboringcrypto_internal_EVP_PKEY_get0(pkey);
+-}
+ #endif
+ 
+ GO_EVP_PKEY *_goboringcrypto_EVP_PKEY_new_for_ecdh(int nid, const uint8_t *bytes, size_t len, int is_private);
+diff --git a/src/vendor/github.com/golang-fips/openssl-fips/openssl/openssl_evp.c b/src/vendor/github.com/golang-fips/openssl-fips/openssl/openssl_evp.c
+index 24a9615108..c6b23a984b 100644
+--- a/src/vendor/github.com/golang-fips/openssl-fips/openssl/openssl_evp.c
++++ b/src/vendor/github.com/golang-fips/openssl-fips/openssl/openssl_evp.c
+@@ -5,6 +5,7 @@
+ // +build !msan
+ 
+ #include "goopenssl.h"
++#include <assert.h>
+ 
+ int _goboringcrypto_EVP_sign(EVP_MD *md, EVP_PKEY_CTX *ctx, const uint8_t *msg,
+                              size_t msgLen, uint8_t *sig, size_t *slen,
+@@ -138,3 +139,52 @@ err:
+ 
+   return ret;
+ }
++
++#if OPENSSL_VERSION_NUMBER >= 0x10100000L
++DEFINEFUNCINTERNAL(int, EVP_PKEY_up_ref, (GO_EVP_PKEY *pkey), (pkey))
++
++GO_EVP_PKEY *
++_goboringcrypto_EVP_PKEY_ref(GO_EVP_PKEY *pkey)
++{
++  if (_goboringcrypto_internal_EVP_PKEY_up_ref(pkey) != 1)
++    return NULL;
++
++  return pkey;
++}
++
++#else
++GO_EVP_PKEY *
++_goboringcrypto_EVP_PKEY_ref(GO_EVP_PKEY *pkey)
++{
++  GO_EVP_PKEY *result = NULL;
++
++  if (pkey->type != EVP_PKEY_EC && pkey->type != EVP_PKEY_RSA)
++    return NULL;
++
++  result = _goboringcrypto_EVP_PKEY_new();
++  if (!result)
++    goto err;
++
++  switch (pkey->type) {
++  case EVP_PKEY_EC:
++    if (_goboringcrypto_EVP_PKEY_set1_EC_KEY(result, _goboringcrypto_EVP_PKEY_get0_EC_KEY()) != 1)
++      goto err;
++    break;
++
++  case EVP_PKEY_RSA:
++    if (_goboringcrypto_EVP_PKEY_set1_RSA_KEY(result, _goboringcrypto_EVP_PKEY_get0_RSA_KEY()) != 1)
++      goto err;
++
++    break;
++
++  default:
++    assert(0);
++  }
++
++  return result;
++
++err:
++  _goboringcrypto_EVP_PKEY_free(result);
++  return NULL;
++}
++#endif
+diff --git a/src/vendor/github.com/golang-fips/openssl-fips/openssl/rsa.go b/src/vendor/github.com/golang-fips/openssl-fips/openssl/rsa.go
+index 75ba7a8a59..1e016676a0 100644
+--- a/src/vendor/github.com/golang-fips/openssl-fips/openssl/rsa.go
++++ b/src/vendor/github.com/golang-fips/openssl-fips/openssl/rsa.go
+@@ -116,7 +116,9 @@ func (k *PrivateKeyRSA) withKey(f func(*C.GO_RSA) C.int) C.int {
+ 
+ func setupRSA(withKey func(func(*C.GO_RSA) C.int) C.int,
+ 	padding C.int, h hash.Hash, label []byte, saltLen int, ch crypto.Hash,
+-	init func(*C.GO_EVP_PKEY_CTX) C.int) (pkey *C.GO_EVP_PKEY, ctx *C.GO_EVP_PKEY_CTX, err error) {
++	init func(*C.GO_EVP_PKEY_CTX) C.int) (_ *C.GO_EVP_PKEY,_  *C.GO_EVP_PKEY_CTX, err error) {
++	var pkey *C.GO_EVP_PKEY
++	var ctx *C.GO_EVP_PKEY_CTX
+ 	defer func() {
+ 		if err != nil {
+ 			if pkey != nil {

@@ -1,0 +1,54 @@
+From 7733d625ebdea5a6f323a0c5944fb8ab728d1b2b Mon Sep 17 00:00:00 2001
+From: Andrew Hughes <gnu.andrew@redhat.com>
+Date: Sat, 25 Nov 2023 17:29:36 +0000
+Subject: [PATCH] Allow devkit to work with RHEL
+
+---
+ make/devkit/Makefile  |  2 +-
+ make/devkit/Tools.gmk | 10 +++++++++-
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/make/devkit/Makefile b/make/devkit/Makefile
+index c85a7c21d29..8f69d23c325 100644
+--- a/make/devkit/Makefile
++++ b/make/devkit/Makefile
+@@ -58,7 +58,7 @@
+ COMMA := ,
+ 
+ os := $(shell uname -o)
+-cpu := $(shell uname -p)
++cpu := $(shell uname -m)
+ 
+ # Figure out what platform this is building on.
+ me := $(cpu)-$(if $(findstring Linux,$(os)),linux-gnu)
+diff --git a/make/devkit/Tools.gmk b/make/devkit/Tools.gmk
+index 187320ca26e..001f4b1870c 100644
+--- a/make/devkit/Tools.gmk
++++ b/make/devkit/Tools.gmk
+@@ -62,6 +62,14 @@ ifeq ($(BASE_OS), OL)
+     BASE_URL := http://yum.oracle.com/repo/OracleLinux/OL6/4/base/$(ARCH)/
+     LINUX_VERSION := OL6.4
+   endif
++else ifeq ($(BASE_OS), RHEL)
++  ifeq ($(ARCH), aarch64)
++    BASE_URL := https://download.eng.brq.redhat.com/rhel-7/rel-eng/RHEL-7/latest-RHEL-ALT-7/compose/Server/$(ARCH)/os/Packages/
++    LINUX_VERSION := RHEL7.6
++  else
++    BASE_URL := https://download.eng.brq.redhat.com/rhel-7/rel-eng/RHEL-7/latest-RHEL-7/compose/Server/$(ARCH)/os/Packages/
++    LINUX_VERSION := RHEL7.9
++  endif
+ else ifeq ($(BASE_OS), Fedora)
+   ifeq ($(ARCH), riscv64)
+     DEFAULT_OS_VERSION := rawhide/68692
+@@ -246,7 +254,7 @@ download-rpms:
+         # Only run this if rpm dir is empty.
+         ifeq ($(wildcard $(DOWNLOAD_RPMS)/*.rpm), )
+ 	  cd $(DOWNLOAD_RPMS) && \
+-	      wget -r -np -nd $(patsubst %, -A "*%*.rpm", $(RPM_LIST)) $(BASE_URL)
++	      wget -r -e robots=off -np -nd $(patsubst %, -A "*%*.rpm", $(RPM_LIST)) $(BASE_URL)
+         endif
+ 
+ ##########################################################################################
+-- 
+2.45.2
+

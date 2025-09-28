@@ -5,13 +5,13 @@ BuildRequires: scl-utils-build
 %{?scl:%global __strip %%{_scl_root}/usr/bin/strip}
 %{?scl:%global __objdump %%{_scl_root}/usr/bin/objdump}
 %{?scl:%scl_package gcc}
-%global DATE 20240801
-%global gitrev 43d4666d3d94934f11857a2fb9122c575be81801
+%global DATE 20250110
+%global gitrev e525669e462dd777a1af9932fe9188937acdeb69
 %global gcc_version 14.2.1
 %global gcc_major 14
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 1
+%global gcc_release 7
 %global nvptx_tools_gitrev 87ce9dc5999e5fca2e1d3478a30888d9864c9804
 %global newlib_cygwin_gitrev d45261f62a15f8abd94a1031020b9a9f455e4eed
 %global isl_version 0.24
@@ -152,7 +152,7 @@ BuildRequires: scl-utils-build
 Summary: GCC version %{gcc_major}
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.2%{?dist}.redsleeve
+Release: %{gcc_release}.1%{?dist}
 # License notes for some of the less obvious ones:
 #   gcc/doc/cppinternals.texi: Linux-man-pages-copyleft-2-para
 #   isl: MIT, BSD-2-Clause
@@ -333,6 +333,7 @@ Patch9: gcc14-Wno-format-security.patch
 Patch10: gcc14-rh1574936.patch
 Patch11: gcc14-d-shared-libphobos.patch
 Patch12: gcc14-pr101523.patch
+Patch13: gcc14-pr118509.patch
 
 Patch50: isl-rh2155127.patch
 
@@ -360,9 +361,6 @@ Patch3015: 0018-Use-CXX11-ABI.patch
 Patch3017: 0020-more-fixes.patch
 Patch3018: 0021-libstdc++-disable-tests.patch
 
-Patch10000: gcc6-decimal-rtti-arm.patch
-Patch10001: gcc14-nonshared-arm.patch
-
 %if 0%{?rhel} == 9
 %global nonsharedver 110
 %endif
@@ -379,9 +377,6 @@ Patch10001: gcc14-nonshared-arm.patch
 %if 0%{?scl:1}
 %global _gnu %{nil}
 %else
-%global _gnu -gnueabi
-%endif
-%ifarch %{arm}
 %global _gnu -gnueabi
 %endif
 %ifarch sparcv9
@@ -450,6 +445,8 @@ Summary: Fortran support for GCC %{gcc_major}
 Requires: %{?scl_prefix}gcc%{!?scl:13} = %{version}-%{release}
 Requires: libgfortran >= 8.1.1
 Autoreq: true
+Requires(post): /sbin/install-info
+Requires(preun): /sbin/install-info
 
 %if %{build_libquadmath}
 %if 0%{!?scl:1}
@@ -686,6 +683,7 @@ so that there cannot be any synchronization problems.
 %patch -P10 -p0 -b .rh1574936~
 %patch -P11 -p0 -b .d-shared-libphobos~
 %patch -P12 -p1 -b .pr101523~
+%patch -P13 -p0 -b .pr118509~
 
 %patch -P100 -p1 -b .fortran-fdec-duplicates~
 
@@ -726,11 +724,6 @@ touch -r isl-0.24/m4/ax_prog_cxx_for_build.m4 isl-0.24/m4/ax_prog_cc_for_build.m
 %patch -P3017 -p1 -b .dts-test-17~
 %patch -P3018 -p1 -b .dts-test-18~
 
-%ifarch %{arm}
-%patch10000 -p1
-%patch10001 -p1
-%endif
-
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
 echo 'Red Hat %{version}-%{gcc_release}' > gcc/DEV-PHASE
@@ -749,10 +742,8 @@ echo 'TM_H += $(srcdir)/config/rs6000/rs6000-modes.h' >> gcc/config/rs6000/t-rs6
 
 LC_ALL=C sed -i -e 's/\xa0/ /' gcc/doc/options.texi
 
-sed -i -e '/ldp_fusion/s/Init(1)/Init(0)/' gcc/config/aarch64/aarch64.opt
-
 sed -i -e 's/Common Driver Var(flag_report_bug)/& Init(1)/' gcc/common.opt
-sed -i -e 's/context->report_bug = false;/context->report_bug = true;/' gcc/diagnostic.cc
+sed -i -e 's/m_report_bug = false;/m_report_bug = true;/' gcc/diagnostic.cc
 
 %ifarch ppc
 if [ -d libstdc++-v3/config/abi/post/powerpc64-linux-gnu ]; then
@@ -786,6 +777,10 @@ rm -rf libgomp/testsuite/libgomp.fortran/pr90030.f90
 %ifarch %{ix86} ppc64 s390x
 rm -f libstdc++-v3/testsuite/30_threads/future/members/poll.cc
 %endif
+
+# Disable jQuery use (CVE-2020-11023).
+sed -i '/^SEARCHENGINE/s/YES/NO/' libstdc++-v3/doc/doxygen/user.cfg.in
+sed -i '/^GENERATE_TREEVIEW/s/YES/NO/' libstdc++-v3/doc/doxygen/user.cfg.in
 
 %build
 
@@ -1003,9 +998,6 @@ CONFIGURE_OPTS="\
 %endif
 %endif
 	--enable-decimal-float \
-%endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
@@ -1326,6 +1318,9 @@ cp -r -p $libstdcxx_doc_builddir/html ../rpm.doc/libstdc++-v3/html/api
 mkdir -p %{buildroot}%{_mandir}/man3
 cp -r -p $libstdcxx_doc_builddir/man/man3/* %{buildroot}%{_mandir}/man3/
 find ../rpm.doc/libstdc++-v3 -name \*~ | xargs rm
+# We don't want to ship jQuery in the libstdc++-docs package.
+find ../rpm.doc/libstdc++-v3 -name jquery.js | xargs rm
+find ../rpm.doc/libstdc++-v3/html -name '*.html' | xargs sed -i '/<script type="text.javascript" src="jquery.js"><.script>/d'
 %endif
 
 %ifarch sparcv9 sparc64
@@ -2801,8 +2796,55 @@ fi
 %endif
 
 %changelog
-* Sun Dec 22 2024 Jacco Ligthart <jacco@redsleeve.org> 14.2.1-1.2.redsleeve
-- patched for armv6
+* Fri Feb  7 2025 Marek Polacek <polacek@redhat.com> 14.2.1-7.1
+- disable jQuery use, don't ship jquery.js (CVE-2020-11023, RHEL-78387)
+
+* Wed Jan 22 2025 Marek Polacek <polacek@redhat.com> 14.2.1-7
+- update from releases/gcc-14 branch (RHEL-74061)
+  - PRs ada/113036, ada/113868, ada/115917, ada/117328, ada/117996,
+	analyzer/115724, c/117641, c/117745, c/117802, c++/100358, c++/101463,
+	c++/102594, c++/109859, c++/113108, c++/114854, c++/115008,
+	c++/115430, c++/115657, c++/116108, c++/116634, c++/117158,
+	c++/117317, c++/117614, c++/117615, c++/117792, c++/117825,
+	c++/117845, c++/117880, c++/117925, c++/117985, c++/118060,
+	c++/118069, driver/117942, fortran/84674, fortran/84869,
+	fortran/105054, fortran/109105, fortran/109345, fortran/115070,
+	fortran/115348, fortran/116388, fortran/117730, fortran/117763,
+	fortran/117774, fortran/117791, fortran/117797, fortran/117819,
+	fortran/117820, fortran/117843, fortran/117897, libgomp/117851,
+	libstdc++/89624, libstdc++/106212, libstdc++/106676, libstdc++/108236,
+	libstdc++/109517, libstdc++/109976, libstdc++/112349,
+	libstdc++/112641, libstdc++/117520, libstdc++/117560,
+	libstdc++/117822, libstdc++/117962, libstdc++/117966,
+	libstdc++/118035, libstdc++/118093, middle-end/43374,
+	middle-end/102674, middle-end/116997, middle-end/117433,
+	middle-end/117458, middle-end/117459, middle-end/117847,
+	middle-end/118024, modula2/114529, modula2/115003, modula2/115057,
+	modula2/115164, modula2/115276, modula2/115328, modula2/115536,
+	modula2/115540, modula2/115804, modula2/115823, modula2/115957,
+	modula2/116048, modula2/116181, modula2/116378, modula2/116557,
+	modula2/116918, modula2/117120, modula2/117371, modula2/117555,
+	modula2/117660, modula2/117904, modula2/117948, other/116603,
+	preprocessor/117118, rtl-optimization/113994, rtl-optimization/116799,
+	rtl-optimization/117095, sanitizer/117960, target/64242,
+	target/114801, target/114942, target/116371, target/116629,
+	target/116999, target/117045, target/117105, target/117304,
+	target/117357, target/117408, target/117418, target/117443,
+	target/117500, target/117525, target/117562, target/117564,
+	target/117642, target/117659, target/117675, target/117744,
+	target/117926, testsuite/103298, testsuite/109360,
+	tree-optimization/94589, tree-optimization/112376,
+	tree-optimization/116463, tree-optimization/117142,
+	tree-optimization/117254, tree-optimization/117307,
+	tree-optimization/117333, tree-optimization/117398,
+	tree-optimization/117417, tree-optimization/117439,
+	tree-optimization/117574, tree-optimization/117594,
+	tree-optimization/117612, tree-optimization/117912
+- fix up -freport-bug default (#2330362, RHEL-70192)
+- revert -mearly-ldp-fusion and -mlate-ldp-fusion default to enabled on
+  aarch64 to match upstream (RHEL-74059)
+- consider TARGET_EXPR invariant like SAVE_EXPR (PR c++/118509)
+- have gfortran require install-info (RHEL-62417)
 
 * Thu Aug 22 2024 Marek Polacek <polacek@redhat.com> 14.2.1-1.2
 - bump NVR (RHEL-53492)
@@ -2841,7 +2883,6 @@ fi
 	tree-optimization/115841, tree-optimization/115843,
 	tree-optimization/115867, tree-optimization/115868,
 	tree-optimization/116034, tree-optimization/116057
-
 
 * Tue Jul 23 2024 Marek Polacek <polacek@redhat.com> 14.1.1-7
 - update to GCC 14 (RHEL-30412)

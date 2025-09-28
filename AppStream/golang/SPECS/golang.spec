@@ -92,8 +92,8 @@
 %global gohostarch  s390x
 %endif
 
-%global go_api 1.23
-%global go_version 1.23.4
+%global go_api 1.24
+%global go_version 1.24.6
 %global version %{go_version}
 %global pkg_release 1
 
@@ -101,7 +101,7 @@
 %global llvm_compiler_rt_version 18.1.8
 
 Name:           golang
-Version:        %{version}
+Version:	%{version}
 Release:        1%{?dist}
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
@@ -287,7 +287,9 @@ cat /proc/cpuinfo
 cat /proc/meminfo
 
 # Build race detector .syso's from llvm sources
-%global tsan_buildflags %(echo %{build_cflags} | sed 's/-mtls-dialect=gnu2//')
+# The race detector requests a -fno-exceptions build.
+%global tsan_buildflags %(rpm -D 'toolchain clang' -E '%{optflags}' | sed 's/-fexceptions//')
+%global tsan_optflag -O1
 mkdir ../llvm
 
 tar -xf %{SOURCE3} -C ../llvm
@@ -301,18 +303,18 @@ export GOARCH=$(go env GOARCH)
 
 %ifarch x86_64
 pushd "${tsan_go_dir}"
-  CFLAGS="${tsan_buildflags}" CC=clang GOAMD64=v3 ./buildgo.sh
+  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang GOAMD64=v3 ./buildgo.sh
 popd
 cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v3/race_linux.syso
 
 pushd "${tsan_go_dir}"
-  CFLAGS="${tsan_buildflags}" CC=clang GOAMD64=v1 ./buildgo.sh
+  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang GOAMD64=v1 ./buildgo.sh
 popd
 cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v1/race_linux.syso
 
 %else
 pushd "${tsan_go_dir}"
-  CFLAGS="${tsan_buildflags}" CC=clang ./buildgo.sh
+  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang ./buildgo.sh
 popd
 cp "${tsan_go_dir}"/race_linux_%{gohostarch}.syso ./src/runtime/race/race_linux_%{gohostarch}.syso
 %endif
@@ -502,9 +504,9 @@ export GOLANG_FIPS=1
 export OPENSSL_FORCE_FIPS_MODE=1
 pushd crypto
   # Run all crypto tests but skip TLS, we will run FIPS specific TLS tests later
-  go test -timeout 50m $(go list ./... | grep -v tls) -v
+  go test -timeout 50m $(go list ./... | grep -v tls) -v -skip="TestEd25519Vectors|TestACVP"
   # Check that signature functions have parity between boring and notboring
-  CGO_ENABLED=0 go test -timeout 50m $(go list ./... | grep -v tls) -v
+  CGO_ENABLED=0 go test -timeout 50m $(go list ./... | grep -v tls) -v -skip="TestEd25519Vectors|TestACVP"
 popd
 # Run all FIPS specific TLS tests
 pushd crypto/tls
@@ -583,6 +585,37 @@ cd ..
 %endif
 
 %changelog
+* Wed Aug 13 2025 David Benoit <dbenoit@redhat.com> - 1.24.6-1
+- Update to Go 1.24.6 (fips-1)
+- Resolves: RHEL-106464
+
+* Fri Jun 13 2025 David Benoit <dbenoit@redhat.com> - 1.24.4-1
+- Update to Go 1.24.4 (fips-1)
+- Resolves: RHEL-101074
+
+* Thu Jun 12 2025 Archana <aravinda@redhat.com> - 1.23.10-1
+- Update to Go 1.23.10
+- Fix for CVE-2025-4673, CVE-2025-0913, and CVE-2025-22874
+- Resolves: RHEL-96000
+
+* Fri May 30 2025 Alejandro Sáez <asm@redhat.com> - 1.23.9-1
+- Update to Go 1.23.9
+- Remove runtime-usleep-s390x.patch, already merged
+- Resolves: RHEL-93212
+
+* Fri May 30 2025 Alejandro Sáez <asm@redhat.com> - 1.23.9-1
+- Update to Go 1.23.9
+- Remove runtime-usleep-s390x.patch, already merged
+- Resolves: RHEL-93212
+
+* Thu Feb 27 2025 David Benoit <dbenoit@redhat.com> - 1.23.6-2
+- Fix runtime usleep issue on s390x (runtime-usleep-s390x.patch)
+- Resolves: RHEL-81242
+
+* Thu Feb 20 2025 David Benoit <dbenoit@redhat.com> - 1.23.6-1
+- Update to Go 1.23.6 (fips-1)
+- Resolves: RHEL-80344
+
 * Thu Jan 09 2025 David Benoit <dbenoit@redhat.com> - 1.23.4-1
 - Update to Go 1.23.4 (fips-1)
 - Resolves: RHEL-61048

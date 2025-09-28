@@ -1,0 +1,293 @@
+From a6f8fe0a9e9cbe871652e46ba7c22d5e9fb86208 Mon Sep 17 00:00:00 2001
+From: "H.J. Lu" <hjl.tools@gmail.com>
+Date: Wed, 14 Aug 2024 20:50:02 -0700
+Subject: [PATCH] lto: Don't include unused LTO archive members in output
+
+When plugin_object_p is called by elf_link_is_defined_archive_symbol to
+check if a symbol in archive is a real definition, set archive member
+plugin_format to bfd_plugin_yes_unused to avoid including the unused LTO
+archive members in linker output.  When plugin_object_p is called as
+known used, call plugin claim_file if plugin_format is bfd_plugin_unknown
+or bfd_plugin_yes_unused.
+
+To get the proper support for archives with LTO common symbols with GCC,
+the GCC fix for
+
+https://gcc.gnu.org/bugzilla/show_bug.cgi?id=116361
+
+is needed.
+
+bfd/
+
+	PR ld/32083
+	* archures.c (bfd_arch_get_compatible): Treat bfd_plugin_yes_unused
+	the same as bfd_plugin_yes.
+	* elflink.c (elf_link_is_defined_archive_symbol): Likewise.
+	* bfd.c (bfd_plugin_format): Add bfd_plugin_yes_unused.
+	* plugin.c (try_claim): Try claim_file_v2 first.
+	* bfd-in2.h: Regenerated.
+
+ld/
+
+	PR ld/32083
+	* plugin.c (plugin_call_claim_file): Add an argument to return
+	if LDPT_REGISTER_CLAIM_FILE_HOOK_V2 is used.
+	(plugin_object_p): When KNOWN_USED is false, we call plugin
+	claim_file if plugin_format is bfd_plugin_unknown and set
+	plugin_format to bfd_plugin_yes_unused on LTO object.  When
+	KNOWN_USED is true, we call plugin claim_file if plugin_format
+	is bfd_plugin_unknown or bfd_plugin_yes_unused.
+
+commit c839a44c39161c9932d58c28c2949ab3bb94ea6f
+Author: H.J. Lu <hjl.tools@gmail.com>
+Date:   Sun Sep 8 17:27:00 2024 -0700
+
+    bfd: Pass true to ld_plugin_object_p
+    
+    Since linker calls bfd_plugin_object_p, which calls ld_plugin_object_p,
+    only for command-line input objects, pass true to ld_plugin_object_p so
+    that the same input IR file won't be included twice if the new LTO hook,
+    LDPT_REGISTER_CLAIM_FILE_HOOK_V2 isn't used.
+    
+            PR ld/32153
+            * plugin.c (bfd_plugin_object_p): Pass true to ld_plugin_object_p.
+    
+diff -rup binutils.orig/bfd/archures.c binutils-2.41/bfd/archures.c
+--- binutils.orig/bfd/archures.c	2025-02-20 16:28:36.178833667 +0000
++++ binutils-2.41/bfd/archures.c	2025-02-20 20:20:34.505422221 +0000
+@@ -931,6 +931,7 @@ bfd_arch_get_compatible (const bfd *abfd
+      to assume that they know what they are doing.  */
+   if (accept_unknowns
+       || ubfd->plugin_format == bfd_plugin_yes
++      || ubfd->plugin_format == bfd_plugin_yes_unused
+       || strcmp (bfd_get_target (ubfd), "binary") == 0)
+     return kbfd->arch_info;
+   return NULL;
+diff -rup binutils.orig/bfd/bfd-in2.h binutils-2.41/bfd/bfd-in2.h
+--- binutils.orig/bfd/bfd-in2.h	2025-02-20 16:28:36.284833929 +0000
++++ binutils-2.41/bfd/bfd-in2.h	2025-02-20 20:21:33.281519583 +0000
+@@ -1912,7 +1912,8 @@ enum bfd_plugin_format
+   {
+     bfd_plugin_unknown = 0,
+     bfd_plugin_yes = 1,
+-    bfd_plugin_no = 2
++    bfd_plugin_yes_unused = 2,
++    bfd_plugin_no = 3
+   };
+ 
+ struct bfd_build_id
+diff -rup binutils.orig/bfd/bfd.c binutils-2.41/bfd/bfd.c
+--- binutils.orig/bfd/bfd.c	2025-02-20 16:28:36.178833667 +0000
++++ binutils-2.41/bfd/bfd.c	2025-02-20 20:20:12.473385721 +0000
+@@ -57,7 +57,8 @@ EXTERNAL
+ .  {
+ .    bfd_plugin_unknown = 0,
+ .    bfd_plugin_yes = 1,
+-.    bfd_plugin_no = 2
++.    bfd_plugin_yes_unused = 2,
++.    bfd_plugin_no = 3
+ .  };
+ .
+ .struct bfd_build_id
+diff -rup binutils.orig/bfd/elflink.c binutils-2.41/bfd/elflink.c
+--- binutils.orig/bfd/elflink.c	2025-02-20 16:28:36.284833929 +0000
++++ binutils-2.41/bfd/elflink.c	2025-02-20 20:21:00.217464813 +0000
+@@ -3581,6 +3581,7 @@ elf_link_is_defined_archive_symbol (bfd
+      object file is an IR object, give linker LTO plugin a chance to
+      get the correct symbol table.  */
+   if (abfd->plugin_format == bfd_plugin_yes
++      || abfd->plugin_format == bfd_plugin_yes_unused
+ #if BFD_SUPPORTS_PLUGINS
+       || (abfd->plugin_format == bfd_plugin_unknown
+ 	  && bfd_link_plugin_object_p (abfd))
+diff -rup binutils.orig/bfd/plugin.c binutils-2.41/bfd/plugin.c
+--- binutils.orig/bfd/plugin.c	2025-02-20 16:28:36.241833823 +0000
++++ binutils-2.41/bfd/plugin.c	2025-02-20 20:14:43.601840910 +0000
+@@ -329,13 +329,23 @@ try_claim (bfd *abfd)
+   struct ld_plugin_input_file file;
+ 
+   file.handle = abfd;
+-  if (bfd_plugin_open_input (abfd, &file)
+-      && current_plugin->claim_file)
++  if (bfd_plugin_open_input (abfd, &file))
+     {
+-      current_plugin->claim_file (&file, &claimed);
+-      bfd_plugin_close_file_descriptor ((abfd->my_archive != NULL
+-					 ? abfd : NULL),
+-					file.fd);
++      bool claim_file_called = false;
++      if (current_plugin->claim_file_v2)
++	{
++	  current_plugin->claim_file_v2 (&file, &claimed, false);
++	  claim_file_called = true;
++	}
++      else if (current_plugin->claim_file)
++	{
++	  current_plugin->claim_file (&file, &claimed);
++	  claim_file_called = true;
++	}
++      if (claim_file_called)
++	bfd_plugin_close_file_descriptor ((abfd->my_archive != NULL
++					   ? abfd : NULL),
++					  file.fd);
+     }
+ 
+   return claimed;
+@@ -586,8 +596,12 @@ load_plugin (bfd *abfd)
+ static bfd_cleanup
+ bfd_plugin_object_p (bfd *abfd)
+ {
++  /* Since ld_plugin_object_p is called only for linker command-line input
++     objects, pass true to ld_plugin_object_p so that the same input IR
++     file won't be included twice if the LDPT_REGISTER_CLAIM_FILE_HOOK_V2
++     isn't used.  */
+   if (ld_plugin_object_p)
+-    return ld_plugin_object_p (abfd, false);
++    return ld_plugin_object_p (abfd, true);
+ 
+   if (abfd->plugin_format == bfd_plugin_unknown && !load_plugin (abfd))
+     return NULL;
+diff -rup binutils.orig/ld/plugin.c binutils-2.41/ld/plugin.c
+--- binutils.orig/ld/plugin.c	2025-02-20 16:28:37.210836204 +0000
++++ binutils-2.41/ld/plugin.c	2025-02-20 20:23:41.314731681 +0000
+@@ -773,14 +773,17 @@ get_symbols (const void *handle, int nsy
+       if (syms[n].def != LDPK_UNDEF && syms[n].def != LDPK_WEAKUNDEF)
+ 	{
+ 	  blhe = h;
+-	  if (blhe && link_info.wrap_hash != NULL)
++	  /* Check if a symbol is a wrapper symbol.  */
++	  if (blhe)
+ 	    {
+-	      /* Check if a symbol is a wrapper symbol.  */
+-	      struct bfd_link_hash_entry *unwrap
+-		= unwrap_hash_lookup (&link_info, (bfd *) abfd, blhe);
+-	      if (unwrap && unwrap != h)
+-		wrap_status = wrapper;
+-	     }
++	      if (link_info.wrap_hash != NULL)
++		{
++		  struct bfd_link_hash_entry *unwrap
++		    = unwrap_hash_lookup (&link_info, (bfd *) abfd, blhe);
++		  if (unwrap != NULL && unwrap != h)
++		    wrap_status = wrapper;
++		}
++	    }
+ 	}
+       else
+ 	{
+@@ -1159,10 +1162,11 @@ plugin_load_plugins (void)
+ /* Call 'claim file' hook for all plugins.  */
+ static int
+ plugin_call_claim_file (const struct ld_plugin_input_file *file, int *claimed,
+-			bool known_used)
++			int *claim_file_handler_v2, bool known_used)
+ {
+   plugin_t *curplug = plugins_list;
+   *claimed = false;
++  *claim_file_handler_v2 = false;
+   while (curplug && !*claimed)
+     {
+       if (curplug->claim_file_handler)
+@@ -1171,7 +1175,11 @@ plugin_call_claim_file (const struct ld_
+ 
+ 	  called_plugin = curplug;
+ 	  if (curplug->claim_file_handler_v2)
+-	    rv = (*curplug->claim_file_handler_v2) (file, claimed, known_used);
++	    {
++	      rv = (*curplug->claim_file_handler_v2) (file, claimed,
++						      known_used);
++	      *claim_file_handler_v2 = true;
++	    }
+ 	  else
+ 	    rv = (*curplug->claim_file_handler) (file, claimed);
+ 	  called_plugin = NULL;
+@@ -1180,6 +1188,7 @@ plugin_call_claim_file (const struct ld_
+ 	}
+       curplug = curplug->next;
+     }
++
+   return plugin_error_p () ? -1 : 0;
+ }
+ 
+@@ -1207,7 +1216,7 @@ plugin_cleanup (bfd *abfd ATTRIBUTE_UNUS
+ static bfd_cleanup
+ plugin_object_p (bfd *ibfd, bool known_used)
+ {
+-  int claimed;
++  int claimed, claim_file_handler_v2;
+   plugin_input_file_t *input;
+   struct ld_plugin_input_file file;
+   bfd *abfd;
+@@ -1216,12 +1225,17 @@ plugin_object_p (bfd *ibfd, bool known_u
+   if ((ibfd->flags & BFD_PLUGIN) != 0)
+     return NULL;
+ 
+-  if (ibfd->plugin_format != bfd_plugin_unknown)
++  /* When KNOWN_USED is false, we call plugin claim_file if plugin_format
++     is bfd_plugin_unknown and set plugin_format to bfd_plugin_yes_unused
++     on LTO object.  When KNOWN_USED is true, we call plugin claim_file
++     if plugin_format is bfd_plugin_unknown or bfd_plugin_yes_unused.  */
++  if (ibfd->plugin_format != bfd_plugin_unknown
++      && (!known_used || ibfd->plugin_format != bfd_plugin_yes_unused))
+     {
+-      if (ibfd->plugin_format == bfd_plugin_yes)
+-	return plugin_cleanup;
+-      else
++      if (ibfd->plugin_format == bfd_plugin_no)
+ 	return NULL;
++      else
++	return plugin_cleanup;
+     }
+ 
+   /* We create a dummy BFD, initially empty, to house whatever symbols
+@@ -1257,7 +1271,8 @@ plugin_object_p (bfd *ibfd, bool known_u
+ 
+   claimed = 0;
+ 
+-  if (plugin_call_claim_file (&file, &claimed, known_used))
++  if (plugin_call_claim_file (&file, &claimed, &claim_file_handler_v2,
++			      known_used))
+     einfo (_("%F%P: %s: plugin reported error claiming file\n"),
+ 	   plugin_error_plugin ());
+ 
+@@ -1277,7 +1292,13 @@ plugin_object_p (bfd *ibfd, bool known_u
+ 
+   if (claimed)
+     {
+-      ibfd->plugin_format = bfd_plugin_yes;
++      /* Set plugin_format to bfd_plugin_yes_unused if KNOWN_USED is
++	 false for plugin claim_file_v2 to avoid including the unused
++	 LTO archive members in linker output.  */
++      if (known_used || !claim_file_handler_v2)
++	ibfd->plugin_format = bfd_plugin_yes;
++      else
++	ibfd->plugin_format = bfd_plugin_yes_unused;
+       ibfd->plugin_dummy_bfd = abfd;
+       bfd_make_readable (abfd);
+       abfd->no_export = ibfd->no_export;
+@@ -1363,14 +1384,17 @@ plugin_call_cleanup (void)
+     {
+       if (curplug->cleanup_handler && !curplug->cleanup_done)
+ 	{
+-	  enum ld_plugin_status rv;
+-	  curplug->cleanup_done = true;
+-	  called_plugin = curplug;
+-	  rv = (*curplug->cleanup_handler) ();
+-	  called_plugin = NULL;
+-	  if (rv != LDPS_OK)
+-	    info_msg (_("%P: %s: error in plugin cleanup: %d (ignored)\n"),
+-		      curplug->name, rv);
++	  if (1)
++	    {
++	      enum ld_plugin_status rv;
++	      curplug->cleanup_done = true;
++	      called_plugin = curplug;
++	      rv = (*curplug->cleanup_handler) ();
++	      called_plugin = NULL;
++	      if (rv != LDPS_OK)
++		info_msg (_("%P: %s: error in plugin cleanup: %d (ignored)\n"),
++			  curplug->name, rv);
++	    }
+ 	  dlclose (curplug->dlhandle);
+ 	}
+       curplug = curplug->next;

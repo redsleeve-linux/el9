@@ -1,0 +1,163 @@
+PR target/110792: Early clobber issues with rot32di2_doubleword on i386.
+
+This patch is a conservative fix for PR target/110792, a wrong-code
+regression affecting doubleword rotations by BITS_PER_WORD, which
+effectively swaps the highpart and lowpart words, when the source to be
+rotated resides in memory. The issue is that if the register used to
+hold the lowpart of the destination is mentioned in the address of
+the memory operand, the current define_insn_and_split unintentionally
+clobbers it before reading the highpart.
+
+Hence, for the testcase, the incorrectly generated code looks like:
+
+	salq    $4, %rdi                // calculate address
+	movq    WHIRL_S+8(%rdi), %rdi   // accidentally clobber addr
+	movq    WHIRL_S(%rdi), %rbp     // load (wrong) lowpart
+
+Traditionally, the textbook way to fix this would be to add an
+explicit early clobber to the instruction's constraints.
+
+ (define_insn_and_split "<insn>32di2_doubleword"
+- [(set (match_operand:DI 0 "register_operand" "=r,r,r")
++ [(set (match_operand:DI 0 "register_operand" "=r,r,&r")
+        (any_rotate:DI (match_operand:DI 1 "nonimmediate_operand" "0,r,o")
+                       (const_int 32)))]
+
+but unfortunately this currently generates significantly worse code,
+due to a strange choice of reloads (effectively memcpy), which ends up
+looking like:
+
+	salq    $4, %rdi                // calculate address
+	movdqa  WHIRL_S(%rdi), %xmm0    // load the double word in SSE reg.
+	movaps  %xmm0, -16(%rsp)        // store the SSE reg back to the stack
+	movq    -8(%rsp), %rdi          // load highpart
+	movq    -16(%rsp), %rbp         // load lowpart
+
+Note that reload's "&" doesn't distinguish between the memory being
+early clobbered, vs the registers used in an addressing mode being
+early clobbered.
+    
+The fix proposed in this patch is to remove the third alternative, that
+allowed offsetable memory as an operand, forcing reload to place the
+operand into a register before the rotation.  This results in:
+
+	salq    $4, %rdi
+	movq    WHIRL_S(%rdi), %rax
+	movq    WHIRL_S+8(%rdi), %rdi
+	movq    %rax, %rbp
+
+I believe there's a more advanced solution, by swapping the order of
+the loads (if first destination register is mentioned in the address),
+or inserting a lea insn (if both destination registers are mentioned
+in the address), but this fix is a minimal "safe" solution, that
+should hopefully be suitable for backporting.
+
+2023-08-06  Roger Sayle  <roger@nextmovesoftware.com>
+
+gcc/testsuite/ChangeLog
+	PR target/110792
+	* gcc.target/i386/pr110792.c: Remove dg-final scan-assembler-not.
+
+2023-08-03  Roger Sayle  <roger@nextmovesoftware.com>
+
+gcc/ChangeLog
+        PR target/110792
+        * config/i386/i386.md (<any_rotate>ti3): For rotations by 64 bits
+        place operand in a register before gen_<insn>64ti2_doubleword.
+        (<any_rotate>di3): Likewise, for rotations by 32 bits, place
+        operand in a register before gen_<insn>32di2_doubleword.
+        (<any_rotate>32di2_doubleword): Constrain operand to be in register.
+        (<any_rotate>64ti2_doubleword): Likewise.
+
+gcc/testsuite/ChangeLog
+        PR target/110792
+        * g++.target/i386/pr110792.C: New 32-bit C++ test case.
+        * gcc.target/i386/pr110792.c: New 64-bit C test case.
+
+--- gcc/config/i386/i386.md
++++ gcc/config/i386/i386.md
+@@ -15341,7 +15341,10 @@ (define_expand "<insn>ti3"
+     emit_insn (gen_ix86_<insn>ti3_doubleword
+ 		(operands[0], operands[1], operands[2]));
+   else if (CONST_INT_P (operands[2]) && INTVAL (operands[2]) == 64)
+-    emit_insn (gen_<insn>64ti2_doubleword (operands[0], operands[1]));
++    {
++      operands[1] = force_reg (TImode, operands[1]);
++      emit_insn (gen_<insn>64ti2_doubleword (operands[0], operands[1]));
++    }
+   else
+     {
+       rtx amount = force_reg (QImode, operands[2]);
+@@ -15376,7 +15379,10 @@ (define_expand "<insn>di3"
+     emit_insn (gen_ix86_<insn>di3_doubleword
+ 		(operands[0], operands[1], operands[2]));
+   else if (CONST_INT_P (operands[2]) && INTVAL (operands[2]) == 32)
+-    emit_insn (gen_<insn>32di2_doubleword (operands[0], operands[1]));
++    {
++      operands[1] = force_reg (DImode, operands[1]);
++      emit_insn (gen_<insn>32di2_doubleword (operands[0], operands[1]));
++    }
+   else
+     FAIL;
+ 
+@@ -15544,8 +15550,8 @@ (define_insn_and_split "ix86_rotr<dwi>3_doubleword"
+ })
+ 
+ (define_insn_and_split "<insn>32di2_doubleword"
+- [(set (match_operand:DI 0 "register_operand" "=r,r,r")
+-       (any_rotate:DI (match_operand:DI 1 "nonimmediate_operand" "0,r,o")
++ [(set (match_operand:DI 0 "register_operand" "=r,r")
++       (any_rotate:DI (match_operand:DI 1 "register_operand" "0,r")
+                       (const_int 32)))]
+  "!TARGET_64BIT"
+  "#"
+@@ -15562,8 +15568,8 @@ (define_insn_and_split "<insn>32di2_doubleword"
+ })
+ 
+ (define_insn_and_split "<insn>64ti2_doubleword"
+- [(set (match_operand:TI 0 "register_operand" "=r,r,r")
+-       (any_rotate:TI (match_operand:TI 1 "nonimmediate_operand" "0,r,o")
++ [(set (match_operand:TI 0 "register_operand" "=r,r")
++       (any_rotate:TI (match_operand:TI 1 "register_operand" "0,r")
+                       (const_int 64)))]
+  "TARGET_64BIT"
+  "#"
+--- gcc/testsuite/g++.target/i386/pr110792.C
++++ gcc/testsuite/g++.target/i386/pr110792.C
+@@ -0,0 +1,16 @@
++/* { dg-do compile { target ia32 } } */
++/* { dg-options "-O2" } */
++
++template <int ROT, typename T>
++inline T rotr(T input)
++{
++   return static_cast<T>((input >> ROT) | (input << (8 * sizeof(T) - ROT)));
++}
++
++unsigned long long WHIRL_S[256] = {0x18186018C07830D8};
++unsigned long long whirl(unsigned char x0)
++{
++   const unsigned long long s4 = WHIRL_S[x0&0xFF];
++   return rotr<32>(s4);
++}
++/* { dg-final { scan-assembler-not "movl\tWHIRL_S\\+4\\(,%eax,8\\), %eax" } } */
+--- gcc/testsuite/gcc.target/i386/pr110792.c
++++ gcc/testsuite/gcc.target/i386/pr110792.c
+@@ -0,0 +1,17 @@
++/* { dg-do compile { target int128 } } */
++/* { dg-options "-O2" } */
++
++static inline unsigned __int128 rotr(unsigned __int128 input)
++{
++   return ((input >> 64) | (input << (64)));
++}
++
++unsigned __int128 WHIRL_S[256] = {((__int128)0x18186018C07830D8) << 64 |0x18186018C07830D8};
++unsigned __int128 whirl(unsigned char x0)
++{
++   register int t __asm("rdi") = x0&0xFF;
++   const unsigned __int128 s4 = WHIRL_S[t];
++   register unsigned __int128 tt  __asm("rdi") = rotr(s4);
++   asm("":::"memory");
++   return tt;
++}

@@ -37,3 +37,10 @@ need to be modified if the version or rpmrelease values are changed in
 To reduce the number of RPMs involved, the `fastdebug` and `slowdebug`
 builds may be disabled using `--without fastdebug` and `--without
 slowdebug`.
+
+By default, the portable build on RHEL also uses a "devkit" (a
+toolchain and system libraries) to build.  This aids reproducibility
+by removing build differences caused by differing system toolchains
+and libraries.  This dependency can be dropped by defining 'centos' to
+a non-zero value (e.g. --define='centos 1') or a devkit can be built
+using the `openjdk-devkit.specfile` and associated patches.

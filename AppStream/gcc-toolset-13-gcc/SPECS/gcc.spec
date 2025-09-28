@@ -149,7 +149,7 @@ BuildRequires: scl-utils-build
 Summary: GCC version %{gcc_major}
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.1%{?dist}.redsleeve
+Release: %{gcc_release}.3%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License: GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -366,9 +366,6 @@ Patch3019: 0022-libstdc++-revert-behavior.patch
 Patch3021: gcc13-testsuite-p10.patch
 Patch3023: gcc13-testsuite-dwarf.patch
 
-Patch10000: gcc6-decimal-rtti-arm.patch
-Patch10001: gcc13-nonshared-arm.patch
-
 %if 0%{?rhel} == 9
 %global nonsharedver 110
 %endif
@@ -385,9 +382,6 @@ Patch10001: gcc13-nonshared-arm.patch
 %if 0%{?scl:1}
 %global _gnu %{nil}
 %else
-%global _gnu -gnueabi
-%endif
-%ifarch %{arm}
 %global _gnu -gnueabi
 %endif
 %ifarch sparcv9
@@ -758,11 +752,6 @@ rm -f libphobos/testsuite/libphobos.gc/forkgc2.d
 %patch -P3021 -p1 -b .dts-test-21~
 %patch -P3023 -p1 -b .dts-test-23~
 
-%ifarch %{arm}
-%patch10000 -p1
-%patch10001 -p1
-%endif
-
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
 echo 'Red Hat %{version}-%{gcc_release}' > gcc/DEV-PHASE
@@ -816,6 +805,10 @@ rm -rf libgomp/testsuite/libgomp.fortran/pr90030.f90
 %ifarch %{ix86} ppc64 s390x
 rm -f libstdc++-v3/testsuite/30_threads/future/members/poll.cc
 %endif
+
+# Disable jQuery use (CVE-2020-11023).
+sed -i '/^SEARCHENGINE/s/YES/NO/' libstdc++-v3/doc/doxygen/user.cfg.in
+sed -i '/^GENERATE_TREEVIEW/s/YES/NO/' libstdc++-v3/doc/doxygen/user.cfg.in
 
 %build
 
@@ -1057,9 +1050,6 @@ CONFIGURE_OPTS="\
 %endif
 %endif
 	--enable-decimal-float \
-%endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
@@ -1387,6 +1377,9 @@ cp -r -p $libstdcxx_doc_builddir/html ../rpm.doc/libstdc++-v3/html/api
 mkdir -p %{buildroot}%{_mandir}/man3
 cp -r -p $libstdcxx_doc_builddir/man/man3/* %{buildroot}%{_mandir}/man3/
 find ../rpm.doc/libstdc++-v3 -name \*~ | xargs rm
+# We don't want to ship jQuery in the libstdc++-docs package.
+find ../rpm.doc/libstdc++-v3 -name jquery.js | xargs rm
+find ../rpm.doc/libstdc++-v3/html -name '*.html' | xargs sed -i '/<script type="text.javascript" src="jquery.js"><.script>/d'
 %endif
 
 %ifarch sparcv9 sparc64
@@ -2929,8 +2922,11 @@ fi
 %endif
 
 %changelog
-* Fri Sep 27 2024 Jacco Ligthart <jacco@redsleeve.org> 13.3.1-2.1.redsleeve
-- patched for armv6
+* Fri Feb 14 2025 Marek Polacek <polacek@redhat.com> 13.3.1-2.3
+- bump for another rebuild (RHEL-78382)
+
+* Fri Feb  7 2025 Marek Polacek <polacek@redhat.com> 13.3.1-2.2
+- disable jQuery use, don't ship jquery.js (CVE-2020-11023, RHEL-78382)
 
 * Fri Jul 12 2024 Marek Polacek <polacek@redhat.com> 13.3.1-2.1
 - fix wrong RTL patterns for vector merge high/low word on LE (RHEL-45190)

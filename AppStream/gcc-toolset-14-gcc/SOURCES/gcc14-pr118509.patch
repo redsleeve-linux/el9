@@ -1,0 +1,56 @@
+2025-01-20  Jakub Jelinek  <jakub@redhat.com>
+
+	PR c++/118509
+	* typeck.cc (get_member_function_from_ptrfunc): Wrap force_target_expr
+	with save_expr.
+
+	* g++.dg/expr/pmf-4.C: New test.
+
+--- gcc/cp/typeck.cc.jj	2025-01-09 10:10:28.042651891 +0100
++++ gcc/cp/typeck.cc	2025-01-20 15:09:24.200053590 +0100
+@@ -4187,8 +4187,8 @@ get_member_function_from_ptrfunc (tree *
+ 	      && !DECL_P (instance_ptr)
+ 	      && !TREE_CONSTANT (instance_ptr)))
+ 	instance_ptr = instance_save_expr
+-	  = force_target_expr (TREE_TYPE (instance_ptr), instance_ptr,
+-			       complain);
++	  = save_expr (force_target_expr (TREE_TYPE (instance_ptr),
++					  instance_ptr, complain));
+ 
+       /* See above comment.  */
+       if (TREE_SIDE_EFFECTS (function)
+@@ -4196,7 +4196,8 @@ get_member_function_from_ptrfunc (tree *
+ 	      && !DECL_P (function)
+ 	      && !TREE_CONSTANT (function)))
+ 	function
+-	  = force_target_expr (TREE_TYPE (function), function, complain);
++	  = save_expr (force_target_expr (TREE_TYPE (function), function,
++					  complain));
+ 
+       /* Start by extracting all the information from the PMF itself.  */
+       e3 = pfn_from_ptrmemfunc (function);
+--- gcc/testsuite/g++.dg/expr/pmf-4.C.jj
++++ gcc/testsuite/g++.dg/expr/pmf-4.C
+@@ -0,0 +1,22 @@
++// PR c++/118509
++// { dg-do run }
++// { dg-options "-Wall -O2" }
++
++struct A { void foo () { a = 1; } int a; A () : a (0) {} };
++struct B : virtual A {};
++typedef void (A::*C) ();
++
++__attribute__((noipa)) void
++foo (C x, B *y)
++{
++  (y->*x) ();
++}
++
++int
++main ()
++{
++  B b;
++  foo (&A::foo, &b);
++  if (b.a != 1)
++    __builtin_abort ();
++}

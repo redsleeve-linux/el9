@@ -1,0 +1,47 @@
+diff -rup binutils.orig/gold/Makefile.am binutils-2.41/gold/Makefile.am
+--- binutils.orig/gold/Makefile.am	2025-02-24 09:38:42.201892521 +0000
++++ binutils-2.41/gold/Makefile.am	2025-02-24 11:02:18.892145832 +0000
+@@ -207,7 +207,7 @@ dwp_SOURCES = dwp.cc
+ dwp_DEPENDENCIES = libgold.a $(LIBIBERTY) $(LIBINTL_DEP)
+ dwp_LDADD = libgold.a $(LIBIBERTY) $(GOLD_LDADD) $(LIBINTL) $(THREADLIBS) \
+ 	$(LIBDL) $(ZLIB) $(ZSTD_LIBS) $(JANSSON_LIBS)
+-dwp_LDFLAGS = $(GOLD_LDFLAGS)
++dwp_LDFLAGS = $(GOLD_LDFLAGS) -fno-lto
+ 
+ CONFIG_STATUS_DEPENDENCIES = $(srcdir)/../bfd/development.sh
+ 
+diff -rup binutils.orig/gold/Makefile.in binutils-2.41/gold/Makefile.in
+--- binutils.orig/gold/Makefile.in	2025-02-24 09:38:42.201892521 +0000
++++ binutils-2.41/gold/Makefile.in	2025-02-24 11:02:11.812124673 +0000
+@@ -835,7 +835,7 @@ dwp_DEPENDENCIES = libgold.a $(LIBIBERTY
+ dwp_LDADD = libgold.a $(LIBIBERTY) $(GOLD_LDADD) $(LIBINTL) $(THREADLIBS) \
+ 	$(LIBDL) $(ZLIB) $(ZSTD_LIBS) $(JANSSON_LIBS)
+ 
+-dwp_LDFLAGS = $(GOLD_LDFLAGS)
++dwp_LDFLAGS = $(GOLD_LDFLAGS) -fno-lto
+ CONFIG_STATUS_DEPENDENCIES = $(srcdir)/../bfd/development.sh
+ POTFILES = $(CCFILES) $(HFILES) $(TARGETSOURCES)
+ @GCC_TRUE@@NATIVE_LINKER_TRUE@ld1_SOURCES = $(sources_var)
+diff -rup binutils.orig/ld/ldlang.c binutils-2.41/ld/ldlang.c
+--- binutils.orig/ld/ldlang.c	2025-02-24 09:38:42.413893857 +0000
++++ binutils-2.41/ld/ldlang.c	2025-02-24 09:39:34.394224393 +0000
+@@ -7947,6 +7947,19 @@ lang_list_remove_tail (lang_statement_li
+ 		       lang_statement_list_type *origlist)
+ {
+   union lang_statement_union **savetail;
++
++  if (getenv ("LD_DEBUG_NEVER") != NULL)
++    {
++      /* FIXME: RHEL-49348: For some reason building this function for the
++	 PowerPC architecture on RHEL-10 is resulting in a linker that
++	 triggers the ASSERT below - because the origlist pointer is
++	 corrupt.  These fprintf statements, even if they will never be
++	 used, are enough to cause the compiler to build the function
++	 correctly, thus avoiding the problem.  */
++      fprintf (stderr, "origlist %p destlist %p\n", origlist, destlist);
++      fprintf (stderr, "heads: %p %p\n", origlist->head, destlist->head);
++    }
++
+   /* Check that ORIGLIST really is an earlier state of DESTLIST.  */
+   ASSERT (origlist->head == destlist->head);
+   savetail = origlist->tail;

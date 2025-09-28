@@ -1,0 +1,41 @@
+From 3d81d23118aab95214e24ccc81eff61ac245a1ac Mon Sep 17 00:00:00 2001
+From: Thomas Fitzsimmons <fitzsim@redhat.com>
+Date: Wed, 20 Mar 2024 13:01:47 -0400
+Subject: [PATCH] devkit: Remove .comment sections from sysroot objects
+
+Otherwise the comment sections of C runtime objects, including those
+in static libraries like libc_nonshared.a, contribute RPM package
+version strings to the .comment section in devkit-produced binaries
+and libraries.  These RPM package strings change frequently, even
+across minor toolchain updates.  Their presence interferes when
+comparing binaries built with devkits that use different sysroot RPM
+package sets.
+---
+ make/devkit/Tools.gmk | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/make/devkit/Tools.gmk b/make/devkit/Tools.gmk
+index b6f895f5a25..37ea1a6a287 100644
+--- a/make/devkit/Tools.gmk
++++ b/make/devkit/Tools.gmk
+@@ -324,6 +324,9 @@ $(foreach p,$(RPM_FILE_LIST),$(eval $(call unrpm,$(p))))
+ # have it anyway, but just to make sure...
+ # Patch libc.so and libpthread.so to force linking against libraries in sysroot
+ # and not the ones installed on the build machine.
++# Remove comment sections from static libraries and C runtime objects
++# to prevent leaking RHEL-specific package versions into
++# devkit-produced binaries.
+ $(libs) : $(rpms)
+ 	@echo Patching libc and pthreads
+ 	@(for f in `find $(SYSROOT) -name libc.so -o -name libpthread.so`; do \
+@@ -333,6 +336,7 @@ $(libs) : $(rpms)
+ 	      -e 's|/lib/||g' ) > $$f.tmp ; \
+ 	  mv $$f.tmp $$f ; \
+ 	done)
++	@find $(SYSROOT) -name '*.[ao]' -exec objcopy --remove-section .comment '{}' ';'
+ 	@mkdir -p $(SYSROOT)/usr/lib
+ 	@touch $@
+ 
+-- 
+2.45.2
+

@@ -9,7 +9,7 @@ BuildRequires: scl-utils-build
 Summary: A GNU collection of binary utilities
 Name: %{?scl_prefix}binutils
 Version: 2.41
-Release: 3%{?dist}.redsleeve
+Release: 4%{?dist}.1
 License: GPL-3.0-or-later AND (GPL-3.0-or-later WITH Bison-exception-2.2) AND (LGPL-2.0-or-later WITH GCC-exception-2.0) AND BSD-3-Clause AND GFDL-1.3-or-later AND GPL-2.0-or-later AND LGPL-2.1-or-later AND LGPL-2.0-or-later
 URL: https://sourceware.org/binutils
 
@@ -344,11 +344,16 @@ Patch39: binutils-multilib.am.patch
 # Lifetime: Fixed in 2.42
 Patch40: binutils-Intel-APX-CODE_6_GOTTPOFF.patch
 
+Patch41: binutils-LTO-plugin-common-symbols.patch
+
+# Purpose:  Workaround for an unresolved bug in ppc gcc
+#           which generates bad code in the linker.  cf RHEL-49348
+# Lifetime: TEMPORARY
+Patch98: binutils-PPC64-LD-ASSERT.patch
+
 # Purpose:  Suppress the x86 linker's p_align-1 tests due to kernel bug on CentOS-10
 # Lifetime: TEMPORARY
 Patch99: binutils-suppress-ld-align-tests.patch
-
-Patch1000: binutils-armv6.patch
 
 #----------------------------------------------------------------------------
 
@@ -942,7 +947,12 @@ build_target()
 
 %if %{with docs}
     # Because of parallel building, info has to be made after all.
-    %make_build %{_smp_mflags} tooldir=%{_prefix} CC=%gcc_for_binutils CXX=%gxx_for_binutils all 
+
+    # FIXME: Setting CXXFLAGS is a workaround for the PPC64 compiler bug (cf RHEL-49348).
+    # It allows the binutils to build using a version of gcc-toolset-14-ld that is already affected by the bug.
+    # Once built and installed into the buildroot, this fix will no longer be needed.
+    # Although whilst the bug in the PPC64 compiler remains Patch98 will still be needed.
+    %make_build %{_smp_mflags} tooldir=%{_prefix} CC=%gcc_for_binutils CXX=%gxx_for_binutils all CXXFLAGS="$RPM_OPT_FLAGS -fno-lto"
     %make_build %{_smp_mflags} tooldir=%{_prefix} CC=%gcc_for_binutils CXX=%gxx_for_binutils info
 %else
     %make_build %{_smp_mflags} tooldir=%{_prefix} CC=%gcc_for_binutils CXX=%gxx_for_binutils MAKEINFO=true all
@@ -1493,8 +1503,11 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
-* Tue Jan 07 2025 Jacco Ligthart <jacco@redsleeve.org> 2.41-3.redsleeve
-- minor adjustments for armv6
+* Mon Feb 24 2025 Nick Clifton  <nickc@redhat.com> - 2.41-4.1
+- Fix assertion failure in ppc64 ld due to compiler miscompilation.  (RHEL-83791)
+
+* Thu Feb 20 2025 Nick Clifton  <nickc@redhat.com> - 2.41-4
+- Backport fixes for PR 32082 and PR 32153 in order to fix the PR 20267 linker tests.  (RHEL-80372)
 
 * Fri Aug 16 2024 Nick Clifton  <nickc@redhat.com> - 2.41-3
 - Fix restoring contect to gprofng.rc file.  (RHEL-54563)

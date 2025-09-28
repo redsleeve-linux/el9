@@ -1,0 +1,44 @@
+From 22fdd35c242b6bdc822483a03557a58291174673 Mon Sep 17 00:00:00 2001
+From: Paul Murphy <murp@ibm.com>
+Date: Wed, 12 Feb 2025 08:45:34 -0600
+Subject: [PATCH] [release-branch.go1.23] runtime: fix usleep on s390x/linux
+
+The timespec argument takes the remainder in nanoseconds, not
+microseconds. Convert the remaining time to nsec.
+
+Fixes #71727
+
+Change-Id: I36cbbe3a088830c5e3afcc9516ef42e96ee21268
+Reviewed-on: https://go-review.googlesource.com/c/go/+/648915
+TryBot-Result: Gopher Robot <gobot@golang.org>
+Reviewed-by: Mauri de Souza Meneguzzo <mauri870@gmail.com>
+Reviewed-by: Axel Busch <axel.busch@ibm.com>
+Run-TryBot: Paul Murphy <murp@ibm.com>
+Reviewed-by: Cherry Mui <cherryyz@google.com>
+Reviewed-by: Ian Lance Taylor <iant@google.com>
+LUCI-TryBot-Result: Go LUCI <golang-scoped@luci-project-accounts.iam.gserviceaccount.com>
+Reviewed-by: Vishwanatha HD <vishwanatha.hd@ibm.com>
+Reviewed-on: https://go-review.googlesource.com/c/go/+/649395
+Auto-Submit: Ian Lance Taylor <iant@google.com>
+Reviewed-by: Dmitri Shuralyov <dmitshur@google.com>
+---
+ src/runtime/sys_linux_s390x.s | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/runtime/sys_linux_s390x.s b/src/runtime/sys_linux_s390x.s
+index adf5612c3cfbee..59e2f2ab31f204 100644
+--- a/src/runtime/sys_linux_s390x.s
++++ b/src/runtime/sys_linux_s390x.s
+@@ -112,9 +112,10 @@ TEXT runtime·usleep(SB),NOSPLIT,$16-4
+ 	MOVW	$1000000, R3
+ 	DIVD	R3, R2
+ 	MOVD	R2, 8(R15)
+-	MOVW	$1000, R3
+-	MULLD	R2, R3
++	MULLD	R2, R3		// Convert sec to usec and subtract
+ 	SUB	R3, R4
++	MOVW	$1000, R3
++	MULLD	R3, R4		// Convert remaining usec into nsec.
+ 	MOVD	R4, 16(R15)
+ 
+ 	// nanosleep(&ts, 0)

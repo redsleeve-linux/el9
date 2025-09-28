@@ -1,0 +1,38 @@
+From 2617c050a909265444b32063b2d271eca42dcaa6 Mon Sep 17 00:00:00 2001
+From: Andrew Hughes <gnu.andrew@redhat.com>
+Date: Fri, 17 Jan 2025 21:11:01 +0000
+Subject: [PATCH] Tools.gmk: Exclude systemtap-sdt-devel on s390x & ppc64*
+
+There is no DTrace support on s390x (JDK-8305174) and ppc64
+(JDK-8304867) so we don't need the RPMs. They also cause issues with
+static linkage of libstdc++.a on s390x. It fails with 'error:
+relocation refers to local symbol "" [9], which is defined in a
+discarded section'.
+
+Resolves: OPENJDK-3070
+---
+ make/devkit/Tools.gmk | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/make/devkit/Tools.gmk b/make/devkit/Tools.gmk
+index 57d48ec5114..07928f69ceb 100644
+--- a/make/devkit/Tools.gmk
++++ b/make/devkit/Tools.gmk
+@@ -219,9 +219,13 @@ RPM_LIST := \
+     zlib zlib-devel \
+     libffi libffi-devel \
+     fontconfig fontconfig-devel \
+-    systemtap-sdt-devel \
+     #
+ 
++# Only include SystemTap on supported architectures
++ifeq ($(filter ppc64 ppc64le s390x, $(ARCH)), )
++  RPM_LIST += systemtap-sdt-devel
++endif
++
+ ##########################################################################################
+ # Define common directories and files
+ 
+-- 
+2.45.2
+

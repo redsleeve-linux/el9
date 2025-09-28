@@ -1,0 +1,230 @@
+# Spec file for building a devkit for OpenJDK builds
+
+# We do not want debug packages
+%global debug_package %{nil}
+# Arch definitions from java-*-openjdk RPM
+%global aarch64         aarch64 arm64 armv8
+# x86 is not supported by OpenJDK 17
+ExcludeArch: %{ix86}
+
+# New Version-String scheme-style defines
+%global featurever 21
+%global interimver 0
+%global updatever 5
+%global patchver 0
+%global buildver 11
+# Define JDK versions
+%global newjavaver %{featurever}.%{interimver}.%{updatever}.%{patchver}
+%global javaver         %{featurever}
+# Strip up to 6 trailing zeros in newjavaver, as the JDK does, to get the correct version used in filenames
+%global filever %(svn=%{newjavaver}; for i in 1 2 3 4 5 6 ; do svn=${svn%%.0} ; done; echo ${svn})
+# The tag used to create the OpenJDK tarball
+%global vcstag jdk-%{filever}+%{buildver}%{?tagsuffix:-%{tagsuffix}}
+
+# Define milestone (EA for pre-releases, GA for releases)
+# Release will be (where N is usually a number starting at 1):
+# - 0.N%%{?extraver}%%{?dist} for EA releases,
+# - N%%{?extraver}{?dist} for GA releases
+%global is_ga           1
+%if %{is_ga}
+%global build_type GA
+%global ea_designator ""
+%global ea_designator_zip %{nil}
+%global extraver %{nil}
+%global eaprefix %{nil}
+%else
+%global build_type EA
+%global ea_designator ea
+%global ea_designator_zip -%{ea_designator}
+%global extraver .%{ea_designator}
+%global eaprefix 0.
+%endif
+
+# Date devkit RPMs were download
+%global rpm_download_date 20250117
+
+Name: openjdk-devkit
+Version: 1.0
+Release: 9%{?dist}
+License: GPLv2
+URL: http://openjdk.java.net/
+Summary: OpenJDK Devkit
+
+# The source tarball, generated using generate_source_tarball.sh
+Source0: https://openjdk-sources.osci.io/openjdk%{featurever}/open%{vcstag}%{ea_designator_zip}.tar.xz
+# The buildroot RPMs for each architecture
+Source1: devkit-rpms-aarch64-%{rpm_download_date}.tar.xz
+Source2: devkit-rpms-ppc64le-%{rpm_download_date}.tar.xz
+Source3: devkit-rpms-s390x-%{rpm_download_date}.tar.xz
+Source4: devkit-rpms-x86_64-%{rpm_download_date}.tar.xz
+# Toolchain sources
+Source5: binutils-2.39.tar.gz
+Source6: gcc-11.3.0.tar.xz
+Source7: gmp-6.2.1.tar.bz2
+Source8: mpc-1.2.1.tar.gz
+Source9: mpfr-4.1.1.tar.bz2
+Source10: gdb-11.2.tar.xz
+
+# Devkit patches; see https://github.com/rh-openjdk/jdk/tree/devkit
+# To regenerate, use git format-patch -N jdk21u/master
+# Add RHEL RPM URLs and turn off robots
+Patch0: 0001-Allow-devkit-to-work-with-RHEL.patch
+# Turn off multilib on x86_64
+Patch1: 0002-Disable-multilib-on-x86_64.patch
+# Improve build logging (OPENJDK-3071)
+Patch2: 0003-Log-devkit-build-to-stdout.patch
+# Remove .comment sections from sysroot objects
+Patch3: 0004-devkit-Remove-.comment-sections-from-sysroot-objects.patch
+# Configure binutils with --enable-deterministic-archives
+Patch4: 0005-Tools.gmk-Configure-binutils-with-enable-determinist.patch
+# Configure gcc with --enable-linker-build-id (OPENJDK-3068)
+Patch5: 0006-Tools.gmk-Add-enable-linker-build-id-to-gcc-build.patch
+# Exclude systemtap-sdt-devel on s390x & ppc64* (OPENJDK-3070)
+Patch6: 0007-Tools.gmk-Exclude-systemtap-sdt-devel-on-s390x-ppc64.patch
+# Use update repository on RHEL rather than GA (OPENJDK-3589)
+Patch7: 0008-Tools.gmk-Use-update-repository-on-RHEL-rather-than-.patch
+
+BuildRequires: make autoconf automake libtool gcc gcc-c++ wget glibc-devel texinfo tar bison
+
+# Setup variables to reference correct sources
+%ifarch %{aarch64}
+%global rpmtarball %{SOURCE1}
+%endif
+%ifarch ppc64le
+%global rpmtarball %{SOURCE2}
+%endif
+%ifarch s390x
+%global rpmtarball %{SOURCE3}
+%endif
+%ifarch x86_64
+%global rpmtarball %{SOURCE4}
+%endif
+
+%description
+OpenJDK Devkit
+
+%prep
+
+# Unpack OpenJDK sources only in build directory
+%setup -q -T -c -a 0
+
+# This syntax is deprecated:
+#    %patchN [...]
+# and should be replaced with:
+#    %patch -PN [...]
+# For example:
+#    %patch1001 -p1
+# becomes:
+#    %patch -P1001 -p1
+# The replacement format suggested by recent (circa Fedora 38) RPM
+# deprecation messages:
+#    %patch N [...]
+# is not backward-compatible with prior (circa RHEL-8) versions of
+# rpmbuild.
+pushd jdk-*
+%patch -P0 -p1
+%patch -P1 -p1
+%patch -P2 -p1
+%patch -P3 -p1
+%patch -P4 -p1
+%patch -P5 -p1
+%patch -P6 -p1
+%patch -P7 -p1
+popd
+
+mkdir -p devkit/download
+pushd devkit/download
+tar -xJf %{rpmtarball}
+ln -s %{SOURCE5}
+ln -s %{SOURCE6}
+ln -s %{SOURCE7}
+ln -s %{SOURCE8}
+ln -s %{SOURCE9}
+ln -s %{SOURCE10}
+
+%build
+
+devkit_dir=$(pwd)/devkit
+today=$(date +%Y%m%d)
+arch=%{_target_cpu}
+result_name=${arch}-linux-gnu-to-${arch}-linux-gnu
+result_path=result/${result_name}
+
+pushd jdk-*/make/devkit
+
+# Build devkit first using the native toolchain,
+# than again using itself
+for variant in bootstrap product ; do
+    if [ -e ${devkit_dir}-bootstrap/${result_path}/bin/gcc ] ; then
+        ROOTDIR=${devkit_dir}-bootstrap/${result_path};
+        BINDIR=${ROOTDIR}/bin;
+        TOOLS="CC=${BINDIR}/gcc CXX=${BINDIR}/g++ LD=${BINDIR}/ld \
+               AR=${BINDIR}/ar AS=${BINDIR}/as RANLIB=${BINDIR}/ranlib \
+               OBJDUMP=${BINDIR}/objdump"
+        LIBPATH="${ROOTDIR}/lib64:${ROOTDIR}/lib"
+    else
+        TOOLS="CC=$(which gcc) CXX=$(which g++) LD=$(which ld) \
+               AR=$(which ar) AS=$(which as) RANLIB=$(which ranlib) \
+               OBJDUMP=$(which objdump)"
+    fi
+    mkdir -p ${devkit_dir}-${variant}
+    ln -s ${devkit_dir}/download ${devkit_dir}-${variant}
+    LD_LIBRARY_PATH="${LIBPATH}" \
+        make -f Tools.gmk all ${TOOLS} \
+        HOST=${arch}-linux-gnu \
+        BUILD=${arch}-linux-gnu \
+        RESULT=${devkit_dir}-${variant}/result \
+        OUTPUT_ROOT=${devkit_dir}-${variant} \
+        TARGET=${arch}-linux-gnu \
+        PREFIX=${devkit_dir}-${variant}/${result_path} \
+        BASE_OS=RHEL
+done
+
+make -r -f Tars.gmk \
+     SRC_DIR=${devkit_dir}-product/${result_path} \
+     TAR_FILE=${devkit_dir}-product/result/sdk-${result_name}-${today}.tar.gz
+popd
+
+%install
+mkdir -p %{buildroot}%{_datadir}/%{name}
+cp -p devkit-product/result/*.tar.gz %{buildroot}%{_datadir}/%{name}/
+
+%files
+%{_datadir}/%{name}
+
+%changelog
+* Fri Jan 17 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1.0-9
+- Update devkit RPMs to latest updates
+- Exclude SystemTap RPMs from s390x and ppc64le
+- Add a date stamp to the RPM bundles
+- Resolves: OPENJDK-3070
+= Resolves: OPENJDK-3589
+
+* Wed Nov 27 2024 Andrew Hughes <gnu.andrew@redhat.com> - 1.0-8
+- Add --enable-linker-build-id to gcc build
+- Resolves: OPENJDK-3068
+
+* Wed Oct 30 2024 Andrew Hughes <gnu.andrew@redhat.com> - 1.0-7
+- Improve build logging by also writing to stdout
+- Cleanup patches and rebase on jdk-21.0.5-ga
+- Drop JDK-8323671 patch which is upstream as of 21.0.3+3
+- Resolves: OPENJDK-3071
+
+* Tue Jun 11 2024 Andrew Hughes <gnu.andrew@redhat.com> - 1.0-6
+- Fix typo where 'as' binary is accidentally capitalised in AS=<path>/as
+
+* Wed May 01 2024 Andrew Hughes <gnu.andrew@redhat.com> - 1.0-5
+- Bootstrap the devkit, building it again with itself
+
+* Mon Apr 08 2024 Andrew Hughes <gnu.andrew@redhat.com> - 1.0-4
+- Include Thomas' patches to drop .comment sections and build binutils with deterministic archives
+- Use backward-compatible patch syntax
+
+* Tue Feb 06 2024 Andrew Hughes <gnu.andrew@redhat.com> - 1.0-3
+- Include JDK-8323671 patch so the binaries don't contain the full source path
+
+* Fri Dec 08 2023 Andrew Hughes <gnu.andrew@redhat.com> - 1.0-2
+- Try to turn off multlib on x86_64 as we don't have the dependencies for it
+
+* Tue Dec 05 2023 Andrew Hughes <gnu.andrew@redhat.com> - 1.0-1
+- Create RHEL 7 based devkit for building OpenJDK

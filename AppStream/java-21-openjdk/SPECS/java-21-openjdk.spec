@@ -56,9 +56,6 @@
 # LTO for a passing build. This really needs to be looked at.
 %define _lto_cflags %{nil}
 
-%global debug_package %{nil}
-
-
 # note: parametrized macros are order-sensitive (unlike not-parametrized) even with normal macros
 # also necessary when passing it as parameter to other macros. If not macro, then it is considered a switch
 # see the difference between global and define:
@@ -116,7 +113,7 @@
 # Set of architectures which support multiple ABIs
 %global multilib_arches %{power64} sparc64 x86_64
 # Set of architectures for which we build slowdebug builds
-%global debug_arches    %{ix86} x86_64 sparcv9 sparc64 %{aarch64} %{power64} s390x
+%global debug_arches    %{ix86} x86_64 riscv64 sparcv9 sparc64 %{aarch64} %{power64} s390x
 # Set of architectures for which we build fastdebug builds
 %global fastdebug_arches x86_64 ppc64le aarch64
 # Set of architectures with a Just-In-Time (JIT) compiler
@@ -230,7 +227,7 @@
 %global debugedit %{_bindir}/debugedit
 %else
 # On earlier versions of RHEL, it is part of the rpm package
-%global debugedit %( if [ -f "%{_rpmconfigdir}/debugedit"   ]; then echo "%{_rpmconfigdir}/debugedit" ; else echo "/usr/bin/debugedit"; fi  )
+%global debugedit %{_rpmconfigdir}/debugedit
 %endif
 
 # Filter out flags from the optflags macro that cause problems with the OpenJDK build
@@ -311,7 +308,7 @@
 # New Version-String scheme-style defines
 %global featurever 21
 %global interimver 0
-%global updatever 5
+%global updatever 8
 %global patchver 0
 # We don't add any LTS designator for STS packages (Fedora and EPEL).
 # We need to explicitly exclude EPEL as it would have the %%{rhel} macro defined.
@@ -347,7 +344,7 @@
 # Define IcedTea version used for SystemTap tapsets and desktop file
 %global icedteaver      6.0.0pre00-c848b93a8598
 # Define current Git revision for the FIPS support patches
-%global fipsver 0a42e29b391
+%global fipsver 9203d50836c
 # Define JDK versions
 %global newjavaver %{featurever}.%{interimver}.%{updatever}.%{patchver}
 %global javaver         %{featurever}
@@ -359,7 +356,7 @@
 # Define the OS the portable JDK is built on
 # This is undefined for CentOS & openjdk-portable-rhel-8 builds and
 # equals 'rhel7' for openjdk-portable-rhel-7 builds
-%if 0%{?centos} == 0
+%if 0
 %undefine pkgos
 %endif
 
@@ -368,8 +365,8 @@
 %global origin_nice     OpenJDK
 %global top_level_dir_name   %{vcstag}
 %global top_level_dir_name_backup %{top_level_dir_name}-backup
-%global buildver        11
-%global rpmrelease      2
+%global buildver        9
+%global rpmrelease      1
 # Settings used by the portable build
 %global portablerelease 1
 # Portable suffix differs between RHEL and CentOS
@@ -836,6 +833,8 @@ exit 0
 %doc %{_defaultdocdir}/%{uniquejavadocdir -- %{?1}}/NEWS
 %doc %{_defaultdocdir}/%{uniquejavadocdir -- %{?1}}/README.md
 %doc %{_defaultdocdir}/%{uniquejavadocdir -- %{?1}}/java-%{featurever}-openjdk-portable.specfile
+%doc %{_defaultdocdir}/%{uniquejavadocdir -- %{?1}}/openjdk-devkit.specfile
+%doc %{_defaultdocdir}/%{uniquejavadocdir -- %{?1}}/0*.patch
 %dir %{_sysconfdir}/.java/.systemPrefs
 %dir %{_sysconfdir}/.java
 %dir %{_jvmdir}/%{sdkdir -- %{?1}}
@@ -1139,6 +1138,10 @@ OrderWithRequires: %{name}-headless%{?1}%{?_isa} = %{epoch}:%{version}-%{release
 %if 0%{?rhel} >= 8 || 0%{?fedora} > 0
 Recommends: gtk3%{?_isa}
 %endif
+# Recommend PipeWire for screenshots under Wayland.
+%if 0%{?rhel} >= 9 || 0%{?fedora} > 0
+Recommends: pipewire%{?_isa}
+%endif
 
 Provides: java-%{javaver}-%{origin}%{?1} = %{epoch}:%{version}-%{release}
 
@@ -1160,8 +1163,8 @@ Requires: ca-certificates
 # Require javapackages-filesystem for ownership of /usr/lib/jvm/ and macros
 Requires: javapackages-filesystem
 # Require zone-info data provided by tzdata-java sub-package
-# 2024a required as of JDK-8325150
-Requires: tzdata-java >= 2024a
+# 2025a required as of JDK-8347965
+Requires: tzdata-java >= 2025a
 # for support of kernel stream control
 # libsctp.so.1 is being `dlopen`ed on demand
 Requires: lksctp-tools%{?_isa}
@@ -1286,11 +1289,11 @@ Provides: java-%{origin}-src%{?1} = %{epoch}:%{version}-%{release}
 %global pkgnameroot java-%{featurever}-%{origin}-portable%{?pkgos:-%{pkgos}}
 
 # Define the architectures on which we build
-ExclusiveArch: %{aarch64} %{ppc64le} s390x x86_64 riscv64 %{arm}
+ExclusiveArch: %{aarch64} %{ppc64le} s390x x86_64
 
 Name: java-%{javaver}-%{origin}
 Version: %{newjavaver}.%{buildver}
-Release: %{?eaprefix}%{rpmrelease}%{?extraver}%{?dist}.redsleeve
+Release: %{?eaprefix}%{rpmrelease}%{?extraver}%{?dist}
 # Equivalent for the portable build
 %global prelease %{?eaprefix}%{portablerelease}%{?extraver}
 # java-1.5.0-ibm from jpackage.org set Epoch to 1 for unknown reasons
@@ -1363,6 +1366,25 @@ Source18: TestTranslations.java
 Source19: README.md
 Source20: java-%{featurever}-openjdk-portable.specfile
 Source21: NEWS
+Source22: openjdk-devkit.specfile
+# Devkit patches; see https://github.com/rh-openjdk/jdk/tree/devkit
+# To regenerate, use git format-patch -N jdk21u/master
+# Add RHEL RPM URLs and turn off robots
+Source23: 0001-Allow-devkit-to-work-with-RHEL.patch
+# Turn off multilib on x86_64
+Source24: 0002-Disable-multilib-on-x86_64.patch
+# Improve build logging (OPENJDK-3071)
+Source25: 0003-Log-devkit-build-to-stdout.patch
+# Remove .comment sections from sysroot objects
+Source26: 0004-devkit-Remove-.comment-sections-from-sysroot-objects.patch
+# Configure binutils with --enable-deterministic-archives
+Source27: 0005-Tools.gmk-Configure-binutils-with-enable-determinist.patch
+# Configure gcc with --enable-linker-build-id (OPENJDK-3068)
+Source28: 0006-Tools.gmk-Add-enable-linker-build-id-to-gcc-build.patch
+# Exclude systemtap-sdt-devel on s390x & ppc64* (OPENJDK-3070)
+Source29: 0007-Tools.gmk-Exclude-systemtap-sdt-devel-on-s390x-ppc64.patch
+# Use update repository on RHEL rather than GA (OPENJDK-3589)
+Source30: 0008-Tools.gmk-Use-update-repository-on-RHEL-rather-than-.patch
 
 # Setup variables to reference correct sources
 %global releasezip %{_jvmdir}/%{name}-%{version}-%{prelease}.portable.unstripped.jdk.%{_arch}.tar.xz
@@ -1432,6 +1454,8 @@ Patch1001: fips-%{featurever}u-%{fipsver}.patch
 #
 #############################################
 
+# Currently empty
+
 #############################################
 #
 # Portable build specific patches
@@ -1489,8 +1513,8 @@ BuildRequires: %{pkgnameroot}-misc = %{epoch}:%{version}-%{prelease}.%{portables
 %ifarch %{zero_arches}
 BuildRequires: libffi-devel
 %endif
-# 2024a required as of JDK-8325150
-BuildRequires: tzdata-java >= 2024a
+# 2025a required as of JDK-8347965
+BuildRequires: tzdata-java >= 2025a
 # Earlier versions have a bug in tree vectorization on PPC
 BuildRequires: gcc >= 4.8.3-8
 
@@ -1509,17 +1533,17 @@ BuildRequires: libpng-devel
 BuildRequires: zlib-devel
 %else
 # Version in src/java.desktop/share/legal/freetype.md
-Provides: bundled(freetype) = 2.13.2
+Provides: bundled(freetype) = 2.13.3
 # Version in src/java.desktop/share/native/libsplashscreen/giflib/gif_lib.h
 Provides: bundled(giflib) = 5.2.2
 # Version in src/java.desktop/share/native/libharfbuzz/hb-version.h
-Provides: bundled(harfbuzz) = 8.2.2
+Provides: bundled(harfbuzz) = 10.4.0
 # Version in src/java.desktop/share/native/liblcms/lcms2.h
-Provides: bundled(lcms2) = 2.16.0
+Provides: bundled(lcms2) = 2.17.0
 # Version in src/java.desktop/share/native/libjavajpeg/jpeglib.h
 Provides: bundled(libjpeg) = 6b
 # Version in src/java.desktop/share/native/libsplashscreen/libpng/png.h
-Provides: bundled(libpng) = 1.6.43
+Provides: bundled(libpng) = 1.6.47
 # Version in src/java.base/share/native/libzip/zlib/zlib.h
 Provides: bundled(zlib) = 1.3.1
 %endif
@@ -1834,6 +1858,7 @@ The %{origin_nice} %{featurever} API documentation compressed in a single archiv
 %prep
 
 echo "Preparing %{oj_vendor_version}"
+echo "System is RHEL=%{?rhel}%{!?rhel:0}, CentOS=%{?centos}%{!?centos:0}, EPEL=%{?epel}%{!?epel:0}, Fedora=%{?fedora}%{!?fedora:0}"
 
 # Using the echo macro breaks rpmdev-bumpspec, as it parses the first line of stdout :-(
 %if 0%{?stapinstall:1}
@@ -2101,9 +2126,12 @@ if ! nm ${alt_java_binary} | grep prctl ; then true ; else false; fi
 
 %if %{include_staticlibs}
 # Check debug symbols in static libraries (smoke test)
+# Temporary workaround for debuginfo failure on x86_64 with devkit build
+%ifnarch x86_64
 export STATIC_LIBS_HOME=${JAVA_HOME}/lib/static/linux-%{archinstall}/glibc
 readelf --debug-dump $STATIC_LIBS_HOME/libnet.a | grep Inet4AddressImpl.c
 readelf --debug-dump $STATIC_LIBS_HOME/libnet.a | grep Inet6AddressImpl.c
+%endif
 %endif
 
 so_suffix="so"
@@ -2190,7 +2218,11 @@ miscdir=$(pwd)/%{installoutputdir -- "-misc"}
 commondocdir=${RPM_BUILD_ROOT}%{_defaultdocdir}/%{uniquejavadocdir -- $suffix}
 install -d -m 755 ${commondocdir}
 mv ${jdk_image}/NEWS ${commondocdir}
-cp -a %{SOURCE19} %{SOURCE20} ${commondocdir}
+# Copy portable and devkit specfiles and README.md
+cp -a %{SOURCE19} %{SOURCE20} %{SOURCE22} ${commondocdir}
+# Copy devkit patches
+cp -a  %{SOURCE23} %{SOURCE24} %{SOURCE25} %{SOURCE26} \
+       %{SOURCE27} %{SOURCE28} %{SOURCE29} %{SOURCE30} ${commondocdir}
 
 # Install the jdk
 mkdir -p $RPM_BUILD_ROOT%{_jvmdir}
@@ -2535,12 +2567,105 @@ cjc.mainProgram(args)
 %endif
 
 %changelog
-* Tue Jan 21 2025 Jacco Ligthart <jacco@redsleve.org> - 21.0.5.0.11-2.redsleeve
-- add %{arm} to ExclusiveArch
-
-* Tue Nov 12 2024 Release Engineering <releng@rockylinux.org> - 21.0.5.0.11-2
+* Wed Jul 16 2025 Release Engineering <releng@rockylinux.org> - 21.0.8.0.9-1
 - Build for Rocky Linux %{rocky} using our own portable
-- Ensure debugedit is found regardless of major
+
+* Thu Jul 10 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.8.0.9-1.1
+- Update to jdk-21.0.8+9 (GA)
+- Update release notes to 21.0.8+9
+- Switch to GA mode
+- Sync the copy of the portable specfile with the latest update
+- ** This tarball is embargoed until 2025-07-15 @ 1pm PT. **
+- Resolves: RHEL-102289
+
+* Thu Jul 10 2025 Thomas Fitzsimmons <fitzsim@redhat.com> - 1:21.0.7.0.6-3
+- Recommend PipeWire on RHEL 9 and later for java.awt.Robot screenshots under Wayland
+- Resolves: RHEL-102677
+
+* Thu Jul 10 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.8.0.8-0.1.ea
+- Update to jdk-21.0.8+8 (EA)
+- Update release notes to 21.0.8+8
+- Sync the copy of the portable specfile with the latest update
+- Resolves: RHEL-101798
+
+* Wed Jul 09 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.8.0.2-0.1.ea
+- Update to jdk-21.0.8+2 (EA)
+- Update release notes to 21.0.8+2
+- Sync the copy of the portable specfile with the latest update
+- Add timezone data update check to openjdk_news.sh
+- Add duplicate check to openjdk_news.sh
+- Exit if no fixes are obtained rather than try to run filters in openjdk_news.sh
+- Related: RHEL-101798
+- Resolves: RHEL-103209
+
+* Wed Jul 09 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.8.0.1-0.1.ea
+- Update get_bundle_versions.sh to match other scripts
+- * get_bundle_versions.sh: Add license
+- * get_bundle_versions.sh: Set compile-command in Emacs
+- * get_bundle_versions.sh: Use different error codes for different failures
+- * get_bundle_versions.sh: Remove unneeded '.' in JPEG version
+- * get_bundle_versions.sh: shellcheck: Double-quote variable references (SC2086)
+- * get_bundle_versions.sh: shellcheck: Drop use of cat and pass file to awk directly (SC2002)
+- Add OpenJDK 8u support to get_bundle_versions.sh
+- Print bundle updates and backouts at end of openjdk_news.sh output
+- Refer user to get_bundle_versions.sh when bundle updates are found by openjdk_news.sh
+- Related: RHEL-103209
+
+* Wed Jul 09 2025 Antonio Vieiro <avieirov@redhat.com> - 1:21.0.8.0.1-0.1.ea
+- Add script to obtain bundled library versions from OpenJDK sources
+- Related: RHEL-103209
+
+* Wed Jul 09 2025 Thomas Fitzsimmons <fitzsim@redhat.com> - 1:21.0.8.0.1-0.1.ea
+- Warn about bundled provide version bumps and backouts in openjdk_news.sh
+- Related: RHEL-103209
+
+* Wed Jul 09 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.8.0.1-0.1.ea
+- Update to jdk-21.0.8+1 (EA)
+- Update release notes to 21.0.8+1
+- Bump freetype version to 2.13.3 following JDK-8348596
+- Bump harfbuzz version to 10.4.0 following JDK-8348597
+- Bump lcms2 version to 2.17.0 following JDK-8348110
+- Bump libpng version to 1.6.47 following JDK-8348598
+- Switch to EA mode
+- Drop JDK-8351500 local patch which is now available in 21.0.8+1 upstream
+- Sync the copy of the portable specfile with the latest update
+- Related: RHEL-101798
+
+* Thu May 08 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.7.0.6-2
+- Add local version of JDK-8351500 for early interim release before 21.0.8
+- Sync the copy of the portable specfile with the latest update
+- Resolves: RHEL-90309
+
+* Fri Apr 11 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.7.0.6-1
+- Update to jdk-21.0.7+6 (GA)
+- Update release notes to 21.0.7+6
+- Rebase FIPS support against 21.0.7+5
+- Require tzdata 2025a due to upstream inclusion of JDK-8347965
+- Sync the copy of the portable specfile with the latest update
+- ** This tarball is embargoed until 2025-04-15 @ 1pm PT. **
+- Resolves: RHEL-86984
+- Resolves: RHEL-86635
+
+* Thu Feb 06 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.6.0.7-2
+- Bump tzdata requirement to 2024b for JDK-8339637
+- Resolves: RHEL-74001
+
+* Sat Jan 18 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.6.0.7-1
+- Update to jdk-21.0.6+7 (GA)
+- Update release notes to 21.0.6+7
+- Sync the copy of the portable & devkit specfiles with the latest update
+- Include the latest devkit patches
+- Update README.md to list an easier way of disabling the devkit
+- ** This tarball is embargoed until 2025-01-21 @ 1pm PT. **
+- Resolves: RHEL-73562
+
+* Fri Jan 17 2025 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.5.0.11-3
+- Transition to the devkit build by not defining pkgos
+- Exempt x86_64 from the static libs debuginfo test until portable uses an older DWARF version
+- Sync the copy of the portable specfile with the devkit version
+- Include the devkit specfile and patches
+- Document the devkit in README.md
+- Resolves: RHEL-74403
 
 * Wed Oct 16 2024 Andrew Hughes <gnu.andrew@redhat.com> - 1:21.0.5.0.11-2
 - Update to jdk-21.0.5+11 (GA)
