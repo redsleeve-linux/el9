@@ -1,0 +1,272 @@
+commit 95129e6b8fabdaa8cd8a4a5cc20be0f4cb0ba59f
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Mon Oct 28 14:45:30 2024 +0100
+
+    Revert "elf: Run constructors on cyclic recursive dlopen (bug 31986)"
+    
+    This reverts commit 9897ced8e78db5d813166a7ccccfd5a42c69ef20.
+    
+    Adjust the test expectations in elf/tst-dlopen-auditdup-auditmod.c
+    accordingly.
+
+Conflicts:
+	elf/Makefile (fixup context)
+
+diff --git a/elf/Makefile b/elf/Makefile
+index 73deb69f5a3c9150..a358ad7ff0eb2af7 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -405,7 +405,6 @@ tests += \
+   tst-dlmopen3 \
+   tst-dlmopen4 \
+   tst-dlopen-auditdup \
+-  tst-dlopen-recurse \
+   tst-dlopen-self \
+   tst-dlopen-tlsmodid \
+   tst-dlopen-tlsreinit1 \
+@@ -786,8 +785,6 @@ modules-names = \
+   tst-dlmopen1mod \
+   tst-dlopen-auditdup-auditmod \
+   tst-dlopen-auditdupmod \
+-  tst-dlopen-recursemod1 \
+-  tst-dlopen-recursemod2 \
+   tst-dlopen-sgid-mod \
+   tst-dlopen-tlsreinitmod1 \
+   tst-dlopen-tlsreinitmod2 \
+@@ -2862,8 +2859,6 @@ tst-dlopen-tlsreinit3-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
+ $(objpfx)tst-dlopen-tlsreinit4.out: $(objpfx)tst-auditmod1.so
+ tst-dlopen-tlsreinit4-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
+ 
+-$(objpfx)tst-dlopen-recurse.out: $(objpfx)tst-dlopen-recursemod1.so
+-$(objpfx)tst-dlopen-recursemod1.so: $(objpfx)tst-dlopen-recursemod2.so
+ tst-dlopen-auditdup-ENV = LD_AUDIT=$(objpfx)tst-dlopen-auditdup-auditmod.so
+ $(objpfx)tst-dlopen-auditdup.out: \
+   $(objpfx)tst-dlopen-auditdupmod.so $(objpfx)tst-dlopen-auditdup-auditmod.so
+diff --git a/elf/dl-open.c b/elf/dl-open.c
+index 6ec1ca033bbe7859..6557c2fd7ca0bbfe 100644
+--- a/elf/dl-open.c
++++ b/elf/dl-open.c
+@@ -604,14 +604,6 @@ dl_open_worker_begin (void *a)
+       if ((mode & RTLD_GLOBAL) && new->l_global == 0)
+ 	add_to_global_update (new);
+ 
+-      /* Do not return without calling the (supposedly new) map's
+-	 constructor.  This case occurs if a dependency of a directly
+-	 opened map has a constructor that calls dlopen again on the
+-	 initially opened map.  The new map is initialized last, so
+-	 checking only it is enough.  */
+-      if (!new->l_init_called)
+-	_dl_catch_exception (NULL, call_dl_init, args);
+-
+       return;
+     }
+ 
+diff --git a/elf/dl-support.c b/elf/dl-support.c
+index f4dc9c61a2637f8b..00abc2d8056c78b0 100644
+--- a/elf/dl-support.c
++++ b/elf/dl-support.c
+@@ -103,7 +103,6 @@ static struct link_map _dl_main_map =
+     .l_used = 1,
+     .l_tls_offset = NO_TLS_OFFSET,
+     .l_serial = 1,
+-    .l_init_called = 1,
+   };
+ 
+ /* Namespace information.  */
+diff --git a/elf/tst-dlopen-auditdup-auditmod.c b/elf/tst-dlopen-auditdup-auditmod.c
+index 9b67295e94d03e7a..270a595ec4de1439 100644
+--- a/elf/tst-dlopen-auditdup-auditmod.c
++++ b/elf/tst-dlopen-auditdup-auditmod.c
+@@ -66,7 +66,11 @@ la_activity (uintptr_t *cookie, unsigned int flag)
+           _exit (1);
+         }
+ 
+-      /* Check that the constructor has run.  */
++      /* Check that the constructor has not run.  Running the
++         constructor would require constructing its dependencies, but
++         the constructor call that triggered this auditing activity
++         has not completed, and constructors among the dependencies
++         may not be able to deal with that.  */
+       int *status = dlsym (handle, "auditdupmod_status");
+       if (status == NULL)
+         {
+@@ -75,9 +79,9 @@ la_activity (uintptr_t *cookie, unsigned int flag)
+           _exit (1);
+         }
+       printf ("info: auditdupmod_status == %d\n", *status);
+-      if (*status != 1)
++      if (*status != 0)
+         {
+-          puts ("error: auditdupmod_status == 1 expected");
++          puts ("error: auditdupmod_status == 0 expected");
+           fflush (stdout);
+           _exit (1);
+         }
+diff --git a/elf/tst-dlopen-recurse.c b/elf/tst-dlopen-recurse.c
+deleted file mode 100644
+index c7fb379d373c6e77..0000000000000000
+--- a/elf/tst-dlopen-recurse.c
++++ /dev/null
+@@ -1,34 +0,0 @@
+-/* Test that recursive dlopen runs constructors before return (bug 31986).
+-   Copyright (C) 2024 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-#include <stdio.h>
+-#include <support/check.h>
+-#include <support/xdlfcn.h>
+-
+-static int
+-do_test (void)
+-{
+-  void *handle = xdlopen ("tst-dlopen-recursemod1.so", RTLD_NOW);
+-  int *status = dlsym (handle, "recursemod1_status");
+-  printf ("info: recursemod1_status == %d (from main)\n", *status);
+-  TEST_COMPARE (*status, 2);
+-  xdlclose (handle);
+-  return 0;
+-}
+-
+-#include <support/test-driver.c>
+diff --git a/elf/tst-dlopen-recursemod1.c b/elf/tst-dlopen-recursemod1.c
+deleted file mode 100644
+index 5e0cc0eb8c32d6d4..0000000000000000
+--- a/elf/tst-dlopen-recursemod1.c
++++ /dev/null
+@@ -1,50 +0,0 @@
+-/* Directly opened test module that gets recursively opened again.
+-   Copyright (C) 2024 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <support/xdlfcn.h>
+-
+-int recursemod1_status;
+-
+-/* Force linking against st-dlopen-recursemod2.so.  Also allows
+-   checking for relocation.  */
+-extern int recursemod2_status;
+-int *force_recursemod2_reference = &recursemod2_status;
+-
+-static void __attribute__ ((constructor))
+-init (void)
+-{
+-  ++recursemod1_status;
+-  printf ("info: tst-dlopen-recursemod1.so constructor called (status %d)\n",
+-          recursemod1_status);
+-}
+-
+-static void __attribute__ ((destructor))
+-fini (void)
+-{
+-  /* The recursemod1_status variable was incremented in the
+-     tst-dlopen-recursemod2.so constructor.  */
+-  printf ("info: tst-dlopen-recursemod1.so destructor called (status %d)\n",
+-          recursemod1_status);
+-  if (recursemod1_status != 2)
+-    {
+-      puts ("error: recursemod1_status == 2 expected");
+-      exit (1);
+-    }
+-}
+diff --git a/elf/tst-dlopen-recursemod2.c b/elf/tst-dlopen-recursemod2.c
+deleted file mode 100644
+index edd2f2526b877810..0000000000000000
+--- a/elf/tst-dlopen-recursemod2.c
++++ /dev/null
+@@ -1,66 +0,0 @@
+-/* Indirectly opened module that recursively opens the directly opened module.
+-   Copyright (C) 2024 Free Software Foundation, Inc.
+-   This file is part of the GNU C Library.
+-
+-   The GNU C Library is free software; you can redistribute it and/or
+-   modify it under the terms of the GNU Lesser General Public
+-   License as published by the Free Software Foundation; either
+-   version 2.1 of the License, or (at your option) any later version.
+-
+-   The GNU C Library is distributed in the hope that it will be useful,
+-   but WITHOUT ANY WARRANTY; without even the implied warranty of
+-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+-   Lesser General Public License for more details.
+-
+-   You should have received a copy of the GNU Lesser General Public
+-   License along with the GNU C Library; if not, see
+-   <https://www.gnu.org/licenses/>.  */
+-
+-#include <dlfcn.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-
+-int recursemod2_status;
+-
+-static void __attribute__ ((constructor))
+-init (void)
+-{
+-  ++recursemod2_status;
+-  printf ("info: tst-dlopen-recursemod2.so constructor called (status %d)\n",
+-          recursemod2_status);
+-  void *handle = dlopen ("tst-dlopen-recursemod1.so", RTLD_NOW);
+-  if (handle == NULL)
+-    {
+-      printf ("error: dlopen: %s\n", dlerror ());
+-      exit (1);
+-    }
+-  int *status = dlsym (handle, "recursemod1_status");
+-  if (status == NULL)
+-    {
+-      printf ("error: dlsym: %s\n", dlerror ());
+-      exit (1);
+-    }
+-  printf ("info: recursemod1_status == %d\n", *status);
+-  if (*status != 1)
+-    {
+-      puts ("error: recursemod1_status == 1 expected");
+-      exit (1);
+-    }
+-  ++*status;
+-  printf ("info: recursemod1_status == %d\n", *status);
+-
+-  int **mod2_status = dlsym (handle, "force_recursemod2_reference");
+-  if (mod2_status == NULL || *mod2_status != &recursemod2_status)
+-    {
+-      puts ("error: invalid recursemod2_status address in"
+-            " tst-dlopen-recursemod1.so");
+-      exit (1);
+-    }
+-}
+-
+-static void __attribute__ ((destructor))
+-fini (void)
+-{
+-  printf  ("info: tst-dlopen-recursemod2.so destructor called (status %d)\n",
+-           recursemod2_status);
+-}

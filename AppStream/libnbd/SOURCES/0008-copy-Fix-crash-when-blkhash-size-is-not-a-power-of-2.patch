@@ -1,0 +1,33 @@
+From 7c92a9c782970c168f12107eb5cf7816d4741710 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Mon, 7 Apr 2025 11:35:25 +0100
+Subject: [PATCH] copy: Fix crash when blkhash size is not a power of 2
+
+nbdcopy: blkhash.c:105: init_blkhash: Assertion `is_power_of_2 (blkhash_size)' failed.
+
+The check for this was wrong, resulting in a later assertion failure
+instead of an error message.
+
+Reported-by: Vera Wu
+Fixes: https://issues.redhat.com/browse/RHEL-85513
+(cherry picked from commit 6c6e0822c854e423d79bef87caf1c20c5bdb5eb5)
+---
+ copy/main.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/copy/main.c b/copy/main.c
+index 76b09ded..613b9ede 100644
+--- a/copy/main.c
++++ b/copy/main.c
+@@ -220,7 +220,7 @@ main (int argc, char *argv[])
+                      prog, "--blkhash", error, pstr);
+             exit (EXIT_FAILURE);
+           }
+-          if (! is_power_of_2 (blkhash_size)) {
++          if (! is_power_of_2 (i64)) {
+             fprintf (stderr, "%s: %s is not a power of two: %s\n",
+                      prog, "--blkhash", &optarg[i+1]);
+             exit (EXIT_FAILURE);
+-- 
+2.47.1
+

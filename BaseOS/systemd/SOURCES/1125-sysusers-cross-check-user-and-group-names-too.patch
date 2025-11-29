@@ -1,0 +1,98 @@
+From 51a75e6643bc9fabd895e859a8abcf36dd371b38 Mon Sep 17 00:00:00 2001
+From: Luca BRUNO <luca.bruno@coreos.com>
+Date: Thu, 3 Nov 2022 15:11:00 +0000
+Subject: [PATCH] sysusers: cross-check user and group names too
+
+This adds an additional name check when cross-matching new group
+entries against existing users, which allows coalescing entries
+matching both ID and name.
+It provides a small idempotence enhancement when creating groups
+in cases where matching user entries are in place. By fine-tuning
+the conflict detection logic, this avoids picking up new random
+IDs and correctly prefers configuration values instead.
+
+(cherry picked from commit 4ae3e8c9dbd8aa25c404eb47e4e1962fe9b03c78)
+
+Resolves: RHEL-72572
+---
+ src/sysusers/sysusers.c | 28 +++++++++++++++++++---------
+ 1 file changed, 19 insertions(+), 9 deletions(-)
+
+diff --git a/src/sysusers/sysusers.c b/src/sysusers/sysusers.c
+index 08b005e6be..e2533e0128 100644
+--- a/src/sysusers/sysusers.c
++++ b/src/sysusers/sysusers.c
+@@ -1175,22 +1175,32 @@ static int add_user(Item *i) {
+         return 0;
+ }
+ 
+-static int gid_is_ok(gid_t gid, bool check_with_uid) {
++static int gid_is_ok(gid_t gid, const char *groupname, bool check_with_uid) {
+         struct group *g;
+         struct passwd *p;
++        Item *user;
++        char *username;
++
++        assert(groupname);
+ 
+         if (ordered_hashmap_get(todo_gids, GID_TO_PTR(gid)))
+                 return 0;
+ 
+         /* Avoid reusing gids that are already used by a different user */
+-        if (check_with_uid && ordered_hashmap_get(todo_uids, UID_TO_PTR(gid)))
+-                return 0;
++        if (check_with_uid) {
++                user = ordered_hashmap_get(todo_uids, UID_TO_PTR(gid));
++                if (user && !streq(user->name, groupname))
++                        return 0;
++        }
+ 
+         if (hashmap_contains(database_by_gid, GID_TO_PTR(gid)))
+                 return 0;
+ 
+-        if (check_with_uid && hashmap_contains(database_by_uid, UID_TO_PTR(gid)))
+-                return 0;
++        if (check_with_uid) {
++                username = hashmap_get(database_by_uid, UID_TO_PTR(gid));
++                if (username && !streq(username, groupname))
++                        return 0;
++        }
+ 
+         if (!arg_root) {
+                 errno = 0;
+@@ -1258,7 +1268,7 @@ static int add_group(Item *i) {
+ 
+         /* Try to use the suggested numeric GID */
+         if (i->gid_set) {
+-                r = gid_is_ok(i->gid, false);
++                r = gid_is_ok(i->gid, i->name, false);
+                 if (r < 0)
+                         return log_error_errno(r, "Failed to verify GID " GID_FMT ": %m", i->gid);
+                 if (i->id_set_strict) {
+@@ -1281,7 +1291,7 @@ static int add_group(Item *i) {
+ 
+         /* Try to reuse the numeric uid, if there's one */
+         if (!i->gid_set && i->uid_set) {
+-                r = gid_is_ok((gid_t) i->uid, true);
++                r = gid_is_ok((gid_t) i->uid, i->name, true);
+                 if (r < 0)
+                         return log_error_errno(r, "Failed to verify GID " GID_FMT ": %m", i->gid);
+                 if (r > 0) {
+@@ -1299,7 +1309,7 @@ static int add_group(Item *i) {
+                         if (c <= 0 || !uid_range_contains(uid_range, c))
+                                 log_debug("Group ID " GID_FMT " of file not suitable for %s.", c, i->name);
+                         else {
+-                                r = gid_is_ok(c, true);
++                                r = gid_is_ok(c, i->name, true);
+                                 if (r < 0)
+                                         return log_error_errno(r, "Failed to verify GID " GID_FMT ": %m", i->gid);
+                                 else if (r > 0) {
+@@ -1321,7 +1331,7 @@ static int add_group(Item *i) {
+                         if (r < 0)
+                                 return log_error_errno(r, "No free group ID available for %s.", i->name);
+ 
+-                        r = gid_is_ok(search_uid, true);
++                        r = gid_is_ok(search_uid, i->name, true);
+                         if (r < 0)
+                                 return log_error_errno(r, "Failed to verify GID " GID_FMT ": %m", i->gid);
+                         else if (r > 0)

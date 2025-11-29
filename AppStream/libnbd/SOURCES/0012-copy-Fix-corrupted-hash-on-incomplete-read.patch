@@ -1,0 +1,39 @@
+From fcac97261f26ad486e45dedfdfa6da3ee04fe6ca Mon Sep 17 00:00:00 2001
+From: Nir Soffer <nsoffer@redhat.com>
+Date: Mon, 14 Apr 2025 21:40:16 +0000
+Subject: [PATCH] copy: Fix corrupted hash on incomplete read
+
+When using synchronous read with unknown file size, if the read was
+shorter than request size, we updated the hash with the complete buffer,
+inserting leftover bytes from the previous read into the hash.
+
+I'm not sure if there is validation for source size and number of blocks
+in the blocks vector, so this can generate a corrupted hash silently.
+
+We probably need to validate later that the image size matches the size
+of the hashed data.
+
+I could not reproduce a corrupted hash, the issue discovered by reading
+the code.
+
+(cherry picked from commit 49cd9fbc0022c0ae5bc5d0b9dd48219dfb92b2f7)
+---
+ copy/synch-copying.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/copy/synch-copying.c b/copy/synch-copying.c
+index 4c65c86d..b030a85a 100644
+--- a/copy/synch-copying.c
++++ b/copy/synch-copying.c
+@@ -49,7 +49,7 @@ synch_copying (void)
+     size_t r;
+ 
+     while ((r = src->ops->synch_read (src, buf, request_size, offset)) > 0) {
+-      update_blkhash ((const char *) buf, offset, request_size);
++      update_blkhash ((const char *) buf, offset, r);
+       dst->ops->synch_write (dst, buf, r, offset);
+       offset += r;
+       progress_bar (offset, src->size);
+-- 
+2.47.1
+

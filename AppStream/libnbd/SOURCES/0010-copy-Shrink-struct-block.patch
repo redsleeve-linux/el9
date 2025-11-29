@@ -1,0 +1,78 @@
+From 298297a2ac28dc443b64cf0610b53e3c72bf4d39 Mon Sep 17 00:00:00 2001
+From: Nir Soffer <nsoffer@redhat.com>
+Date: Sun, 13 Apr 2025 14:54:31 +0000
+Subject: [PATCH] copy: Shrink struct block
+
+Change n to uint32_t since block size bigger than 4g does not make
+sense. Move the type field to the end to shrink struct size from 24
+bytes to 16.
+
+This minimizes memory usage and improves locality. For example we can
+have 4 blocks in a single cache line instead of 2.5.
+
+Testing shows up to 8% improvement in time and 33% in maximum resident
+set size with 1000g empty image. With images full of zeros or images
+full of non-zero bytes we see lower memory usage but no difference in
+time.
+
+| size   | content | tool       | source | version | memory   | time     |
+|--------|---------|------------|--------|---------|----------|----------|
+| 1000g  | hole    | nbdcopy    | file   | before  |  644716k |    3.33s |
+| 1000g  | hole    | nbdcopy    | file   | after   |  516716k |    3.10s |
+| 1000g  | hole    | nbdcopy    | nbd    | before  |  388844k |    1.13s |
+| 1000g  | hole    | nbdcopy    | nbd    | after   |  260716k |    1.04s |
+| 1000g  | hole    | blksum     | nbd    | -       |   10792k |    0.29s |
+| 1000g  | hole    | sha256sum  | file   | -       |   *2796k | *445.00s |
+|--------|---------|------------|--------|---------|----------|----------|
+| 10g    | zero    | nbdcopy    | file   | before  |   20236k |    1.33s |
+| 10g    | zero    | nbdcopy    | file   | after   |   18796k |    1.32s |
+| 10g    | zero    | nbdcopy    | nbd    | before  |   32648k |    8.21s |
+| 10g    | zero    | nbdcopy    | nbd    | after   |   31416k |    8.23s |
+| 10g    | zero    | nbdcopy    | pipe   | before  |   19052k |    4.56s |
+| 10g    | zero    | nbdcopy    | pipe   | after   |   17772k |    4.56s |
+| 10g    | zero    | blksum     | nbd    | -       |   13948k |    3.90s |
+| 10g    | zero    | blksum     | pipe   | -       |   10340k |    0.55s |
+| 10g    | zero    | sha256sum  | file   | -       |    2796k |    4.45s |
+|--------|---------|------------|--------|---------|----------|----------|
+| 10g    | data    | nbdcopy    | file   | before  |   20224k |    1.28s |
+| 10g    | data    | nbdcopy    | file   | after   |   19036k |    1.26s |
+| 10g    | data    | nbdcopy    | nbd    | before  |   32792k |    8.02s |
+| 10g    | data    | nbdcopy    | nbd    | after   |   31512k |    8.02s |
+| 10g    | data    | nbdcopy    | pipe   | before  |   19052k |    4.56s |
+| 10g    | data    | nbdcopy    | pipe   | after   |   17772k |    4.57s |
+| 10g    | data    | blksum     | nbd    | -       |   13888k |    3.88s |
+| 10g    | data    | blksum     | pipe   | -       |   12512k |    1.10s |
+| 10g    | data    | sha256sum  | file   | -       |    2788k |    4.49s |
+
+* estimated based on 10g image
+
+Measured using:
+
+    /usr/bin/time -f "memory=%Mk time=%es" ./nbdcopy --blkhash ...
+
+Tested on Fedora 41 VM on MacBook Pro M2 Max.
+
+(cherry picked from commit f3e1b5fe8423558b49a2b829c0fe13f601b475f2)
+---
+ copy/blkhash.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/copy/blkhash.c b/copy/blkhash.c
+index 526db4d2..41253ec8 100644
+--- a/copy/blkhash.c
++++ b/copy/blkhash.c
+@@ -64,9 +64,9 @@ enum block_type { block_unknown = 0, block_zero, block_data, block_incomplete };
+ 
+ /* We will have one of these structs per blkhash block. */
+ struct block {
+-  enum block_type type;
+   void *ptr;
+-  size_t n;
++  uint32_t n;
++  enum block_type type;
+ };
+ 
+ DEFINE_VECTOR_TYPE(blocks, struct block);
+-- 
+2.47.1
+

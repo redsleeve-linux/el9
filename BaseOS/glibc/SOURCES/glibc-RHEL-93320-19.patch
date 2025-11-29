@@ -1,0 +1,185 @@
+Downstream-only patch to avoid ABI change:
+
+Move _dl_find_object and _rtld_libc_freeres to GLIBC_PRIVATE ABI
+
+Avoid modifying rtld_global_ro as it could cause interesting issues
+during glibc updates due to mismatches between running and newly
+installed glibc vs. ld.so
+
+This means _dl_find_object() will not work from a shared object
+dlopen()'d from a static binary. Th the corresponding test has to
+be removed. This is considered a non-issue at this point as C++
+exceptions are broken in that case for other reasons already
+(TLS not initialized properly etc...)
+
+Signed-off-by: Benjamin Herrenschmidt <benh@amazon.com>
+Reviewed-by: DJ Delorie <dj@redhat.com>
+
+diff --git a/elf/Makefile b/elf/Makefile
+index 7382cf6dd498ce8a..a28ea58551ffd1d7 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -62,6 +62,7 @@ dl-routines = \
+   dl-find_object \
+   dl-fini \
+   dl-init \
++  dl-libc_freeres \
+   dl-load \
+   dl-lookup \
+   dl-lookup-direct \
+@@ -138,7 +139,6 @@ rtld-routines = \
+   dl-hwcaps \
+   dl-hwcaps-subdirs \
+   dl-hwcaps_split \
+-  dl-libc_freeres \
+   dl-minimal \
+   dl-mutex \
+   dl-sysdep \
+@@ -285,7 +285,6 @@ tests-static-internal := \
+   tst-stackguard1-static \
+   tst-tls1-static \
+   tst-tls1-static-non-pie \
+-  tst-dl_find_object-static \
+   # tests-static-internal
+ 
+ CRT-tst-tls1-static-non-pie := $(csu-objpfx)crt1.o
+diff --git a/elf/Versions b/elf/Versions
+index 71d648a6b4bcbf5a..3e729c92d3be282d 100644
+--- a/elf/Versions
++++ b/elf/Versions
+@@ -76,5 +76,11 @@ ld {
+ 
+     # Check if an address range within a loaded ELF object is read-only.
+     _dl_readonly_area;
++
++    # Called from __libc_shared to deallocate malloc'ed memory.
++    __rtld_libc_freeres;
++
++    # Implementation of _dl_find_object.  The public entry point is in libc
++    __dl_find_object_internal;
+   }
+ }
+diff --git a/elf/dl-find_object.c b/elf/dl-find_object.c
+index 56894ca24a510b07..99797580066cdce8 100644
+--- a/elf/dl-find_object.c
++++ b/elf/dl-find_object.c
+@@ -356,7 +356,7 @@ _dlfo_lookup (uintptr_t pc, struct dl_find_object_internal *first1, size_t size)
+ }
+ 
+ int
+-_dl_find_object (void *pc1, struct dl_find_object *result)
++__dl_find_object_internal (void *pc1, struct dl_find_object *result)
+ {
+   uintptr_t pc = (uintptr_t) pc1;
+ 
+@@ -463,7 +463,7 @@ _dl_find_object (void *pc1, struct dl_find_object *result)
+         return -1;
+     } /* Transaction retry loop.  */
+ }
+-rtld_hidden_def (_dl_find_object)
++rtld_hidden_def (__dl_find_object_internal)
+ 
+ /* _dlfo_process_initial is called twice.  First to compute the array
+    sizes from the initial loaded mappings.  Second to fill in the
+diff --git a/elf/dl-libc_freeres.c b/elf/dl-libc_freeres.c
+index 2a377fa9dfc4f1c0..1acb7a87297515b0 100644
+--- a/elf/dl-libc_freeres.c
++++ b/elf/dl-libc_freeres.c
+@@ -24,3 +24,4 @@ __rtld_libc_freeres (void)
+ {
+   _dl_find_object_freeres ();
+ }
++rtld_hidden_def (__rtld_libc_freeres)
+diff --git a/elf/libc-dl_find_object.c b/elf/libc-dl_find_object.c
+index 38ea3bc94999df6e..1ce487ac3812d2a9 100644
+--- a/elf/libc-dl_find_object.c
++++ b/elf/libc-dl_find_object.c
+@@ -22,5 +22,5 @@
+ int
+ _dl_find_object (void *address, struct dl_find_object *result)
+ {
+-  return GLRO (dl_find_object) (address, result);
++  return __dl_find_object_internal (address, result);
+ }
+diff --git a/elf/rtld.c b/elf/rtld.c
+index d698a32ae120e887..667880e18ae816d8 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -381,7 +381,6 @@ struct rtld_global_ro _rtld_global_ro attribute_relro =
+     ._dl_catch_error = _dl_catch_error,
+     ._dl_error_free = _dl_error_free,
+     ._dl_tls_get_addr_soft = _dl_tls_get_addr_soft,
+-    ._dl_libc_freeres = __rtld_libc_freeres,
+ #ifdef HAVE_DL_DISCOVER_OSVERSION
+     ._dl_discover_osversion = _dl_discover_osversion
+ #endif
+@@ -584,10 +583,6 @@ _dl_start (void *arg)
+ 
+   __rtld_malloc_init_stubs ();
+ 
+-  /* Do not use an initializer for these members because it would
+-     intefere with __rtld_static_init.  */
+-  GLRO (dl_find_object) = &_dl_find_object;
+-
+   {
+ #ifdef DONT_USE_BOOTSTRAP_MAP
+     ElfW(Addr) entry = _dl_start_final (arg);
+diff --git a/elf/rtld_static_init.c b/elf/rtld_static_init.c
+index 6027000d3a56e46e..3f8abb6800b401d7 100644
+--- a/elf/rtld_static_init.c
++++ b/elf/rtld_static_init.c
+@@ -78,7 +78,6 @@ __rtld_static_init (struct link_map *map)
+   extern __typeof (dl->_dl_tls_static_size) _dl_tls_static_size
+     attribute_hidden;
+   dl->_dl_tls_static_size = _dl_tls_static_size;
+-  dl->_dl_find_object = _dl_find_object;
+ 
+   __rtld_static_init_arch (map, dl);
+ }
+diff --git a/malloc/set-freeres.c b/malloc/set-freeres.c
+index 856ff7831f84d07c..2a1e8971b2df218d 100644
+--- a/malloc/set-freeres.c
++++ b/malloc/set-freeres.c
+@@ -69,7 +69,7 @@ __libc_freeres (void)
+       call_function_static_weak (__libc_dlerror_result_free);
+ 
+ #ifdef SHARED
+-      GLRO (dl_libc_freeres) ();
++      __rtld_libc_freeres ();
+ #endif
+ 
+       for (p = symbol_set_first_element (__libc_freeres_ptrs);
+diff --git a/sysdeps/generic/ldsodefs.h b/sysdeps/generic/ldsodefs.h
+index 29c87649f14a1b5b..e5860916345487e7 100644
+--- a/sysdeps/generic/ldsodefs.h
++++ b/sysdeps/generic/ldsodefs.h
+@@ -714,14 +714,6 @@ struct rtld_global_ro
+   void (*_dl_error_free) (void *);
+   void *(*_dl_tls_get_addr_soft) (struct link_map *);
+ 
+-  /* Called from __libc_shared to deallocate malloc'ed memory.  */
+-  void (*_dl_libc_freeres) (void);
+-
+-  /* Implementation of _dl_find_object.  The public entry point is in
+-     libc, and this is patched by __rtld_static_init to support static
+-     dlopen.  */
+-  int (*_dl_find_object) (void *, struct dl_find_object *);
+-
+ #ifdef HAVE_DL_DISCOVER_OSVERSION
+   int (*_dl_discover_osversion) (void);
+ #endif
+@@ -1513,7 +1505,13 @@ __rtld_mutex_init (void)
+ #endif /* !PTHREAD_IN_LIBC */
+ 
+ /* Implementation of GL (dl_libc_freeres).  */
+-void __rtld_libc_freeres (void) attribute_hidden;
++void __rtld_libc_freeres (void);
++rtld_hidden_proto (__rtld_libc_freeres)
++
++/* Implementation of _dl_find_object */
++int __dl_find_object_internal (void *, struct dl_find_object *);
++rtld_hidden_proto (__dl_find_object_internal)
++
+ 
+ #if THREAD_GSCOPE_IN_TCB
+ void __thread_gscope_wait (void) attribute_hidden;

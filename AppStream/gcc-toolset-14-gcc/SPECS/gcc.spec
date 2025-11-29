@@ -11,7 +11,7 @@ BuildRequires: scl-utils-build
 %global gcc_major 14
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 7
+%global gcc_release 12
 %global nvptx_tools_gitrev 87ce9dc5999e5fca2e1d3478a30888d9864c9804
 %global newlib_cygwin_gitrev d45261f62a15f8abd94a1031020b9a9f455e4eed
 %global isl_version 0.24
@@ -152,7 +152,7 @@ BuildRequires: scl-utils-build
 Summary: GCC version %{gcc_major}
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.1%{?dist}.redsleeve
+Release: %{gcc_release}%{?dist}
 # License notes for some of the less obvious ones:
 #   gcc/doc/cppinternals.texi: Linux-man-pages-copyleft-2-para
 #   isl: MIT, BSD-2-Clause
@@ -231,8 +231,10 @@ BuildRequires: libzstd-devel
 BuildRequires: glibc >= 2.3.90-35
 %endif
 %ifarch %{multilib_64_archs}
-# Ensure glibc{,-devel} is installed for both multilib arches
-BuildRequires: /lib/libc.so.6 /usr/lib/libc.so /lib64/libc.so.6 /usr/lib64/libc.so
+BuildRequires: (glibc32 or glibc-devel(%{__isa_name}-32))
+%endif
+%ifarch sparcv9 ppc
+BuildRequires: (glibc64 or glibc-devel(%{__isa_name}-64))
 %endif
 %ifarch ia64
 BuildRequires: libunwind >= 0.98
@@ -361,8 +363,10 @@ Patch3015: 0018-Use-CXX11-ABI.patch
 Patch3017: 0020-more-fixes.patch
 Patch3018: 0021-libstdc++-disable-tests.patch
 
-Patch10000: gcc6-decimal-rtti-arm.patch
-Patch10001: gcc14-nonshared-arm.patch
+Patch4000: gcc14-RHEL-90244.patch
+Patch4001: gcc14-pr118892-1.patch
+Patch4002: gcc14-pr118892-2.patch
+Patch4003: gcc14-pr118892-3.patch
 
 %if 0%{?rhel} == 9
 %global nonsharedver 110
@@ -380,9 +384,6 @@ Patch10001: gcc14-nonshared-arm.patch
 %if 0%{?scl:1}
 %global _gnu %{nil}
 %else
-%global _gnu -gnueabi
-%endif
-%ifarch %{arm}
 %global _gnu -gnueabi
 %endif
 %ifarch sparcv9
@@ -730,10 +731,11 @@ touch -r isl-0.24/m4/ax_prog_cxx_for_build.m4 isl-0.24/m4/ax_prog_cc_for_build.m
 %patch -P3017 -p1 -b .dts-test-17~
 %patch -P3018 -p1 -b .dts-test-18~
 
-%ifarch %{arm}
-%patch10000 -p1
-%patch10001 -p1
-%endif
+# Bugfix backports.
+%patch -P4000 -p1 -b .RHEL-90244~
+%patch -P4001 -p1 -b .RHEL-pr118892-1~
+%patch -P4002 -p1 -b .RHEL-pr118892-2~
+%patch -P4003 -p1 -b .RHEL-pr118892-3~
 
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
@@ -1010,9 +1012,6 @@ CONFIGURE_OPTS="\
 %endif
 	--enable-decimal-float \
 %endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
-%endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
@@ -1048,20 +1047,6 @@ CC="$CC" CXX="$CXX" CFLAGS="$OPT_FLAGS" \
 make %{?_smp_mflags} BOOT_CFLAGS="$OPT_FLAGS" LDFLAGS_FOR_TARGET=-Wl,-z,relro,-z,now bootstrap
 %else
 make %{?_smp_mflags} BOOT_CFLAGS="$OPT_FLAGS" LDFLAGS_FOR_TARGET=-Wl,-z,relro,-z,now profiledbootstrap
-%endif
-
-echo '/* GNU ld script
-   Use the shared library, but some functions are only in
-   the static library, so try that secondarily.  */
-%{oformat}
-INPUT ( %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/%{_lib}/libstdc++.so.6 -lstdc++_nonshared%{nonsharedver} )' \
-  > %{gcc_target_platform}/libstdc++-v3/src/.libs/libstdc++_system.so
-
-%if 0
-# Relink libcc1 against -lstdc++_nonshared:
-sed -i -e '/^postdeps/s/-lstdc++/-lstdc++_system/' libcc1/libtool
-rm -f libcc1/libcc1.la
-make -C libcc1 libcc1.la
 %endif
 
 CC="`%{gcc_target_platform}/libstdc++-v3/scripts/testsuite_flags --build-cc`"
@@ -1445,11 +1430,18 @@ echo '/* GNU ld script */
 %{oformat}
 INPUT ( %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/%{_lib}/libgomp.so.1 )' > libgomp.so
 
+%define libstdcxx_so %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/%{_lib}/libstdc++.so.6
+%define libstdcxx_so_link INPUT ( %{libstdcxx_so} -lstdc++_nonshared AS_NEEDED (%{libstdcxx_so}) )
+%define libstdcxx64_so %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/lib64/libstdc++.so.6
+%define libstdcxx64_so_link INPUT ( %{libstdcxx64_so} -lstdc++_nonshared AS_NEEDED (%{libstdcxx64_so}) )
+%define libstdcxx32_so %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/lib/libstdc++.so.6
+%define libstdcxx32_so_link INPUT ( %{libstdcxx32_so} -lstdc++_nonshared AS_NEEDED (%{libstdcxx32_so}) )
+
 echo '/* GNU ld script
    Use the shared library, but some functions are only in
    the static library, so try that secondarily.  */
 %{oformat}
-INPUT ( %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/%{_lib}/libstdc++.so.6 -lstdc++_nonshared )' > libstdc++.so
+%{libstdcxx_so_link}' > libstdc++.so
 rm -f libgfortran.so
 echo '/* GNU ld script
    Use the shared library, but some functions are only in
@@ -1545,7 +1537,7 @@ echo '/* GNU ld script
    Use the shared library, but some functions are only in
    the static library, so try that secondarily.  */
 %{oformat2}
-INPUT ( %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/lib64/libstdc++.so.6 -lstdc++_nonshared )' > 64/libstdc++.so
+%{libstdcxx64_so_link}' > 64/libstdc++.so
 rm -f 64/libgfortran.so
 echo '/* GNU ld script
    Use the shared library, but some functions are only in
@@ -1633,7 +1625,7 @@ echo '/* GNU ld script
    Use the shared library, but some functions are only in
    the static library, so try that secondarily.  */
 %{oformat2}
-INPUT ( %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/lib/libstdc++.so.6 -lstdc++_nonshared )' > 32/libstdc++.so
+%{libstdcxx32_so_link}' > 32/libstdc++.so
 rm -f 32/libgfortran.so
 echo '/* GNU ld script
    Use the shared library, but some functions are only in
@@ -1933,7 +1925,7 @@ echo '/* GNU ld script
    Use the shared library, but some functions are only in
    the static library, so try that secondarily.  */
 %{oformat}
-INPUT ( %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/%{_lib}/libstdc++.so.6 -lstdc++_nonshared )' \
+%{libstdcxx_so_link}' \
   > %{gcc_target_platform}/libstdc++-v3/src/.libs/libstdc++.so
 cp -a %{gcc_target_platform}/libstdc++-v3/src/.libs/libstdc++_nonshared%{nonsharedver}.a \
   %{gcc_target_platform}/libstdc++-v3/src/.libs/libstdc++_nonshared.a
@@ -2810,8 +2802,21 @@ fi
 %endif
 
 %changelog
-* Sun Sep 28 2025 Jacco Ligthart <jacco@redsleeve.org> 14.2.1-7.1.redsleeve
-- patched for armv6
+* Thu Sep  4 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-12
+- Fix glibc32 dependency (RHEL-112209)
+
+* Wed Aug 27 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-11
+- Fix ICE in rebuild_jump_labels on aarch64-linux-gnu (RHEL-106790)
+
+* Wed May 28 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-10
+- Put the libstdc++ AS_NEEDED in the right places (RHEL-84679)
+
+* Thu May 22 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-9
+- Add AS_NEEDED libstdc++.so.6 when only needed through libstdc++_nonshared
+  (RHEL-84679)
+
+* Thu May 22 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-8
+- libstdc++: Fix -Warray-bounds warning in std::vector<bool> (RHEL-90244)
 
 * Fri Feb  7 2025 Marek Polacek <polacek@redhat.com> 14.2.1-7.1
 - disable jQuery use, don't ship jquery.js (CVE-2020-11023, RHEL-78387)

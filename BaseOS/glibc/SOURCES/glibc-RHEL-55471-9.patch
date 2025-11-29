@@ -1,0 +1,35 @@
+Downstream-only patch to restore the extern ABI for functions
+like fprintf that use the FILE * type.  Rebuilds of applications
+receive ABI change reports because of this installed header change
+(indirect subtype change in libabigail terms), and given that
+this part of struct _IO_FILE is strictly internal, there is no
+need to expose this change to installed headers.
+
+diff --git a/libio/bits/types/struct_FILE.h b/libio/bits/types/struct_FILE.h
+index 59f316f8a03d9498..ab64e4e43d663333 100644
+--- a/libio/bits/types/struct_FILE.h
++++ b/libio/bits/types/struct_FILE.h
+@@ -103,15 +103,19 @@ struct _IO_FILE_complete
+   void *_freeres_buf;
+   size_t __pad5;
+   int _mode;
+-#if __WORDSIZE == 64
++#ifdef _LIBC
++# if __WORDSIZE == 64
+   int _unused3;
+-#endif
++# endif
+   __uint64_t _total_written;
+-#if __WORDSIZE == 32
++# if __WORDSIZE == 32
+   int _unused3;
+-#endif
++# endif
+   /* Make sure we don't get into trouble again.  */
+   char _unused2[12 * sizeof (int) - 4 * sizeof (void *) - sizeof (size_t)];
++#else
++  char _unused2[15 * sizeof (int) - 4 * sizeof (void *) - sizeof (size_t)];
++#endif
+ };
+ 
+ /* These macros are used by bits/stdio.h and internal headers.  */

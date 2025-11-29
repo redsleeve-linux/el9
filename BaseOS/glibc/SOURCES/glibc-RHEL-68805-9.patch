@@ -1,0 +1,110 @@
+commit 7b47b3dd214c8ff2c699f13efe5533941be53635
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Apr 8 18:38:38 2025 +0200
+
+    libio: Synthesize ESPIPE error if lseek returns 0 after reading bytes
+    
+    This is required so that fclose, when trying to seek to the right
+    position after filling the input buffer, does not fail with EINVAL.
+    This fclose code path only ignores ESPIPE errors.
+    
+    Reported by Petr Pisar on
+    <https://bugzilla.redhat.com/show_bug.cgi?id=2358265>.
+    
+    Fixes commit be6818be31e756398e45f70e2819d78be0961223 ("Make fclose
+    seek input file to right offset (bug 12724)").
+    
+    Reviewed-by: Frédéric Bérat <fberat@redhat.com>
+
+Conflicts:
+	stdio-common/Makefile (fixup context)
+
+diff --git a/libio/fileops.c b/libio/fileops.c
+index 0b35790a9d35bcc5..11303013cb11dbd2 100644
+--- a/libio/fileops.c
++++ b/libio/fileops.c
+@@ -928,6 +928,16 @@ do_ftell (FILE *fp)
+   if (result == EOF)
+     return result;
+ 
++  if (result == 0 && offset < 0)
++    {
++      /* This happens for some character devices that always report
++	 file offset 0 even after some data has been read (instead of
++	 failing with ESPIPE).  The fclose path ignores this
++	 error.  */
++      __set_errno (ESPIPE);
++      return EOF;
++    }
++
+   result += offset;
+ 
+   if (result < 0)
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index fe4a7c4acc3932b2..9a027d41a2e9cc9b 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -218,6 +218,7 @@ tests := \
+   tst-bz11319 \
+   tst-bz11319-fortify2 \
+   tst-cookie \
++  tst-fclose-devzero \
+   tst-fclose-offset \
+   tst-fdopen \
+   tst-fdopen2 \
+diff --git a/stdio-common/tst-fclose-devzero.c b/stdio-common/tst-fclose-devzero.c
+new file mode 100644
+index 0000000000000000..1c7b39a3e04ba80d
+--- /dev/null
++++ b/stdio-common/tst-fclose-devzero.c
+@@ -0,0 +1,50 @@
++/* Test that always-zero lseek does not cause fclose failure after fread.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <stdio.h>
++#include <string.h>
++
++#include <support/check.h>
++#include <support/xstdio.h>
++
++int
++do_test (void)
++{
++  for (int do_ftello = 0; do_ftello < 2; ++do_ftello)
++    {
++      FILE *fp = xfopen ("/dev/zero", "r");
++      char buf[17];
++      memset (buf, 0xcc, sizeof (buf));
++      xfread (buf, 1, sizeof (buf), fp);
++      static const char zeros[sizeof (buf)] = { 0 };
++      TEST_COMPARE_BLOB (buf, sizeof (buf), zeros, sizeof (zeros));
++      if (do_ftello)
++        {
++          errno = 0;
++          TEST_COMPARE (ftello (fp), -1);
++          TEST_COMPARE (errno, ESPIPE);
++        }
++      /* Do not use xfclose because it flushes first.  */
++      TEST_COMPARE (fclose (fp), 0);
++    }
++
++  return 0;
++}
++
++#include <support/test-driver.c>

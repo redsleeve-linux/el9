@@ -1,0 +1,44 @@
+From 270d5ab1358d916483f2da0a7b060c433ed35ecc Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 15 Feb 2023 13:51:15 +0900
+Subject: [PATCH] time-util: drop unnecessary assignment of timezone name
+
+As mktime() does not use timezone neme.
+
+(cherry picked from commit 97c5f7ba1f50fcd7b982b995b46692c8cad4afaa)
+
+Related: RHEL-110954
+---
+ src/basic/time-util.c | 5 +----
+ 1 file changed, 1 insertion(+), 4 deletions(-)
+
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index d468848d09..92928e88a4 100644
+--- a/src/basic/time-util.c
++++ b/src/basic/time-util.c
+@@ -630,7 +630,7 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+                 { "Sat",       6 },
+         };
+ 
+-        const char *k, *utc = NULL, *tzn = NULL;
++        const char *k, *utc = NULL;
+         struct tm tm, copy;
+         usec_t usec, plus = 0, minus = 0;
+         int r, weekday = -1, isdst = -1;
+@@ -745,7 +745,6 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+                                 /* Found one of the two timezones specified. */
+                                 t = strndupa_safe(t, e - t - 1);
+                                 isdst = j;
+-                                tzn = tzname[j];
+                         }
+                 }
+         }
+@@ -756,8 +755,6 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+                 return -EINVAL;
+ 
+         tm.tm_isdst = isdst;
+-        if (!with_tz && tzn)
+-                tm.tm_zone = tzn;
+ 
+         if (streq(t, "today")) {
+                 tm.tm_sec = tm.tm_min = tm.tm_hour = 0;

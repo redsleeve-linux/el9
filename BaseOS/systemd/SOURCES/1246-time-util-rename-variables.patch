@@ -1,0 +1,69 @@
+From 8fb4c5d8a9df069effe63c66be9a7bfb8fe7e3e6 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Wed, 15 Feb 2023 13:46:50 +0900
+Subject: [PATCH] time-util: rename variables
+
+No functional changes, just refactoring.
+
+(cherry picked from commit a83c1baaeb510f1916d2d8cf0324d100708c7073)
+
+Related: RHEL-110954
+---
+ src/basic/time-util.c | 18 +++++++++---------
+ 1 file changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index 6e1b34b025..d468848d09 100644
+--- a/src/basic/time-util.c
++++ b/src/basic/time-util.c
+@@ -632,10 +632,10 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+ 
+         const char *k, *utc = NULL, *tzn = NULL;
+         struct tm tm, copy;
+-        time_t x;
+         usec_t usec, plus = 0, minus = 0;
+-        int r, weekday = -1, dst = -1;
++        int r, weekday = -1, isdst = -1;
+         unsigned fractional = 0;
++        time_t sec;
+ 
+         /* Allowed syntaxes:
+          *
+@@ -744,18 +744,18 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+                         if (IN_SET(j, 0, 1)) {
+                                 /* Found one of the two timezones specified. */
+                                 t = strndupa_safe(t, e - t - 1);
+-                                dst = j;
++                                isdst = j;
+                                 tzn = tzname[j];
+                         }
+                 }
+         }
+ 
+-        x = (time_t) (usec / USEC_PER_SEC);
++        sec = (time_t) (usec / USEC_PER_SEC);
+ 
+-        if (!localtime_or_gmtime_r(&x, &tm, utc))
++        if (!localtime_or_gmtime_r(&sec, &tm, utc))
+                 return -EINVAL;
+ 
+-        tm.tm_isdst = dst;
++        tm.tm_isdst = isdst;
+         if (!with_tz && tzn)
+                 tm.tm_zone = tzn;
+ 
+@@ -870,11 +870,11 @@ from_tm:
+         if (weekday >= 0 && tm.tm_wday != weekday)
+                 return -EINVAL;
+ 
+-        x = mktime_or_timegm(&tm, utc);
+-        if (x < 0)
++        sec = mktime_or_timegm(&tm, utc);
++        if (sec < 0)
+                 return -EINVAL;
+ 
+-        usec = usec_add(x * USEC_PER_SEC, fractional);
++        usec = usec_add(sec * USEC_PER_SEC, fractional);
+ 
+ finish:
+         usec = usec_add(usec, plus);

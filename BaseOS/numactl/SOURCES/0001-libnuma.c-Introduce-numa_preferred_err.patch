@@ -1,0 +1,80 @@
+From 1159e00f4f8604fdbb36a8fb04a1c86ce3cdc054 Mon Sep 17 00:00:00 2001
+From: Pingfan Liu <piliu@redhat.com>
+Date: Thu, 23 Jan 2025 18:50:09 +0800
+Subject: [PATCH 1/2] libnuma.c: Introduce numa_preferred_err()
+
+After commit 87c6834 ( libnuma: Convert preferred node into a mask),
+numa_preferred() returns -1 if no suitable node is found. Before that,
+it returns 0.
+
+The users still expect the old behavior, and use 0 as an index to
+an array. In order to avoid modifying the existing code, let's introduce
+another API numa_preferred_err() to report error if no suitable node is
+available and keep numa_preferred() in its original form.
+
+Signed-off-by: Pingfan Liu <piliu@redhat.com>
+---
+ libnuma.c         | 12 +++++++++++-
+ numa.h            |  3 +++
+ versions.ldscript |  1 +
+ 3 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/libnuma.c b/libnuma.c
+index 1ffe207..380e8a6 100644
+--- a/libnuma.c
++++ b/libnuma.c
+@@ -1947,7 +1947,7 @@ static struct bitmask *__numa_preferred(void)
+ 	return bmp;
+ }
+ 
+-int numa_preferred(void)
++int numa_preferred_err(void)
+ {
+ 	int first_node = 0;
+ 	struct bitmask *bmp;
+@@ -1959,6 +1959,16 @@ int numa_preferred(void)
+ 	return first_node;
+ }
+ 
++int numa_preferred(void)
++{
++	int first_node = 0;
++
++	first_node = numa_preferred_err();
++	first_node = first_node >= 0 ? first_node : 0;
++
++	return first_node;
++}
++
+ static void __numa_set_preferred(struct bitmask *bmp)
+ {
+ 	int nodes = numa_bitmask_weight(bmp);
+diff --git a/numa.h b/numa.h
+index 51a6833..f0b550b 100644
+--- a/numa.h
++++ b/numa.h
+@@ -140,6 +140,9 @@ int numa_max_node(void);
+ int numa_max_possible_node(void);
+ /* Return preferred node */
+ int numa_preferred(void);
++/* If the preferred node is unavailable, return an error;
++   otherwise, return the preferred node */
++int numa_preferred_err(void);
+ 
+ /* Return node size and free memory */
+ long long numa_node_size64(int node, long long *freep);
+diff --git a/versions.ldscript b/versions.ldscript
+index ee48e70..2fd6ebc 100644
+--- a/versions.ldscript
++++ b/versions.ldscript
+@@ -45,6 +45,7 @@ libnuma_1.1 {
+     numa_parse_bitmap;
+     numa_police_memory;
+     numa_preferred;
++    numa_preferred_err;
+     numa_run_on_node;
+     numa_run_on_node_mask;
+     numa_sched_getaffinity;
+-- 
+2.47.0
+

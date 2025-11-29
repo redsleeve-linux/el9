@@ -1,0 +1,158 @@
+commit c813c1490d5d8640a94fced10fc7674a48737b96
+Author: Michael Jeanson <mjeanson@efficios.com>
+Date:   Wed Jul 10 15:37:28 2024 -0400
+
+    nptl: Add rseq auxvals
+    
+    Get the rseq feature size and alignment requirement from the auxiliary
+    vector for use inside the dynamic loader. Use '__rseq_size' directly to
+    store the feature size. If the main thread registration fails or is
+    disabled by tunable, reset the value to 0.
+    
+    This will be used in the TLS block allocator to compute the size and
+    alignment of the rseq area block for the extended ABI support.
+    
+    Signed-off-by: Michael Jeanson <mjeanson@efficios.com>
+    Reviewed-by: Mathieu Desnoyers <mathieu.desnoyers@efficios.com>
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+Conflicts:
+	sysdeps/nptl/dl-tls_init_tp.c: Adjust for skipped commit:
+	33237fe83d553dff (Remove --enable-tunables configure option)
+
+diff --git a/sysdeps/nptl/dl-tls_init_tp.c b/sysdeps/nptl/dl-tls_init_tp.c
+index 2f56281a02246a09..20552b11843148fb 100644
+--- a/sysdeps/nptl/dl-tls_init_tp.c
++++ b/sysdeps/nptl/dl-tls_init_tp.c
+@@ -46,6 +46,8 @@ rtld_mutex_dummy (pthread_mutex_t *lock)
+ 
+ const unsigned int __rseq_flags;
+ 
++size_t _rseq_align attribute_hidden;
++
+ void
+ __tls_pre_init_tp (void)
+ {
+@@ -99,12 +101,17 @@ __tls_init_tp (void)
+   }
+ 
+   {
++    /* If the registration fails or is disabled by tunable, the public
++       '__rseq_size' will be set to '0' regardless of the feature size of the
++       allocated rseq area.  An rseq area of at least 32 bytes is always
++       allocated since application code is allowed to check the status of the
++       rseq registration by reading the content of the 'cpu_id' field.  */
+     bool do_rseq = true;
+ #if HAVE_TUNABLES
+     do_rseq = TUNABLE_GET (rseq, int, NULL);
+ #endif
+-    if (rseq_register_current_thread (pd, do_rseq))
+-      _rseq_size = RSEQ_AREA_SIZE_INITIAL_USED;
++    if (!rseq_register_current_thread (pd, do_rseq))
++      _rseq_size = 0;
+ 
+ #ifdef RSEQ_SIG
+     /* This should be a compile-time constant, but the current
+diff --git a/sysdeps/unix/sysv/linux/dl-parse_auxv.h b/sysdeps/unix/sysv/linux/dl-parse_auxv.h
+index bf9374371eb217fc..44c135c56570134e 100644
+--- a/sysdeps/unix/sysv/linux/dl-parse_auxv.h
++++ b/sysdeps/unix/sysv/linux/dl-parse_auxv.h
+@@ -21,6 +21,7 @@
+ #include <fpu_control.h>
+ #include <ldsodefs.h>
+ #include <link.h>
++#include <rseq-internal.h>
+ 
+ typedef ElfW(Addr) dl_parse_auxv_t[AT_MINSIGSTKSZ + 1];
+ 
+@@ -57,5 +58,17 @@ void _dl_parse_auxv (ElfW(auxv_t) *av, dl_parse_auxv_t auxv_values)
+     GLRO(dl_sysinfo) = auxv_values[AT_SYSINFO];
+ #endif
+ 
++  /* Get the rseq feature size, with a minimum of RSEQ_AREA_SIZE_INITIAL_USED
++     (20) for kernels that don't have AT_RSEQ_FEATURE_SIZE.  Limit the feature
++     size to RSEQ_AREA_SIZE_MAX_USED (28) which fits the rseq area in 'struct
++     pthread' and represents the maximum feature size of currently released
++     kernels.  Since no kernels currently cross the 32 bytes of the original
++     ABI, the semantics of a feature size of 32 or more are still undetermined.
++     */
++  _rseq_size = MIN (MAX (auxv_values[AT_RSEQ_FEATURE_SIZE],
++                         RSEQ_AREA_SIZE_INITIAL_USED),
++		    RSEQ_AREA_SIZE_MAX_USED);
++  _rseq_align = MAX (auxv_values[AT_RSEQ_ALIGN], RSEQ_MIN_ALIGN);
++
+   DL_PLATFORM_AUXV
+ }
+diff --git a/sysdeps/unix/sysv/linux/rseq-internal.h b/sysdeps/unix/sysv/linux/rseq-internal.h
+index c108a12a6227eeac..f4027b09519a652b 100644
+--- a/sysdeps/unix/sysv/linux/rseq-internal.h
++++ b/sysdeps/unix/sysv/linux/rseq-internal.h
+@@ -25,13 +25,31 @@
+ #include <stdio.h>
+ #include <sys/rseq.h>
+ 
+-/* 32 is the initially required value for the area size.  The
+-   actually used rseq size may be less (20 bytes initially).  */
++/* Minimum size of the rseq area allocation required by the syscall.  The
++   actually used rseq feature size may be less (20 bytes initially).  */
+ #define RSEQ_AREA_SIZE_INITIAL 32
++
++/* Minimum used feature size of the rseq area.  */
+ #define RSEQ_AREA_SIZE_INITIAL_USED 20
+ 
+-/* The variables are in .data.relro but are not yet write-protected.  */
++/* Maximum currently used feature size of the rseq area.  */
++#define RSEQ_AREA_SIZE_MAX_USED 28
++
++/* Minimum alignment of the rseq area.  */
++#define RSEQ_MIN_ALIGN 32
++
++/* Alignment requirement of the rseq area.
++   Populated from the auxiliary vector with a minimum of '32'.
++   In .data.relro but not yet write-protected.  */
++extern size_t _rseq_align attribute_hidden;
++
++/* Size of the active features in the rseq area.
++   Populated from the auxiliary vector with a minimum of '20'.
++   In .data.relro but not yet write-protected.  */
+ extern unsigned int _rseq_size attribute_hidden;
++
++/* Offset from the thread pointer to the rseq area.
++   In .data.relro but not yet write-protected.  */
+ extern ptrdiff_t _rseq_offset attribute_hidden;
+ 
+ #ifdef RSEQ_SIG
+diff --git a/sysdeps/unix/sysv/linux/tst-rseq.c b/sysdeps/unix/sysv/linux/tst-rseq.c
+index 1d404db610c08fdf..5946db73d9b079c3 100644
+--- a/sysdeps/unix/sysv/linux/tst-rseq.c
++++ b/sysdeps/unix/sysv/linux/tst-rseq.c
+@@ -38,13 +38,15 @@ static void
+ do_rseq_main_test (void)
+ {
+   struct pthread *pd = THREAD_SELF;
++  size_t rseq_feature_size = MIN (MAX (getauxval (AT_RSEQ_FEATURE_SIZE),
++                                       RSEQ_AREA_SIZE_INITIAL_USED),
++                                  RSEQ_AREA_SIZE_MAX_USED);
+ 
+   TEST_VERIFY_EXIT (rseq_thread_registered ());
+   TEST_COMPARE (__rseq_flags, 0);
+   TEST_VERIFY ((char *) __thread_pointer () + __rseq_offset
+                == (char *) &pd->rseq_area);
+-  /* The current implementation only supports the initial size.  */
+-  TEST_COMPARE (__rseq_size, 20);
++  TEST_COMPARE (__rseq_size, rseq_feature_size);
+ }
+ 
+ static void
+diff --git a/sysdeps/unix/sysv/linux/tst-rseq.h b/sysdeps/unix/sysv/linux/tst-rseq.h
+index a476c316fc2671a0..86cf50fbeff32384 100644
+--- a/sysdeps/unix/sysv/linux/tst-rseq.h
++++ b/sysdeps/unix/sysv/linux/tst-rseq.h
+@@ -23,6 +23,7 @@
+ #include <syscall.h>
+ #include <sys/rseq.h>
+ #include <tls.h>
++#include <rseq-internal.h>
+ 
+ static inline bool
+ rseq_thread_registered (void)

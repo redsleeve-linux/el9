@@ -1,0 +1,56 @@
+From a2d2e9bfc825c42d398c4d012dd73d7e389c2980 Mon Sep 17 00:00:00 2001
+From: Li Tian <litian@redhat.com>
+Date: Fri, 18 Jul 2025 09:11:29 +0800
+Subject: [PATCH] kernel-install: add --entry-type=type1|type2 option to
+ kernel-install.in
+
+Both kernel-core and kernel-uki-virt call kernel-install
+upon removal. Need an additional argument to avoid complete
+removal for both traditional kernel and UKI.
+
+And because kernel-install in RHEL9 is a shell script,
+we need a specific solution.
+
+Signed-off-by: Li Tian <litian@redhat.com>
+
+(cherry picked from commit 19d4040d71da15d0a91d0be854e5125fa6042870)
+
+Resolves: RHEL-83932
+---
+ src/kernel-install/kernel-install.in | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/src/kernel-install/kernel-install.in b/src/kernel-install/kernel-install.in
+index 105bd54acc..d16c5652bd 100755
+--- a/src/kernel-install/kernel-install.in
++++ b/src/kernel-install/kernel-install.in
+@@ -26,9 +26,11 @@ usage()
+ {
+     echo "Usage:"
+     echo "  kernel-install [OPTIONS...] add KERNEL-VERSION KERNEL-IMAGE [INITRD-FILE...]"
+-    echo "  kernel-install [OPTIONS...] remove KERNEL-VERSION"
++    echo "  kernel-install [OPTIONS...] remove KERNEL-VERSION [--entry-type...]"
+     echo "  kernel-install [OPTIONS...] inspect"
+     echo "Options:"
++    echo "  --entry-type type1|type2|all"
++    echo "                 Operate only on the specified bootloader entry type"
+     echo "  -h, --help     Print this help and exit"
+     echo "      --version  Print version string and exit"
+     echo "  -v, --verbose  Increase verbosity"
+@@ -371,6 +373,16 @@ case "$COMMAND" in
+         ;;
+ 
+     remove)
++        if [ "$1" = "--entry-type" ]; then
++            shift
++            if [ "$1" = "type1" ] || [ "$1" = "type2" ]; then
++                export KERNEL_INSTALL_BOOT_ENTRY_TYPE="$1"
++            elif [ "$1" != "all" ]; then
++                echo "Error: invalid --entry-type '$1'" >&2
++                exit 1
++            fi
++        fi
++
+         for f in $KERNEL_INSTALL_PLUGINS; do
+             log_verbose "+$f remove $KERNEL_VERSION $ENTRY_DIR_ABS"
+             err=0

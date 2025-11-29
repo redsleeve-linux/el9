@@ -1,0 +1,445 @@
+commit 596a61cf6b51ce2d58b8ca4e1d1f4fdfe1440dbc
+Author: Tulio Magno Quites Machado Filho <tuliom@redhat.com>
+Date:   Tue Jan 28 15:37:44 2025 -0300
+
+    libio: Start to return errors when flushing fwrite's buffer [BZ #29459]
+    
+    When an error happens, fwrite is expected to return a value that is less
+    than nmemb.  If this error happens while flushing its internal buffer,
+    fwrite is in a complex scenario: all the data might have been written to
+    the buffer, indicating a successful copy, but the buffer is expected to
+    be flushed and it was not.
+    
+    POSIX.1-2024 states the following about errors on fwrite:
+    
+        If an error occurs, the resulting value of the file-position indicator
+        for the stream is unspecified.
+    
+        The fwrite() function shall return the number of elements successfully
+        written, which may be less than nitems if a write error is encountered.
+    
+    With that in mind, this commit modifies _IO_new_file_write in order to
+    return the total number of bytes written via the file pointer.  It also
+    modifies fwrite in order to use the new information and return the
+    correct number of bytes written even when sputn returns EOF.
+    
+    Add 2 tests:
+    
+    1. tst-fwrite-bz29459: This test is based on the reproducer attached to
+       bug 29459.  In order to work, it requires to pipe stdout to another
+       process making it hard to reuse test-driver.c.  This code is more
+       specific to the issue reported.
+    2. tst-fwrite-pipe: Recreates the issue by creating a pipe that is shared
+       with a child process.  Reuses test-driver.c.  Evaluates a more generic
+       scenario.
+    
+    Co-authored-by: Florian Weimer <fweimer@redhat.com>
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+Conflicts:
+	libio/bits/types/struct_FILE.h
+	  (Downstream is missing commit 2a99e2398d9d717c034e915f7846a49e623f5450)
+
+diff --git a/libio/bits/types/struct_FILE.h b/libio/bits/types/struct_FILE.h
+index f7f756a701ce0e93..7292334a28ad3f79 100644
+--- a/libio/bits/types/struct_FILE.h
++++ b/libio/bits/types/struct_FILE.h
+@@ -102,8 +102,15 @@ struct _IO_FILE_complete
+   void *_freeres_buf;
+   size_t __pad5;
+   int _mode;
++#ifdef __LP64__
++  int _unused3;
++#endif
++  __uint64_t _total_written;
++#ifndef __LP64__
++  int _unused3;
++#endif
+   /* Make sure we don't get into trouble again.  */
+-  char _unused2[15 * sizeof (int) - 4 * sizeof (void *) - sizeof (size_t)];
++  char _unused2[12 * sizeof (int) - 4 * sizeof (void *) - sizeof (size_t)];
+ };
+ 
+ /* These macros are used by bits/stdio.h and internal headers.  */
+diff --git a/libio/fileops.c b/libio/fileops.c
+index f43ad59c5a5bca7d..b2354d42b420b80c 100644
+--- a/libio/fileops.c
++++ b/libio/fileops.c
+@@ -114,6 +114,7 @@ _IO_new_file_init_internal (struct _IO_FILE_plus *fp)
+ 
+   _IO_link_in (fp);
+   fp->file._fileno = -1;
++  fp->file._total_written = 0;
+ }
+ 
+ /* External version of _IO_new_file_init_internal which switches off
+@@ -1185,6 +1186,7 @@ _IO_new_file_write (FILE *f, const void *data, ssize_t n)
+ 	  f->_flags |= _IO_ERR_SEEN;
+ 	  break;
+ 	}
++      f->_total_written += count;
+       to_do -= count;
+       data = (void *) ((char *) data + count);
+     }
+diff --git a/libio/iofwrite.c b/libio/iofwrite.c
+index 71b609c526b79071..5c648302c8fd9224 100644
+--- a/libio/iofwrite.c
++++ b/libio/iofwrite.c
+@@ -36,13 +36,42 @@ _IO_fwrite (const void *buf, size_t size, size_t count, FILE *fp)
+     return 0;
+   _IO_acquire_lock (fp);
+   if (_IO_vtable_offset (fp) != 0 || _IO_fwide (fp, -1) == -1)
+-    written = _IO_sputn (fp, (const char *) buf, request);
++    {
++      /* Compute actually written bytes plus pending buffer
++         contents.  */
++      uint64_t original_total_written
++        = fp->_total_written + (fp->_IO_write_ptr - fp->_IO_write_base);
++      written = _IO_sputn (fp, (const char *) buf, request);
++      if (written == EOF)
++        {
++          /* An error happened and we need to find the appropriate return
++             value.  There 3 possible scenarios:
++             1. If the number of bytes written is between 0..[buffer content],
++                we need to return 0 because none of the bytes from this
++                request have been written;
++             2. If the number of bytes written is between
++                [buffer content]+1..request-1, that means we managed to write
++                data requested in this fwrite call;
++             3. We might have written all the requested data and got an error
++                anyway.  We can't return success, which means we still have to
++                return less than request.  */
++          if (fp->_total_written > original_total_written)
++            {
++              written = fp->_total_written - original_total_written;
++              /* If everything was reported as written and somehow an
++                 error occurred afterwards, avoid reporting success.  */
++              if (written == request)
++                --written;
++            }
++          else
++            /* Only already-pending buffer contents was written.  */
++            written = 0;
++        }
++    }
+   _IO_release_lock (fp);
+   /* We have written all of the input in case the return value indicates
+-     this or EOF is returned.  The latter is a special case where we
+-     simply did not manage to flush the buffer.  But the data is in the
+-     buffer and therefore written as far as fwrite is concerned.  */
+-  if (written == request || written == EOF)
++     this.  */
++  if (written == request)
+     return count;
+   else
+     return written / size;
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index 71f6ea12d103564c..b4a1e62f4a388d0a 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -219,6 +219,7 @@ tests := \
+   tst-fwrite \
+   tst-fwrite-memstrm \
+   tst-fwrite-overflow \
++  tst-fwrite-pipe \
+   tst-fwrite-ro \
+   tst-getline \
+   tst-getline-enomem \
+@@ -276,6 +277,7 @@ endif
+ 
+ test-srcs = \
+   $(xprintf-srcs) \
++  tst-fwrite-bz29459 \
+   tst-printf \
+   tst-printfsz-islongdouble \
+   tst-unbputc \
+@@ -284,6 +286,7 @@ test-srcs = \
+ ifeq ($(run-built-tests),yes)
+ tests-special += \
+   $(foreach f,$(xprintf-stems),$(objpfx)$(f).out) \
++  $(objpfx)tst-fwrite-bz29459.out \
+   $(objpfx)tst-printf.out \
+   $(objpfx)tst-printfsz-islongdouble.out \
+   $(objpfx)tst-setvbuf1-cmp.out \
+@@ -436,6 +439,10 @@ tst-freopen64-6-ENV = \
+   MALLOC_TRACE=$(objpfx)tst-freopen64-6.mtrace \
+   LD_PRELOAD=$(common-objpfx)malloc/libc_malloc_debug.so
+ 
++$(objpfx)tst-fwrite-bz29459.out: tst-fwrite-bz29459.sh $(objpfx)tst-fwrite-bz29459
++	$(SHELL) $< $(common-objpfx) '$(test-program-prefix)'; \
++	$(evaluate-test)
++
+ $(objpfx)tst-unbputc.out: tst-unbputc.sh $(objpfx)tst-unbputc
+ 	$(SHELL) $< $(common-objpfx) '$(test-program-prefix)'; \
+ 	$(evaluate-test)
+diff --git a/stdio-common/tst-fwrite-bz29459.c b/stdio-common/tst-fwrite-bz29459.c
+new file mode 100644
+index 0000000000000000..0640faac0c3823ef
+--- /dev/null
++++ b/stdio-common/tst-fwrite-bz29459.c
+@@ -0,0 +1,89 @@
++/* Test fwrite against bug 29459.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* This test is based on the code attached to bug 29459.
++   It depends on stdout being redirected to a specific process via a script
++   with the same name.  Because of this, we cannot use the features from
++   test_driver.c.  */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <errno.h>
++#include <unistd.h>
++#include <support/check.h>
++#include <support/xsignal.h>
++
++/* Usually this test reproduces in a few iterations.  However, keep a high
++   number of iterations in order to avoid return false-positives due to an
++   overwhelmed/slow system.  */
++#define ITERATIONS 5000
++
++/* The goal of this test is to use fwrite () on a redirected and closed
++   stdout.  A script will guarantee that stdout is redirected to another
++   process that closes it during the execution.  The process reading from
++   the pipe must read at least the first line in order to guarantee that
++   flag _IO_CURRENTLY_PUTTING is set in the write end of the pipe, triggering
++   important parts of the code that flushes lines from fwrite's internal
++   buffer.  The underlying write () returns EPIPE, which fwrite () must
++   propagate.  */
++
++int
++main (void)
++{
++  int i;
++  size_t rc;
++  /* Ensure the string we send has a new line because we're dealing
++     with a lined-buffered stream.  */
++  const char *s = "hello\n";
++  const size_t len = strlen(s);
++
++  /* Ensure that fwrite buffers the output before writing to stdout.  */
++  setlinebuf(stdout);
++  /* Ignore SIGPIPE in order to catch the EPIPE returned by the
++     underlying call to write().  */
++  xsignal(SIGPIPE, SIG_IGN);
++
++  for (i = 1; i <= ITERATIONS; i++)
++    {
++      /* Keep writing to stdout.  The test succeeds if fwrite () returns an
++         error.  */
++      if ((rc = fwrite(s, 1, len, stdout)) < len)
++	{
++	  /* An error happened.  Check if ferror () does return an error
++	     and that it is indeed EPIPE.  */
++	  TEST_COMPARE (ferror (stdout), 1);
++	  TEST_COMPARE (errno, EPIPE);
++	  fprintf(stderr, "Success: i=%d. fwrite returned %zu < %zu "
++			  "and errno=EPIPE\n",
++		  i, rc, len);
++	  /* The test succeeded!  */
++	  return 0;
++	}
++      else
++	{
++	  /* fwrite () was able to write all the contents.  Check if no errors
++	     have been reported and try again.  */
++	  TEST_COMPARE (ferror (stdout), 0);
++	  TEST_COMPARE (errno, 0);
++	}
++    }
++
++  fprintf(stderr, "Error: fwrite did not return an error\n");
++  return 1;
++}
+diff --git a/stdio-common/tst-fwrite-bz29459.sh b/stdio-common/tst-fwrite-bz29459.sh
+new file mode 100755
+index 0000000000000000..164313532b91cb56
+--- /dev/null
++++ b/stdio-common/tst-fwrite-bz29459.sh
+@@ -0,0 +1,34 @@
++#!/bin/sh
++# Test fwrite for bug 29459.
++# Copyright (C) 2025 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++common_objpfx=$1; shift
++test_program_prefix=$1; shift
++
++status=0
++
++${test_program_prefix} \
++  ${common_objpfx}stdio-common/tst-fwrite-bz29459 \
++    2> ${common_objpfx}stdio-common/tst-fwrite-bz29459.out \
++    | head -n1 > /dev/null
++
++grep -q Success ${common_objpfx}stdio-common/tst-fwrite-bz29459.out || status=1
++
++exit $status
+diff --git a/stdio-common/tst-fwrite-pipe.c b/stdio-common/tst-fwrite-pipe.c
+new file mode 100644
+index 0000000000000000..a6119125b25eeddb
+--- /dev/null
++++ b/stdio-common/tst-fwrite-pipe.c
+@@ -0,0 +1,130 @@
++/* Test if fwrite returns EPIPE.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdlib.h>
++#include <string.h>
++#include <errno.h>
++#include <support/check.h>
++#include <support/xstdio.h>
++#include <support/xsignal.h>
++#include <support/xunistd.h>
++
++/* Usually this test reproduces in a few iterations.  However, keep a high
++   number of iterations in order to avoid return false-positives due to an
++   overwhelmed/slow system.  */
++#define ITERATIONS 5000
++
++#define BUFFERSIZE 20
++
++/* When the underlying write () fails with EPIPE, fwrite () is expected to
++   return an error by returning < nmemb and keeping errno=EPIPE.  */
++
++static int
++do_test (void)
++{
++  int fd[2];
++  pid_t p;
++  FILE *f;
++  size_t written;
++  int ret = 1;  /* Return failure by default.  */
++
++  /* Try to create a pipe.  */
++  xpipe (fd);
++
++  p = xfork ();
++  if (p == 0)
++    {
++      char b[BUFFERSIZE];
++      size_t bytes;
++
++      /* Read at least the first line from the pipe before closing it.
++	 This is important because it guarantees the file stream will have
++	 flag _IO_CURRENTLY_PUTTING set, which triggers important parts of
++	 the code that flushes lines from fwrite's internal buffer.  */
++      do {
++	bytes = read (fd[0], b, BUFFERSIZE);
++      } while(bytes > 0 && memrchr (b, '\n', bytes) == NULL);
++
++      /* Child closes both ends of the pipe in order to trigger an EPIPE
++	 error on the parent.  */
++      xclose (fd[0]);
++      xclose (fd[1]);
++
++      return 0;
++    }
++  else
++    {
++      /* Ensure the string we send has a new line because we're dealing
++         with a lined-buffered stream.  */
++      const char *s = "hello\n";
++      size_t len = strlen (s);
++      int i;
++
++      /* Parent only writes to pipe.
++	 Close the unused read end of the pipe.  */
++      xclose (fd[0]);
++
++      /* Ignore SIGPIPE in order to catch the EPIPE returned by the
++	 underlying call to write().  */
++      xsignal(SIGPIPE, SIG_IGN);
++
++      /* Create a file stream associated with the write end of the pipe.  */
++      f = fdopen (fd[1], "w");
++      TEST_VERIFY_EXIT (f != NULL);
++      /* Ensure that fwrite buffers the output before writing to the pipe.  */
++      setlinebuf (f);
++
++      /* Ensure errno is not set before starting.  */
++      errno = 0;
++      for (i = 1; i <= ITERATIONS; i++)
++	{
++	  /* Try to write to the pipe.  The first calls are expected to
++	     suceeded until the child process closes the read end.
++	     After that, fwrite () is expected to fail and errno should be
++	     set to EPIPE.  */
++	  written = fwrite (s, 1, len, f);
++
++	  if (written == len)
++	    {
++	      TEST_VERIFY_EXIT (ferror (f) == 0);
++	      TEST_VERIFY_EXIT (errno == 0);
++	    }
++	  else
++	    {
++	      /* An error happened.  Check if ferror () does return an error
++		 and that it is indeed EPIPE.  */
++	      TEST_COMPARE (ferror (f), 1);
++	      TEST_COMPARE (errno, EPIPE);
++	      /* The test succeeded!  Clear the error from the file stream and
++		 return success.  */
++	      clearerr (f);
++	      ret = 0;
++              break;
++	    }
++	}
++
++      xfclose (f);
++    }
++
++  if (ret)
++    FAIL_RET ("fwrite should have returned an error, but it didn't.\n");
++
++  return ret;
++}
++
++#include <support/test-driver.c>

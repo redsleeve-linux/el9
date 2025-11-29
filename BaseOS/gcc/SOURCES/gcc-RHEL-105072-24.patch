@@ -1,0 +1,28 @@
+commit 104b09005229ef48a79a33511ea192bb3ec3c415
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Jul 11 06:19:39 2023 +0200
+
+    libgcc: Fix -Wint-conversion warning in find_fde_tail
+    
+    Fixes commit r14-1614-g49310a99330849 ("libgcc: Fix eh_frame fast path
+    in find_fde_tail").
+    
+    libgcc/
+    
+            PR libgcc/110179
+            * unwind-dw2-fde-dip.c (find_fde_tail): Add cast to avoid
+            implicit conversion of pointer value to integer.
+
+diff --git a/libgcc/unwind-dw2-fde-dip.c b/libgcc/unwind-dw2-fde-dip.c
+index b46e95dc8f88ac5c..e08154c1442d748f 100644
+--- a/libgcc/unwind-dw2-fde-dip.c
++++ b/libgcc/unwind-dw2-fde-dip.c
+@@ -403,7 +403,7 @@ find_fde_tail (_Unwind_Ptr pc,
+ 	 BFD ld generates.  */
+       signed value __attribute__ ((mode (SI)));
+       memcpy (&value, p, sizeof (value));
+-      eh_frame = p + value;
++      eh_frame = (_Unwind_Ptr) (p + value);
+       p += sizeof (value);
+     }
+   else

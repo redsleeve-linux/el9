@@ -1,0 +1,150 @@
+commit 94251ae99edaa911f4cb8056748dca0874ea268c
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Tue Jan 28 21:53:49 2025 +0000
+
+    Make fflush (NULL) flush input files (bug 32369)
+    
+    As discussed in bug 32369 and required by POSIX, the POSIX feature
+    fflush (NULL) should flush input files, not just output files.  The
+    POSIX requirement is that "fflush() shall perform this flushing action
+    on all streams for which the behavior is defined above", and the
+    definition for input files is for "a stream open for reading with an
+    underlying file description, if the file is not already at EOF, and
+    the file is one capable of seeking".
+    
+    Implement this requirement in glibc.  (The underlying flushing
+    implementation is what deals with avoiding errors for seeking on an
+    unseekable file.)
+    
+    Tested for x86_64.
+
+diff --git a/libio/genops.c b/libio/genops.c
+index cf6985938255e70d..560cbdd587ad2240 100644
+--- a/libio/genops.c
++++ b/libio/genops.c
+@@ -706,6 +706,13 @@ _IO_flush_all (void)
+ 	   )
+ 	  && _IO_OVERFLOW (fp, EOF) == EOF)
+ 	result = EOF;
++      if (_IO_fileno (fp) >= 0
++	  && ((fp->_mode <= 0 && fp->_IO_read_ptr < fp->_IO_read_end)
++	      || (_IO_vtable_offset (fp) == 0
++		  && fp->_mode > 0 && (fp->_wide_data->_IO_read_ptr
++				       < fp->_wide_data->_IO_read_end)))
++	  && _IO_SYNC (fp) != 0)
++	result = EOF;
+ 
+       _IO_funlockfile (fp);
+       run_fp = NULL;
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index ed358394c90f2319..0476c3777d7d21c4 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -222,6 +222,7 @@ tests := \
+   tst-fdopen \
+   tst-fdopen2 \
+   tst-ferror \
++  tst-fflush-all-input \
+   tst-fgets \
+   tst-fgets2 \
+   tst-fileno \
+diff --git a/stdio-common/tst-fflush-all-input.c b/stdio-common/tst-fflush-all-input.c
+new file mode 100644
+index 0000000000000000..8e3fca3a087a1699
+--- /dev/null
++++ b/stdio-common/tst-fflush-all-input.c
+@@ -0,0 +1,94 @@
++/* Test fflush (NULL) flushes input files (bug 32369).
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <wchar.h>
++
++#include <support/check.h>
++#include <support/xstdio.h>
++#include <support/xunistd.h>
++
++int
++do_test (void)
++{
++  FILE *temp = tmpfile ();
++  TEST_VERIFY_EXIT (temp != NULL);
++  fprintf (temp, "abc");
++  TEST_COMPARE (fflush (temp), 0);
++  TEST_COMPARE (lseek (fileno (temp), 0, SEEK_SET), 0);
++  TEST_COMPARE (fgetc (temp), 'a');
++  TEST_COMPARE (fflush (NULL), 0);
++  TEST_COMPARE (lseek (fileno (temp), 0, SEEK_CUR), 1);
++  xfclose (temp);
++
++  /* Likewise, but in wide mode.  */
++  temp = tmpfile ();
++  TEST_VERIFY_EXIT (temp != NULL);
++  fwprintf (temp, L"abc");
++  TEST_COMPARE (fflush (temp), 0);
++  TEST_COMPARE (lseek (fileno (temp), 0, SEEK_SET), 0);
++  TEST_COMPARE (fgetwc (temp), L'a');
++  TEST_COMPARE (fflush (NULL), 0);
++  TEST_COMPARE (lseek (fileno (temp), 0, SEEK_CUR), 1);
++  xfclose (temp);
++
++  /* Similar tests, but with the flush implicitly occurring on exit
++     (in a forked subprocess).  */
++
++  temp = tmpfile ();
++  TEST_VERIFY_EXIT (temp != NULL);
++  pid_t pid = xfork ();
++  if (pid == 0)
++    {
++      fprintf (temp, "abc");
++      TEST_COMPARE (fflush (temp), 0);
++      TEST_COMPARE (lseek (fileno (temp), 0, SEEK_SET), 0);
++      TEST_COMPARE (fgetc (temp), 'a');
++      exit (EXIT_SUCCESS);
++    }
++  else
++    {
++      TEST_COMPARE (xwaitpid (pid, NULL, 0), pid);
++      TEST_COMPARE (lseek (fileno (temp), 0, SEEK_CUR), 1);
++      xfclose (temp);
++    }
++
++  temp = tmpfile ();
++  TEST_VERIFY_EXIT (temp != NULL);
++  pid = xfork ();
++  if (pid == 0)
++    {
++      fwprintf (temp, L"abc");
++      TEST_COMPARE (fflush (temp), 0);
++      TEST_COMPARE (lseek (fileno (temp), 0, SEEK_SET), 0);
++      TEST_COMPARE (fgetwc (temp), L'a');
++      exit (EXIT_SUCCESS);
++    }
++  else
++    {
++      TEST_COMPARE (xwaitpid (pid, NULL, 0), pid);
++      TEST_COMPARE (lseek (fileno (temp), 0, SEEK_CUR), 1);
++      xfclose (temp);
++    }
++
++  return 0;
++}
++
++#include <support/test-driver.c>

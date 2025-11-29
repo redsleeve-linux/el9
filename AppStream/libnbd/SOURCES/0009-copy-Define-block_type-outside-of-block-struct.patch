@@ -1,0 +1,66 @@
+From b7cd0e53f61fc72be3025f0e1969507279af8842 Mon Sep 17 00:00:00 2001
+From: Nir Soffer <nsoffer@redhat.com>
+Date: Sun, 13 Apr 2025 14:51:09 +0000
+Subject: [PATCH] copy: Define block_type outside of block struct
+
+This make the code easier to follow and maintain.
+
+(cherry picked from commit dc5f0e6c79e7aa03ba634b71d4780f6d7d039cdd)
+---
+ copy/blkhash.c | 38 ++++++++++++++++++++------------------
+ 1 file changed, 20 insertions(+), 18 deletions(-)
+
+diff --git a/copy/blkhash.c b/copy/blkhash.c
+index 622d8a39..526db4d2 100644
+--- a/copy/blkhash.c
++++ b/copy/blkhash.c
+@@ -43,26 +43,28 @@
+ 
+ #ifdef HAVE_GNUTLS
+ 
++/* unknown => We haven't seen this block yet.  'ptr' is NULL.
++ *
++ * zero => The block is all zeroes.  'ptr' is NULL.
++ *
++ * data => The block is all data, and we have seen the whole block,
++ * and the hash has been computed.  'ptr' points to the computed
++ * hash.  'n' is unused.
++ *
++ * incomplete => Part of the block was seen.  'ptr' points to the
++ * data block, waiting to be completed.  'n' is the number of bytes
++ * seen so far.  We will compute the hash and turn this into a
++ * 'data' or 'zero' block, either when we have seen all bytes of
++ * this block, or at the end.
++ *
++ * Note that this code assumes that we are called exactly once for a
++ * range in the disk image.
++ */
++enum block_type { block_unknown = 0, block_zero, block_data, block_incomplete };
++
+ /* We will have one of these structs per blkhash block. */
+ struct block {
+-  /* unknown => We haven't seen this block yet.  'ptr' is NULL.
+-   *
+-   * zero => The block is all zeroes.  'ptr' is NULL.
+-   *
+-   * data => The block is all data, and we have seen the whole block,
+-   * and the hash has been computed.  'ptr' points to the computed
+-   * hash.  'n' is unused.
+-   *
+-   * incomplete => Part of the block was seen.  'ptr' points to the
+-   * data block, waiting to be completed.  'n' is the number of bytes
+-   * seen so far.  We will compute the hash and turn this into a
+-   * 'data' or 'zero' block, either when we have seen all bytes of
+-   * this block, or at the end.
+-   *
+-   * Note that this code assumes that we are called exactly once for a
+-   * range in the disk image.
+-   */
+-  enum { block_unknown = 0, block_zero, block_data, block_incomplete } type;
++  enum block_type type;
+   void *ptr;
+   size_t n;
+ };
+-- 
+2.47.1
+

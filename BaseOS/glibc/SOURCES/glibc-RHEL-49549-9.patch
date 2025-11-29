@@ -1,0 +1,140 @@
+commit 495b96e064da605630a23092d1e484ade4bdc093
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Sep 3 17:57:46 2024 +0200
+
+    elf: Reorder audit events in dlcose to match _dl_fini (bug 32066)
+    
+    This was discovered after extending elf/tst-audit23 to cover
+    dlclose of the dlmopen namespace.
+    
+    Auditors already experience the new order during process
+    shutdown (_dl_fini), so no LAV_CURRENT bump or backwards
+    compatibility code seems necessary.
+    
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff --git a/elf/dl-close.c b/elf/dl-close.c
+index 8a4c3528a124d4e7..236d89f67f3bf410 100644
+--- a/elf/dl-close.c
++++ b/elf/dl-close.c
+@@ -303,6 +303,12 @@ _dl_close_worker (struct link_map *map, bool force)
+ 	    }
+ 
+ #ifdef SHARED
++	  /* Auditing checkpoint: we will start deleting objects.
++	     This is supposed to happen before la_objclose (see _dl_fini),
++	     but only once per non-recursive dlclose call.  */
++	  if (!unload_any)
++	    _dl_audit_activity_nsid (nsid, LA_ACT_DELETE);
++
+ 	  /* Auditing checkpoint: we remove an object.  */
+ 	  _dl_audit_objclose (imap);
+ #endif
+@@ -463,12 +469,8 @@ _dl_close_worker (struct link_map *map, bool force)
+   if (!unload_any)
+     goto out;
+ 
+-#ifdef SHARED
+-  /* Auditing checkpoint: we will start deleting objects.  */
+-  _dl_audit_activity_nsid (nsid, LA_ACT_DELETE);
+-#endif
+-
+-  /* Notify the debugger we are about to remove some loaded objects.  */
++  /* Notify the debugger we are about to remove some loaded objects.
++     LA_ACT_DELETE has already been signalled above for !unload_any.  */
+   struct r_debug *r = _dl_debug_update (nsid);
+   r->r_state = RT_DELETE;
+   _dl_debug_state ();
+diff --git a/elf/tst-audit23.c b/elf/tst-audit23.c
+index d5137fd44dacde3c..5e3afd397bb2d3d1 100644
+--- a/elf/tst-audit23.c
++++ b/elf/tst-audit23.c
+@@ -31,16 +31,21 @@
+ #include <support/xstdio.h>
+ #include <support/xdlfcn.h>
+ #include <support/support.h>
++#include <support/test-driver.h>
+ 
+ static int restart;
++static int do_dlclose;
+ #define CMDLINE_OPTIONS \
+-  { "restart", no_argument, &restart, 1 },
++  { "restart", no_argument, &restart, 1 }, \
++  { "dlclose", no_argument, &do_dlclose, 1 }, \
+ 
+ static int
+ handle_restart (void)
+ {
+   xdlopen ("tst-audit23mod.so", RTLD_NOW);
+-  xdlmopen (LM_ID_NEWLM, LIBC_SO, RTLD_NOW);
++  void *handle = xdlmopen (LM_ID_NEWLM, LIBC_SO, RTLD_NOW);
++  if (do_dlclose)
++    xdlclose (handle);
+ 
+   return 0;
+ }
+@@ -60,8 +65,8 @@ is_vdso (const char *str)
+ 	 || startswith (str, "linux-vdso");
+ }
+ 
+-static int
+-do_test (int argc, char *argv[])
++static void
++do_one_test (int argc, char *argv[], bool pass_dlclose_flag)
+ {
+   /* We must have either:
+      - One or four parameters left if called initially:
+@@ -69,16 +74,15 @@ do_test (int argc, char *argv[])
+        + "--library-path"      optional
+        + the library path      optional
+        + the application name  */
+-  if (restart)
+-    return handle_restart ();
+-
+-  char *spargv[9];
++  char *spargv[10];
+   TEST_VERIFY_EXIT (((argc - 1) + 3) < array_length (spargv));
+   int i = 0;
+   for (; i < argc - 1; i++)
+     spargv[i] = argv[i + 1];
+   spargv[i++] = (char *) "--direct";
+   spargv[i++] = (char *) "--restart";
++  if (pass_dlclose_flag)
++    spargv[i++] = (char *) "--dlclose";
+   spargv[i] = NULL;
+ 
+   setenv ("LD_AUDIT", "tst-auditmod23.so", 0);
+@@ -146,8 +150,14 @@ do_test (int argc, char *argv[])
+ 
+ 	  /* The cookie identifies the object at the head of the link map,
+ 	     so we only add a new namespace if it changes from the previous
+-	     one.  This works since dlmopen is the last in the test body.  */
+-	  if (cookie != last_act_cookie && last_act_cookie != -1)
++	     one.  This works since dlmopen is the last in the test body.
++
++	     Currently, this does not work as expected because there
++	     is no head link map if a namespace is completely deleted.
++	     No LA_ACT_CONSISTENT event is generated in that case.
++	     See the comment in _dl_audit_activity_nsid and bug 32068.  */
++	  if (cookie != last_act_cookie && last_act_cookie != -1
++	      && !pass_dlclose_flag)
+ 	    TEST_COMPARE (last_act, LA_ACT_CONSISTENT);
+ 
+ 	  if (this_act == LA_ACT_ADD && acts[nacts] != cookie)
+@@ -265,7 +275,16 @@ do_test (int argc, char *argv[])
+ 
+   free (buffer);
+   xfclose (out);
++}
++
++static int
++do_test (int argc, char *argv[])
++{
++  if (restart)
++    return handle_restart ();
+ 
++  do_one_test (argc, argv, false);
++  do_one_test (argc, argv, true);
+   return 0;
+ }
+ 

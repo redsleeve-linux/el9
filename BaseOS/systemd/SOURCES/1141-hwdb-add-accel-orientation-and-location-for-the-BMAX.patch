@@ -1,0 +1,90 @@
+From 90f9c768313ebf279b82f036b2cd5939fde88f15 Mon Sep 17 00:00:00 2001
+From: Enrico Tagliavini <enrico.tagliavini@gmail.com>
+Date: Sun, 9 Feb 2025 14:44:46 +0100
+Subject: [PATCH] hwdb: add accel orientation and location for the BMAX Y14
+
+The BMAX MaxBook Y14 has 2 acceleromenter sensors, one seems to be in
+the display, the other in the base. With the default ACCEL_MOUNT_MATRIX
+monitor-sensor would report the display to be rotate of 180 degrees
+compared to its real position, i.e. upside down when normal and vice
+versa. Left up and right up are also swapped.
+
+Correcting the ACCEL_MOUNT_MATRIX for the display sensor solves the
+issue and monitor-sensor reports the correct values.
+
+For the Y13 model the Z axis value was also inverted. For the Y14 to
+work correctly, this is not necessary, but I'm not sure how to double
+check this.
+
+Sensors info:
+
+P: /devices/pci0000:00/0000:00:15.0/i2c_designware.0/i2c-0/i2c-KIOX010A:00/iio:device0
+M: iio:device0
+R: 0
+U: iio
+T: iio_device
+D: c 237:0
+N: iio:device0
+L: 0
+E: DEVPATH=/devices/pci0000:00/0000:00:15.0/i2c_designware.0/i2c-0/i2c-KIOX010A:00/iio:device0
+E: SUBSYSTEM=iio
+E: DEVNAME=/dev/iio:device0
+E: DEVTYPE=iio_device
+E: MAJOR=237
+E: MINOR=0
+E: USEC_INITIALIZED=25931869
+E: IIO_SENSOR_PROXY_TYPE=iio-poll-accel iio-buffer-accel
+E: SYSTEMD_WANTS=iio-sensor-proxy.service
+E: TAGS=:systemd:
+E: CURRENT_TAGS=:systemd:
+
+P: /devices/pci0000:00/0000:00:15.3/i2c_designware.3/i2c-3/i2c-KIOX020A:00/iio:device1
+M: iio:device1
+R: 1
+U: iio
+T: iio_device
+D: c 237:1
+N: iio:device1
+L: 0
+E: DEVPATH=/devices/pci0000:00/0000:00:15.3/i2c_designware.3/i2c-3/i2c-KIOX020A:00/iio:device1
+E: SUBSYSTEM=iio
+E: DEVNAME=/dev/iio:device1
+E: DEVTYPE=iio_device
+E: MAJOR=237
+E: MINOR=1
+E: USEC_INITIALIZED=26000295
+E: IIO_SENSOR_PROXY_TYPE=iio-poll-accel iio-buffer-accel
+E: SYSTEMD_WANTS=iio-sensor-proxy.service
+E: TAGS=:systemd:
+E: CURRENT_TAGS=:systemd:
+
+accel-display
+acpi:KIOX010A:KIOX010A:
+dmi:bvnAmericanMegatrendsInternational,LLC.:bvr5.00_002:bd05/13/2024:br5.27:efr1.1:svnAMI:pnIntel:pvrDefaultstring:rvnAMI:rnIntel:rvrDefaultstring:cvnDefaultstring:ct31:cvrDefaultstring:skuH8Y6:
+
+accel-base
+acpi:KIOX020A:KIOX020A:
+
+(cherry picked from commit 1740bbc98b44a5debce667571235418311136a04)
+
+Resolves: RHEL-72697
+---
+ hwdb.d/60-sensor.hwdb | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/hwdb.d/60-sensor.hwdb b/hwdb.d/60-sensor.hwdb
+index 869f9221a4..b1e029dc14 100644
+--- a/hwdb.d/60-sensor.hwdb
++++ b/hwdb.d/60-sensor.hwdb
+@@ -242,6 +242,11 @@ sensor:modalias:acpi:KIOX010A:*:dmi:*:svnAMI:*:skuH2M6:*
+  ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, -1, 0; 0, 0, -1
+  ACCEL_LOCATION=display
+ 
++# BMAX MaxBook Y14
++sensor:modalias:acpi:KIOX010A:*:dmi:*:svnAMI:*:skuH8Y6:*
++ ACCEL_MOUNT_MATRIX=-1, 0, 0; 0, -1, 0; 0, 0, 1
++ ACCEL_LOCATION=display
++
+ #########################################
+ # BUSH
+ #########################################

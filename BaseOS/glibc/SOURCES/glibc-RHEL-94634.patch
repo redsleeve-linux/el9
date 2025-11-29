@@ -1,0 +1,29 @@
+commit b22923abb046311ac9097a36b97b9b97342bac44
+Author: Carlos O'Donell <carlos@redhat.com>
+Date:   Thu Aug 15 08:12:35 2024 -0400
+
+    Report error if setaffinity wrapper fails (Bug 32040)
+    
+    Previously if the setaffinity wrapper failed the rest of the subtest
+    would not execute and the current subtest would be reported as passing.
+    Now if the setaffinity wrapper fails the subtest is correctly reported
+    as faling. Tested manually by changing the conditions of the affinity
+    call including setting size to zero, or checking the wrong condition.
+    
+    No regressions on x86_64.
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+diff --git a/sysdeps/unix/sysv/linux/tst-skeleton-affinity.c b/sysdeps/unix/sysv/linux/tst-skeleton-affinity.c
+index 55ddcda2ce24e186..6871ac73fd69a935 100644
+--- a/sysdeps/unix/sysv/linux/tst-skeleton-affinity.c
++++ b/sysdeps/unix/sysv/linux/tst-skeleton-affinity.c
+@@ -158,7 +158,7 @@ test_size (const struct conf *conf, size_t size)
+   if (setaffinity (kernel_size, initial_set) < 0)
+     {
+       printf ("error: size %zu: setaffinity: %m\n", size);
+-      return true;
++      return false;
+     }
+ 
+   /* Use one-CPU set to test switching between CPUs.  */

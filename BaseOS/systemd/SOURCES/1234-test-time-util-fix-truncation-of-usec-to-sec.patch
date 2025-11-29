@@ -1,0 +1,61 @@
+From 442b74d5a4aca7f9bde1b8fb10bf295e26524a8d Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sat, 14 Dec 2024 16:49:54 +0900
+Subject: [PATCH] test-time-util: fix truncation of usec to sec
+
+Also
+- use ASSERT_XYZ() macros,
+- log tzname[] on failure.
+
+(cherry picked from commit 3f1d499964abb6a4c0141d7ea8f852829880adff)
+
+Related: RHEL-110954
+---
+ src/test/test-time-util.c | 20 ++++++++++++--------
+ 1 file changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/src/test/test-time-util.c b/src/test/test-time-util.c
+index 45d7541415..a5443ad7d7 100644
+--- a/src/test/test-time-util.c
++++ b/src/test/test-time-util.c
+@@ -384,28 +384,32 @@ TEST(format_timestamp) {
+ static void test_format_timestamp_impl(usec_t x) {
+         bool success, override;
+         const char *xx, *yy;
+-        usec_t y;
++        usec_t y, x_sec, y_sec;
+ 
+         xx = FORMAT_TIMESTAMP(x);
+-        assert_se(xx);
+-        assert_se(parse_timestamp(xx, &y) >= 0);
++        ASSERT_NOT_NULL(xx);
++        ASSERT_OK(parse_timestamp(xx, &y));
+         yy = FORMAT_TIMESTAMP(y);
+-        assert_se(yy);
++        ASSERT_NOT_NULL(yy);
+ 
+-        success = (x / USEC_PER_SEC == y / USEC_PER_SEC) && streq(xx, yy);
++        x_sec = x / USEC_PER_SEC;
++        y_sec = y / USEC_PER_SEC;
++        success = (x_sec == y_sec) && streq(xx, yy);
+         /* Workaround for https://github.com/systemd/systemd/issues/28472
+          * and https://github.com/systemd/systemd/pull/35471. */
+         override = !success &&
+                    (STRPTR_IN_SET(tzname[0], "CAT", "EAT", "WET") ||
+                     STRPTR_IN_SET(tzname[1], "CAT", "EAT", "WET")) &&
+-                   DIV_ROUND_UP(x > y ? x - y : y - x, USEC_PER_SEC) == 3600; /* 1 hour, ignore fractional second */
++                   (x_sec > y_sec ? x_sec - y_sec : y_sec - x_sec) == 3600; /* 1 hour, ignore fractional second */
+         log_full(success ? LOG_DEBUG : override ? LOG_WARNING : LOG_ERR,
+                  "@" USEC_FMT " → %s → @" USEC_FMT " → %s%s",
+                  x, xx, y, yy,
+                  override ? ", ignoring." : "");
+         if (!override) {
+-                assert_se(x / USEC_PER_SEC == y / USEC_PER_SEC);
+-                assert_se(streq(xx, yy));
++                if (!success)
++                        log_warning("tzname[0]=\"%s\", tzname[1]=\"%s\"", tzname[0], tzname[1]);
++                ASSERT_EQ(x_sec, y_sec);
++                ASSERT_STREQ(xx, yy);
+         }
+ }
+ 

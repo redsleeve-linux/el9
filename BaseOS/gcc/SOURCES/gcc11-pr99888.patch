@@ -1,0 +1,403 @@
+From c23b5006d3ffeda1a9edf5fd817765a6da3696ca Mon Sep 17 00:00:00 2001
+From: Kewen Lin <linkw@linux.ibm.com>
+Date: Fri, 30 Sep 2022 07:16:49 -0500
+Subject: [PATCH] rs6000: Rework ELFv2 support for -fpatchable-function-entry*
+ [PR99888]
+
+As PR99888 and its related show, the current support for
+-fpatchable-function-entry on powerpc ELFv2 doesn't work
+well with global entry existence.  For example, with one
+command line option -fpatchable-function-entry=3,2, it got
+below w/o this patch:
+
+  .LPFE1:
+	  nop
+	  nop
+	  .type   foo, @function
+  foo:
+	  nop
+  .LFB0:
+	  .cfi_startproc
+  .LCF0:
+  0:      addis 2,12,.TOC.-.LCF0@ha
+	  addi 2,2,.TOC.-.LCF0@l
+	  .localentry     foo,.-foo
+
+, the assembly is unexpected since the patched nops have
+no effects when being entered from local entry.
+
+This patch is to update the nops patched before and after
+local entry, it looks like:
+
+	  .type   foo, @function
+  foo:
+  .LFB0:
+	  .cfi_startproc
+  .LCF0:
+  0:      addis 2,12,.TOC.-.LCF0@ha
+	  addi 2,2,.TOC.-.LCF0@l
+	  nop
+	  nop
+	  .localentry     foo,.-foo
+	  nop
+
+	PR target/99888
+	PR target/105649
+
+Backported to GCC 11: renamed source files from .cc back to .c
+
+gcc/ChangeLog:
+
+	* doc/invoke.texi (option -fpatchable-function-entry): Adjust the
+	documentation for PowerPC ELFv2 ABI dual entry points.
+	* config/rs6000/rs6000-internal.h
+	(rs6000_print_patchable_function_entry): New function declaration.
+	* config/rs6000/rs6000-logue.c (rs6000_output_function_prologue):
+	Support patchable-function-entry by emitting nops before and after
+	local entry for the function that needs global entry.
+	* config/rs6000/rs6000.c (rs6000_print_patchable_function_entry): Skip
+	the function that needs global entry till global entry has been
+	emitted.
+	* config/rs6000/rs6000.h (struct machine_function): New bool member
+	global_entry_emitted.
+
+gcc/testsuite/ChangeLog:
+
+	* gcc.target/powerpc/pr99888-1.c: New test.
+	* gcc.target/powerpc/pr99888-2.c: New test.
+	* gcc.target/powerpc/pr99888-3.c: New test.
+	* gcc.target/powerpc/pr99888-4.c: New test.
+	* gcc.target/powerpc/pr99888-5.c: New test.
+	* gcc.target/powerpc/pr99888-6.c: New test.
+	* c-c++-common/patchable_function_entry-default.c: Adjust for
+	powerpc_elfv2 to avoid compilation error.
+---
+ gcc/config/rs6000/rs6000-internal.h           |  4 ++
+ gcc/config/rs6000/rs6000-logue.c              | 32 ++++++++++++++
+ gcc/config/rs6000/rs6000.c                    | 10 ++++-
+ gcc/config/rs6000/rs6000.h                    |  4 ++
+ gcc/doc/invoke.texi                           |  8 +++-
+ .../patchable_function_entry-default.c        |  3 ++
+ gcc/testsuite/gcc.target/powerpc/pr99888-1.c  | 43 +++++++++++++++++++
+ gcc/testsuite/gcc.target/powerpc/pr99888-2.c  | 43 +++++++++++++++++++
+ gcc/testsuite/gcc.target/powerpc/pr99888-3.c  | 11 +++++
+ gcc/testsuite/gcc.target/powerpc/pr99888-4.c  | 13 ++++++
+ gcc/testsuite/gcc.target/powerpc/pr99888-5.c  | 13 ++++++
+ gcc/testsuite/gcc.target/powerpc/pr99888-6.c  | 14 ++++++
+ 12 files changed, 194 insertions(+), 4 deletions(-)
+ create mode 100644 gcc/testsuite/gcc.target/powerpc/pr99888-1.c
+ create mode 100644 gcc/testsuite/gcc.target/powerpc/pr99888-2.c
+ create mode 100644 gcc/testsuite/gcc.target/powerpc/pr99888-3.c
+ create mode 100644 gcc/testsuite/gcc.target/powerpc/pr99888-4.c
+ create mode 100644 gcc/testsuite/gcc.target/powerpc/pr99888-5.c
+ create mode 100644 gcc/testsuite/gcc.target/powerpc/pr99888-6.c
+
+diff --git a/gcc/config/rs6000/rs6000-internal.h b/gcc/config/rs6000/rs6000-internal.h
+index b9e82c0468d0..e75b8d5c7e88 100644
+--- a/gcc/config/rs6000/rs6000-internal.h
++++ b/gcc/config/rs6000/rs6000-internal.h
+@@ -182,6 +182,10 @@ extern tree rs6000_fold_builtin (tree fndecl ATTRIBUTE_UNUSED,
+ 			         tree *args ATTRIBUTE_UNUSED,
+ 			         bool ignore ATTRIBUTE_UNUSED);
+ 
++extern void rs6000_print_patchable_function_entry (FILE *,
++						   unsigned HOST_WIDE_INT,
++						   bool);
++
+ extern bool rs6000_passes_float;
+ extern bool rs6000_passes_long_double;
+ extern bool rs6000_passes_vector;
+diff --git a/gcc/config/rs6000/rs6000-logue.c b/gcc/config/rs6000/rs6000-logue.c
+index a11d020ccd0c..3621cb501c70 100644
+--- a/gcc/config/rs6000/rs6000-logue.c
++++ b/gcc/config/rs6000/rs6000-logue.c
+@@ -4009,11 +4009,43 @@ rs6000_output_function_prologue (FILE *file)
+ 	  fprintf (file, "\tadd 2,2,12\n");
+ 	}
+ 
++      unsigned short patch_area_size = crtl->patch_area_size;
++      unsigned short patch_area_entry = crtl->patch_area_entry;
++      /* Need to emit the patching area.  */
++      if (patch_area_size > 0)
++	{
++	  cfun->machine->global_entry_emitted = true;
++	  /* As ELFv2 ABI shows, the allowable bytes between the global
++	     and local entry points are 0, 4, 8, 16, 32 and 64 when
++	     there is a local entry point.  Considering there are two
++	     non-prefixed instructions for global entry point prologue
++	     (8 bytes), the count for patchable nops before local entry
++	     point would be 2, 6 and 14.  It's possible to support those
++	     other counts of nops by not making a local entry point, but
++	     we don't have clear use cases for them, so leave them
++	     unsupported for now.  */
++	  if (patch_area_entry > 0)
++	    {
++	      if (patch_area_entry != 2
++		  && patch_area_entry != 6
++		  && patch_area_entry != 14)
++		error ("unsupported number of nops before function entry (%u)",
++		       patch_area_entry);
++	      rs6000_print_patchable_function_entry (file, patch_area_entry,
++						     true);
++	      patch_area_size -= patch_area_entry;
++	    }
++	}
++
+       fputs ("\t.localentry\t", file);
+       assemble_name (file, name);
+       fputs (",.-", file);
+       assemble_name (file, name);
+       fputs ("\n", file);
++      /* Emit the nops after local entry.  */
++      if (patch_area_size > 0)
++	rs6000_print_patchable_function_entry (file, patch_area_size,
++					       patch_area_entry == 0);
+     }
+ 
+   else if (rs6000_pcrel_p ())
+diff --git a/gcc/config/rs6000/rs6000.c b/gcc/config/rs6000/rs6000.c
+index bbe21eacc6b9..b9496d7f2680 100644
+--- a/gcc/config/rs6000/rs6000.c
++++ b/gcc/config/rs6000/rs6000.c
+@@ -14930,8 +14930,14 @@ rs6000_print_patchable_function_entry (FILE *file,
+   if (!(TARGET_64BIT && DEFAULT_ABI != ABI_ELFv2)
+       && HAVE_GAS_SECTION_LINK_ORDER)
+     flags |= SECTION_LINK_ORDER;
+-  default_print_patchable_function_entry_1 (file, patch_area_size, record_p,
+-					    flags);
++  bool global_entry_needed_p = rs6000_global_entry_point_prologue_needed_p ();
++  /* For a function which needs global entry point, we will emit the
++     patchable area before and after local entry point under the control of
++     cfun->machine->global_entry_emitted, see the handling in function
++     rs6000_output_function_prologue.  */
++  if (!global_entry_needed_p || cfun->machine->global_entry_emitted)
++    default_print_patchable_function_entry_1 (file, patch_area_size, record_p,
++					      flags);
+ }
+ 
+ enum rtx_code
+diff --git a/gcc/config/rs6000/rs6000.h b/gcc/config/rs6000/rs6000.h
+index eb7b21584970..b4df22b60303 100644
+--- a/gcc/config/rs6000/rs6000.h
++++ b/gcc/config/rs6000/rs6000.h
+@@ -2435,6 +2435,10 @@ typedef struct GTY(()) machine_function
+   bool lr_is_wrapped_separately;
+   bool toc_is_wrapped_separately;
+   bool mma_return_type_error;
++  /* Indicate global entry is emitted, only useful when the function requires
++     global entry.  It helps to control the patchable area before and after
++     local entry.  */
++  bool global_entry_emitted;
+ } machine_function;
+ #endif
+ 
+diff --git a/gcc/doc/invoke.texi b/gcc/doc/invoke.texi
+index 2ac9cfc35f92..518bfdf0867d 100644
+--- a/gcc/doc/invoke.texi
++++ b/gcc/doc/invoke.texi
+@@ -16884,9 +16884,13 @@ the area size or to remove it completely on a single function.
+ If @code{N=0}, no pad location is recorded.
+ 
+ The NOP instructions are inserted at---and maybe before, depending on
+-@var{M}---the function entry address, even before the prologue.
++@var{M}---the function entry address, even before the prologue.  On
++PowerPC with the ELFv2 ABI, for a function with dual entry points,
++the local entry point is this function entry address.
+ 
+-The maximum value of @var{N} and @var{M} is 65535.
++The maximum value of @var{N} and @var{M} is 65535.  On PowerPC with the
++ELFv2 ABI, for a function with dual entry points, the supported values
++for @var{M} are 0, 2, 6 and 14.
+ @end table
+ 
+ 
+diff --git a/gcc/testsuite/c-c++-common/patchable_function_entry-default.c b/gcc/testsuite/c-c++-common/patchable_function_entry-default.c
+index 7036f7bfbea4..a501efccb194 100644
+--- a/gcc/testsuite/c-c++-common/patchable_function_entry-default.c
++++ b/gcc/testsuite/c-c++-common/patchable_function_entry-default.c
+@@ -1,6 +1,9 @@
+ /* { dg-do compile { target { ! { nvptx*-*-* visium-*-* } } } } */
+ /* { dg-options "-O2 -fpatchable-function-entry=3,1" } */
+ /* { dg-additional-options "-fno-pie" { target sparc*-*-* } } */
++/* See PR99888, one single preceding nop isn't allowed on powerpc_elfv2,
++   so overriding with two preceding nops to make it pass there.  */
++/* { dg-additional-options "-fpatchable-function-entry=3,2" { target powerpc_elfv2 } } */
+ /* { dg-final { scan-assembler-times "nop|NOP|SWYM" 3 { target { ! { alpha*-*-* } } } } } */
+ /* { dg-final { scan-assembler-times "bis" 3 { target alpha*-*-* } } } */
+ 
+diff --git a/gcc/testsuite/gcc.target/powerpc/pr99888-1.c b/gcc/testsuite/gcc.target/powerpc/pr99888-1.c
+new file mode 100644
+index 000000000000..9370b4e74388
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/powerpc/pr99888-1.c
+@@ -0,0 +1,43 @@
++/* Verify no errors for different nops after local entry on ELFv2.  */
++
++extern int a;
++
++__attribute__ ((noipa, patchable_function_entry (1, 0)))
++int test1 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (2, 0)))
++int test2 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (3, 0)))
++int test3 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (4, 0)))
++int test4 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (5, 0)))
++int test5 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (6, 0)))
++int test6 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (7, 0)))
++int test7 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (8, 0)))
++int test8 (int b) {
++  return a + b;
++}
+diff --git a/gcc/testsuite/gcc.target/powerpc/pr99888-2.c b/gcc/testsuite/gcc.target/powerpc/pr99888-2.c
+new file mode 100644
+index 000000000000..450617126023
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/powerpc/pr99888-2.c
+@@ -0,0 +1,43 @@
++/* Verify no errors for 2, 6 and 14 nops before local entry on ELFv2.  */
++
++extern int a;
++
++__attribute__ ((noipa, patchable_function_entry (2, 2)))
++int test1 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (4, 2)))
++int test2 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (6, 6)))
++int test3 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (8, 6)))
++int test4 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (16, 6)))
++int test5 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (14, 14)))
++int test6 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (28, 14)))
++int test7 (int b) {
++  return a + b;
++}
++
++__attribute__ ((noipa, patchable_function_entry (64, 14)))
++int test8 (int b) {
++  return a + b;
++}
+diff --git a/gcc/testsuite/gcc.target/powerpc/pr99888-3.c b/gcc/testsuite/gcc.target/powerpc/pr99888-3.c
+new file mode 100644
+index 000000000000..4531ae32036d
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/powerpc/pr99888-3.c
+@@ -0,0 +1,11 @@
++/* { dg-options "-fpatchable-function-entry=1" } */
++
++/* Verify no errors on ELFv2, using command line option instead of
++   function attribute.  */
++
++extern int a;
++
++int test (int b) {
++  return a + b;
++}
++
+diff --git a/gcc/testsuite/gcc.target/powerpc/pr99888-4.c b/gcc/testsuite/gcc.target/powerpc/pr99888-4.c
+new file mode 100644
+index 000000000000..00a8d4d316e0
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/powerpc/pr99888-4.c
+@@ -0,0 +1,13 @@
++/* { dg-require-effective-target powerpc_elfv2 } */
++/* There is no global entry point prologue with pcrel.  */
++/* { dg-options "-mno-pcrel -fpatchable-function-entry=1,1" } */
++
++/* Verify one error emitted for unexpected 1 nop before local
++   entry.  */
++
++extern int a;
++
++int test (int b) {
++  return a + b;
++}
++/* { dg-error "unsupported number of nops before function entry \\(1\\)" "" { target *-*-* } .-1 } */
+diff --git a/gcc/testsuite/gcc.target/powerpc/pr99888-5.c b/gcc/testsuite/gcc.target/powerpc/pr99888-5.c
+new file mode 100644
+index 000000000000..39d3b4465f11
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/powerpc/pr99888-5.c
+@@ -0,0 +1,13 @@
++/* { dg-require-effective-target powerpc_elfv2 } */
++/* There is no global entry point prologue with pcrel.  */
++/* { dg-options "-mno-pcrel -fpatchable-function-entry=7,3" } */
++
++/* Verify one error emitted for unexpected 3 nops before local
++   entry.  */
++
++extern int a;
++
++int test (int b) {
++  return a + b;
++}
++/* { dg-error "unsupported number of nops before function entry \\(3\\)" "" { target *-*-* } .-1 } */
+diff --git a/gcc/testsuite/gcc.target/powerpc/pr99888-6.c b/gcc/testsuite/gcc.target/powerpc/pr99888-6.c
+new file mode 100644
+index 000000000000..c6c18dcc7ac0
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/powerpc/pr99888-6.c
+@@ -0,0 +1,14 @@
++/* { dg-require-effective-target powerpc_elfv2 } */
++/* There is no global entry point prologue with pcrel.  */
++/* { dg-options "-mno-pcrel" } */
++
++/* Verify one error emitted for unexpected 4 nops before local
++   entry.  */
++
++extern int a;
++
++__attribute__ ((patchable_function_entry (20, 4)))
++int test (int b) {
++  return a + b;
++}
++/* { dg-error "unsupported number of nops before function entry \\(4\\)" "" { target *-*-* } .-1 } */
+-- 
+2.43.5
+

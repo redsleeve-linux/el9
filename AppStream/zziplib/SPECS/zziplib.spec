@@ -1,7 +1,7 @@
 Summary: Lightweight library to easily extract data from zip files
 Name: zziplib
 Version: 0.13.71
-Release: 11%{?dist}.redsleeve
+Release: 12%{?dist}
 License: LGPLv2+ or MPLv1.1
 URL: http://zziplib.sourceforge.net/
 #Source: https://github.com/gdraheim/zziplib/archive/v%{version}.tar.gz
@@ -16,6 +16,8 @@ Source2: options.py
 
 Patch1: CVE-2020-18442.patch 
 Patch2: CVE-2020-18770.patch
+Patch3: CVE-2018-17828-singlez.patch
+Patch4: CVE-2018-17828.patch
 Patch100: multilib-32.patch
 Patch101: multilib-64.patch
 
@@ -76,6 +78,8 @@ cp %{SOURCE2} docs/zzipdoc/
 
 %patch1 -p1
 %patch2 -p1
+%patch3 -p1
+%patch4 -p1
 
 
 %build
@@ -91,10 +95,10 @@ sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool
 # These platforms have a correct _config.h already
 
 pushd %{_builddir}/zziplib-%{version}
-%ifarch i686 %{arm}
+%ifarch i686 armv7hl
  patch -p2 < %{PATCH100}
 %endif
-%ifnarch i686 %{arm}
+%ifnarch i686 armv7hl
  patch -p2 < %{PATCH101}
 %endif
 popd
@@ -124,8 +128,9 @@ popd
 %{_mandir}/man3/*
 
 %changelog
-* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 0.13.71-11.redsleeve
-- changed armv7 to arm
+* Thu Jun 12 2025 Jakub Martisko <jamartis@redhat.com> - 0.13.71-12
+- Fix a directory traversal issue in unzip-mem
+  Resolves: RHEL-6266
 
 * Wed Feb 28 2024 Jakub Martisko <jamartis@redhat.com> - 0.13.71-11
 - Fix CVE-2020-18770

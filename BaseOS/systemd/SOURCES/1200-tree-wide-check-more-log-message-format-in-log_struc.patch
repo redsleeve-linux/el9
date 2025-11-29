@@ -1,0 +1,54 @@
+From b0134d872f6f7dd6b310d4791cb10dd78c0126fe Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 18 Mar 2025 15:50:43 +0900
+Subject: [PATCH] tree-wide: check more log message format in log_struct() and
+ friends
+
+This introduce LOG_ITEM() macro that checks arbitrary formats in
+log_struct().
+Then, drop _printf_ attribute from log_struct_internal(), as it does not
+help so much, and compiler checked only the first format string.
+
+Hopefully, this silences false-positive warnings by Coverity.
+
+[dtardon: Backported just the new macros, not their use across the
+source tree. I could easily avoid doing it at all, but the macros might
+be useful for future backports.]
+
+(cherry picked from commit 3cf6a3a3d4acf8347ccd0250274f517e6b2e9fe6)
+
+Related: RHEL-100353
+---
+ src/basic/log.h | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/src/basic/log.h b/src/basic/log.h
+index c51941c141..153c3571b6 100644
+--- a/src/basic/log.h
++++ b/src/basic/log.h
+@@ -146,7 +146,7 @@ int log_struct_internal(
+                 const char *file,
+                 int line,
+                 const char *func,
+-                const char *format, ...) _printf_(6,0) _sentinel_;
++                const char *format, ...) _sentinel_;
+ 
+ int log_oom_internal(
+                 int level,
+@@ -305,11 +305,15 @@ bool log_on_console(void) _pure_;
+ /* Do a fake formatting of the message string to let the scanner verify the arguments against the format
+  * message. The variable will never be set to true, but we don't tell the compiler that :) */
+ extern bool _log_message_dummy;
+-#  define LOG_MESSAGE(fmt, ...) "MESSAGE=%.0d" fmt, (_log_message_dummy && printf(fmt, ##__VA_ARGS__)), ##__VA_ARGS__
++#  define LOG_ITEM(fmt, ...) "%.0d" fmt, (_log_message_dummy && printf(fmt, ##__VA_ARGS__)), ##__VA_ARGS__
++#  define LOG_MESSAGE(fmt, ...) LOG_ITEM("MESSAGE=" fmt, ##__VA_ARGS__)
+ #else
++#  define LOG_ITEM(fmt, ...) fmt, ##__VA_ARGS__
+ #  define LOG_MESSAGE(fmt, ...) "MESSAGE=" fmt, ##__VA_ARGS__
+ #endif
+ 
++#define LOG_MESSAGE_ID(id) LOG_ITEM("MESSAGE_ID=" id)
++
+ void log_received_signal(int level, const struct signalfd_siginfo *si);
+ 
+ /* If turned on, any requests for a log target involving "syslog" will be implicitly upgraded to the equivalent journal target */

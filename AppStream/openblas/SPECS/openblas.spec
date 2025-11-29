@@ -1,6 +1,6 @@
 %bcond_with system_lapack
 # Version of bundled lapack
-%global lapackver 3.11.0
+%global lapackver 3.12.0
 
 # DO NOT "CLEAN UP" OR MODIFY THIS SPEC FILE WITHOUT ASKING THE
 # MAINTAINER FIRST!
@@ -14,8 +14,8 @@
 # "obsoleted" features are still kept in the spec.
 
 Name:           openblas
-Version:        0.3.26
-Release:        2%{?dist}.redsleeve
+Version:        0.3.29
+Release:        1%{?dist}
 Summary:        An optimized BLAS library based on GotoBLAS2
 License:        BSD-3-Clause
 URL:            https://github.com/OpenMathLib/OpenBLAS
@@ -28,8 +28,6 @@ Patch1:         openblas-0.2.5-libname.patch
 Patch2:         openblas-0.2.15-constructor.patch
 # Supply the proper flags to the test makefile
 Patch3:         openblas-0.3.11-tests.patch
-# Fix incompatible pointer types (causes FTBFS on ppc64le)
-Patch4:         openblas-0.3.26-incompatibletypes.patch
 
 BuildRequires: make
 BuildRequires:  gcc
@@ -236,14 +234,13 @@ This package contains the static libraries.
 tar zxf %{SOURCE0}
 cd OpenBLAS-%{version}
 %if %{with system_lapack}
-%patch0 -p1 -b .system_lapack
+%patch -P 0 -p1 -b .system_lapack
 %endif
-%patch1 -p1 -b .libname
+%patch -P 1 -p1 -b .libname
 %if 0%{?rhel} == 5
-%patch2 -p1 -b .constructor
+%patch -P 2 -p1 -b .constructor
 %endif
-%patch3 -p1 -b .tests
-%patch4 -p1 -b .incompatibletypes
+%patch -P 3 -p1 -b .tests
 
 # Fix source permissions
 find -name \*.f -exec chmod 644 {} \;
@@ -362,9 +359,6 @@ export AVX="NO_AVX2=1"
 %endif
 
 %endif
-%ifarch armv6hl
-TARGET="TARGET=ARMV6 DYNAMIC_ARCH=0"
-%endif
 %ifarch armv7hl
 # ARM v7 still doesn't have runtime cpu detection...
 TARGET="TARGET=ARMV7 DYNAMIC_ARCH=0"
@@ -383,6 +377,9 @@ TARGET="TARGET=ARMV8 DYNAMIC_ARCH=1 DYNAMIC_OLDER=1"
 %endif
 %ifarch s390x
 TARGET="TARGET=ZARCH_GENERIC DYNAMIC_ARCH=1 DYNAMIC_OLDER=1"
+%endif
+%ifarch riscv64
+TARGET="TARGET=RISCV64_GENERIC DYNAMIC_ARCH=0"
 %endif
 
 %if 0%{?rhel} == 5
@@ -406,6 +403,7 @@ make -C threaded   $TARGET USE_THREAD=1 USE_OPENMP=0 FC=gfortran CC=gcc COMMON_O
 COMMON="%{optflags} -fPIC -fopenmp -pthread"
 FCOMMON="$COMMON -frecursive"
 make -C openmp     $TARGET USE_THREAD=1 USE_OPENMP=1 FC=gfortran CC=gcc COMMON_OPT="$COMMON" FCOMMON_OPT="$FCOMMON" $NMAX LIBPREFIX="libopenblaso"     $AVX $LAPACKE INTERFACE64=0 %{with cpp_thread_check:CPP_THREAD_SAFETY_TEST=1}
+make -C openmp     $TARGET USE_THREAD=1 USE_OPENMP=1 FC=gfortran CC=gcc COMMON_OPT="$COMMON" FCOMMON_OPT="$FCOMMON" $NMAX LIBPREFIX="libopenblaso"     $AVX $LAPACKE INTERFACE64=0 %{with cpp_thread_check:CPP_THREAD_SAFETY_TEST=1} lapack-test
 
 %if %build64
 COMMON="%{optflags} -fPIC"
@@ -443,11 +441,11 @@ cp -a %{_includedir}/lapacke %{buildroot}%{_includedir}/%{name}
 # Fix name of libraries: runtime CPU detection has none
 suffix=""
 # but archs that don't have it do have one
-%ifarch armv6hl
-suffix="_armv6"
-%endif
 %ifarch armv7hl
 suffix="_armv7"
+%endif
+%ifarch riscv64
+suffix="_riscv64_generic"
 %endif
 slibname=`basename %{buildroot}%{_libdir}/libopenblas${suffix}-*.so .so`
 mv %{buildroot}%{_libdir}/${slibname}.a %{buildroot}%{_libdir}/lib%{name}.a
@@ -655,8 +653,9 @@ rm -rf %{buildroot}%{_libdir}/cmake
 %endif
 
 %changelog
-* Thu Jan 02 2025 Jacco Ligthart <jacco@redsleeve.org> - 0.3.26-2.redsleeve
-- added armv6hl
+* Wed Apr 09 2025 Pavel Simovec <psimovec@redhat.com> - 0.3.29-1
+- Update to 0.3.29
+- Resolves: RHEL-77185
 
 * Thu Aug 22 2024 Pavel Simovec <psimovec@redhat.com> - 0.3.26-2
 - Re-include openblas.pc

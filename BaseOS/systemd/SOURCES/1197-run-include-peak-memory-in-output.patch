@@ -1,0 +1,53 @@
+From 989e3c2990ea0c4a43d5d0aed3ed2e5b05c6ca57 Mon Sep 17 00:00:00 2001
+From: Florian Schmaus <flo@geekplace.eu>
+Date: Mon, 6 Nov 2023 17:28:41 +0100
+Subject: [PATCH] run: include peak memory in output
+
+Fixes #28542.
+
+Signed-off-by: Florian Schmaus <flo@geekplace.eu>
+(cherry picked from commit 324ec6b5d2033fae4dc3e087473d27010d948f65)
+
+Related: RHEL-95797
+---
+ src/run/run.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/run/run.c b/src/run/run.c
+index 627a6b11da..9ddb90595b 100644
+--- a/src/run/run.c
++++ b/src/run/run.c
+@@ -987,6 +987,7 @@ typedef struct RunContext {
+         uint64_t inactive_enter_usec;
+         char *result;
+         uint64_t cpu_usage_nsec;
++        uint64_t memory_peak;
+         uint64_t ip_ingress_bytes;
+         uint64_t ip_egress_bytes;
+         uint64_t io_read_bytes;
+@@ -1048,6 +1049,7 @@ static int run_context_update(RunContext *c, const char *path) {
+                 { "ExecMainCode",                    "i",    NULL,    offsetof(RunContext, exit_code)           },
+                 { "ExecMainStatus",                  "i",    NULL,    offsetof(RunContext, exit_status)         },
+                 { "CPUUsageNSec",                    "t",    NULL,    offsetof(RunContext, cpu_usage_nsec)      },
++                { "MemoryPeak",                      "t",    NULL,    offsetof(RunContext, memory_peak)         },
+                 { "IPIngressBytes",                  "t",    NULL,    offsetof(RunContext, ip_ingress_bytes)    },
+                 { "IPEgressBytes",                   "t",    NULL,    offsetof(RunContext, ip_egress_bytes)     },
+                 { "IOReadBytes",                     "t",    NULL,    offsetof(RunContext, io_read_bytes)       },
+@@ -1238,6 +1240,7 @@ static int start_transient_service(
+         if (arg_wait || arg_stdio != ARG_STDIO_NONE) {
+                 _cleanup_(run_context_free) RunContext c = {
+                         .cpu_usage_nsec = NSEC_INFINITY,
++                        .memory_peak = UINT64_MAX,
+                         .ip_ingress_bytes = UINT64_MAX,
+                         .ip_egress_bytes = UINT64_MAX,
+                         .io_read_bytes = UINT64_MAX,
+@@ -1333,6 +1336,9 @@ static int start_transient_service(
+                                 log_info("CPU time consumed: %s",
+                                          FORMAT_TIMESPAN(DIV_ROUND_UP(c.cpu_usage_nsec, NSEC_PER_USEC), USEC_PER_MSEC));
+ 
++                        if (c.memory_peak != UINT64_MAX)
++                                log_info("Memory peak: %s", FORMAT_BYTES(c.memory_peak));
++
+                         if (c.ip_ingress_bytes != UINT64_MAX)
+                                 log_info("IP traffic received: %s", FORMAT_BYTES(c.ip_ingress_bytes));
+ 

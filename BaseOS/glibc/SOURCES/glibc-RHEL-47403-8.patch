@@ -1,0 +1,218 @@
+commit d604f9c500570e80febfcc6a52b63a002b466f35
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Mar 11 15:30:52 2025 +0100
+
+    elf: Test dlopen (NULL, RTLD_LAZY) from an ELF constructor
+    
+    This call must not complete initialization of all shared objects
+    in the global scope because the ELF constructor which makes the call
+    likely has not finished initialization.  Calling more constructors
+    at this point would expose those to a partially constructed
+    dependency.
+    
+    This completes the revert of commit 9897ced8e78db5d813166a7ccccfd5a
+    ("elf: Run constructors on cyclic recursive dlopen (bug 31986)").
+
+Conflicts:
+	elf/Makefile (fixup context)
+
+diff --git a/elf/Makefile b/elf/Makefile
+index a358ad7ff0eb2af7..3a50ca90366aec94 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -405,6 +405,7 @@ tests += \
+   tst-dlmopen3 \
+   tst-dlmopen4 \
+   tst-dlopen-auditdup \
++  tst-dlopen-constructor-null \
+   tst-dlopen-self \
+   tst-dlopen-tlsmodid \
+   tst-dlopen-tlsreinit1 \
+@@ -785,6 +786,8 @@ modules-names = \
+   tst-dlmopen1mod \
+   tst-dlopen-auditdup-auditmod \
+   tst-dlopen-auditdupmod \
++  tst-dlopen-constructor-null-mod1 \
++  tst-dlopen-constructor-null-mod2 \
+   tst-dlopen-sgid-mod \
+   tst-dlopen-tlsreinitmod1 \
+   tst-dlopen-tlsreinitmod2 \
+@@ -2937,3 +2940,9 @@ $(objpfx)tst-nolink-libc-2: $(objpfx)tst-nolink-libc.o
+ 	  -Wl,--dynamic-linker=$(objpfx)ld.so
+ $(objpfx)tst-nolink-libc-2.out: $(objpfx)tst-nolink-libc-2 $(objpfx)ld.so
+ 	$< > $@ 2>&1; $(evaluate-test)
++
++$(objpfx)tst-dlopen-constructor-null: \
++  $(objpfx)tst-dlopen-constructor-null-mod1.so \
++  $(objpfx)tst-dlopen-constructor-null-mod2.so
++$(objpfx)tst-dlopen-constructor-null-mod2.so: \
++  $(objpfx)tst-dlopen-constructor-null-mod1.so
+diff --git a/elf/dl-open.c b/elf/dl-open.c
+index 6557c2fd7ca0bbfe..c225654822ee3520 100644
+--- a/elf/dl-open.c
++++ b/elf/dl-open.c
+@@ -604,6 +604,16 @@ dl_open_worker_begin (void *a)
+       if ((mode & RTLD_GLOBAL) && new->l_global == 0)
+ 	add_to_global_update (new);
+ 
++      /* It is not possible to run the ELF constructor for the new
++	 link map if it has not executed yet: If this dlopen call came
++	 from an ELF constructor that has not put that object into a
++	 consistent state, completing initialization for the entire
++	 scope will expose objects that have this partially
++	 constructed object among its dependencies to this
++	 inconsistent state.  This could happen even with a benign
++	 dlopen (NULL, RTLD_LAZY) call from a constructor of an
++	 initially loaded shared object.  */
++
+       return;
+     }
+ 
+diff --git a/elf/tst-dlopen-constructor-null-mod1.c b/elf/tst-dlopen-constructor-null-mod1.c
+new file mode 100644
+index 0000000000000000..70a7a0ad46a1a666
+--- /dev/null
++++ b/elf/tst-dlopen-constructor-null-mod1.c
+@@ -0,0 +1,55 @@
++/* Module calling dlopen (NULL, RTLD_LAZY) to obtain the global scope.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <dlfcn.h>
++#include <stddef.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++int mod1_status;
++
++static void __attribute__ ((constructor))
++init (void)
++{
++  puts ("info: tst-dlopen-constructor-null-mod1.so constructor");
++
++  void *handle = dlopen (NULL, RTLD_LAZY);
++  if (handle == NULL)
++    {
++      printf ("error: %s\n", dlerror ());
++      exit (1);
++    }
++  puts ("info: dlopen returned");
++  if (dlsym (handle, "malloc") != malloc)
++    {
++      puts ("error: dlsym did not produce expected result");
++      exit (1);
++    }
++  dlclose (handle);
++
++  /* Check that the second module's constructor has not executed.   */
++  if (getenv ("mod2_status") != NULL)
++    {
++      printf ("error: mod2_status environment variable set: %s\n",
++              getenv ("mod2_status"));
++      exit (1);
++    }
++
++  /* Communicate to the second module that the constructor executed.   */
++  mod1_status = 1;
++}
+diff --git a/elf/tst-dlopen-constructor-null-mod2.c b/elf/tst-dlopen-constructor-null-mod2.c
+new file mode 100644
+index 0000000000000000..d6e945beaec04815
+--- /dev/null
++++ b/elf/tst-dlopen-constructor-null-mod2.c
+@@ -0,0 +1,37 @@
++/* Module whose constructor should not be invoked by dlopen (NULL, RTLD_LAZY).
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <stdlib.h>
++
++extern int mod1_status;
++int mod2_status;
++
++static void __attribute__ ((constructor))
++init (void)
++{
++  printf ("info: tst-dlopen-constructor-null-mod2.so constructor"
++          " (mod1_status=%d)", mod1_status);
++  if (!(mod1_status == 1 && mod2_status == 0))
++    {
++      puts ("error: mod1_status == 1 && mod2_status == 0 expected");
++      exit (1);
++    }
++  setenv ("mod2_status", "constructed", 1);
++  mod2_status = 1;
++}
+diff --git a/elf/tst-dlopen-constructor-null.c b/elf/tst-dlopen-constructor-null.c
+new file mode 100644
+index 0000000000000000..db90643325c5235f
+--- /dev/null
++++ b/elf/tst-dlopen-constructor-null.c
+@@ -0,0 +1,38 @@
++/* Verify that dlopen (NULL, RTLD_LAZY) does not complete initialization.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* This test mimics what the glvndSetupPthreads function in libglvnd
++   does. */
++
++#include <stdlib.h>
++#include <support/check.h>
++
++/* Defined and initialized in the shared objects.  */
++extern int mod1_status;
++extern int mod2_status;
++
++static int
++do_test (void)
++{
++  TEST_COMPARE (mod1_status, 1);
++  TEST_COMPARE (mod2_status, 1);
++  TEST_COMPARE_STRING (getenv ("mod2_status"), "constructed");
++  return 0;
++}
++
++#include <support/test-driver.c>

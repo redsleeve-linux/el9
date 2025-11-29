@@ -1,0 +1,82 @@
+From 01e0a19a9c38f1b935d627c9b02b2950e835b8c5 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Sat, 25 Mar 2023 11:34:47 +0100
+Subject: [PATCH] user-sessions: do not remove /etc/nologin
+
+pam_nologin looks for /etc/nologin and /run/nologin.
+user-sessions creates (and removes) /run/nologin, but also removes
+/etc/nologin. (This behaviour is unchanged since the introduction
+of the binary in e92787416c691c3f34f47349e5eae3fa68eae856.)
+
+By not removing pam_nologin we fully drop compatibility with PAM < 1.1.
+This has the advantage that now /etc/nologin can be used by administrator to
+disable user logins, e.g. for extended maintanance. We already specified
+PAM >= 1.1.2 as dependency, so this was already covered.
+
+The makes the code match the man page.
+
+Fixes #26965.
+
+(cherry picked from commit a78413baae0e999384b535d327203ebf417b1e24)
+
+Resolves: RHEL-85467
+---
+ src/shared/fileio-label.c         | 12 +++++++++---
+ src/user-sessions/user-sessions.c | 13 +++++--------
+ 2 files changed, 14 insertions(+), 11 deletions(-)
+
+diff --git a/src/shared/fileio-label.c b/src/shared/fileio-label.c
+index d03b0548ec..572b8f62ad 100644
+--- a/src/shared/fileio-label.c
++++ b/src/shared/fileio-label.c
+@@ -23,9 +23,15 @@ int write_string_file_atomic_label_ts(const char *fn, const char *line, struct t
+ int create_shutdown_run_nologin_or_warn(void) {
+         int r;
+ 
+-        /* This is used twice: once in systemd-user-sessions.service, in order to block logins when we actually go
+-         * down, and once in systemd-logind.service when shutdowns are scheduled, and logins are to be turned off a bit
+-         * in advance. We use the same wording of the message in both cases. */
++        /* This is used twice: once in systemd-user-sessions.service, in order to block logins when we
++         * actually go down, and once in systemd-logind.service when shutdowns are scheduled, and logins are
++         * to be turned off a bit in advance. We use the same wording of the message in both cases.
++         *
++         * Traditionally, there was only /etc/nologin, and we managed that. Then, in PAM 1.1
++         * support for /run/nologin was added as alternative
++         * (https://github.com/linux-pam/linux-pam/commit/e9e593f6ddeaf975b7fe8446d184e6bc387d450b).
++         * 13 years later we stopped managing /etc/nologin, leaving it for the administrator to manage.
++         */
+ 
+         r = write_string_file_atomic_label("/run/nologin",
+                                            "System is going down. Unprivileged users are not permitted to log in anymore. "
+diff --git a/src/user-sessions/user-sessions.c b/src/user-sessions/user-sessions.c
+index 6b7493fd88..37867ee3ed 100644
+--- a/src/user-sessions/user-sessions.c
++++ b/src/user-sessions/user-sessions.c
+@@ -15,7 +15,7 @@
+ #include "string-util.h"
+ 
+ static int run(int argc, char *argv[]) {
+-        int r, k;
++        int r;
+ 
+         if (argc != 2)
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+@@ -29,14 +29,11 @@ static int run(int argc, char *argv[]) {
+         if (r < 0)
+                 return r;
+ 
+-        if (streq(argv[1], "start")) {
+-                r = unlink_or_warn("/run/nologin");
+-                k = unlink_or_warn("/etc/nologin");
+-                if (r < 0)
+-                        return r;
+-                return k;
++        /* We only touch /run/nologin. See create_shutdown_run_nologin_or_warn() for details. */
+ 
+-        } else if (streq(argv[1], "stop"))
++        if (streq(argv[1], "start"))
++                return unlink_or_warn("/run/nologin");
++        if (streq(argv[1], "stop"))
+                 return create_shutdown_run_nologin_or_warn();
+ 
+         return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Unknown verb '%s'.", argv[1]);

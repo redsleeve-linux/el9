@@ -1,0 +1,148 @@
+commit 8329939a37f483a16013dd8af8303cbcb86d92cb
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Jul 4 21:46:16 2025 +0200
+
+    elf: Introduce _dl_debug_change_state
+    
+    It combines updating r_state with the debugger notification.
+    
+    The second change to  _dl_open introduces an additional debugger
+    notification for dlmopen, but debuggers are expected to ignore it.
+    
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+
+diff --git a/elf/dl-close.c b/elf/dl-close.c
+index 236d89f67f3bf410..fa3974afba798073 100644
+--- a/elf/dl-close.c
++++ b/elf/dl-close.c
+@@ -472,8 +472,7 @@ _dl_close_worker (struct link_map *map, bool force)
+   /* Notify the debugger we are about to remove some loaded objects.
+      LA_ACT_DELETE has already been signalled above for !unload_any.  */
+   struct r_debug *r = _dl_debug_update (nsid);
+-  r->r_state = RT_DELETE;
+-  _dl_debug_state ();
++  _dl_debug_change_state (r, RT_DELETE);
+   LIBC_PROBE (unmap_start, 2, nsid, r);
+ 
+   if (unload_global)
+@@ -762,8 +761,7 @@ _dl_close_worker (struct link_map *map, bool force)
+   __rtld_lock_unlock_recursive (GL(dl_load_tls_lock));
+ 
+   /* Notify the debugger those objects are finalized and gone.  */
+-  r->r_state = RT_CONSISTENT;
+-  _dl_debug_state ();
++  _dl_debug_change_state (r, RT_CONSISTENT);
+   LIBC_PROBE (unmap_complete, 2, nsid, r);
+ 
+ #ifdef SHARED
+diff --git a/elf/dl-debug.c b/elf/dl-debug.c
+index 649386d5a6b885ed..f840a1b92292968d 100644
+--- a/elf/dl-debug.c
++++ b/elf/dl-debug.c
+@@ -67,6 +67,13 @@ _dl_debug_update (Lmid_t ns)
+   return &r->base;
+ }
+ 
++void
++_dl_debug_change_state (struct r_debug *r, int state)
++{
++  atomic_store_release (&r->r_state, state);
++  _dl_debug_state ();
++}
++
+ /* Initialize _r_debug_extended for the namespace NS.  LDBASE is the
+    run-time load address of the dynamic linker, to be put in
+    _r_debug_extended.r_ldbase.  Return the address of _r_debug.  */
+diff --git a/elf/dl-load.c b/elf/dl-load.c
+index 6714807946b60188..c118db811d8899f6 100644
+--- a/elf/dl-load.c
++++ b/elf/dl-load.c
+@@ -946,8 +946,7 @@ _dl_notify_new_object (int mode, Lmid_t nsid, struct link_map *l)
+       /* Notify the debugger we have added some objects.  We need to
+ 	 call _dl_debug_initialize in a static program in case dynamic
+ 	 linking has not been used before.  */
+-      r->r_state = RT_ADD;
+-      _dl_debug_state ();
++      _dl_debug_change_state (r, RT_ADD);
+       LIBC_PROBE (map_start, 2, nsid, r);
+     }
+   else
+diff --git a/elf/dl-open.c b/elf/dl-open.c
+index 1e61e402455da666..df6aa55a8842ee62 100644
+--- a/elf/dl-open.c
++++ b/elf/dl-open.c
+@@ -787,8 +787,7 @@ dl_open_worker (void *a)
+ #ifdef SHARED
+ 	bool was_not_consistent  = r->r_state != RT_CONSISTENT;
+ #endif
+-	r->r_state = RT_CONSISTENT;
+-	_dl_debug_state ();
++	_dl_debug_change_state (r, RT_CONSISTENT);
+ 	LIBC_PROBE (map_complete, 3, nsid, r, args->map);
+ 
+ #ifdef SHARED
+@@ -866,7 +865,7 @@ no more namespaces available for dlmopen()"));
+ 	}
+ 
+       GL(dl_ns)[nsid].libc_map = NULL;
+-      _dl_debug_update (nsid)->r_state = RT_CONSISTENT;
++      _dl_debug_change_state (_dl_debug_update (nsid), RT_CONSISTENT);
+     }
+   /* Never allow loading a DSO in a namespace which is empty.  Such
+      direct placements is only causing problems.  Also don't allow
+diff --git a/elf/rtld.c b/elf/rtld.c
+index cd233174c9d944b2..0fe9986e4c7ed830 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -1842,8 +1842,7 @@ dl_main (const ElfW(Phdr) *phdr,
+ #endif
+ 
+   /* We start adding objects.  */
+-  r->r_state = RT_ADD;
+-  _dl_debug_state ();
++  _dl_debug_change_state (r, RT_ADD);
+   LIBC_PROBE (init_start, 2, LM_ID_BASE, r);
+ 
+   /* Auditing checkpoint: we are ready to signal that the initial map
+@@ -2527,8 +2526,7 @@ dl_main (const ElfW(Phdr) *phdr,
+   /* Notify the debugger all new objects are now ready to go.  We must re-get
+      the address since by now the variable might be in another object.  */
+   r = _dl_debug_update (LM_ID_BASE);
+-  r->r_state = RT_CONSISTENT;
+-  _dl_debug_state ();
++  _dl_debug_change_state (r, RT_CONSISTENT);
+   LIBC_PROBE (init_complete, 2, LM_ID_BASE, r);
+ 
+ #ifdef SHARED
+diff --git a/sysdeps/generic/ldsodefs.h b/sysdeps/generic/ldsodefs.h
+index 21dbe2d21ed8e605..371c32dd79c3ea2b 100644
+--- a/sysdeps/generic/ldsodefs.h
++++ b/sysdeps/generic/ldsodefs.h
+@@ -1129,8 +1129,14 @@ extern void _dl_debug_state (void);
+ rtld_hidden_proto (_dl_debug_state)
+ 
+ /* Initialize `struct r_debug_extended' for the namespace NS.  LDBASE
+-   is the run-time load address of the dynamic linker, to be put in the
+-   `r_ldbase' member.  Return the address of the structure.  */
++   is the run-time load address of the dynamic linker, to be put in
++   the `r_ldbase' member.
++
++   Return the address of the r_debug structure for the namespace.
++   This is not merely a convenience or optimization, but it is
++   necessary for the LIBC_PROBE Systemtap/debugger probes to work
++   reliably: direct variable access can create probes that tools
++   cannot consume.  */
+ extern struct r_debug *_dl_debug_initialize (ElfW(Addr) ldbase, Lmid_t ns)
+      attribute_hidden;
+ 
+@@ -1138,6 +1144,10 @@ extern struct r_debug *_dl_debug_initialize (ElfW(Addr) ldbase, Lmid_t ns)
+    of the namespace NS.  */
+ extern struct r_debug *_dl_debug_update (Lmid_t ns) attribute_hidden;
+ 
++/* Update R->r_state to STATE and notify the debugger by calling
++   _dl_debug_state.  */
++void _dl_debug_change_state (struct r_debug *r, int state) attribute_hidden;
++
+ /* Initialize the basic data structure for the search paths.  SOURCE
+    is either "LD_LIBRARY_PATH" or "--library-path".
+    GLIBC_HWCAPS_PREPEND adds additional glibc-hwcaps subdirectories to

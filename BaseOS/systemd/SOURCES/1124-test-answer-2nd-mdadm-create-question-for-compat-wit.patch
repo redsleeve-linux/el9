@@ -1,0 +1,69 @@
+From 5ce6e9778a1f9708b4e52d143a0ed044a2a9e815 Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <luca.boccassi@gmail.com>
+Date: Sun, 22 Dec 2024 13:31:36 +0000
+Subject: [PATCH] test: answer 2nd mdadm --create question for compat with new
+ version
+
+New version of mdadm now asks a second question, so send 'y' twice
+to it in the test scripts
+
+[    5.253483] TEST-64-UDEV-STORAGE.sh[684]: + echo y
+[    5.254412] TEST-64-UDEV-STORAGE.sh[685]: + mdadm --create /dev/md/mdmirror --name mdmirror --uuid aaaaaaaa:bbbbbbbb:cccccccc:00000001 /dev/disk/by-id/scsi-0systemd_foobar_deadbeefmdadm0 /dev/disk/by-id/scsi-0systemd_foobar_deadbeefmdadm1 -v -f --level=1 --raid-devices=2
+[    5.254759] TEST-64-UDEV-STORAGE.sh[685]: To optimalize recovery speed, it is recommended to enable write-indent bitmap, do you want to enable it now? [y/N]? mdadm: Note: this array has metadata at the start and
+[    5.255085] TEST-64-UDEV-STORAGE.sh[685]:     may not be suitable as a boot device.  If you plan to
+[    5.255418] TEST-64-UDEV-STORAGE.sh[685]:     store '/boot' on this device please ensure that
+[    5.255745] TEST-64-UDEV-STORAGE.sh[685]:     your boot-loader understands md/v1.x metadata, or use
+[    5.256285] TEST-64-UDEV-STORAGE.sh[685]:     --metadata=0.90
+[    5.256672] TEST-64-UDEV-STORAGE.sh[685]: mdadm: size set to 64512K
+[    5.257063] TEST-64-UDEV-STORAGE.sh[685]: Continue creating array [y/N]? mdadm: create aborted.
+
+This is backward compatible with the older version that asks just one
+question
+
+(cherry picked from commit 16406420ea449b75e70a7dced05d7b98bc0f5376)
+
+Related: RHEL-79977
+---
+ test/units/testsuite-64.sh | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/test/units/testsuite-64.sh b/test/units/testsuite-64.sh
+index f7298ed0d6..c335ee64df 100755
+--- a/test/units/testsuite-64.sh
++++ b/test/units/testsuite-64.sh
+@@ -888,7 +888,7 @@ testcase_mdadm_basic() {
+         "/dev/disk/by-label/$part_name" # ext4 partition
+     )
+     # Create a simple RAID 1 with an ext4 filesystem
+-    echo y | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadm{0..1} -v -f --level=1 --raid-devices=2
++    printf 'y\ny\n' | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadm{0..1} -v -f --level=1 --raid-devices=2
+     udevadm wait --settle --timeout=30 "$raid_dev"
+     mkfs.ext4 -L "$part_name" "$raid_dev"
+     udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
+@@ -917,7 +917,7 @@ testcase_mdadm_basic() {
+         "/dev/disk/by-label/$part_name" # ext4 partition
+     )
+     # Create a simple RAID 5 with an ext4 filesystem
+-    echo y | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadm{0..2} -v -f --level=5 --raid-devices=3
++    printf 'y\ny\n' | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadm{0..2} -v -f --level=5 --raid-devices=3
+     udevadm wait --settle --timeout=30 "$raid_dev"
+     mkfs.ext4 -L "$part_name" "$raid_dev"
+     udevadm wait --settle --timeout=30 "${expected_symlinks[@]}"
+@@ -957,7 +957,7 @@ testcase_mdadm_basic() {
+         "/dev/disk/by-id/md-uuid-$uuid-part3"
+     )
+     # Create a simple RAID 10 with an ext4 filesystem
+-    echo y | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadm{0..3} -v -f --level=10 --raid-devices=4
++    printf 'y\ny\n' | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadm{0..3} -v -f --level=10 --raid-devices=4
+     udevadm wait --settle --timeout=30 "$raid_dev"
+     # Partition the raid device
+     # Here, 'udevadm lock' is meaningless, as udevd does not lock MD devices.
+@@ -1010,7 +1010,7 @@ testcase_mdadm_lvm() {
+         "/dev/disk/by-label/$part_name" # ext4 partition
+     )
+     # Create a RAID 10 with LVM + ext4
+-    echo y | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadmlvm{0..3} -v -f --level=10 --raid-devices=4
++    printf 'y\ny\n' | mdadm --create "$raid_dev" --name "$raid_name" --uuid "$uuid" /dev/disk/by-id/ata-foobar_deadbeefmdadmlvm{0..3} -v -f --level=10 --raid-devices=4
+     udevadm wait --settle --timeout=30 "$raid_dev"
+     # Create an LVM on the MD
+     lvm pvcreate -y "$raid_dev"

@@ -1,0 +1,647 @@
+commit 4f6dae219578d6df475864e273da40bde9d30806
+Author: Stefan Liebler <stli@linux.ibm.com>
+Date:   Tue Apr 29 13:28:58 2025 +0200
+
+    S390: Add new s390 platform z17.
+    
+    The glibc-hwcaps subdirectories are extended by "z17".  Libraries are loaded if
+    the z17 facility bits are active:
+    - Miscellaneous-instruction-extensions facility 4
+    - Vector-enhancements-facility 3
+    - Vector-Packed-Decimal-Enhancement Facility 3
+    - CPU: Concurrent-Functions Facility
+    
+    tst-glibc-hwcaps.c is extended in order to test z17 via new marker6.
+    In case of running on a z17 with a kernel not recognizing z17 yet,
+    AT_PLATFORM will be z900 but vector-bit in AT_HWCAP is set.  This situation
+    is now recognized and this testcase does not fail.
+    
+    A fatal glibc error is dumped if glibc was build with architecture
+    level set for z17, but run on an older machine (See dl-hwcap-check.h).
+    Note, you might get an SIGILL before this check if you don't use:
+    configure --with-rtld-early-cflags=-march=<older-machine>
+    
+    ld.so --list-diagnostics now also dumps information about s390.cpu_features.
+    
+    Independent from z17, the s390x kernel won't introduce new HWCAP-Bits if there
+    is no special handling needed in kernel itself.  For z17, we don't have new
+    HWCAP flags, but have to check the facility bits retrieved by
+    stfle-instruction.
+    
+    Instead of storing all the stfle-bits (currently four 64bit values) in the
+    cpu_features struct, we now only store those bits, which are needed within
+    glibc itself.  Note that we have this list twice, one with original values and
+    the other one which can be filtered with GLIBC_TUNABLES=glibc.cpu.hwcaps.
+    Those new fields are stored in so far reserved space in cpu_features struct.
+    Thus processes started in between the update of glibc package and we e.g. have
+    a new ld.so and an old libc.so, won't crash. The glibc internal ifunc-resolvers
+    would not select the best optimized variant.
+    
+    The users of stfle-bits are also updated:
+    - parsing of GLIBC_TUNABLES=glibc.cpu.hwcaps
+    - glibc internal ifunc-resolvers
+    - __libc_ifunc_impl_list
+    - sysconf
+
+Note: Conflicts were resolved by Stefan Liebler.
+
+Conflicts:
+	elf/Makefile (fixup context)
+	sysdeps/s390/cpu-features.c (partial re-implement downstream)
+	sysdeps/s390/multiarch/ifunc-impl-list.c (fixup context)
+	sysdeps/s390/s390-64/dl-hwcaps-subdirs.c (fixup context)
+
+diff --git a/elf/Makefile b/elf/Makefile
+index ba11f3a8b81e7218..84151f2e59704a43 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -667,6 +667,12 @@ modules-names = \
+   libmarkermod5-3 \
+   libmarkermod5-4 \
+   libmarkermod5-5 \
++  libmarkermod6-1 \
++  libmarkermod6-2 \
++  libmarkermod6-3 \
++  libmarkermod6-4 \
++  libmarkermod6-5 \
++  libmarkermod6-6 \
+   ltglobmod1 \
+   ltglobmod2 \
+   neededobj1 \
+@@ -2624,6 +2630,7 @@ LDFLAGS-libmarkermod2-1.so += -Wl,-soname,libmarkermod2.so
+ LDFLAGS-libmarkermod3-1.so += -Wl,-soname,libmarkermod3.so
+ LDFLAGS-libmarkermod4-1.so += -Wl,-soname,libmarkermod4.so
+ LDFLAGS-libmarkermod5-1.so += -Wl,-soname,libmarkermod5.so
++LDFLAGS-libmarkermod6-1.so += -Wl,-soname,libmarkermod6.so
+ $(objpfx)libmarkermod%.os : markermodMARKER-VALUE.c
+ 	$(compile-command.c) \
+ 	  -DMARKER=marker$(firstword $(subst -, ,$*)) \
+@@ -2638,6 +2645,8 @@ $(objpfx)libmarkermod4.so: $(objpfx)libmarkermod4-1.so
+ 	cp $< $@
+ $(objpfx)libmarkermod5.so: $(objpfx)libmarkermod5-1.so
+ 	cp $< $@
++$(objpfx)libmarkermod6.so: $(objpfx)libmarkermod6-1.so
++	cp $< $@
+ 
+ # tst-glibc-hwcaps-prepend checks that --glibc-hwcaps-prepend is
+ # preferred over auto-detected subdirectories.
+diff --git a/elf/tst-glibc-hwcaps-cache.script b/elf/tst-glibc-hwcaps-cache.script
+index d58fc8c5de3c5198..af89e9c6f811f483 100644
+--- a/elf/tst-glibc-hwcaps-cache.script
++++ b/elf/tst-glibc-hwcaps-cache.script
+@@ -5,6 +5,7 @@ cp $B/elf/libmarkermod2-1.so $L/libmarkermod2.so
+ cp $B/elf/libmarkermod3-1.so $L/libmarkermod3.so
+ cp $B/elf/libmarkermod4-1.so $L/libmarkermod4.so
+ cp $B/elf/libmarkermod5-1.so $L/libmarkermod5.so
++cp $B/elf/libmarkermod6-1.so $L/libmarkermod6.so
+ 
+ mkdirp 0770 $L/glibc-hwcaps/power9
+ cp $B/elf/libmarkermod2-2.so $L/glibc-hwcaps/power9/libmarkermod2.so
+@@ -26,6 +27,12 @@ cp $B/elf/libmarkermod5-2.so $L/glibc-hwcaps/z13/libmarkermod5.so
+ cp $B/elf/libmarkermod5-3.so $L/glibc-hwcaps/z14/libmarkermod5.so
+ cp $B/elf/libmarkermod5-4.so $L/glibc-hwcaps/z15/libmarkermod5.so
+ cp $B/elf/libmarkermod5-5.so $L/glibc-hwcaps/z16/libmarkermod5.so
++mkdirp 0770 $L/glibc-hwcaps/z17
++cp $B/elf/libmarkermod6-2.so $L/glibc-hwcaps/z13/libmarkermod6.so
++cp $B/elf/libmarkermod6-3.so $L/glibc-hwcaps/z14/libmarkermod6.so
++cp $B/elf/libmarkermod6-4.so $L/glibc-hwcaps/z15/libmarkermod6.so
++cp $B/elf/libmarkermod6-5.so $L/glibc-hwcaps/z16/libmarkermod6.so
++cp $B/elf/libmarkermod6-6.so $L/glibc-hwcaps/z17/libmarkermod6.so
+ 
+ mkdirp 0770 $L/glibc-hwcaps/x86-64-v2
+ cp $B/elf/libmarkermod2-2.so $L/glibc-hwcaps/x86-64-v2/libmarkermod2.so
+diff --git a/sysdeps/s390/cpu-features.c b/sysdeps/s390/cpu-features.c
+index afeb9b56382efa96..e9e7e726b71fb09a 100644
+--- a/sysdeps/s390/cpu-features.c
++++ b/sysdeps/s390/cpu-features.c
+@@ -28,7 +28,7 @@ extern __typeof (memcmp) MEMCMP_DEFAULT;
+ #if HAVE_TUNABLES
+ # define S390_COPY_CPU_FEATURES(SRC_PTR, DEST_PTR)	\
+   (DEST_PTR)->hwcap = (SRC_PTR)->hwcap;			\
+-  (DEST_PTR)->stfle_bits[0] = (SRC_PTR)->stfle_bits[0];
++  (DEST_PTR)->stfle_filtered = (SRC_PTR)->stfle_filtered;
+ 
+ static void
+ TUNABLE_CALLBACK (set_hwcaps) (tunable_val_t *valp)
+@@ -100,7 +100,7 @@ TUNABLE_CALLBACK (set_hwcaps) (tunable_val_t *valp)
+ 	      disable = true;
+ 	      hwcap_mask = HWCAP_S390_VXRS | HWCAP_S390_VXRS_EXT
+ 		| HWCAP_S390_VXRS_EXT2;
+-	      stfle_bits0_mask = S390_STFLE_MASK_ARCH13_MIE3;
++	      stfle_bits0_mask = S390_STFLE_BIT61_ARCH13_MIE3;
+ 	    }
+ 	  else if ((feature_len == 3 && *feature == 'z'
+ 		    && MEMCMP_DEFAULT (feature, "z13", 3) == 0)
+@@ -110,7 +110,7 @@ TUNABLE_CALLBACK (set_hwcaps) (tunable_val_t *valp)
+ 	      reset_features = true;
+ 	      disable = true;
+ 	      hwcap_mask = HWCAP_S390_VXRS_EXT | HWCAP_S390_VXRS_EXT2;
+-	      stfle_bits0_mask = S390_STFLE_MASK_ARCH13_MIE3;
++	      stfle_bits0_mask = S390_STFLE_BIT61_ARCH13_MIE3;
+ 	    }
+ 	  else if ((feature_len == 3 && *feature == 'z'
+ 		    && MEMCMP_DEFAULT (feature, "z14", 3) == 0)
+@@ -120,14 +120,16 @@ TUNABLE_CALLBACK (set_hwcaps) (tunable_val_t *valp)
+ 	      reset_features = true;
+ 	      disable = true;
+ 	      hwcap_mask = HWCAP_S390_VXRS_EXT2;
+-	      stfle_bits0_mask = S390_STFLE_MASK_ARCH13_MIE3;
++	      stfle_bits0_mask = S390_STFLE_BIT61_ARCH13_MIE3;
+ 	    }
+ 	  else if ((feature_len == 3 && *feature == 'z'
+ 		    && (MEMCMP_DEFAULT (feature, "z15", 3) == 0
+-			|| MEMCMP_DEFAULT (feature, "z16", 3) == 0))
++			|| MEMCMP_DEFAULT (feature, "z16", 3) == 0
++			|| MEMCMP_DEFAULT (feature, "z17", 3) == 0))
+ 		   || (feature_len == 6
+ 		       && (MEMCMP_DEFAULT (feature, "arch13", 6) == 0
+-			   || MEMCMP_DEFAULT (feature, "arch14", 6) == 0)))
++			   || MEMCMP_DEFAULT (feature, "arch14", 6) == 0
++			   || MEMCMP_DEFAULT (feature, "arch15", 6) == 0)))
+ 	    {
+ 	      /* For z15 or newer we don't have to disable something,
+ 		 but we have to reset to the original values.  */
+@@ -165,7 +167,7 @@ TUNABLE_CALLBACK (set_hwcaps) (tunable_val_t *valp)
+ 	  if (feature_len == 10
+ 	      && MEMCMP_DEFAULT (feature, "STFLE_MIE3", 10) == 0)
+ 	    {
+-	      stfle_bits0_mask = S390_STFLE_MASK_ARCH13_MIE3;
++	      stfle_bits0_mask = S390_STFLE_BIT61_ARCH13_MIE3;
+ 	    }
+ 	}
+ 
+@@ -186,9 +188,9 @@ TUNABLE_CALLBACK (set_hwcaps) (tunable_val_t *valp)
+       if (stfle_bits0_mask != 0ULL)
+ 	{
+ 	  if (disable)
+-	    cpu_features_curr.stfle_bits[0] &= ~stfle_bits0_mask;
++	    cpu_features_curr.stfle_filtered &= ~stfle_bits0_mask;
+ 	  else
+-	    cpu_features_curr.stfle_bits[0] |= stfle_bits0_mask;
++	    cpu_features_curr.stfle_filtered |= stfle_bits0_mask;
+ 	}
+ 
+       /* Jump over current token ... */
+@@ -202,14 +204,18 @@ TUNABLE_CALLBACK (set_hwcaps) (tunable_val_t *valp)
+   /* Copy back the features after checking that no unsupported features were
+      enabled by user.  */
+   cpu_features->hwcap = cpu_features_curr.hwcap & cpu_features_orig.hwcap;
+-  cpu_features->stfle_bits[0] = cpu_features_curr.stfle_bits[0]
+-    & cpu_features_orig.stfle_bits[0];
++  cpu_features->stfle_filtered = cpu_features_curr.stfle_filtered
++    & cpu_features_orig.stfle_filtered;
+ }
+ #endif
+ 
+ static inline void
+-init_cpu_features (struct cpu_features *cpu_features)
++init_cpu_features_no_tunables (struct cpu_features *cpu_features)
+ {
++  /* Only initialize once.  */
++  if (cpu_features->hwcap != 0)
++    return;
++
+   /* Fill cpu_features as passed by kernel and machine.  */
+   cpu_features->hwcap = GLRO(dl_hwcap);
+ 
+@@ -218,20 +224,57 @@ init_cpu_features (struct cpu_features *cpu_features)
+ 		      && (cpu_features->hwcap & HWCAP_S390_ZARCH)
+ 		      && (cpu_features->hwcap & HWCAP_S390_HIGH_GPRS)))
+     {
+-      register unsigned long reg0 __asm__("0") = 0;
++      unsigned long long stfle_bits[4] = { 0 };
++      register unsigned long reg0 __asm__("0") = 3;
+       __asm__ __volatile__(".machine push"        "\n\t"
+ 			   ".machine \"z9-109\""  "\n\t"
+ 			   ".machinemode \"zarch_nohighgprs\"\n\t"
+ 			   "stfle %0"             "\n\t"
+ 			   ".machine pop"         "\n"
+-			   : "=QS" (cpu_features->stfle_bits[0]),
++			   : "=QS" (stfle_bits[0]),
+ 			     "+d" (reg0)
+ 			   : : "cc");
++
++      unsigned long long internal_stfle_bits = 0;
++
++      /* Facility bit 34: z10: General instructions extension.  */
++      if ((stfle_bits[0] & (1ULL << (63 - 34))) != 0)
++	internal_stfle_bits |= S390_STFLE_BIT34_Z10;
++
++      /* Facility bit 45: z196: Distinct operands, popcount, ...  */
++      if ((stfle_bits[0] & (1ULL << (63 - 45))) != 0)
++	internal_stfle_bits |= S390_STFLE_BIT45_Z196;
++
++      /* Facility bit 61: arch13/z15: Miscellaneous-Instruction-Extensions
++	 Facility 3, e.g. mvcrl.  */
++      if ((stfle_bits[0] & (1ULL << (63 - 61))) != 0)
++	internal_stfle_bits |= S390_STFLE_BIT61_ARCH13_MIE3;
++
++      /* Facility bit 84: arch15/z17: Miscellaneous-instruction-extensions 4  */
++      if ((stfle_bits[1] & (1ULL << (127 - 84))) != 0)
++	internal_stfle_bits |= S390_STFLE_BIT84_ARCH15_MIE4;
++
++      /* Facility bit 198: arch15/z17: Vector-enhancements-facility 3  */
++      if ((stfle_bits[3] & (1ULL << (255 - 198))) != 0)
++	internal_stfle_bits |= S390_STFLE_BIT198_ARCH15_VXRS_EXT3;
++
++      /* Facility bit 199: arch15/z17: Vector-Packed-Decimal-Enhancement 3  */
++      if ((stfle_bits[3] & (1ULL << (255 - 199))) != 0)
++	internal_stfle_bits |= S390_STFLE_BIT199_ARCH15_VXRS_PDE3;
++
++      /* Facility bit 201: arch15/z17: CPU: Concurrent-Functions Facility  */
++      if ((stfle_bits[3] & (1ULL << (255 - 201))) != 0)
++	internal_stfle_bits |= S390_STFLE_BIT201_ARCH15_CON;
++
++      cpu_features->stfle_orig = internal_stfle_bits;
++      cpu_features->stfle_filtered = internal_stfle_bits;
+     }
+-  else
+-    {
+-      cpu_features->stfle_bits[0] = 0ULL;
+-    }
++}
++
++static inline void
++init_cpu_features (struct cpu_features *cpu_features)
++{
++  init_cpu_features_no_tunables (cpu_features);
+ 
+ #if HAVE_TUNABLES
+   TUNABLE_GET (glibc, cpu, hwcaps, tunable_val_t *, TUNABLE_CALLBACK (set_hwcaps));
+diff --git a/sysdeps/s390/cpu-features.h b/sysdeps/s390/cpu-features.h
+index 5e6b58f7c5bb07e4..f98654a7223cfc5b 100644
+--- a/sysdeps/s390/cpu-features.h
++++ b/sysdeps/s390/cpu-features.h
+@@ -18,29 +18,58 @@
+ #ifndef __CPU_FEATURES_S390X_H
+ # define __CPU_FEATURES_S390X_H
+ 
+-#define S390_STFLE_BITS_Z10  34 /* General instructions extension */
+-#define S390_STFLE_BITS_Z196 45 /* Distinct operands, pop ... */
+-#define S390_STFLE_BITS_ARCH13_MIE3 61 /* Miscellaneous-Instruction-Extensions
+-					  Facility 3, e.g. mvcrl.  */
++/* The following stfle bit definitions are intended to be used for the
++   glibc internal stfle_orig and stfle_filtered fields in cpu_features
++   struct.  They can't be used on the double words retrieved by the
++   stfle-instruction.  */
+ 
+-#define S390_STFLE_MASK_ARCH13_MIE3 (1ULL << (63 - S390_STFLE_BITS_ARCH13_MIE3))
++/* Facility bit 34: z10: General instructions extension.  */
++#define S390_STFLE_BIT34_Z10 (1ULL << 0)
+ 
++/* Facility bit 45: z196: Distinct operands, popcount, ...  */
++#define S390_STFLE_BIT45_Z196 (1ULL << 1)
+ 
+-#define S390_IS_ARCH13_MIE3(STFLE_BITS_ARRAY)			\
+-  (((STFLE_BITS_ARRAY)[0] & S390_STFLE_MASK_ARCH13_MIE3) != 0)
++/* Facility bit 61: arch13/z15: Miscellaneous-Instruction-Extensions
++   Facility 3, e.g. mvcrl.  */
++#define S390_STFLE_BIT61_ARCH13_MIE3 (1ULL << 2)
+ 
+-#define S390_IS_Z196(STFLE_BITS_ARRAY)			\
+-  (((STFLE_BITS_ARRAY)[0] & (1ULL << (63 - S390_STFLE_BITS_Z196))) != 0)
++/* Facility bit 84: arch15/z17: Miscellaneous-instruction-extensions
++   facility 4  */
++#define S390_STFLE_BIT84_ARCH15_MIE4 (1ULL << 3)
+ 
+-#define S390_IS_Z10(STFLE_BITS_ARRAY)				\
+-  (((STFLE_BITS_ARRAY)[0] & (1ULL << (63 - S390_STFLE_BITS_Z10))) != 0)
++/* Facility bit 198: arch15/z17: Vector-enhancements-facility 3  */
++#define S390_STFLE_BIT198_ARCH15_VXRS_EXT3 (1ULL << 4)
++
++/* Facility bit 199: arch15/z17: Vector-Packed-Decimal-Enhancement
++   Facility 3  */
++#define S390_STFLE_BIT199_ARCH15_VXRS_PDE3 (1ULL << 5)
++
++/* Facility bit 201: arch15/z17: CPU: Concurrent-Functions Facility  */
++#define S390_STFLE_BIT201_ARCH15_CON (1ULL << 6)
++
++#define S390_IS_ARCH15(STFLE_BITS)					\
++  ((((STFLE_BITS) & S390_STFLE_BIT84_ARCH15_MIE4) != 0)			\
++   && (((STFLE_BITS) & S390_STFLE_BIT198_ARCH15_VXRS_EXT3) != 0)	\
++   && (((STFLE_BITS) & S390_STFLE_BIT199_ARCH15_VXRS_PDE3) != 0)	\
++   && (((STFLE_BITS) & S390_STFLE_BIT201_ARCH15_CON) != 0))
++
++#define S390_IS_ARCH13_MIE3(STFLE_BITS)			\
++  (((STFLE_BITS) & S390_STFLE_BIT61_ARCH13_MIE3) != 0)
++
++#define S390_IS_Z196(STFLE_BITS)		\
++  (((STFLE_BITS) & S390_STFLE_BIT45_Z196) != 0)
++
++#define S390_IS_Z10(STFLE_BITS)			\
++  (((STFLE_BITS) & S390_STFLE_BIT34_Z10) != 0)
+ 
+ struct cpu_features
+ {
+   unsigned long int hwcap;
+   unsigned long int __reserved_hwcap2;
+-  unsigned long long stfle_bits[3];
+-  unsigned long long __reserved[11];
++  unsigned long long __reserved;
++  unsigned long long stfle_orig;
++  unsigned long long stfle_filtered;
++  unsigned long long __reserved2[11];
+ };
+ 
+ #endif /* __CPU_FEATURES_S390X_H  */
+diff --git a/sysdeps/s390/dl-diagnostics-cpu.c b/sysdeps/s390/dl-diagnostics-cpu.c
+new file mode 100644
+index 0000000000000000..426af2df7a34b55e
+--- /dev/null
++++ b/sysdeps/s390/dl-diagnostics-cpu.c
+@@ -0,0 +1,37 @@
++/* Print CPU diagnostics data in ld.so.  s390 version.
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <dl-diagnostics.h>
++#include <ldsodefs.h>
++#include <cpu-features.h>
++
++static void
++print_cpu_features_value (const char *label, uint64_t value)
++{
++  _dl_printf ("s390.cpu_features.");
++  _dl_diagnostics_print_labeled_value (label, value);
++}
++
++void
++_dl_diagnostics_cpu (void)
++{
++  const struct cpu_features *cpu_features = &GLRO(dl_s390_cpu_features);
++  print_cpu_features_value ("hwcap", cpu_features->hwcap);
++  print_cpu_features_value ("stfle_orig", cpu_features->stfle_orig);
++  print_cpu_features_value ("stfle_filtered", cpu_features->stfle_filtered);
++}
+diff --git a/sysdeps/s390/multiarch/ifunc-impl-list.c b/sysdeps/s390/multiarch/ifunc-impl-list.c
+index af2c75f5df7c7e1d..4c5fdf6069c4027b 100644
+--- a/sysdeps/s390/multiarch/ifunc-impl-list.c
++++ b/sysdeps/s390/multiarch/ifunc-impl-list.c
+@@ -83,9 +83,9 @@ __libc_ifunc_impl_list (const char *name, struct libc_ifunc_impl *array,
+ 
+   /* Get hardware information.  */
+   const struct cpu_features *features = &GLRO(dl_s390_cpu_features);
+-  unsigned long int dl_hwcap = features->hwcap;
+-  const unsigned long long * __attribute__((unused)) stfle_bits
+-    = features->stfle_bits;
++  unsigned long int dl_hwcap __attribute__ ((unused)) = features->hwcap;
++  const unsigned long long __attribute__((unused)) stfle_bits
++    = features->stfle_filtered;
+ 
+ #if HAVE_MEMSET_IFUNC
+   IFUNC_IMPL (i, name, memset,
+diff --git a/sysdeps/s390/multiarch/ifunc-resolve.h b/sysdeps/s390/multiarch/ifunc-resolve.h
+index c22d59d2a341fff7..16b358ec2e895a4c 100644
+--- a/sysdeps/s390/multiarch/ifunc-resolve.h
++++ b/sysdeps/s390/multiarch/ifunc-resolve.h
+@@ -22,7 +22,7 @@
+ #include <cpu-features.h>
+ 
+ #define s390_libc_ifunc_expr_stfle_init()				\
+-  const unsigned long long *stfle_bits = features->stfle_bits;
++  const unsigned long long stfle_bits = features->stfle_filtered;
+ 
+ #define s390_libc_ifunc_expr_init()					\
+   const struct cpu_features *features = &GLRO(dl_s390_cpu_features);	\
+diff --git a/sysdeps/s390/s390-64/Makefile b/sysdeps/s390/s390-64/Makefile
+index 66ed844e68df5159..991025cd2a97c203 100644
+--- a/sysdeps/s390/s390-64/Makefile
++++ b/sysdeps/s390/s390-64/Makefile
+@@ -11,7 +11,8 @@ $(objpfx)tst-glibc-hwcaps: \
+   $(objpfx)libmarkermod2-1.so \
+   $(objpfx)libmarkermod3-1.so \
+   $(objpfx)libmarkermod4-1.so \
+-  $(objpfx)libmarkermod5-1.so
++  $(objpfx)libmarkermod5-1.so \
++  $(objpfx)libmarkermod6-1.so
+ $(objpfx)tst-glibc-hwcaps.out: \
+   $(objpfx)libmarkermod2.so \
+     $(objpfx)glibc-hwcaps/z13/libmarkermod2.so \
+@@ -26,7 +27,14 @@ $(objpfx)tst-glibc-hwcaps.out: \
+     $(objpfx)glibc-hwcaps/z13/libmarkermod5.so \
+     $(objpfx)glibc-hwcaps/z14/libmarkermod5.so \
+     $(objpfx)glibc-hwcaps/z15/libmarkermod5.so \
+-    $(objpfx)glibc-hwcaps/z16/libmarkermod5.so
++    $(objpfx)glibc-hwcaps/z16/libmarkermod5.so \
++  $(objpfx)libmarkermod6.so \
++    $(objpfx)glibc-hwcaps/z13/libmarkermod6.so \
++    $(objpfx)glibc-hwcaps/z14/libmarkermod6.so \
++    $(objpfx)glibc-hwcaps/z15/libmarkermod6.so \
++    $(objpfx)glibc-hwcaps/z16/libmarkermod6.so \
++    $(objpfx)glibc-hwcaps/z17/libmarkermod6.so
++
+ 
+ $(objpfx)glibc-hwcaps/z13/libmarkermod2.so: $(objpfx)libmarkermod2-2.so
+ 	$(make-target-directory)
+@@ -58,6 +66,21 @@ $(objpfx)glibc-hwcaps/z15/libmarkermod5.so: $(objpfx)libmarkermod5-4.so
+ $(objpfx)glibc-hwcaps/z16/libmarkermod5.so: $(objpfx)libmarkermod5-5.so
+ 	$(make-target-directory)
+ 	cp $< $@
++$(objpfx)glibc-hwcaps/z13/libmarkermod6.so: $(objpfx)libmarkermod6-2.so
++	$(make-target-directory)
++	cp $< $@
++$(objpfx)glibc-hwcaps/z14/libmarkermod6.so: $(objpfx)libmarkermod6-3.so
++	$(make-target-directory)
++	cp $< $@
++$(objpfx)glibc-hwcaps/z15/libmarkermod6.so: $(objpfx)libmarkermod6-4.so
++	$(make-target-directory)
++	cp $< $@
++$(objpfx)glibc-hwcaps/z16/libmarkermod6.so: $(objpfx)libmarkermod6-5.so
++	$(make-target-directory)
++	cp $< $@
++$(objpfx)glibc-hwcaps/z17/libmarkermod6.so: $(objpfx)libmarkermod6-6.so
++	$(make-target-directory)
++	cp $< $@
+ 
+ 
+ ifeq (no,$(build-hardcoded-path-in-tests))
+diff --git a/sysdeps/s390/s390-64/dl-hwcap-check.h b/sysdeps/s390/s390-64/dl-hwcap-check.h
+index 52c609571b32f4ab..d52444419b9a54c1 100644
+--- a/sysdeps/s390/s390-64/dl-hwcap-check.h
++++ b/sysdeps/s390/s390-64/dl-hwcap-check.h
+@@ -25,8 +25,23 @@
+ static inline void
+ dl_hwcap_check (void)
+ {
+-#if defined __ARCH__
+-# if GCCMACRO__ARCH__ >= 14
++  /* Note: The s390x kernel won't introduce new HWCAP-Bits if there is
++     no special handling needed in kernel itself.  Thus we have have
++     to check the facility-list retrieved with the stfle instruction.
++     We already have a common storage of this list in cpu-features.c.
++     This dl-hwcap-check.h file is included in
++     sysdeps/unix/sysv/linux/dl-sysdep.c, where also dl-machine.h and
++     cpu-features.c is included.  Therefore we don't have a special
++     include here.  */
++
++#if defined GCCMACRO__ARCH__
++# if GCCMACRO__ARCH__ >= 15
++  init_cpu_features_no_tunables (&GLRO(dl_s390_cpu_features));
++  if (!(S390_IS_ARCH15 (GLRO(dl_s390_cpu_features).stfle_orig)))
++    _dl_fatal_printf ("\
++Fatal glibc error: CPU lacks VXRS_EXT3/VXRS_PDE3/MIE4/Concurrent-functions \
++support (z17 or later required)\n");
++# elif GCCMACRO__ARCH__ >= 14
+   if (!(GLRO(dl_hwcap) & HWCAP_S390_VXRS_PDE2))
+     _dl_fatal_printf ("\
+ Fatal glibc error: CPU lacks VXRS_PDE2 support (z16 or later required)\n");
+@@ -39,7 +54,7 @@ Fatal glibc error: CPU lacks VXRS_EXT2 support (z15 or later required)\n");
+     _dl_fatal_printf ("\
+ Fatal glibc error: CPU lacks VXE support (z14 or later required)\n");
+ # endif
+-#endif /* __ARCH__ */
++#endif /* GCCMACRO__ARCH__ */
+ }
+ 
+ #endif /* _DL_HWCAP_CHECK_H */
+diff --git a/sysdeps/s390/s390-64/dl-hwcaps-subdirs.c b/sysdeps/s390/s390-64/dl-hwcaps-subdirs.c
+index 187d732d560c4a62..0e4aa067c0b87439 100644
+--- a/sysdeps/s390/s390-64/dl-hwcaps-subdirs.c
++++ b/sysdeps/s390/s390-64/dl-hwcaps-subdirs.c
+@@ -18,9 +18,10 @@
+ 
+ #include <dl-hwcaps.h>
+ #include <ldsodefs.h>
++#include <cpu-features.h>
+ 
+-const char _dl_hwcaps_subdirs[] = "z16:z15:z14:z13";
+-enum { subdirs_count = 4 }; /* Number of components in _dl_hwcaps_subdirs.  */
++const char _dl_hwcaps_subdirs[] = "z17:z16:z15:z14:z13";
++enum { subdirs_count = 5 }; /* Number of components in _dl_hwcaps_subdirs.  */
+ 
+ uint32_t
+ _dl_hwcaps_subdirs_active (void)
+@@ -57,5 +58,12 @@ _dl_hwcaps_subdirs_active (void)
+     return _dl_hwcaps_subdirs_build_bitmask (subdirs_count, active);
+   ++active;
+ 
++  /* z17.
++     Note: The kernel has not introduced new HWCAP bits as the new facilities do
++     not require kernel interaction.  Thus we check the features via stfle.  */
++  if (!(S390_IS_ARCH15 (GLRO(dl_s390_cpu_features).stfle_orig)))
++    return _dl_hwcaps_subdirs_build_bitmask (subdirs_count, active);
++  ++active;
++
+   return _dl_hwcaps_subdirs_build_bitmask (subdirs_count, active);
+ }
+diff --git a/sysdeps/s390/s390-64/tst-glibc-hwcaps.c b/sysdeps/s390/s390-64/tst-glibc-hwcaps.c
+index f3b8ef3dec80d2d1..211aaf3052a1e12c 100644
+--- a/sysdeps/s390/s390-64/tst-glibc-hwcaps.c
++++ b/sysdeps/s390/s390-64/tst-glibc-hwcaps.c
+@@ -26,35 +26,53 @@ extern int marker2 (void);
+ extern int marker3 (void);
+ extern int marker4 (void);
+ extern int marker5 (void);
++extern int marker6 (void);
+ 
+ /* Return the arch level, 10 for the baseline libmarkermod*.so's.  */
+ static int
+ compute_level (void)
+ {
+   const char *platform = (const char *) getauxval (AT_PLATFORM);
++  const unsigned long int hwcap = getauxval (AT_HWCAP);
++  const int latest_level = 15;
+ 
+   /* The arch* versions refer to the edition of the Principles of
+      Operation, and they are off by two when compared with the recent
+      product names.  (The code below should not be considered an
+      accurate mapping to Principles of Operation editions for earlier
+      AT_PLATFORM strings).  */
+-  if (strcmp (platform, "z900") == 0)
+-    return 10;
+-  if (strcmp (platform, "z990") == 0)
+-    return 10;
+-  if (strcmp (platform, "z9-109") == 0)
+-    return 10;
+-  if (strcmp (platform, "z10") == 0)
+-    return 10;
+-  if (strcmp (platform, "z196") == 0)
+-    return 10;
+-  if (strcmp (platform, "zEC12") == 0)
+-    return 10;
++  if ((strcmp (platform, "z900") == 0)
++      || (strcmp (platform, "z990") == 0)
++      || (strcmp (platform, "z9-109") == 0)
++      || (strcmp (platform, "z10") == 0)
++      || (strcmp (platform, "z196") == 0)
++      || (strcmp (platform, "zEC12") == 0))
++    {
++      if ((hwcap & HWCAP_S390_VX) == 0)
++	{
++	  /* As vector-support was introduced with the newer z13
++	     architecture, we are really on one of the tested older
++	     architectures.  */
++	  return 10;
++	}
++      else
++	{
++	  /* According to AT_PLATFORM we are on an older architecture
++	     without vector-support, but according to HWCAPs vector
++	     registers are supported.  This means we are running on a
++	     new architecture which is not yet known by the kernel.
++	     Thus the default AT_PLATFORM string is used, which is the
++	     oldest supported one.  For this test, assume we are on
++	     the latest known architecture.  See
++	     <kernel>/arch/s390/kernel/processor.c:setup_elf_platform().
++	  */
++	  return latest_level;
++	}
++    }
+ 
+   /* If we are running on z13 or newer and the kernel was booted with novx,
+      then AT_PLATFORM is z13 or newer, but _dl_hwcaps_subdirs_active will
+      return zero and the _dl_hwcaps_subdirs are not searched.  */
+-  const unsigned long int hwcap = getauxval (AT_HWCAP);
+   if ((hwcap & HWCAP_S390_VX) == 0)
+     return 10;
+ 
+@@ -66,9 +84,12 @@ compute_level (void)
+     return 13;
+   if (strcmp (platform, "z16") == 0)
+     return 14;
++  if (strcmp (platform, "z17") == 0)
++    return latest_level;
++
+   printf ("warning: unrecognized AT_PLATFORM value: %s\n", platform);
+-  /* Assume that the new platform supports z16.  */
+-  return 14;
++  /* Assume that the new platform supports the latest known architecture.  */
++  return latest_level;
+ }
+ 
+ static int
+@@ -80,6 +101,7 @@ do_test (void)
+   TEST_COMPARE (marker3 (), MIN (level - 9, 3));
+   TEST_COMPARE (marker4 (), MIN (level - 9, 4));
+   TEST_COMPARE (marker5 (), MIN (level - 9, 5));
++  TEST_COMPARE (marker6 (), MIN (level - 9, 6));
+   return 0;
+ }
+ 
+diff --git a/sysdeps/unix/sysv/linux/s390/sysconf.c b/sysdeps/unix/sysv/linux/s390/sysconf.c
+index 14821b5f248cd991..fc04a7ddedea0d7e 100644
+--- a/sysdeps/unix/sysv/linux/s390/sysconf.c
++++ b/sysdeps/unix/sysv/linux/s390/sysconf.c
+@@ -65,7 +65,7 @@ get_cache_info (int level, int attr, int type)
+ 	return 0L;
+     }
+ 
+-  if (!S390_IS_Z10 (features->stfle_bits))
++  if (!S390_IS_Z10 (features->stfle_orig))
+     {
+       /* We are at least on a z9 machine.
+ 	 Return 256byte for LINESIZE for L1 d/i-cache,

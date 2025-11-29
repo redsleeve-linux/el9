@@ -1,0 +1,24 @@
+commit ac73067cb7a328bf106ecd041c020fc61be7e087
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Oct 25 17:41:53 2024 +0200
+
+    elf: Fix map_complete Systemtap probe in dl_open_worker
+    
+    The refactoring did not take the change of variable into account.
+    Fixes commit 43db5e2c0672cae7edea7c9685b22317eae25471
+    ("elf: Signal RT_CONSISTENT after relocation processing in dlopen
+    (bug 31986)").
+
+diff --git a/elf/dl-open.c b/elf/dl-open.c
+index c225654822ee3520..1e61e402455da666 100644
+--- a/elf/dl-open.c
++++ b/elf/dl-open.c
+@@ -789,7 +789,7 @@ dl_open_worker (void *a)
+ #endif
+ 	r->r_state = RT_CONSISTENT;
+ 	_dl_debug_state ();
+-	LIBC_PROBE (map_complete, 3, nsid, r, new);
++	LIBC_PROBE (map_complete, 3, nsid, r, args->map);
+ 
+ #ifdef SHARED
+ 	if (was_not_consistent)

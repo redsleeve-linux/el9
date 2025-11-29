@@ -1,0 +1,62 @@
+From 9ce381170ed40874230db05111f8837475634e4b Mon Sep 17 00:00:00 2001
+From: Tamar Christina <tamar.christina@arm.com>
+Date: Mon, 28 Apr 2025 12:58:37 +0100
+Subject: [PATCH] aarch64: force operand to fresh register to avoid subreg
+ issues [PR118892]
+
+When the input is already a subreg and we try to make a paradoxical
+subreg out of it for copysign this can fail if it violates the subreg
+relationship.
+
+Use force_lowpart_subreg instead of lowpart_subreg to then force the
+results to a register instead of ICEing.
+
+gcc/ChangeLog:
+
+	PR target/118892
+	* config/aarch64/aarch64.md (copysign<GPF:mode>3): Use
+	force_lowpart_subreg instead of lowpart_subreg.
+
+gcc/testsuite/ChangeLog:
+
+	PR target/118892
+	* gcc.target/aarch64/copysign-pr118892.c: New test.
+---
+ gcc/config/aarch64/aarch64.md                        |  2 +-
+ gcc/testsuite/gcc.target/aarch64/copysign-pr118892.c | 11 +++++++++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+ create mode 100644 gcc/testsuite/gcc.target/aarch64/copysign-pr118892.c
+
+diff --git a/gcc/config/aarch64/aarch64.md b/gcc/config/aarch64/aarch64.md
+index 95577b325ce..6a481059bf0 100644
+--- a/gcc/config/aarch64/aarch64.md
++++ b/gcc/config/aarch64/aarch64.md
+@@ -7210,7 +7210,7 @@ (define_expand "copysign<GPF:mode>3"
+ 
+       emit_insn (gen_iorv2<v_int_equiv>3 (
+ 	lowpart_subreg (V2<V_INT_EQUIV>mode, operands[0], <MODE>mode),
+-	lowpart_subreg (V2<V_INT_EQUIV>mode, operands[1], <MODE>mode),
++	force_lowpart_subreg (V2<V_INT_EQUIV>mode, operands[1], <MODE>mode),
+ 	v_bitmask));
+       DONE;
+     }
+diff --git a/gcc/testsuite/gcc.target/aarch64/copysign-pr118892.c b/gcc/testsuite/gcc.target/aarch64/copysign-pr118892.c
+new file mode 100644
+index 00000000000..adfa30dc3e2
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/copysign-pr118892.c
+@@ -0,0 +1,11 @@
++/* { dg-do compile } */
++/* { dg-options "-Ofast" } */
++
++double l();
++double f()
++{
++  double t6[2] = {l(), l()};
++  double t7[2];
++  __builtin_memcpy(&t7, &t6, sizeof(t6));
++  return -__builtin_fabs(t7[1]);
++}
+-- 
+2.50.1
+

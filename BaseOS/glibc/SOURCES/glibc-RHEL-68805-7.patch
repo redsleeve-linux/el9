@@ -1,0 +1,110 @@
+commit 3ff3b9997cfef891ba33a14f1dcba0310d96369c
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Tue Jan 28 23:20:08 2025 +0000
+
+    Fix fflush handling for mmap files after ungetc (bug 32535)
+    
+    As discussed in bug 32535, fflush fails on files opened for reading
+    using mmap after ungetc.  Fix the logic to handle this case and still
+    compute the file offset correctly.
+    
+    Tested for x86_64.
+
+diff --git a/libio/fileops.c b/libio/fileops.c
+index c77f3572ba23cb05..0b35790a9d35bcc5 100644
+--- a/libio/fileops.c
++++ b/libio/fileops.c
+@@ -858,17 +858,21 @@ libc_hidden_ver (_IO_new_file_sync, _IO_file_sync)
+ static int
+ _IO_file_sync_mmap (FILE *fp)
+ {
++  off64_t o = fp->_offset - (fp->_IO_read_end - fp->_IO_read_ptr);
+   if (fp->_IO_read_ptr != fp->_IO_read_end)
+     {
+-      if (__lseek64 (fp->_fileno, fp->_IO_read_ptr - fp->_IO_buf_base,
+-		     SEEK_SET)
+-	  != fp->_IO_read_ptr - fp->_IO_buf_base)
++      if (_IO_in_backup (fp))
++	{
++	  _IO_switch_to_main_get_area (fp);
++	  o -= fp->_IO_read_end - fp->_IO_read_base;
++	}
++      if (__lseek64 (fp->_fileno, o, SEEK_SET) != o)
+ 	{
+ 	  fp->_flags |= _IO_ERR_SEEN;
+ 	  return EOF;
+ 	}
+     }
+-  fp->_offset = fp->_IO_read_ptr - fp->_IO_buf_base;
++  fp->_offset = o;
+   fp->_IO_read_end = fp->_IO_read_ptr = fp->_IO_read_base;
+   return 0;
+ }
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index c620d0ce3681a1ec..a49ab3701e88d4e6 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -223,6 +223,7 @@ tests := \
+   tst-fdopen2 \
+   tst-ferror \
+   tst-fflush-all-input \
++  tst-fflush-mmap \
+   tst-fgets \
+   tst-fgets2 \
+   tst-fileno \
+diff --git a/stdio-common/tst-fflush-mmap.c b/stdio-common/tst-fflush-mmap.c
+new file mode 100644
+index 0000000000000000..3bddb909e072caf2
+--- /dev/null
++++ b/stdio-common/tst-fflush-mmap.c
+@@ -0,0 +1,50 @@
++/* Test fflush after ungetc on files using mmap (bug 32535).
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++
++#include <support/check.h>
++#include <support/temp_file.h>
++#include <support/xstdio.h>
++#include <support/xunistd.h>
++
++int
++do_test (void)
++{
++  char *filename = NULL;
++  int fd = create_temp_file ("tst-fflush-mmap", &filename);
++  TEST_VERIFY_EXIT (fd != -1);
++  xclose (fd);
++
++  /* Test fflush after ungetc (bug 32535).  */
++  FILE *fp = xfopen (filename, "w");
++  TEST_VERIFY (0 <= fputs ("test", fp));
++  xfclose (fp);
++
++  fp = xfopen (filename, "rm");
++  TEST_COMPARE (fgetc (fp), 't');
++  TEST_COMPARE (ungetc ('u', fp), 'u');
++  TEST_COMPARE (fflush (fp), 0);
++  TEST_COMPARE (fgetc (fp), 't');
++  TEST_COMPARE (fgetc (fp), 'e');
++  xfclose (fp);
++
++  return 0;
++}
++
++#include <support/test-driver.c>

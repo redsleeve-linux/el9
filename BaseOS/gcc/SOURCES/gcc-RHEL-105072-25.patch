@@ -1,0 +1,97 @@
+commit c46bded78f3733ad1312d141ebf1ae541032a48b
+Author: Thomas Neumann <thomas.neumann@in.tum.de>
+Date:   Fri Aug 11 09:20:27 2023 -0600
+
+    preserve base pointer for __deregister_frame [PR110956]
+    
+    Original bug report: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=110956
+    Rainer Orth successfully tested the patch on Solaris with a full bootstrap.
+    
+    Some uncommon unwinding table encodings need to access the base pointer
+    for address computations. We do not have that information in calls to
+    __deregister_frame_info_bases, and previously simply used nullptr as
+    base pointer. That is usually fine, but for some Solaris i386 shared
+    libraries that results in wrong address computations.
+    
+    To fix this problem we now associate the unwinding object with
+    the table pointer itself, which is always known, in addition to
+    the PC range. When deregistering a frame, we first locate the object
+    using the table pointer, and then use the base pointer stored within
+    the object to compute the PC range.
+    
+    libgcc/ChangeLog:
+            PR libgcc/110956
+            * unwind-dw2-fde.c: Associate object with address of unwinding
+            table.
+
+diff --git a/libgcc/unwind-dw2-fde.c b/libgcc/unwind-dw2-fde.c
+index 41b8c2e9380bc45b..5d6fb29acd440563 100644
+--- a/libgcc/unwind-dw2-fde.c
++++ b/libgcc/unwind-dw2-fde.c
+@@ -124,6 +124,9 @@ __register_frame_info_bases (const void *begin, struct object *ob,
+ #endif
+ 
+ #ifdef ATOMIC_FDE_FAST_PATH
++  // Register the object itself to know the base pointer on deregistration.
++  btree_insert (&registered_frames, (uintptr_type) begin, 1, ob);
++
+   // Register the frame in the b-tree
+   uintptr_type range[2];
+   get_pc_range (ob, range);
+@@ -175,6 +178,9 @@ __register_frame_info_table_bases (void *begin, struct object *ob,
+   ob->s.b.encoding = DW_EH_PE_omit;
+ 
+ #ifdef ATOMIC_FDE_FAST_PATH
++  // Register the object itself to know the base pointer on deregistration.
++  btree_insert (&registered_frames, (uintptr_type) begin, 1, ob);
++
+   // Register the frame in the b-tree
+   uintptr_type range[2];
+   get_pc_range (ob, range);
+@@ -225,22 +231,17 @@ __deregister_frame_info_bases (const void *begin)
+     return ob;
+ 
+ #ifdef ATOMIC_FDE_FAST_PATH
+-  // Find the corresponding PC range
+-  struct object lookupob;
+-  lookupob.tbase = 0;
+-  lookupob.dbase = 0;
+-  lookupob.u.single = begin;
+-  lookupob.s.i = 0;
+-  lookupob.s.b.encoding = DW_EH_PE_omit;
+-#ifdef DWARF2_OBJECT_END_PTR_EXTENSION
+-  lookupob.fde_end = NULL;
+-#endif
+-  uintptr_type range[2];
+-  get_pc_range (&lookupob, range);
++  // Find the originally registered object to get the base pointer.
++  ob = btree_remove (&registered_frames, (uintptr_type) begin);
+ 
+-  // And remove
+-  ob = btree_remove (&registered_frames, range[0]);
+-  bool empty_table = (range[1] - range[0]) == 0;
++  // Remove the corresponding PC range.
++  if (ob)
++    {
++      uintptr_type range[2];
++      get_pc_range (ob, range);
++      if (range[0] != range[1])
++    btree_remove (&registered_frames, range[0]);
++    }
+ 
+   // Deallocate the sort array if any.
+   if (ob && ob->s.b.sorted)
+@@ -283,12 +284,11 @@ __deregister_frame_info_bases (const void *begin)
+ 
+  out:
+   __gthread_mutex_unlock (&object_mutex);
+-  const int empty_table = 0; // The non-atomic path stores all tables.
+ #endif
+ 
+   // If we didn't find anything in the lookup data structures then they
+   // were either already destroyed or we tried to remove an empty range.
+-  gcc_assert (in_shutdown || (empty_table || ob));
++  gcc_assert (in_shutdown || ob);
+   return (void *) ob;
+ }
+ 

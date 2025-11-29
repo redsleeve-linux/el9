@@ -1,0 +1,34 @@
+commit 9be9be828dc9020735bc7eacddd1ceae1aeedb1b
+Author: Sören Tempel <soeren+git@soeren-tempel.net>
+Date:   Sun May 14 19:30:21 2023 +0200
+
+    fix assert in __deregister_frame_info_bases
+    
+    The assertion in __deregister_frame_info_bases assumes that for every
+    frame something was inserted into the lookup data structure by
+    __register_frame_info_bases. Unfortunately, this does not necessarily
+    hold true as the btree_insert call in __register_frame_info_bases will
+    not insert anything for empty ranges. Therefore, we need to explicitly
+    account for such empty ranges in the assertion as `ob` will be a null
+    pointer for such ranges, hence causing the assertion to fail.
+    
+    Signed-off-by: Sören Tempel <soeren@soeren-tempel.net>
+    
+    libgcc/ChangeLog:
+            * unwind-dw2-fde.c: Accept empty ranges when deregistering frames.
+
+diff --git a/libgcc/unwind-dw2-fde.c b/libgcc/unwind-dw2-fde.c
+index efcf9490469ad1a0..fdf52396e8576b79 100644
+--- a/libgcc/unwind-dw2-fde.c
++++ b/libgcc/unwind-dw2-fde.c
+@@ -278,7 +278,9 @@ __deregister_frame_info_bases (const void *begin)
+   __gthread_mutex_unlock (&object_mutex);
+ #endif
+ 
+-  gcc_assert (in_shutdown || ob);
++  // If we didn't find anything in the lookup data structures then they
++  // were either already destroyed or we tried to remove an empty range.
++  gcc_assert (in_shutdown || ((range[1] - range[0]) == 0 || ob));
+   return (void *) ob;
+ }
+ 

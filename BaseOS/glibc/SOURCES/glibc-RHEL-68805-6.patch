@@ -1,0 +1,115 @@
+commit 0dcc0b2f63051863187dc678964eb17761b1a820
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Tue Jan 28 22:35:21 2025 +0000
+
+    Fix fseek handling for mmap files after ungetc or fflush (bug 32529)
+    
+    As discussed in bug 32529, fseek fails on files opened for reading
+    using mmap after ungetc.  The implementation of fseek for such files
+    has an offset computation that's also incorrect after fflush.  A
+    combined fix addresses both problems (with tests for both included as
+    well) and it seems reasonable to consider them a single bug.
+    
+    Tested for x86_64.
+
+diff --git a/libio/fileops.c b/libio/fileops.c
+index 47e9b5c27a5bca9f..c77f3572ba23cb05 100644
+--- a/libio/fileops.c
++++ b/libio/fileops.c
+@@ -1106,11 +1106,18 @@ _IO_file_seekoff_mmap (FILE *fp, off64_t offset, int dir, int mode)
+   if (mode == 0)
+     return fp->_offset - (fp->_IO_read_end - fp->_IO_read_ptr);
+ 
++  if (_IO_in_backup (fp))
++    {
++      if (dir == _IO_seek_cur)
++	offset += fp->_IO_read_ptr - fp->_IO_read_end;
++      _IO_switch_to_main_get_area (fp);
++    }
++
+   switch (dir)
+     {
+     case _IO_seek_cur:
+       /* Adjust for read-ahead (bytes is buffer). */
+-      offset += fp->_IO_read_ptr - fp->_IO_read_base;
++      offset += fp->_offset - (fp->_IO_read_end - fp->_IO_read_ptr);
+       break;
+     case _IO_seek_set:
+       break;
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index 0476c3777d7d21c4..c620d0ce3681a1ec 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -246,6 +246,7 @@ tests := \
+   tst-freopen64-6 \
+   tst-freopen64-7 \
+   tst-fseek \
++  tst-fseek-mmap \
+   tst-fwrite \
+   tst-fwrite-memstrm \
+   tst-fwrite-overflow \
+diff --git a/stdio-common/tst-fseek-mmap.c b/stdio-common/tst-fseek-mmap.c
+new file mode 100644
+index 0000000000000000..86fa99a1a2e3e7e9
+--- /dev/null
++++ b/stdio-common/tst-fseek-mmap.c
+@@ -0,0 +1,59 @@
++/* Test fseek on files using mmap (bug 32529).
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++
++#include <support/check.h>
++#include <support/temp_file.h>
++#include <support/xstdio.h>
++#include <support/xunistd.h>
++
++int
++do_test (void)
++{
++  char *filename = NULL;
++  int fd = create_temp_file ("tst-fseek-mmap", &filename);
++  TEST_VERIFY_EXIT (fd != -1);
++  xclose (fd);
++
++  /* Test fseek after ungetc (bug 32529).  */
++  FILE *fp = xfopen (filename, "w");
++  TEST_VERIFY (0 <= fputs ("test", fp));
++  xfclose (fp);
++
++  fp = xfopen (filename, "rm");
++  TEST_COMPARE (fgetc (fp), 't');
++  TEST_COMPARE (ungetc ('u', fp), 'u');
++  TEST_COMPARE (fseek (fp, 0, SEEK_CUR), 0);
++  xfclose (fp);
++
++  /* Test fseek positioning after fflush (another issue covered by the
++     same fix).  */
++  fp = xfopen (filename, "rm");
++  TEST_COMPARE (fgetc (fp), 't');
++  TEST_COMPARE (fflush (fp), 0);
++  TEST_COMPARE (ftell (fp), 1);
++  TEST_COMPARE (fseek (fp, 0, SEEK_CUR), 0);
++  TEST_COMPARE (ftell (fp), 1);
++  TEST_COMPARE (fgetc (fp), 'e');
++  xfclose (fp);
++
++  return 0;
++}
++
++#include <support/test-driver.c>

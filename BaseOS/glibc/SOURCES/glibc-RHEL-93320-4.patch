@@ -1,0 +1,2764 @@
+commit 5d28a8962dcb6ec056b81d730e3c6fb57185a210
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Dec 28 22:52:56 2021 +0100
+
+    elf: Add _dl_find_object function
+    
+    It can be used to speed up the libgcc unwinder, and the internal
+    _dl_find_dso_for_object function (which is used for caller
+    identification in dlopen and related functions, and in dladdr).
+    
+    _dl_find_object is in the internal namespace due to bug 28503.
+    If libgcc switches to _dl_find_object, this namespace issue will
+    be fixed.  It is located in libc for two reasons: it is necessary
+    to forward the call to the static libc after static dlopen, and
+    there is a link ordering issue with -static-libgcc and libgcc_eh.a
+    because libc.so is not a linker script that includes ld.so in the
+    glibc build tree (so that GCC's internal -lc after libgcc_eh.a does
+    not pick up ld.so).
+    
+    It is necessary to do the i386 customization in the
+    sysdeps/x86/bits/dl_find_object.h header shared with x86-64 because
+    otherwise, multilib installations are broken.
+    
+    The implementation uses software transactional memory, as suggested
+    by Torvald Riegel.  Two copies of the supporting data structures are
+    used, also achieving full async-signal-safety.
+    
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+Conflicts:
+	elf/Makefile
+		Updated for change of layout
+	elf/dl-support.c
+		Updated for minor context changes
+	elf/rtld.c
+		Updated for context changes caused by the existing
+		backport of upstream 706209867f1ba89c458033408d419e92d8055f58
+		"elf: Second ld.so relocation only if libc.so has been loaded"
+	include/link.h
+		Updated for minor context changes
+	manual/dynlink.texi
+		Already added by glibc-RHEL-22165-1.patch, folded in the
+		typo fix from upstream
+		6cf4ebe10c6f0f60cdfce98f5a0ec7c5ceb987df
+	sysdeps/mach/hurd/i386/libc.abilist
+		Updated for minor context changes
+
+diff --git a/bits/dl_find_object.h b/bits/dl_find_object.h
+new file mode 100644
+index 0000000000000000..5d652c9c7144b678
+--- /dev/null
++++ b/bits/dl_find_object.h
+@@ -0,0 +1,32 @@
++/* System dependent definitions for finding objects by address.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _DLFCN_H
++# error "Never use <bits/dl_find_object.h> directly; include <dlfcn.h> instead."
++#endif
++
++/* This implementation does not have a dlfo_eh_dbase member in struct
++   dl_find_object.  */
++#define DLFO_STRUCT_HAS_EH_DBASE 0
++
++/* This implementation does not have a dlfo_eh_count member in struct
++   dl_find_object.  */
++#define DLFO_STRUCT_HAS_EH_COUNT 0
++
++/* The ELF segment which contains the exception handling data.  */
++#define DLFO_EH_SEGMENT_TYPE PT_GNU_EH_FRAME
+diff --git a/dlfcn/Makefile b/dlfcn/Makefile
+index d3965427dabed898..3466669f18577b2e 100644
+--- a/dlfcn/Makefile
++++ b/dlfcn/Makefile
+@@ -19,7 +19,7 @@ subdir		:= dlfcn
+ 
+ include ../Makeconfig
+ 
+-headers		:= bits/dlfcn.h dlfcn.h
++headers		:= bits/dlfcn.h bits/dl_find_object.h dlfcn.h
+ extra-libs	:= libdl
+ libdl-routines	:= libdl-compat
+ routines = \
+diff --git a/dlfcn/dlfcn.h b/dlfcn/dlfcn.h
+index 24388cfedae4dd67..8168a71dbfe90e75 100644
+--- a/dlfcn/dlfcn.h
++++ b/dlfcn/dlfcn.h
+@@ -28,6 +28,8 @@
+ 
+ 
+ #ifdef __USE_GNU
++#include <bits/dl_find_object.h>
++
+ /* If the first argument of `dlsym' or `dlvsym' is set to RTLD_NEXT
+    the run-time address of the symbol called NAME in the next shared
+    object is returned.  The "next" relation is defined by the order
+@@ -199,6 +201,31 @@ typedef struct
+   Dl_serpath dls_serpath[1];	/* Actually longer, dls_cnt elements.  */
+ # endif
+ } Dl_serinfo;
++
++struct dl_find_object
++{
++  __extension__ unsigned long long int dlfo_flags;
++  void *dlfo_map_start;		/* Beginning of mapping containing address.  */
++  void *dlfo_map_end;		/* End of mapping.  */
++  struct link_map *dlfo_link_map;
++  void *dlfo_eh_frame;		/* Exception handling data of the object.  */
++# if DLFO_STRUCT_HAS_EH_DBASE
++  void *dlfo_eh_dbase;		/* Base address for DW_EH_PE_datarel.  */
++#  if __WORDSIZE == 32
++  unsigned int __dlfo_eh_dbase_pad;
++#  endif
++# endif
++# if DLFO_STRUCT_HAS_EH_COUNT
++  int dlfo_eh_count;		/* Number of exception handling entries.  */
++  unsigned int __dlfo_eh_count_pad;
++# endif
++  __extension__ unsigned long long int __dflo_reserved[7];
++};
++
++/* If ADDRESS is found in an object, fill in *RESULT and return 0.
++   Otherwise, return -1.  */
++int _dl_find_object (void *__address, struct dl_find_object *__result) __THROW;
++
+ #endif /* __USE_GNU */
+ 
+ 
+diff --git a/elf/Makefile b/elf/Makefile
+index f5c9b6df9a8f9acd..e1e6107c277f5f76 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -43,6 +43,7 @@ routines = \
+   dl-sym \
+   dl-sysdep \
+   enbl-secure \
++  libc-dl_find_object \
+   libc_early_init \
+   rtld_static_init \
+   # routines
+@@ -58,6 +59,7 @@ dl-routines = \
+   dl-deps \
+   dl-exception \
+   dl-execstack \
++  dl-find_object \
+   dl-fini \
+   dl-init \
+   dl-load \
+@@ -119,6 +121,9 @@ elide-routines.os = \
+   thread_gscope_wait \
+   # elide-routines.os
+ 
++# These object files are only included in the dynamically-linked libc.
++shared-only-routines = libc-dl_find_object
++
+ # ld.so uses those routines, plus some special stuff for being the program
+ # interpreter and operating independent of libc.
+ rtld-routines = \
+@@ -280,6 +285,7 @@ tests-static-internal := \
+   tst-stackguard1-static \
+   tst-tls1-static \
+   tst-tls1-static-non-pie \
++  tst-dl_find_object-static \
+   # tests-static-internal
+ 
+ CRT-tst-tls1-static-non-pie := $(csu-objpfx)crt1.o
+@@ -520,6 +526,7 @@ tests-internal += \
+   tst-tls8 \
+   unload \
+   unload2 \
++  tst-dl_find_object tst-dl_find_object-threads \
+   # tests-internal
+ 
+ tests-container += \
+@@ -781,6 +788,16 @@ modules-names = \
+   tst-deep1mod1 \
+   tst-deep1mod2 \
+   tst-deep1mod3 \
++  tst-dl_find_object-mod1 \
++  tst-dl_find_object-mod2 \
++  tst-dl_find_object-mod3 \
++  tst-dl_find_object-mod4 \
++  tst-dl_find_object-mod5 \
++  tst-dl_find_object-mod6 \
++  tst-dl_find_object-mod7 \
++  tst-dl_find_object-mod8 \
++  tst-dl_find_object-mod9 \
++  tst-dlmopen1mod \
+   tst-dlclose-lazy-mod1 \
+   tst-dlclose-lazy-mod2 \
+   tst-dlmopen-dlerror-mod \
+@@ -2772,6 +2789,37 @@ $(objpfx)tst-ro-dynamic-mod.so: $(objpfx)tst-ro-dynamic-mod.os \
+ 
+ $(objpfx)tst-rtld-run-static.out: $(objpfx)ldconfig
+ 
++$(objpfx)tst-dl_find_object.out: \
++  $(objpfx)tst-dl_find_object-mod1.so $(objpfx)tst-dl_find_object-mod2.so
++$(objpfx)tst-dl_find_object-static.out: \
++  $(objpfx)tst-dl_find_object-mod1.so $(objpfx)tst-dl_find_object-mod2.so
++tst-dl_find_object-static-ENV = $(static-dlopen-environment)
++CFLAGS-tst-dl_find_object.c += -funwind-tables
++CFLAGS-tst-dl_find_object-static.c += -funwind-tables
++LDFLAGS-tst-dl_find_object-static += -Wl,--eh-frame-hdr
++CFLAGS-tst-dl_find_object-mod1.c += -funwind-tables
++CFLAGS-tst-dl_find_object-mod2.c += -funwind-tables
++LDFLAGS-tst-dl_find_object-mod2.so += -Wl,--enable-new-dtags,-z,nodelete
++$(objpfx)tst-dl_find_object-threads: $(shared-thread-library)
++CFLAGS-tst-dl_find_object-threads.c += -funwind-tables
++$(objpfx)tst-dl_find_object-threads.out: \
++  $(objpfx)tst-dl_find_object-mod1.so \
++  $(objpfx)tst-dl_find_object-mod2.so \
++  $(objpfx)tst-dl_find_object-mod3.so \
++  $(objpfx)tst-dl_find_object-mod4.so \
++  $(objpfx)tst-dl_find_object-mod5.so \
++  $(objpfx)tst-dl_find_object-mod6.so \
++  $(objpfx)tst-dl_find_object-mod7.so \
++  $(objpfx)tst-dl_find_object-mod8.so \
++  $(objpfx)tst-dl_find_object-mod9.so
++CFLAGS-tst-dl_find_object-mod3.c += -funwind-tables
++CFLAGS-tst-dl_find_object-mod4.c += -funwind-tables
++CFLAGS-tst-dl_find_object-mod5.c += -funwind-tables
++CFLAGS-tst-dl_find_object-mod6.c += -funwind-tables
++CFLAGS-tst-dl_find_object-mod7.c += -funwind-tables
++CFLAGS-tst-dl_find_object-mod8.c += -funwind-tables
++CFLAGS-tst-dl_find_object-mod9.c += -funwind-tables
++
+ $(objpfx)tst-tls-allocation-failure-static-patched: \
+   $(objpfx)tst-tls-allocation-failure-static $(..)scripts/tst-elf-edit.py
+ 	cp $< $@
+diff --git a/elf/Versions b/elf/Versions
+index 17834c7d1c371e1d..71d648a6b4bcbf5a 100644
+--- a/elf/Versions
++++ b/elf/Versions
+@@ -20,6 +20,9 @@ libc {
+     __register_frame_info_table_bases; _Unwind_Find_FDE;
+   }
+ %endif
++  GLIBC_2.35 {
++    _dl_find_object;
++  }
+   GLIBC_PRIVATE {
+     # functions used in other libraries
+     __libc_early_init;
+diff --git a/elf/dl-close.c b/elf/dl-close.c
+index fa3974afba798073..4514c53d2db261c1 100644
+--- a/elf/dl-close.c
++++ b/elf/dl-close.c
+@@ -32,6 +32,7 @@
+ #include <sysdep-cancel.h>
+ #include <tls.h>
+ #include <stap-probe.h>
++#include <dl-find_object.h>
+ 
+ #include <dl-unmap-segments.h>
+ 
+@@ -694,6 +695,9 @@ _dl_close_worker (struct link_map *map, bool force)
+ 	  if (imap->l_next != NULL)
+ 	    imap->l_next->l_prev = imap->l_prev;
+ 
++	  /* Update the data used by _dl_find_object.  */
++	  _dl_find_object_dlclose (imap);
++
+ 	  free (imap->l_versions);
+ 	  if (imap->l_origin != (char *) -1)
+ 	    free ((char *) imap->l_origin);
+diff --git a/elf/dl-find_object.c b/elf/dl-find_object.c
+new file mode 100644
+index 0000000000000000..324f40742d59b4dc
+--- /dev/null
++++ b/elf/dl-find_object.c
+@@ -0,0 +1,842 @@
++/* Locating objects in the process image.  ld.so implementation.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <assert.h>
++#include <atomic_wide_counter.h>
++#include <dl-find_object.h>
++#include <dlfcn.h>
++#include <ldsodefs.h>
++#include <link.h>
++#include <stdbool.h>
++#include <stddef.h>
++#include <stdint.h>
++
++/* Fallback implementation of _dl_find_object.  It uses a linear
++   search, needs locking, and is not async-signal-safe.  It is used in
++   _dl_find_object prior to initialization, when called from audit
++   modules.  It also serves as the reference implementation for
++   _dl_find_object.  */
++static int
++_dl_find_object_slow (void *pc, struct dl_find_object *result)
++{
++  ElfW(Addr) addr = (ElfW(Addr)) pc;
++  for (Lmid_t ns = 0; ns < GL(dl_nns); ++ns)
++    for (struct link_map *l = GL(dl_ns)[ns]._ns_loaded; l != NULL;
++         l = l->l_next)
++      if (addr >= l->l_map_start && addr < l->l_map_end
++          && (l->l_contiguous || _dl_addr_inside_object (l, addr)))
++        {
++          assert (ns == l->l_ns);
++          struct dl_find_object_internal internal;
++          _dl_find_object_from_map (l, &internal);
++          _dl_find_object_to_external (&internal, result);
++          return 1;
++        }
++
++  /* Object not found.  */
++  return -1;
++}
++
++/* Data for the main executable.  There is usually a large gap between
++   the main executable and initially loaded shared objects.  Record
++   the main executable separately, to increase the chance that the
++   range for the non-closeable mappings below covers only the shared
++   objects (and not also the gap between main executable and shared
++   objects).  */
++static struct dl_find_object_internal _dlfo_main attribute_relro;
++
++/* Data for initially loaded shared objects that cannot be unloaded.
++   (This may also contain non-contiguous mappings from the main
++   executable.)  The mappings are stored in address order in the
++   _dlfo_nodelete_mappings array (containing
++   _dlfo_nodelete_mappings_size elements).  It is not modified after
++   initialization.  */
++static uintptr_t _dlfo_nodelete_mappings_end attribute_relro;
++static size_t _dlfo_nodelete_mappings_size attribute_relro;
++static struct dl_find_object_internal *_dlfo_nodelete_mappings
++  attribute_relro;
++
++/* Mappings created by dlopen can go away with dlclose, so a dynamic
++   data structure with some synchronization is needed.  Individual
++   segments are similar to the _dlfo_nodelete_mappings array above.
++   The previous segment contains lower addresses and is at most half
++   as long.  Checking the address of the base address of the first
++   element during a lookup can therefore approximate a binary search
++   over all segments, even though the data is not stored in one
++   contiguous array.
++
++   During updates, the segments are overwritten in place, and a
++   software transactional memory construct (involving the
++   _dlfo_loaded_mappings_version variable) is used to detect
++   concurrent modification, and retry as necessary.  The memory
++   allocations are never deallocated, but slots used for objects that
++   have been dlclose'd can be reused by dlopen.  The memory can live
++   in the regular C malloc heap.
++
++   The segments are populated from the start of the list, with the
++   mappings with the highest address.  Only if this segment is full,
++   previous segments are used for mappings at lower addresses.  The
++   remaining segments are populated as needed, but after allocating
++   further segments, some of the initial segments (at the end of the
++   linked list) can be empty (with size 0).
++
++   Adding new elements to this data structure is another source of
++   quadratic behavior for dlopen.  If the other causes of quadratic
++   behavior are eliminated, a more complicated data structure will be
++   needed.  */
++struct dlfo_mappings_segment
++{
++  /* The previous segment has lower base addresses.  */
++  struct dlfo_mappings_segment *previous;
++
++  /* Used by __libc_freeres to deallocate malloc'ed memory.  */
++  void *to_free;
++
++  /* Count of array elements in use and allocated.  */
++  size_t size;
++  size_t allocated;
++
++  struct dl_find_object_internal objects[];
++};
++
++/* To achieve async-signal-safety, two copies of the data structure
++   are used, so that a signal handler can still use this data even if
++   dlopen or dlclose modify the other copy.  The the MSB in
++   _dlfo_loaded_mappings_version determines which array element is the
++   currently active region.  */
++static struct dlfo_mappings_segment *_dlfo_loaded_mappings[2];
++
++/* Returns the number of actually used elements in all segments
++   starting at SEG.  */
++static inline size_t
++_dlfo_mappings_segment_count_used (struct dlfo_mappings_segment *seg)
++{
++  size_t count = 0;
++  for (; seg != NULL && seg->size > 0; seg = seg->previous)
++    for (size_t i = 0; i < seg->size; ++i)
++      /* Exclude elements which have been dlclose'd.  */
++      count += seg->objects[i].map != NULL;
++  return count;
++}
++
++/* Compute the total number of available allocated segments linked
++   from SEG.  */
++static inline size_t
++_dlfo_mappings_segment_count_allocated (struct dlfo_mappings_segment *seg)
++{
++  size_t count = 0;
++  for (; seg != NULL; seg = seg->previous)
++    count += seg->allocated;
++  return count;
++}
++
++/* This is essentially an arbitrary value.  dlopen allocates plenty of
++   memory anyway, so over-allocated a bit does not hurt.  Not having
++   many small-ish segments helps to avoid many small binary searches.
++   Not using a power of 2 means that we do not waste an extra page
++   just for the malloc header if a mapped allocation is used in the
++   glibc allocator.  */
++enum { dlfo_mappings_initial_segment_size = 63 };
++
++/* Allocate an empty segment.  This used for the first ever
++   allocation.  */
++static struct dlfo_mappings_segment *
++_dlfo_mappings_segment_allocate_unpadded (size_t size)
++{
++  if (size < dlfo_mappings_initial_segment_size)
++    size = dlfo_mappings_initial_segment_size;
++  /* No overflow checks here because the size is a mapping count, and
++     struct link_map is larger than what we allocate here.  */
++  enum
++    {
++      element_size = sizeof ((struct dlfo_mappings_segment) {}.objects[0])
++    };
++  size_t to_allocate = (sizeof (struct dlfo_mappings_segment)
++                        + size * element_size);
++  struct dlfo_mappings_segment *result = malloc (to_allocate);
++  if (result != NULL)
++    {
++      result->previous = NULL;
++      result->to_free = NULL; /* Minimal malloc memory cannot be freed.  */
++      result->size = 0;
++      result->allocated = size;
++    }
++  return result;
++}
++
++/* Allocate an empty segment that is at least SIZE large.  PREVIOUS
++   points to the chain of previously allocated segments and can be
++   NULL.  */
++static struct dlfo_mappings_segment *
++_dlfo_mappings_segment_allocate (size_t size,
++                                 struct dlfo_mappings_segment * previous)
++{
++  /* Exponential sizing policies, so that lookup approximates a binary
++     search.  */
++  {
++    size_t minimum_growth;
++    if (previous == NULL)
++      minimum_growth = dlfo_mappings_initial_segment_size;
++    else
++      minimum_growth = 2* previous->allocated;
++    if (size < minimum_growth)
++      size = minimum_growth;
++  }
++  enum { cache_line_size_estimate = 128 };
++  /* No overflow checks here because the size is a mapping count, and
++     struct link_map is larger than what we allocate here.  */
++  enum
++    {
++      element_size = sizeof ((struct dlfo_mappings_segment) {}.objects[0])
++    };
++  size_t to_allocate = (sizeof (struct dlfo_mappings_segment)
++                        + size * element_size
++                        + 2 * cache_line_size_estimate);
++  char *ptr = malloc (to_allocate);
++  if (ptr == NULL)
++    return NULL;
++  char *original_ptr = ptr;
++  /* Start and end at a (conservative) 128-byte cache line boundary.
++     Do not use memalign for compatibility with partially interposing
++     malloc implementations.  */
++  char *end = PTR_ALIGN_DOWN (ptr + to_allocate, cache_line_size_estimate);
++  ptr = PTR_ALIGN_UP (ptr, cache_line_size_estimate);
++  struct dlfo_mappings_segment *result
++    = (struct dlfo_mappings_segment *) ptr;
++  result->previous = previous;
++  result->to_free = original_ptr;
++  result->size = 0;
++  /* We may have obtained slightly more space if malloc happened
++     to provide an over-aligned pointer.  */
++  result->allocated = (((uintptr_t) (end - ptr)
++                        - sizeof (struct dlfo_mappings_segment))
++                       / element_size);
++  assert (result->allocated >= size);
++  return result;
++}
++
++/* Monotonic counter for software transactional memory.  The lowest
++   bit indicates which element of the _dlfo_loaded_mappings contains
++   up-to-date data.  */
++static __atomic_wide_counter _dlfo_loaded_mappings_version;
++
++/* TM version at the start of the read operation.  */
++static inline uint64_t
++_dlfo_read_start_version (void)
++{
++  /* Acquire MO load synchronizes with the fences at the beginning and
++     end of the TM update region.  */
++  return __atomic_wide_counter_load_acquire (&_dlfo_loaded_mappings_version);
++}
++
++/* Optimized variant of _dlfo_read_start_version which can be called
++   when the loader is write-locked.  */
++static inline uint64_t
++_dlfo_read_version_locked (void)
++{
++  return __atomic_wide_counter_load_relaxed (&_dlfo_loaded_mappings_version);
++}
++
++/* Update the version to reflect that an update is happening.  This
++   does not change the bit that controls the active segment chain.
++   Returns the index of the currently active segment chain.  */
++static inline unsigned int
++_dlfo_mappings_begin_update (void)
++{
++  unsigned int v
++    = __atomic_wide_counter_fetch_add_relaxed (&_dlfo_loaded_mappings_version,
++                                               2);
++  /* Subsequent stores to the TM data must not be reordered before the
++     store above with the version update.  */
++  atomic_thread_fence_release ();
++  return v & 1;
++}
++
++/* Installs the just-updated version as the active version.  */
++static inline void
++_dlfo_mappings_end_update (void)
++{
++  /* The previous writes to the TM data must not be reordered after
++     the version update below.  */
++  atomic_thread_fence_release ();
++  __atomic_wide_counter_fetch_add_relaxed (&_dlfo_loaded_mappings_version,
++                                           1);
++}
++/* Completes an in-place update without switching versions.  */
++static inline void
++_dlfo_mappings_end_update_no_switch (void)
++{
++  /* The previous writes to the TM data must not be reordered after
++     the version update below.  */
++  atomic_thread_fence_release ();
++  __atomic_wide_counter_fetch_add_relaxed (&_dlfo_loaded_mappings_version,
++                                           2);
++}
++
++/* Return true if the read was successful, given the start
++   version.  */
++static inline bool
++_dlfo_read_success (uint64_t start_version)
++{
++  return _dlfo_read_start_version () == start_version;
++}
++
++/* Returns the active segment identified by the specified start
++   version.  */
++static struct dlfo_mappings_segment *
++_dlfo_mappings_active_segment (uint64_t start_version)
++{
++  return _dlfo_loaded_mappings[start_version & 1];
++}
++
++/* Searches PC amoung the address-sorted array [FIRST1, FIRST1 +
++   SIZE).  Assumes PC >= FIRST1->map_start.  Returns a pointer to the
++   element that contains PC, or NULL if there is no such element.  */
++static inline struct dl_find_object_internal *
++_dlfo_lookup (uintptr_t pc, struct dl_find_object_internal *first1, size_t size)
++{
++  struct dl_find_object_internal *end = first1 + size;
++
++  /* Search for a lower bound in first.  */
++  struct dl_find_object_internal *first = first1;
++  while (size > 0)
++    {
++      size_t half = size >> 1;
++      struct dl_find_object_internal *middle = first + half;
++      if (middle->map_start < pc)
++        {
++          first = middle + 1;
++          size -= half + 1;
++        }
++      else
++        size = half;
++    }
++
++  if (first != end && pc == first->map_start)
++    {
++      if (pc < first->map_end)
++        return first;
++      else
++        /* Zero-length mapping after dlclose.  */
++        return NULL;
++    }
++  else
++    {
++      /* Check to see if PC is in the previous mapping.  */
++      --first;
++      if (pc < first->map_end)
++        /* pc >= first->map_start implied by the search above.  */
++        return first;
++      else
++        return NULL;
++    }
++}
++
++int
++_dl_find_object (void *pc1, struct dl_find_object *result)
++{
++  uintptr_t pc = (uintptr_t) pc1;
++
++  if (__glibc_unlikely (_dlfo_main.map_end == 0))
++    {
++      /* Not initialized.  No locking is needed here because this can
++         only be called from audit modules, which cannot create
++         threads.  */
++      return _dl_find_object_slow (pc1, result);
++    }
++
++  /* Main executable.  */
++  if (pc >= _dlfo_main.map_start && pc < _dlfo_main.map_end)
++    {
++      _dl_find_object_to_external (&_dlfo_main, result);
++      return 0;
++    }
++
++  /* Other initially loaded objects.  */
++  if (pc >= _dlfo_nodelete_mappings->map_start
++      && pc < _dlfo_nodelete_mappings_end)
++    {
++      struct dl_find_object_internal *obj
++        = _dlfo_lookup (pc, _dlfo_nodelete_mappings,
++                        _dlfo_nodelete_mappings_size);
++      if (obj != NULL)
++        {
++          _dl_find_object_to_external (obj, result);
++          return 0;
++        }
++      /* Fall through to the full search.  The kernel may have mapped
++         the initial mappings with gaps that are later filled by
++         dlopen with other mappings.  */
++    }
++
++  /* Handle audit modules, dlopen, dlopen objects.  This uses software
++     transactional memory, with a retry loop in case the version
++     changes during execution.  */
++  while (true)
++    {
++    retry:
++      ;
++      uint64_t start_version = _dlfo_read_start_version ();
++
++      /* The read through seg->previous assumes that the CPU
++         recognizes the load dependency, so that no invalid size
++         values is read.  Furthermore, the code assumes that no
++         out-of-thin-air value for seg->size is observed.  Together,
++         this ensures that the observed seg->size value is always less
++         than seg->allocated, so that _dlfo_mappings_index does not
++         read out-of-bounds.  (This avoids intermediate TM version
++         verification.  A concurrent version update will lead to
++         invalid lookup results, but not to out-of-memory access.)
++
++         Either seg == NULL or seg->size == 0 terminates the segment
++         list.  _dl_find_object_update does not bother to clear the
++         size on earlier unused segments.  */
++      for (struct dlfo_mappings_segment *seg
++             = _dlfo_mappings_active_segment (start_version);
++           seg != NULL && seg->size > 0; seg = seg->previous)
++        if (pc >= seg->objects[0].map_start)
++          {
++            /* PC may lie within this segment.  If it is less than the
++               segment start address, it can only lie in a previous
++               segment, due to the base address sorting.  */
++            struct dl_find_object_internal *obj
++              = _dlfo_lookup (pc, seg->objects, seg->size);
++
++            if (obj != NULL)
++              {
++                /* Found the right mapping.  Copy out the data prior to
++                   checking if the read transaction was successful.  */
++                struct dl_find_object_internal copy = *obj;
++                if (_dlfo_read_success (start_version))
++                  {
++                    _dl_find_object_to_external (&copy, result);
++                    return 0;
++                  }
++                else
++                  /* Read transaction failure.  */
++                  goto retry;
++              }
++            else
++              {
++                /* PC is not covered by this mapping.  */
++                if (_dlfo_read_success (start_version))
++                  return -1;
++                else
++                  /* Read transaction failure.  */
++                  goto retry;
++              }
++          } /* if: PC might lie within the current seg.  */
++
++      /* PC is not covered by any segment.  */
++      if (_dlfo_read_success (start_version))
++        return -1;
++    } /* Transaction retry loop.  */
++}
++rtld_hidden_def (_dl_find_object)
++
++/* _dlfo_process_initial is called twice.  First to compute the array
++   sizes from the initial loaded mappings.  Second to fill in the
++   bases and infos arrays with the (still unsorted) data.  Returns the
++   number of loaded (non-nodelete) mappings.  */
++static size_t
++_dlfo_process_initial (void)
++{
++  struct link_map *main_map = GL(dl_ns)[LM_ID_BASE]._ns_loaded;
++
++  size_t nodelete = 0;
++  if (!main_map->l_contiguous)
++    {
++      struct dl_find_object_internal dlfo;
++      _dl_find_object_from_map (main_map, &dlfo);
++
++      /* PT_LOAD segments for a non-contiguous are added to the
++         non-closeable mappings.  */
++      for (const ElfW(Phdr) *ph = main_map->l_phdr,
++             *ph_end = main_map->l_phdr + main_map->l_phnum;
++           ph < ph_end; ++ph)
++        if (ph->p_type == PT_LOAD)
++          {
++            if (_dlfo_nodelete_mappings != NULL)
++              {
++                /* Second pass only.  */
++                _dlfo_nodelete_mappings[nodelete] = dlfo;
++                _dlfo_nodelete_mappings[nodelete].map_start
++                  = ph->p_vaddr + main_map->l_addr;
++                _dlfo_nodelete_mappings[nodelete].map_end
++                  = _dlfo_nodelete_mappings[nodelete].map_start + ph->p_memsz;
++              }
++            ++nodelete;
++          }
++    }
++
++  size_t loaded = 0;
++  for (Lmid_t ns = 0; ns < GL(dl_nns); ++ns)
++    for (struct link_map *l = GL(dl_ns)[ns]._ns_loaded; l != NULL;
++         l = l->l_next)
++      /* Skip the main map processed above, and proxy maps.  */
++      if (l != main_map && l == l->l_real)
++        {
++          /* lt_library link maps are implicitly NODELETE.  */
++          if (l->l_type == lt_library || l->l_nodelete_active)
++            {
++              if (_dlfo_nodelete_mappings != NULL)
++                /* Second pass only.  */
++                _dl_find_object_from_map
++                  (l, _dlfo_nodelete_mappings + nodelete);
++              ++nodelete;
++            }
++          else if (l->l_type == lt_loaded)
++            {
++              if (_dlfo_loaded_mappings[0] != NULL)
++                /* Second pass only.  */
++                _dl_find_object_from_map
++                  (l, &_dlfo_loaded_mappings[0]->objects[loaded]);
++              ++loaded;
++            }
++        }
++
++  _dlfo_nodelete_mappings_size = nodelete;
++  return loaded;
++}
++
++/* Selection sort based on mapping start address.  */
++void
++_dlfo_sort_mappings (struct dl_find_object_internal *objects, size_t size)
++{
++  if (size < 2)
++    return;
++
++  for (size_t i = 0; i < size - 1; ++i)
++    {
++      /* Find minimum.  */
++      size_t min_idx = i;
++      uintptr_t min_val = objects[i].map_start;
++      for (size_t j = i + 1; j < size; ++j)
++        if (objects[j].map_start < min_val)
++          {
++            min_idx = j;
++            min_val = objects[j].map_start;
++          }
++
++      /* Swap into place.  */
++      struct dl_find_object_internal tmp = objects[min_idx];
++      objects[min_idx] = objects[i];
++      objects[i] = tmp;
++    }
++}
++
++void
++_dl_find_object_init (void)
++{
++  /* Cover the main mapping.  */
++  {
++    struct link_map *main_map = GL(dl_ns)[LM_ID_BASE]._ns_loaded;
++
++    if (main_map->l_contiguous)
++      _dl_find_object_from_map (main_map, &_dlfo_main);
++    else
++      {
++        /* Non-contiguous main maps are handled in
++           _dlfo_process_initial.  Mark as initialized, but not
++           coverying any valid PC.  */
++        _dlfo_main.map_start = -1;
++        _dlfo_main.map_end = -1;
++      }
++  }
++
++  /* Allocate the data structures.  */
++  size_t loaded_size = _dlfo_process_initial ();
++  _dlfo_nodelete_mappings = malloc (_dlfo_nodelete_mappings_size
++                                    * sizeof (*_dlfo_nodelete_mappings));
++  if (loaded_size > 0)
++    _dlfo_loaded_mappings[0]
++      = _dlfo_mappings_segment_allocate_unpadded (loaded_size);
++  if (_dlfo_nodelete_mappings == NULL
++      || (loaded_size > 0 && _dlfo_loaded_mappings[0] == NULL))
++    _dl_fatal_printf ("\
++Fatal glibc error: cannot allocate memory for find-object data\n");
++  /* Fill in the data with the second call.  */
++  _dlfo_nodelete_mappings_size = 0;
++  _dlfo_process_initial ();
++
++  /* Sort both arrays.  */
++  if (_dlfo_nodelete_mappings_size > 0)
++    {
++      _dlfo_sort_mappings (_dlfo_nodelete_mappings,
++                           _dlfo_nodelete_mappings_size);
++      size_t last_idx = _dlfo_nodelete_mappings_size - 1;
++      _dlfo_nodelete_mappings_end = _dlfo_nodelete_mappings[last_idx].map_end;
++    }
++  if (loaded_size > 0)
++    _dlfo_sort_mappings (_dlfo_loaded_mappings[0]->objects,
++                         _dlfo_loaded_mappings[0]->size);
++}
++
++static void
++_dl_find_object_link_map_sort (struct link_map **loaded, size_t size)
++{
++  /* Selection sort based on map_start.  */
++  if (size < 2)
++    return;
++  for (size_t i = 0; i < size - 1; ++i)
++    {
++      /* Find minimum.  */
++      size_t min_idx = i;
++      ElfW(Addr) min_val = loaded[i]->l_map_start;
++      for (size_t j = i + 1; j < size; ++j)
++        if (loaded[j]->l_map_start < min_val)
++          {
++            min_idx = j;
++            min_val = loaded[j]->l_map_start;
++          }
++
++      /* Swap into place.  */
++      struct link_map *tmp = loaded[min_idx];
++      loaded[min_idx] = loaded[i];
++      loaded[i] = tmp;
++    }
++}
++
++/* Initializes the segment for writing.  Returns the target write
++   index (plus 1) in this segment.  The index is chosen so that a
++   partially filled segment still has data at index 0.  */
++static inline size_t
++_dlfo_update_init_seg (struct dlfo_mappings_segment *seg,
++                       size_t remaining_to_add)
++{
++  if (remaining_to_add < seg->allocated)
++    /* Partially filled segment.  */
++    seg->size = remaining_to_add;
++  else
++    seg->size = seg->allocated;
++  return seg->size;
++}
++
++/* Invoked from _dl_find_object_update after sorting.  */
++static bool
++_dl_find_object_update_1 (struct link_map **loaded, size_t count)
++{
++  int active_idx = _dlfo_read_version_locked () & 1;
++
++  struct dlfo_mappings_segment *current_seg
++    = _dlfo_loaded_mappings[active_idx];
++  size_t current_used = _dlfo_mappings_segment_count_used (current_seg);
++
++  struct dlfo_mappings_segment *target_seg
++    = _dlfo_loaded_mappings[!active_idx];
++  size_t remaining_to_add = current_used + count;
++
++  /* Ensure that the new segment chain has enough space.  */
++  {
++    size_t new_allocated
++      = _dlfo_mappings_segment_count_allocated (target_seg);
++    if (new_allocated < remaining_to_add)
++      {
++        size_t more = remaining_to_add - new_allocated;
++        target_seg = _dlfo_mappings_segment_allocate (more, target_seg);
++        if (target_seg == NULL)
++          /* Out of memory.  Do not end the update and keep the
++             current version unchanged.  */
++          return false;
++
++        /* Start update cycle. */
++        _dlfo_mappings_begin_update ();
++
++        /* The barrier ensures that a concurrent TM read or fork does
++           not see a partially initialized segment.  */
++        atomic_store_release (&_dlfo_loaded_mappings[!active_idx], target_seg);
++      }
++    else
++      /* Start update cycle without allocation.  */
++      _dlfo_mappings_begin_update ();
++  }
++
++  size_t target_seg_index1 = _dlfo_update_init_seg (target_seg,
++                                                    remaining_to_add);
++
++  /* Merge the current_seg segment list with the loaded array into the
++     target_set.  Merging occurs backwards, in decreasing l_map_start
++     order.  */
++  size_t loaded_index1 = count;
++  size_t current_seg_index1;
++  if (current_seg == NULL)
++    current_seg_index1 = 0;
++  else
++    current_seg_index1 = current_seg->size;
++  while (true)
++    {
++      if (current_seg_index1 == 0)
++        {
++          /* Switch to the previous segment.  */
++          if (current_seg != NULL)
++            current_seg = current_seg->previous;
++          if (current_seg != NULL)
++            {
++              current_seg_index1 = current_seg->size;
++              if (current_seg_index1 == 0)
++                /* No more data in previous segments.  */
++                current_seg = NULL;
++            }
++        }
++
++      if (current_seg != NULL
++          && (current_seg->objects[current_seg_index1 - 1].map == NULL))
++        {
++          /* This mapping has been dlclose'd.  Do not copy it.  */
++          --current_seg_index1;
++          continue;
++        }
++
++      if (loaded_index1 == 0 && current_seg == NULL)
++        /* No more data in either source.  */
++        break;
++
++      /* Make room for another mapping.  */
++      assert (remaining_to_add > 0);
++      if (target_seg_index1 == 0)
++        {
++          /* Switch segments and set the size of the segment.  */
++          target_seg = target_seg->previous;
++          target_seg_index1 = _dlfo_update_init_seg (target_seg,
++                                                     remaining_to_add);
++        }
++
++      /* Determine where to store the data.  */
++      struct dl_find_object_internal *dlfo
++        = &target_seg->objects[target_seg_index1 - 1];
++
++      if (loaded_index1 == 0
++          || (current_seg != NULL
++              && (loaded[loaded_index1 - 1]->l_map_start
++                  < current_seg->objects[current_seg_index1 - 1].map_start)))
++        {
++          /* Prefer mapping in current_seg.  */
++          assert (current_seg_index1 > 0);
++          *dlfo = current_seg->objects[current_seg_index1 - 1];
++          --current_seg_index1;
++        }
++      else
++        {
++          /* Prefer newly loaded link map.  */
++          assert (loaded_index1 > 0);
++          _dl_find_object_from_map (loaded[loaded_index1 - 1], dlfo);
++          loaded[loaded_index1 -  1]->l_find_object_processed = 1;
++          --loaded_index1;
++        }
++
++      /* Consume space in target segment.  */
++      --target_seg_index1;
++
++      --remaining_to_add;
++    }
++
++  /* Everything has been added.  */
++  assert (remaining_to_add == 0);
++
++  /* The segment must have been filled up to the beginning.  */
++  assert (target_seg_index1 == 0);
++
++  /* Prevent searching further into unused segments.  */
++  if (target_seg->previous != NULL)
++    target_seg->previous->size = 0;
++
++  _dlfo_mappings_end_update ();
++  return true;
++}
++
++bool
++_dl_find_object_update (struct link_map *new_map)
++{
++  /* Copy the newly-loaded link maps into an array for sorting.  */
++  size_t count = 0;
++  for (struct link_map *l = new_map; l != NULL; l = l->l_next)
++    /* Skip proxy maps and already-processed maps.  */
++    count += l == l->l_real && !l->l_find_object_processed;
++  struct link_map **map_array = malloc (count * sizeof (*map_array));
++  if (map_array == NULL)
++    return false;
++  {
++    size_t i = 0;
++    for (struct link_map *l = new_map; l != NULL; l = l->l_next)
++      if (l == l->l_real && !l->l_find_object_processed)
++        map_array[i++] = l;
++  }
++  if (count == 0)
++    return true;
++
++  _dl_find_object_link_map_sort (map_array, count);
++  bool ok = _dl_find_object_update_1 (map_array, count);
++  free (map_array);
++  return ok;
++}
++
++void
++_dl_find_object_dlclose (struct link_map *map)
++{
++  uint64_t start_version = _dlfo_read_version_locked ();
++  uintptr_t map_start = map->l_map_start;
++
++
++  /* Directly patch the size information in the mapping to mark it as
++     unused.  See the parallel lookup logic in _dl_find_object.  Do
++     not check for previous dlclose at the same mapping address
++     because that cannot happen (there would have to be an
++     intermediate dlopen, which drops size-zero mappings).  */
++  for (struct dlfo_mappings_segment *seg
++         = _dlfo_mappings_active_segment (start_version);
++       seg != NULL && seg->size > 0; seg = seg->previous)
++    if (map_start >= seg->objects[0].map_start)
++      {
++        struct dl_find_object_internal *obj
++          = _dlfo_lookup (map_start, seg->objects, seg->size);
++        if (obj == NULL)
++          /* Ignore missing link maps because of potential shutdown
++             issues around __libc_freeres.  */
++            return;
++
++        /* The update happens in-place, but given that we do not use
++           atomic accesses on the read side, update the version around
++           the update to trigger re-validation in concurrent
++           readers.  */
++        _dlfo_mappings_begin_update ();
++
++        /* Mark as closed.  */
++        obj->map_end = obj->map_start;
++        obj->map = NULL;
++
++        _dlfo_mappings_end_update_no_switch ();
++        return;
++      }
++}
++
++void
++_dl_find_object_freeres (void)
++{
++  for (int idx = 0; idx < 2; ++idx)
++    {
++      for (struct dlfo_mappings_segment *seg = _dlfo_loaded_mappings[idx];
++           seg != NULL; )
++        {
++          struct dlfo_mappings_segment *previous = seg->previous;
++          free (seg->to_free);
++          seg = previous;
++        }
++      /* Stop searching in shared objects.  */
++      _dlfo_loaded_mappings[idx] = 0;
++    }
++}
+diff --git a/elf/dl-find_object.h b/elf/dl-find_object.h
+new file mode 100644
+index 0000000000000000..f899905e09427a0d
+--- /dev/null
++++ b/elf/dl-find_object.h
+@@ -0,0 +1,115 @@
++/* Locating objects in the process image.  ld.so implementation.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _DL_FIND_EH_FRAME_H
++#define _DL_FIND_EH_FRAME_H
++
++#include <assert.h>
++#include <dlfcn.h>
++#include <ldsodefs.h>
++#include <stdbool.h>
++#include <stdint.h>
++
++/* Internal version of struct dl_find_object.  Does not include the
++   (yet unused) flags member.  We need to make a copy of data also in
++   struct link_map to support non-contiguous mappings, and to support
++   software transactional memory (the link map is not covered by
++   transactions).  */
++struct dl_find_object_internal
++{
++  uintptr_t map_start;
++  uintptr_t map_end;            /* Set to map_start by dlclose.  */
++  struct link_map *map;         /* Set to NULL by dlclose.  */
++  void *eh_frame;
++#if DLFO_STRUCT_HAS_EH_DBASE
++  void *eh_dbase;
++#endif
++#if DLFO_STRUCT_HAS_EH_COUNT
++  int eh_count;
++#endif
++};
++
++static inline void
++_dl_find_object_to_external (struct dl_find_object_internal *internal,
++                             struct dl_find_object *external)
++{
++  external->dlfo_flags = 0;
++  external->dlfo_map_start = (void *) internal->map_start;
++  external->dlfo_map_end = (void *) internal->map_end;
++  external->dlfo_link_map = internal->map;
++  external->dlfo_eh_frame = internal->eh_frame;
++# if DLFO_STRUCT_HAS_EH_DBASE
++  external->dlfo_eh_dbase = internal->eh_dbase;
++# endif
++# if DLFO_STRUCT_HAS_EH_COUNT
++  external->dlfo_eh_count = internal->eh_count;
++# endif
++}
++
++/* Extract the object location data from a link map and writes it to
++   *RESULT.  */
++static void __attribute__ ((unused))
++_dl_find_object_from_map (struct link_map *l,
++                          struct dl_find_object_internal *result)
++{
++  result->map_start = (uintptr_t) l->l_map_start;
++  result->map_end = (uintptr_t) l->l_map_end;
++  result->map = l;
++
++#if DLFO_STRUCT_HAS_EH_DBASE
++  result->eh_dbase = (void *) l->l_info[DT_PLTGOT];
++#endif
++
++  for (const ElfW(Phdr) *ph = l->l_phdr, *ph_end = l->l_phdr + l->l_phnum;
++       ph < ph_end; ++ph)
++    if (ph->p_type == DLFO_EH_SEGMENT_TYPE)
++      {
++        result->eh_frame = (void *) (ph->p_vaddr + l->l_addr);
++#if DLFO_STRUCT_HAS_EH_COUNT
++        result->eh_count = ph->p_memsz / 8;
++#endif
++        return;
++      }
++
++  /* Object has no exception handling segment.  */
++  result->eh_frame = NULL;
++#if DLFO_STRUCT_HAS_EH_COUNT
++  result->eh_count = 0;
++#endif
++}
++
++/* Called by the dynamic linker to set up the data structures for the
++   initially loaded objects.  This creates a few persistent
++   allocations, so it should be called with the minimal malloc.  */
++void _dl_find_object_init (void) attribute_hidden;
++
++/* Called by dlopen/dlmopen to add new objects to the DWARF EH frame
++   data structures.  NEW_MAP is the dlopen'ed link map.  Link maps on
++   the l_next list are added if l_object_processed is 0.  Needs to
++   be protected by loader write lock.  Returns true on success, false
++   on malloc failure.  */
++bool _dl_find_object_update (struct link_map *new_map) attribute_hidden;
++
++/* Called by dlclose to remove the link map from the DWARF EH frame
++   data structures.  Needs to be protected by loader write lock.  */
++void _dl_find_object_dlclose (struct link_map *l) attribute_hidden;
++
++/* Called from __libc_freeres to deallocate malloc'ed memory.  */
++void _dl_find_object_freeres (void) attribute_hidden;
++
++#endif /* _DL_FIND_OBJECT_H */
+diff --git a/elf/dl-libc_freeres.c b/elf/dl-libc_freeres.c
+index 68f305a6f98aac0c..2a377fa9dfc4f1c0 100644
+--- a/elf/dl-libc_freeres.c
++++ b/elf/dl-libc_freeres.c
+@@ -17,8 +17,10 @@
+    <https://www.gnu.org/licenses/>.  */
+ 
+ #include <ldsodefs.h>
++#include <dl-find_object.h>
+ 
+ void
+ __rtld_libc_freeres (void)
+ {
++  _dl_find_object_freeres ();
+ }
+diff --git a/elf/dl-open.c b/elf/dl-open.c
+index df6aa55a8842ee62..1e659e02882b42c1 100644
+--- a/elf/dl-open.c
++++ b/elf/dl-open.c
+@@ -36,6 +36,7 @@
+ #include <array_length.h>
+ #include <libc-early-init.h>
+ #include <gnu/lib-names.h>
++#include <dl-find_object.h>
+ 
+ #include <dl-dst.h>
+ #include <dl-prop.h>
+@@ -731,6 +732,10 @@ dl_open_worker_begin (void *a)
+      objects.  */
+   update_scopes (new);
+ 
++  if (!_dl_find_object_update (new))
++    _dl_signal_error (ENOMEM, new->l_libname->name, NULL,
++		      N_ ("cannot allocate address lookup data"));
++
+   /* FIXME: It is unclear whether the order here is correct.
+      Shouldn't new objects be made available for binding (and thus
+      execution) only after there TLS data has been set up fully?
+diff --git a/elf/dl-support.c b/elf/dl-support.c
+index 00abc2d8056c78b0..b80bdfc257f5fee0 100644
+--- a/elf/dl-support.c
++++ b/elf/dl-support.c
+@@ -44,6 +44,7 @@
+ #include <dl-vdso-setup.h>
+ #include <dl-auxv.h>
+ #include <array_length.h>
++#include <dl-find_object.h>
+ 
+ extern char *__progname;
+ char **_dl_argv = &__progname;	/* This is checked for some error messages.  */
+@@ -352,6 +353,8 @@ _dl_non_dynamic_init (void)
+ 	  break;
+ 	}
+ 
++  call_function_static_weak (_dl_find_object_init);
++
+   /* Setup relro on the binary itself.  */
+   _dl_protect_relro (&_dl_main_map);
+ }
+diff --git a/elf/libc-dl_find_object.c b/elf/libc-dl_find_object.c
+new file mode 100644
+index 0000000000000000..38ea3bc94999df6e
+--- /dev/null
++++ b/elf/libc-dl_find_object.c
+@@ -0,0 +1,26 @@
++/* Locating objects in the process image.  libc forwarder.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <ldsodefs.h>
++#include <dlfcn.h>
++
++int
++_dl_find_object (void *address, struct dl_find_object *result)
++{
++  return GLRO (dl_find_object) (address, result);
++}
+diff --git a/elf/rtld.c b/elf/rtld.c
+index fd70c4c3528cda2d..b5be7674dc1dbf40 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -52,6 +52,7 @@
+ #include <dl-execve.h>
+ #include <get-dynamic-info.h>
+ #include <dl-audit-check.h>
++#include <dl-find_object.h>
+ 
+ #include <assert.h>
+ 
+@@ -583,6 +584,10 @@ _dl_start (void *arg)
+ 
+   __rtld_malloc_init_stubs ();
+ 
++  /* Do not use an initializer for these members because it would
++     intefere with __rtld_static_init.  */
++  GLRO (dl_find_object) = &_dl_find_object;
++
+   {
+ #ifdef DONT_USE_BOOTSTRAP_MAP
+     ElfW(Addr) entry = _dl_start_final (arg);
+@@ -2388,6 +2393,9 @@ dl_main (const ElfW(Phdr) *phdr,
+ 	  rtld_timer_stop (&relocate_time, start);
+ 	}
+ 
++      /* Set up the object lookup structures.  */
++      _dl_find_object_init ();
++
+       /* The library defining malloc has already been relocated due to
+ 	 prelinking.  Resolve the malloc symbols for the dynamic
+ 	 loader.  */
+@@ -2497,6 +2505,9 @@ dl_main (const ElfW(Phdr) *phdr,
+ 
+   if (! prelinked)
+     {
++      /* Set up the object lookup structures.  */
++      _dl_find_object_init ();
++
+       /* If libc.so was loaded, relocate ld.so against it.  Complete ld.so
+ 	 initialization with mutex symbols from libc.so and malloc symbols
+ 	 from the global scope.  */
+diff --git a/elf/rtld_static_init.c b/elf/rtld_static_init.c
+index 3f8abb6800b401d7..6027000d3a56e46e 100644
+--- a/elf/rtld_static_init.c
++++ b/elf/rtld_static_init.c
+@@ -78,6 +78,7 @@ __rtld_static_init (struct link_map *map)
+   extern __typeof (dl->_dl_tls_static_size) _dl_tls_static_size
+     attribute_hidden;
+   dl->_dl_tls_static_size = _dl_tls_static_size;
++  dl->_dl_find_object = _dl_find_object;
+ 
+   __rtld_static_init_arch (map, dl);
+ }
+diff --git a/elf/tst-dl_find_object-mod1.c b/elf/tst-dl_find_object-mod1.c
+new file mode 100644
+index 0000000000000000..d33ef56efddc1c2b
+--- /dev/null
++++ b/elf/tst-dl_find_object-mod1.c
+@@ -0,0 +1,10 @@
++char mod1_data;
++
++void
++mod1_function (void (*f) (void))
++{
++  /* Make sure this is not a tail call and unwind information is
++     therefore needed.  */
++  f ();
++  f ();
++}
+diff --git a/elf/tst-dl_find_object-mod2.c b/elf/tst-dl_find_object-mod2.c
+new file mode 100644
+index 0000000000000000..3dad31c97c906baf
+--- /dev/null
++++ b/elf/tst-dl_find_object-mod2.c
+@@ -0,0 +1,15 @@
++#include <dlfcn.h>
++
++char mod2_data;
++
++void
++mod2_function (void (*f) (void))
++{
++  /* Make sure this is not a tail call and unwind information is
++     therefore needed.  */
++  f ();
++  f ();
++}
++
++/* Used to verify that _dl_find_object after static dlopen works.  */
++void *find_object = _dl_find_object;
+diff --git a/elf/tst-dl_find_object-mod3.c b/elf/tst-dl_find_object-mod3.c
+new file mode 100644
+index 0000000000000000..c1fc20ff9ce34503
+--- /dev/null
++++ b/elf/tst-dl_find_object-mod3.c
+@@ -0,0 +1,10 @@
++char mod3_data[4096];
++
++void
++mod3_function (void (*f) (void))
++{
++  /* Make sure this is not a tail call and unwind information is
++     therefore needed.  */
++  f ();
++  f ();
++}
+diff --git a/elf/tst-dl_find_object-mod4.c b/elf/tst-dl_find_object-mod4.c
+new file mode 100644
+index 0000000000000000..27934e60113b61b9
+--- /dev/null
++++ b/elf/tst-dl_find_object-mod4.c
+@@ -0,0 +1,10 @@
++char mod4_data;
++
++void
++mod4_function (void (*f) (void))
++{
++  /* Make sure this is not a tail call and unwind information is
++     therefore needed.  */
++  f ();
++  f ();
++}
+diff --git a/elf/tst-dl_find_object-mod5.c b/elf/tst-dl_find_object-mod5.c
+new file mode 100644
+index 0000000000000000..3bdbda8ccd662376
+--- /dev/null
++++ b/elf/tst-dl_find_object-mod5.c
+@@ -0,0 +1,11 @@
++/* Slightly larger to get different layouts.  */
++char mod5_data[4096];
++
++void
++mod5_function (void (*f) (void))
++{
++  /* Make sure this is not a tail call and unwind information is
++     therefore needed.  */
++  f ();
++  f ();
++}
+diff --git a/elf/tst-dl_find_object-mod6.c b/elf/tst-dl_find_object-mod6.c
+new file mode 100644
+index 0000000000000000..f78acffb9eb5dfac
+--- /dev/null
++++ b/elf/tst-dl_find_object-mod6.c
+@@ -0,0 +1,11 @@
++/* Large to get different layouts.  */
++char mod6_data[4096];
++
++void
++mod6_function (void (*f) (void))
++{
++  /* Make sure this is not a tail call and unwind information is
++     therefore needed.  */
++  f ();
++  f ();
++}
+diff --git a/elf/tst-dl_find_object-mod7.c b/elf/tst-dl_find_object-mod7.c
+new file mode 100644
+index 0000000000000000..71353880da7270df
+--- /dev/null
++++ b/elf/tst-dl_find_object-mod7.c
+@@ -0,0 +1,10 @@
++char mod7_data;
++
++void
++mod7_function (void (*f) (void))
++{
++  /* Make sure this is not a tail call and unwind information is
++     therefore needed.  */
++  f ();
++  f ();
++}
+diff --git a/elf/tst-dl_find_object-mod8.c b/elf/tst-dl_find_object-mod8.c
+new file mode 100644
+index 0000000000000000..41f8f1ea092fbaca
+--- /dev/null
++++ b/elf/tst-dl_find_object-mod8.c
+@@ -0,0 +1,10 @@
++char mod8_data;
++
++void
++mod8_function (void (*f) (void))
++{
++  /* Make sure this is not a tail call and unwind information is
++     therefore needed.  */
++  f ();
++  f ();
++}
+diff --git a/elf/tst-dl_find_object-mod9.c b/elf/tst-dl_find_object-mod9.c
+new file mode 100644
+index 0000000000000000..dc2e7a20cb8a42d8
+--- /dev/null
++++ b/elf/tst-dl_find_object-mod9.c
+@@ -0,0 +1,10 @@
++char mod9_data;
++
++void
++mod9_function (void (*f) (void))
++{
++  /* Make sure this is not a tail call and unwind information is
++     therefore needed.  */
++  f ();
++  f ();
++}
+diff --git a/elf/tst-dl_find_object-static.c b/elf/tst-dl_find_object-static.c
+new file mode 100644
+index 0000000000000000..a95ebeb84723fe42
+--- /dev/null
++++ b/elf/tst-dl_find_object-static.c
+@@ -0,0 +1,22 @@
++/* Basic tests for _dl_find_object.  Static version.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++/* Disable tests around _r_debug and libc symbols that do not work in
++   the static case.  */
++#define FOR_STATIC
++#include "tst-dl_find_object.c"
+diff --git a/elf/tst-dl_find_object-threads.c b/elf/tst-dl_find_object-threads.c
+new file mode 100644
+index 0000000000000000..472deeec57da0560
+--- /dev/null
++++ b/elf/tst-dl_find_object-threads.c
+@@ -0,0 +1,275 @@
++/* _dl_find_object test with parallelism.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <array_length.h>
++#include <dlfcn.h>
++#include <elf/dl-find_object.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <support/check.h>
++#include <support/support.h>
++#include <support/xdlfcn.h>
++#include <support/xthread.h>
++#include <support/xunistd.h>
++
++/* Computes the expected _dl_find_object result directly from the
++   map.  */
++static void
++from_map (struct link_map *l, struct dl_find_object *expected)
++{
++  struct dl_find_object_internal internal;
++  _dl_find_object_from_map (l, &internal);
++  _dl_find_object_to_external (&internal, expected);
++}
++
++/* Returns the soname for the test object NUMBER.  */
++static char *
++soname (int number)
++{
++  return xasprintf ("tst-dl_find_object-mod%d.so", number);
++}
++
++/* Returns the data symbol name for the test object NUMBER.  */
++static char *
++symbol (int number)
++{
++  return xasprintf ("mod%d_data", number);
++}
++
++struct verify_data
++{
++  char *soname;
++  void *address;                /* Address in the shared object.  */
++  struct dl_find_object dlfo;
++  pthread_t thr;
++};
++
++/* Compare _dl_find_object result at ADDRESS with *EXPECTED.  */
++static void
++check (void *address, struct dl_find_object *expected, int line)
++{
++  struct dl_find_object actual;
++  int ret = _dl_find_object (address, &actual);
++  if (expected == NULL)
++    {
++      if (ret != -1)
++        {
++          support_record_failure ();
++          printf ("%s:%d: unexpected success for %p\n",
++                  __FILE__, line, address);
++        }
++      return;
++    }
++  if (ret != 0)
++    {
++      support_record_failure ();
++      printf ("%s:%d: unexpected failure for %p\n",
++              __FILE__, line, address);
++      return;
++    }
++
++  if (actual.dlfo_flags != expected->dlfo_flags)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: flags is %llu, expected %llu\n",
++              __FILE__, line, address,
++              actual.dlfo_flags, expected->dlfo_flags);
++    }
++  if (actual.dlfo_flags != expected->dlfo_flags)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: map start is %p, expected %p\n",
++              __FILE__, line,
++              address, actual.dlfo_map_start, expected->dlfo_map_start);
++    }
++  if (actual.dlfo_map_end != expected->dlfo_map_end)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: map end is %p, expected %p\n",
++              __FILE__, line,
++              address, actual.dlfo_map_end, expected->dlfo_map_end);
++    }
++  if (actual.dlfo_link_map != expected->dlfo_link_map)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: link map is %p, expected %p\n",
++              __FILE__, line,
++              address, actual.dlfo_link_map, expected->dlfo_link_map);
++    }
++  if (actual.dlfo_eh_frame != expected->dlfo_eh_frame)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: EH frame is %p, expected %p\n",
++              __FILE__, line,
++              address, actual.dlfo_eh_frame, expected->dlfo_eh_frame);
++    }
++#if DLFO_STRUCT_HAS_EH_DBASE
++  if (actual.dlfo_eh_dbase != expected->dlfo_eh_dbase)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: data base is %p, expected %p\n",
++              __FILE__, line,
++              address, actual.dlfo_eh_dbase, expected->dlfo_eh_dbase);
++    }
++#endif
++#if DLFO_STRUCT_HAS_EH_COUNT
++  if (actual.dlfo_eh_count != expected->dlfo_eh_count)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: count is %d, expected %d\n",
++              __FILE__, line,
++              address, actual.dlfo_eh_count, expected->dlfo_eh_count);
++    }
++#endif
++}
++
++/* Request process termination after 3 seconds.  */
++static bool exit_requested;
++static void *
++exit_thread (void *ignored)
++{
++  usleep (3 * 100 * 1000);
++  __atomic_store_n (&exit_requested, true,  __ATOMIC_RELAXED);
++  return NULL;
++}
++
++static void *
++verify_thread (void *closure)
++{
++  struct verify_data *data = closure;
++
++  while (!__atomic_load_n (&exit_requested, __ATOMIC_RELAXED))
++    {
++      check (data->address, &data->dlfo, __LINE__);
++      check (data->dlfo.dlfo_map_start, &data->dlfo, __LINE__);
++      check (data->dlfo.dlfo_map_end - 1, &data->dlfo, __LINE__);
++    }
++
++  return NULL;
++}
++
++/* Sets up the verification data, dlopen'ing shared object NUMBER, and
++   launches a verification thread.  */
++static void
++start_verify (int number, struct verify_data *data)
++{
++  data->soname = soname (number);
++  struct link_map *l = xdlopen (data->soname, RTLD_NOW);
++  from_map (l, &data->dlfo);
++  TEST_VERIFY_EXIT (data->dlfo.dlfo_link_map == l);
++  char *sym = symbol (number);
++  data->address = xdlsym (data->dlfo.dlfo_link_map, sym);
++  free (sym);
++  data->thr = xpthread_create (NULL, verify_thread, data);
++}
++
++
++static int
++do_test (void)
++{
++  struct verify_data data_mod2;
++  struct verify_data data_mod4;
++  struct verify_data data_mod7;
++
++  /* Load the modules with gaps.  */
++  {
++    void *mod1 = xdlopen ("tst-dl_find_object-mod1.so", RTLD_NOW);
++    start_verify (2, &data_mod2);
++    void *mod3 = xdlopen ("tst-dl_find_object-mod3.so", RTLD_NOW);
++    start_verify (4, &data_mod4);
++    void *mod5 = xdlopen ("tst-dl_find_object-mod5.so", RTLD_NOW);
++    void *mod6 = xdlopen ("tst-dl_find_object-mod6.so", RTLD_NOW);
++    start_verify (7, &data_mod7);
++    xdlclose (mod6);
++    xdlclose (mod5);
++    xdlclose (mod3);
++    xdlclose (mod1);
++  }
++
++  /* Objects that continuously opened and closed.  */
++  struct temp_object
++  {
++    char *soname;
++    char *symbol;
++    struct link_map *link_map;
++    void *address;
++  } temp_objects[] =
++    {
++      { soname (1), symbol (1), },
++      { soname (3), symbol (3), },
++      { soname (5), symbol (5), },
++      { soname (6), symbol (6), },
++      { soname (8), symbol (8), },
++      { soname (9), symbol (9), },
++    };
++
++  pthread_t exit_thr = xpthread_create (NULL, exit_thread, NULL);
++
++  struct drand48_data state;
++  srand48_r (1, &state);
++  while (!__atomic_load_n (&exit_requested, __ATOMIC_RELAXED))
++    {
++      long int idx;
++      lrand48_r (&state, &idx);
++      idx %= array_length (temp_objects);
++      if (temp_objects[idx].link_map == NULL)
++        {
++          temp_objects[idx].link_map = xdlopen (temp_objects[idx].soname,
++                                                RTLD_NOW);
++          temp_objects[idx].address = xdlsym (temp_objects[idx].link_map,
++                                              temp_objects[idx].symbol);
++        }
++      else
++        {
++          xdlclose (temp_objects[idx].link_map);
++          temp_objects[idx].link_map = NULL;
++          struct dl_find_object dlfo;
++          int ret = _dl_find_object (temp_objects[idx].address, &dlfo);
++          if (ret != -1)
++            {
++              TEST_VERIFY_EXIT (ret == 0);
++              support_record_failure ();
++              printf ("%s: error: %s EH found after dlclose, link map %p\n",
++                      __FILE__, temp_objects[idx].soname, dlfo.dlfo_link_map);
++            }
++        }
++    }
++
++  xpthread_join (data_mod2.thr);
++  xpthread_join (data_mod4.thr);
++  xpthread_join (data_mod7.thr);
++  xpthread_join (exit_thr);
++
++  for (size_t i = 0; i < array_length (temp_objects); ++i)
++    {
++      free (temp_objects[i].soname);
++      free (temp_objects[i].symbol);
++      if (temp_objects[i].link_map != NULL)
++        xdlclose (temp_objects[i].link_map);
++    }
++
++  free (data_mod2.soname);
++  free (data_mod4.soname);
++  xdlclose (data_mod4.dlfo.dlfo_link_map);
++  free (data_mod7.soname);
++  xdlclose (data_mod7.dlfo.dlfo_link_map);
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/elf/tst-dl_find_object.c b/elf/tst-dl_find_object.c
+new file mode 100644
+index 0000000000000000..9abffa35d479c8fc
+--- /dev/null
++++ b/elf/tst-dl_find_object.c
+@@ -0,0 +1,240 @@
++/* Basic tests for _dl_find_object.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <dl-find_object.h>
++#include <dlfcn.h>
++#include <gnu/lib-names.h>
++#include <ldsodefs.h>
++#include <link.h>
++#include <stdio.h>
++#include <support/check.h>
++#include <support/xdlfcn.h>
++
++/* Use data objects for testing, so that it is not necessary to decode
++   function descriptors on architectures that have them.  */
++static char main_program_data;
++
++/* Computes the expected _dl_find_object result directly from the
++   map.  */
++static void
++from_map (struct link_map *l, struct dl_find_object *expected)
++{
++  struct dl_find_object_internal internal;
++  _dl_find_object_from_map (l, &internal);
++  _dl_find_object_to_external (&internal, expected);
++}
++
++/* Compare _dl_find_object result at ADDRESS with *EXPECTED.  */
++static void
++check (void *address,
++       struct dl_find_object *expected, int line)
++{
++  struct dl_find_object actual;
++  int ret = _dl_find_object (address, &actual);
++  if (expected == NULL)
++    {
++      if (ret != -1)
++        {
++          support_record_failure ();
++          printf ("%s:%d: unexpected success for %p\n",
++                  __FILE__, line, address);
++        }
++      return;
++    }
++  if (ret != 0)
++    {
++      support_record_failure ();
++      printf ("%s:%d: unexpected failure for %p\n",
++              __FILE__, line, address);
++      return;
++    }
++
++  if (actual.dlfo_flags != expected->dlfo_flags)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: flags is %llu, expected %llu\n",
++              __FILE__, line, address,
++              actual.dlfo_flags, expected->dlfo_flags);
++    }
++  if (actual.dlfo_flags != expected->dlfo_flags)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: map start is %p, expected %p\n",
++              __FILE__, line,
++              address, actual.dlfo_map_start, expected->dlfo_map_start);
++    }
++  if (actual.dlfo_map_end != expected->dlfo_map_end)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: map end is %p, expected %p\n",
++              __FILE__, line,
++              address, actual.dlfo_map_end, expected->dlfo_map_end);
++    }
++  if (actual.dlfo_link_map != expected->dlfo_link_map)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: link map is %p, expected %p\n",
++              __FILE__, line,
++              address, actual.dlfo_link_map, expected->dlfo_link_map);
++    }
++  if (actual.dlfo_eh_frame != expected->dlfo_eh_frame)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: EH frame is %p, expected %p\n",
++              __FILE__, line,
++              address, actual.dlfo_eh_frame, expected->dlfo_eh_frame);
++    }
++#if DLFO_STRUCT_HAS_EH_DBASE
++  if (actual.dlfo_eh_dbase != expected->dlfo_eh_dbase)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: data base is %p, expected %p\n",
++              __FILE__, line,
++              address, actual.dlfo_eh_dbase, expected->dlfo_eh_dbase);
++    }
++#endif
++#if DLFO_STRUCT_HAS_EH_COUNT
++  if (actual.dlfo_eh_count != expected->dlfo_eh_count)
++    {
++      support_record_failure ();
++      printf ("%s:%d: error: %p: count is %d, expected %d\n",
++              __FILE__, line,
++              address, actual.dlfo_eh_count, expected->dlfo_eh_count);
++    }
++#endif
++}
++
++/* Check that unwind data for the main executable and the dynamic
++   linker can be found.  */
++static void
++check_initial (void)
++{
++#ifndef FOR_STATIC
++  /* Avoid direct reference, which could lead to copy relocations.  */
++  struct r_debug *debug = xdlsym (NULL, "_r_debug");
++  TEST_VERIFY_EXIT (debug != NULL);
++  char **tzname = xdlsym (NULL, "tzname");
++
++  /* The main executable has an unnamed link map.  */
++  struct link_map *main_map = (struct link_map *) debug->r_map;
++  TEST_COMPARE_STRING (main_map->l_name, "");
++
++  /* The link map of the dynamic linker.  */
++  struct link_map *rtld_map = xdlopen (LD_SO, RTLD_LAZY | RTLD_NOLOAD);
++  TEST_VERIFY_EXIT (rtld_map != NULL);
++
++  /* The link map of libc.so.  */
++  struct link_map *libc_map = xdlopen (LIBC_SO, RTLD_LAZY | RTLD_NOLOAD);
++  TEST_VERIFY_EXIT (libc_map != NULL);
++
++  struct dl_find_object expected;
++
++  /* Data in the main program.  */
++  from_map (main_map, &expected);
++  check (&main_program_data, &expected, __LINE__);
++  /* Corner cases for the mapping.  */
++  check ((void *) main_map->l_map_start, &expected, __LINE__);
++  check ((void *) (main_map->l_map_end - 1), &expected, __LINE__);
++
++  /* Data in the dynamic loader.  */
++  from_map (rtld_map, &expected);
++  check (debug, &expected, __LINE__);
++  check ((void *) rtld_map->l_map_start, &expected, __LINE__);
++  check ((void *) (rtld_map->l_map_end - 1), &expected, __LINE__);
++
++  /* Data in libc.  */
++  from_map (libc_map, &expected);
++  check (tzname, &expected, __LINE__);
++  check ((void *) libc_map->l_map_start, &expected, __LINE__);
++  check ((void *) (libc_map->l_map_end - 1), &expected, __LINE__);
++#endif
++}
++
++static int
++do_test (void)
++{
++  {
++    struct dl_find_object dlfo = { };
++    int ret = _dl_find_object (&main_program_data, &dlfo);
++    printf ("info: main program unwind data: %p (%d)\n",
++            dlfo.dlfo_eh_frame, ret);
++    TEST_COMPARE (ret, 0);
++    TEST_VERIFY (dlfo.dlfo_eh_frame != NULL);
++  }
++
++  check_initial ();
++
++  /* dlopen-based test.  First an object that can be dlclosed.  */
++  struct link_map *mod1 = xdlopen ("tst-dl_find_object-mod1.so", RTLD_NOW);
++  void *mod1_data = xdlsym (mod1, "mod1_data");
++  void *map_start = (void *) mod1->l_map_start;
++  void *map_end = (void *) (mod1->l_map_end - 1);
++  check_initial ();
++
++  struct dl_find_object expected;
++  from_map (mod1, &expected);
++  check (mod1_data, &expected, __LINE__);
++  check (map_start, &expected, __LINE__);
++  check (map_end, &expected, __LINE__);
++
++  /* Unloading must make the data unavailable.  */
++  xdlclose (mod1);
++  check_initial ();
++  check (mod1_data, NULL, __LINE__);
++  check (map_start, NULL, __LINE__);
++  check (map_end, NULL, __LINE__);
++
++  /* Now try a NODELETE load.  */
++  struct link_map *mod2 = xdlopen ("tst-dl_find_object-mod2.so", RTLD_NOW);
++  void *mod2_data = xdlsym (mod1, "mod2_data");
++  map_start = (void *) mod2->l_map_start;
++  map_end = (void *) (mod2->l_map_end - 1);
++  check_initial ();
++  from_map (mod2, &expected);
++  check (mod2_data, &expected, __LINE__);
++  check (map_start, &expected, __LINE__);
++  check (map_end, &expected, __LINE__);
++  dlclose (mod2);               /* Does nothing due to NODELETE.  */
++  check_initial ();
++  check (mod2_data, &expected, __LINE__);
++  check (map_start, &expected, __LINE__);
++  check (map_end, &expected, __LINE__);
++
++  /* Now load again the first module.  */
++  mod1 = xdlopen ("tst-dl_find_object-mod1.so", RTLD_NOW);
++  mod1_data = xdlsym (mod1, "mod1_data");
++  map_start = (void *) mod1->l_map_start;
++  map_end = (void *) (mod1->l_map_end - 1);
++  check_initial ();
++  from_map (mod1, &expected);
++  check (mod1_data, &expected, __LINE__);
++  check (map_start, &expected, __LINE__);
++  check (map_end, &expected, __LINE__);
++
++  /* Check that _dl_find_object works from a shared object (mostly for
++     static dlopen).  */
++  __typeof (_dl_find_object) *find_object
++    = *(void **) xdlsym (mod2, "find_object");
++  struct dl_find_object actual;
++  TEST_COMPARE (find_object (&main_program_data, &actual), 0);
++  check (&main_program_data, &actual, __LINE__); /* Reversed check.  */
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/include/atomic_wide_counter.h b/include/atomic_wide_counter.h
+index 31f009d5e66cb45f..cf526ed2ea715000 100644
+--- a/include/atomic_wide_counter.h
++++ b/include/atomic_wide_counter.h
+@@ -31,6 +31,14 @@ __atomic_wide_counter_load_relaxed (__atomic_wide_counter *c)
+ }
+ 
+ static inline uint64_t
++
++__atomic_wide_counter_load_acquire (__atomic_wide_counter *c)
++{
++  return atomic_load_acquire (&c->__value64);
++}
++
++static inline uint64_t
++
+ __atomic_wide_counter_fetch_add_relaxed (__atomic_wide_counter *c,
+                                          unsigned int val)
+ {
+@@ -64,6 +72,14 @@ __atomic_wide_counter_fetch_xor_release (__atomic_wide_counter *c,
+ uint64_t __atomic_wide_counter_load_relaxed (__atomic_wide_counter *c)
+   attribute_hidden;
+ 
++static inline uint64_t
++__atomic_wide_counter_load_acquire (__atomic_wide_counter *c)
++{
++  uint64_t r = __atomic_wide_counter_load_relaxed (c);
++  atomic_thread_fence_acquire ();
++  return r;
++}
++
+ uint64_t __atomic_wide_counter_fetch_add_relaxed (__atomic_wide_counter *c,
+                                                   unsigned int op)
+   attribute_hidden;
+diff --git a/include/bits/dl_find_object.h b/include/bits/dl_find_object.h
+new file mode 100644
+index 0000000000000000..7a323d7d4fac65ed
+--- /dev/null
++++ b/include/bits/dl_find_object.h
+@@ -0,0 +1 @@
++#include_next <bits/dl_find_object.h>
+diff --git a/include/dlfcn.h b/include/dlfcn.h
+index e73294b0af587913..ae25f05303b18044 100644
+--- a/include/dlfcn.h
++++ b/include/dlfcn.h
+@@ -4,6 +4,8 @@
+ #include <link.h>		/* For ElfW.  */
+ #include <stdbool.h>
+ 
++rtld_hidden_proto (_dl_find_object)
++
+ /* Internally used flag.  */
+ #define __RTLD_DLOPEN	0x80000000
+ #define __RTLD_SPROF	0x40000000
+diff --git a/include/link.h b/include/link.h
+index bafac6c9628b183c..9e3a14b2996292fe 100644
+--- a/include/link.h
++++ b/include/link.h
+@@ -212,6 +212,9 @@ struct link_map
+ 				       the dummy malloc in ld.so.  */
+     unsigned int l_ld_readonly:1; /* Nonzero if dynamic section is readonly.  */
+     unsigned int l_tls_in_slotinfo:1; /* TLS slotinfo updated in dlopen.  */
++    unsigned int l_find_object_processed:1; /* Zero if _dl_find_object_update
++					       needs to process this
++					       lt_library map.  */
+ 
+     /* NODELETE status of the map.  Only valid for maps of type
+        lt_loaded.  Lazy binding sets l_nodelete_active directly,
+diff --git a/manual/dynlink.texi b/manual/dynlink.texi
+index d59dca2b7a916889..f97f13444f1c5946 100644
+--- a/manual/dynlink.texi
++++ b/manual/dynlink.texi
+@@ -533,6 +533,111 @@ array.
+ The @code{dlinfo} function is a GNU extension.
+ @end deftypefun
+ 
++The remainder of this section documents the @code{_dl_find_object}
++function and supporting types and constants.
++
++@deftp {Data Type} {struct dl_find_object}
++@standards{GNU, dlfcn.h}
++This structure contains information about a main program or loaded
++object.  The @code{_dl_find_object} function uses it to return
++result data to the caller.
++
++@table @code
++@item unsigned long long int dlfo_flags
++Currently unused and always 0.
++
++@item void *dlfo_map_start
++The start address of the inspected mapping.  This information comes from
++the program header, so it follows its convention, and the address is not
++necessarily page-aligned.
++
++@item void *dlfo_map_end
++The end address of the mapping.
++
++@item struct link_map *dlfo_link_map
++This member contains a pointer to the link map of the object.
++
++@item void *dlfo_eh_frame
++This member contains a pointer to the exception handling data of the
++object.  See @code{DLFO_EH_SEGMENT_TYPE} below.
++
++@end table
++
++This structure is a GNU extension.
++@end deftp
++
++@deftypevr Macro int DLFO_STRUCT_HAS_EH_DBASE
++@standards{GNU, dlfcn.h}
++On most targets, this macro is defined as @code{0}.  If it is defined to
++@code{1}, @code{struct dl_find_object} contains an additional member
++@code{dlfo_eh_dbase} of type @code{void *}.  It is the base address for
++@code{DW_EH_PE_datarel} DWARF encodings to this location.
++
++This macro is a GNU extension.
++@end deftypevr
++
++@deftypevr Macro int DLFO_STRUCT_HAS_EH_COUNT
++@standards{GNU, dlfcn.h}
++On most targets, this macro is defined as @code{0}.  If it is defined to
++@code{1}, @code{struct dl_find_object} contains an additional member
++@code{dlfo_eh_count} of type @code{int}.  It is the number of exception
++handling entries in the EH frame segment identified by the
++@code{dlfo_eh_frame} member.
++
++This macro is a GNU extension.
++@end deftypevr
++
++@deftypevr Macro int DLFO_EH_SEGMENT_TYPE
++@standards{GNU, dlfcn.h}
++On targets using DWARF-based exception unwinding, this macro expands to
++@code{PT_GNU_EH_FRAME}.  This indicates that @code{dlfo_eh_frame} in
++@code{struct dl_find_object} points to the @code{PT_GNU_EH_FRAME}
++segment of the object.  On targets that use other unwinding formats, the
++macro expands to the program header type for the unwinding data.
++
++This macro is a GNU extension.
++@end deftypevr
++
++@deftypefun {int} _dl_find_object (void *@var{address}, struct dl_find_object *@var{result})
++@standards{GNU, dlfcn.h}
++@safety{@mtsafe{}@assafe{}@acsafe{}}
++On success, this function returns 0 and writes about the object
++surrounding the address to @code{*@var{result}}.  On failure, -1 is
++returned.
++
++The @var{address} can be a code address or data address.  On
++architectures using function descriptors, no attempt is made to decode
++the function descriptor.  Depending on how these descriptors are
++implemented, @code{_dl_find_object} may return the object that defines
++the function descriptor (and not the object that contains the code
++implementing the function), or fail to find any object at all.
++
++On success @var{address} is greater than or equal to
++@code{@var{result}->dlfo_map_start} and less than
++@code{@var{result}->dlfo_map_end}, that is, the supplied code address is
++located within the reported mapping.
++
++This function returns a pointer to the unwinding information for the
++object that contains the program code @var{address} in
++@code{@var{result}->dlfo_eh_frame}.  If the platform uses DWARF
++unwinding information, this is the in-memory address of the
++@code{PT_GNU_EH_FRAME} segment.  See @code{DLFO_EH_SEGMENT_TYPE} above.
++In case @var{address} resides in an object that lacks unwinding information,
++the function still returns 0, but sets @code{@var{result}->dlfo_eh_frame}
++to a null pointer.
++
++@code{_dl_find_object} itself is thread-safe.  However, if the
++application invokes @code{dlclose} for the object that contains
++@var{address} concurrently with @code{_dl_find_object} or after the call
++returns, accessing the unwinding data for that object or the link map
++(through @code{@var{result}->dlfo_link_map}) is not safe.  Therefore, the
++application needs to ensure by other means (e.g., by convention) that
++@var{address} remains a valid code address while the unwinding
++information is processed.
++
++This function is a GNU extension.
++@end deftypefun
++
+ @c FIXME these are undocumented:
+ @c dladdr
+ @c dladdr1
+diff --git a/sysdeps/arm/bits/dl_find_object.h b/sysdeps/arm/bits/dl_find_object.h
+new file mode 100644
+index 0000000000000000..d0204f361fff4152
+--- /dev/null
++++ b/sysdeps/arm/bits/dl_find_object.h
+@@ -0,0 +1,25 @@
++/* arm definitions for finding objects.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _DLFCN_H
++# error "Never use <bits/dl_find_object.h> directly; include <dlfcn.h> instead."
++#endif
++
++#define DLFO_STRUCT_HAS_EH_DBASE 0
++#define DLFO_STRUCT_HAS_EH_COUNT 1
++#define DLFO_EH_SEGMENT_TYPE PT_ARM_EXIDX
+diff --git a/sysdeps/generic/ldsodefs.h b/sysdeps/generic/ldsodefs.h
+index 9142bc8f493bce64..29c87649f14a1b5b 100644
+--- a/sysdeps/generic/ldsodefs.h
++++ b/sysdeps/generic/ldsodefs.h
+@@ -717,6 +717,11 @@ struct rtld_global_ro
+   /* Called from __libc_shared to deallocate malloc'ed memory.  */
+   void (*_dl_libc_freeres) (void);
+ 
++  /* Implementation of _dl_find_object.  The public entry point is in
++     libc, and this is patched by __rtld_static_init to support static
++     dlopen.  */
++  int (*_dl_find_object) (void *, struct dl_find_object *);
++
+ #ifdef HAVE_DL_DISCOVER_OSVERSION
+   int (*_dl_discover_osversion) (void);
+ #endif
+diff --git a/sysdeps/mach/hurd/i386/libc.abilist b/sysdeps/mach/hurd/i386/libc.abilist
+index e849d6fa35456b4b..ba6ef0924ca632cb 100644
+--- a/sysdeps/mach/hurd/i386/libc.abilist
++++ b/sysdeps/mach/hurd/i386/libc.abilist
+@@ -2286,6 +2286,7 @@ GLIBC_2.34 shm_open F
+ GLIBC_2.34 shm_unlink F
+ GLIBC_2.34 timespec_getres F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/nios2/bits/dl_find_object.h b/sysdeps/nios2/bits/dl_find_object.h
+new file mode 100644
+index 0000000000000000..1195cb9f8a1caed0
+--- /dev/null
++++ b/sysdeps/nios2/bits/dl_find_object.h
+@@ -0,0 +1,25 @@
++/* nios2 definitions for finding objects.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _DLFCN_H
++# error "Never use <bits/dl_find_object.h> directly; include <dlfcn.h> instead."
++#endif
++
++#define DLFO_STRUCT_HAS_EH_DBASE 1
++#define DLFO_STRUCT_HAS_EH_COUNT 0
++#define DLFO_EH_SEGMENT_TYPE PT_GNU_EH_FRAME
+diff --git a/sysdeps/unix/sysv/linux/aarch64/libc.abilist b/sysdeps/unix/sysv/linux/aarch64/libc.abilist
+index f227ae6ceec97c73..fed942ed4b9ef469 100644
+--- a/sysdeps/unix/sysv/linux/aarch64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/aarch64/libc.abilist
+@@ -2613,3 +2613,4 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+diff --git a/sysdeps/unix/sysv/linux/alpha/libc.abilist b/sysdeps/unix/sysv/linux/alpha/libc.abilist
+index 0ccc3fc73ecc0e4d..28679327043ff0f2 100644
+--- a/sysdeps/unix/sysv/linux/alpha/libc.abilist
++++ b/sysdeps/unix/sysv/linux/alpha/libc.abilist
+@@ -2710,6 +2710,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/arc/libc.abilist b/sysdeps/unix/sysv/linux/arc/libc.abilist
+index fd80704787f4ef41..239db7bab0a18a87 100644
+--- a/sysdeps/unix/sysv/linux/arc/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arc/libc.abilist
+@@ -2374,3 +2374,4 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+diff --git a/sysdeps/unix/sysv/linux/arm/be/libc.abilist b/sysdeps/unix/sysv/linux/arm/be/libc.abilist
+index 2ae6c58b8ad6fc01..bc79dcfe8ab4c723 100644
+--- a/sysdeps/unix/sysv/linux/arm/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arm/be/libc.abilist
+@@ -492,6 +492,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0xa0
+ GLIBC_2.4 _IO_2_1_stdin_ D 0xa0
+diff --git a/sysdeps/unix/sysv/linux/arm/le/libc.abilist b/sysdeps/unix/sysv/linux/arm/le/libc.abilist
+index fcfd1e8594d80aa1..614607fd6baa8c6f 100644
+--- a/sysdeps/unix/sysv/linux/arm/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arm/le/libc.abilist
+@@ -489,6 +489,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0xa0
+ GLIBC_2.4 _IO_2_1_stdin_ D 0xa0
+diff --git a/sysdeps/unix/sysv/linux/csky/libc.abilist b/sysdeps/unix/sysv/linux/csky/libc.abilist
+index ba034b85414a2b55..2b61543f0dd47034 100644
+--- a/sysdeps/unix/sysv/linux/csky/libc.abilist
++++ b/sysdeps/unix/sysv/linux/csky/libc.abilist
+@@ -2648,3 +2648,4 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+diff --git a/sysdeps/unix/sysv/linux/hppa/libc.abilist b/sysdeps/unix/sysv/linux/hppa/libc.abilist
+index b7460bec8ace47c2..6b3cb1adb40c0a01 100644
+--- a/sysdeps/unix/sysv/linux/hppa/libc.abilist
++++ b/sysdeps/unix/sysv/linux/hppa/libc.abilist
+@@ -2597,6 +2597,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/i386/libc.abilist b/sysdeps/unix/sysv/linux/i386/libc.abilist
+index a4dc341dededdc3b..7f608c1b64454bff 100644
+--- a/sysdeps/unix/sysv/linux/i386/libc.abilist
++++ b/sysdeps/unix/sysv/linux/i386/libc.abilist
+@@ -2781,6 +2781,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/ia64/libc.abilist b/sysdeps/unix/sysv/linux/ia64/libc.abilist
+index 94b222dbc7ffbb81..865deec43f99a036 100644
+--- a/sysdeps/unix/sysv/linux/ia64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/ia64/libc.abilist
+@@ -2548,6 +2548,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist b/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
+index 12fd3b63103c3e6e..a172d746328ddeeb 100644
+--- a/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
++++ b/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
+@@ -493,6 +493,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0x98
+ GLIBC_2.4 _IO_2_1_stdin_ D 0x98
+diff --git a/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist b/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
+index 4d2296007ab1d922..174e9c7739f966ac 100644
+--- a/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
++++ b/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
+@@ -2724,6 +2724,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist b/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
+index a223278a3d4a33d8..d042be1369b7d264 100644
+--- a/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
+@@ -2697,3 +2697,4 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+diff --git a/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist b/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
+index 780a4f5b0bf5518c..332da62de23b88b8 100644
+--- a/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
+@@ -2694,3 +2694,4 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
+index cd65136062a6a876..2d6ec0d0e8f3c797 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
+@@ -2689,6 +2689,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
+index b5b9902db56a4c79..6c5befa72bb5602b 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
+@@ -2687,6 +2687,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
+index 57593d5f94a184f1..5fb24c97e1e6f05d 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
+@@ -2695,6 +2695,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
+index e944d76bed0bfe06..f4f29fc15ee8f1a2 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
+@@ -2599,6 +2599,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/nios2/libc.abilist b/sysdeps/unix/sysv/linux/nios2/libc.abilist
+index 8af5a3a90dfe4089..2e7300cd0512ad78 100644
+--- a/sysdeps/unix/sysv/linux/nios2/libc.abilist
++++ b/sysdeps/unix/sysv/linux/nios2/libc.abilist
+@@ -2736,3 +2736,4 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
+index 3a0213b39f8f7abd..129a2f16a7b731d3 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
+@@ -2751,6 +2751,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
+index f57df0234b8bdee3..7e232267791057a3 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
+@@ -2784,6 +2784,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
+index 259a0cfc5126ca9e..6f97392b7030ee95 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
+@@ -2507,6 +2507,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
+index 126541daf152e1ad..29058a041a9cdba1 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
+@@ -2809,3 +2809,4 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist b/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
+index 05df4d13d2c35ad1..d2924766d2f33039 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
+@@ -2376,3 +2376,4 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist b/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
+index 8e349cbff8cc0507..b770e05da3ae0350 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
+@@ -2576,3 +2576,4 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist b/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
+index e9de402766af0d8a..bed3433a2b75d3b4 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
+@@ -2749,6 +2749,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist b/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
+index 1a010c745d78a07e..4f1a143da504d98c 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
+@@ -2544,6 +2544,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/sh/be/libc.abilist b/sysdeps/unix/sysv/linux/sh/be/libc.abilist
+index 22ce530975944ff6..92c8dec8ec28c54a 100644
+--- a/sysdeps/unix/sysv/linux/sh/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sh/be/libc.abilist
+@@ -2604,6 +2604,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/sh/le/libc.abilist b/sysdeps/unix/sysv/linux/sh/le/libc.abilist
+index 960df07b83bd2cbf..263da58cb7dada2c 100644
+--- a/sysdeps/unix/sysv/linux/sh/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sh/le/libc.abilist
+@@ -2601,6 +2601,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist b/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
+index eedb376f3dfeb8fb..0171efe7db109153 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
+@@ -2744,6 +2744,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist b/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
+index 86e0c92bef9255ab..7f8d45f362e63584 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
+@@ -2571,6 +2571,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist b/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
+index 5e59d90623c2bcba..c2f1a8ecc6d04dcf 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
+@@ -2522,6 +2522,7 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist b/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
+index 94412dc134af283a..8b43acf1005f1790 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
+@@ -2628,3 +2628,4 @@ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
++GLIBC_2.35 _dl_find_object F
+diff --git a/sysdeps/x86/bits/dl_find_object.h b/sysdeps/x86/bits/dl_find_object.h
+new file mode 100644
+index 0000000000000000..d9852ecb02fca036
+--- /dev/null
++++ b/sysdeps/x86/bits/dl_find_object.h
+@@ -0,0 +1,29 @@
++/* x86 definitions for finding objects.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#ifndef _DLFCN_H
++# error "Never use <bits/dl_find_object.h> directly; include <dlfcn.h> instead."
++#endif
++
++#ifdef __x86_64__
++# define DLFO_STRUCT_HAS_EH_DBASE 0
++#else
++# define DLFO_STRUCT_HAS_EH_DBASE 1
++#endif
++#define DLFO_STRUCT_HAS_EH_COUNT 0
++#define DLFO_EH_SEGMENT_TYPE PT_GNU_EH_FRAME

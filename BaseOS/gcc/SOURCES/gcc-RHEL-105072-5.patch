@@ -1,0 +1,27 @@
+commit ab2a2457780d224343ce05e7d8e2964c6a47fd83
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Jan 25 12:09:56 2022 +0100
+
+    libgcc: Fix _Unwind_Find_FDE for missing unwind data with glibc 2.35
+    
+    _dl_find_object returns success even if no unwind information has been
+    found, and dlfo_eh_frame is NULL.
+    
+    libgcc/ChangeLog:
+    
+            PR libgcc/104207
+            * unwind-dw2-fde-dip.c (_Unwind_Find_FDE): Add NULL check.
+
+diff --git a/libgcc/unwind-dw2-fde-dip.c b/libgcc/unwind-dw2-fde-dip.c
+index b837d8e490425652..1744c91958013ebb 100644
+--- a/libgcc/unwind-dw2-fde-dip.c
++++ b/libgcc/unwind-dw2-fde-dip.c
+@@ -509,7 +509,7 @@ _Unwind_Find_FDE (void *pc, struct dwarf_eh_bases *bases)
+ #ifdef DLFO_STRUCT_HAS_EH_DBASE
+   {
+     struct dl_find_object dlfo;
+-    if (_dl_find_object (pc, &dlfo) == 0)
++    if (_dl_find_object (pc, &dlfo) == 0 && dlfo.dlfo_eh_frame != NULL)
+       return find_fde_tail ((_Unwind_Ptr) pc, dlfo.dlfo_eh_frame,
+ # if DLFO_STRUCT_HAS_EH_DBASE
+ 			    (_Unwind_Ptr) dlfo.dlfo_eh_dbase,

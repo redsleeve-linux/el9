@@ -22,7 +22,7 @@
 Summary: An authorization framework
 Name: polkit
 Version: 0.117
-Release: 13%{?dist}.redsleeve
+Release: 14%{?dist}
 License: LGPLv2+
 URL: http://www.freedesktop.org/wiki/Software/polkit
 Source0: http://www.freedesktop.org/software/polkit/releases/%{name}-%{version}.tar.gz
@@ -205,7 +205,7 @@ pushd firefox-%{mozjs_version}
 %patch14 -p1
 %patch15 -p1
 
-%ifarch %{arm}
+%ifarch armv7hl
 # Include definitions for user vfp on armv7 as it causes the compilation to fail without them
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1526653
 %patch17 -p1
@@ -236,6 +236,12 @@ pushd firefox-%{mozjs_version}/js/src
 # Prefer GCC for now
 export CC=gcc
 export CXX=g++
+
+# outline atomic helpers (-foutline-atomic) enabled by default in libgcc, but linked improperly
+%ifarch aarch64
+export CFLAGS="%{optflags} -mno-outline-atomics"
+export CXXFLAGS="%{optflags} -mno-outline-atomics"
+%endif
 
 # Workaround
 # error: options `-C embed-bitcode=no` and `-C lto` are incompatible
@@ -394,8 +400,9 @@ exit 0
 %endif
 
 %changelog
-* Sat Nov 23 2024 Jacco Ligthart <jacco@redsleeve.org> - 0.117-13.redsleeve
-- apply definitions_for_user_vfp also for armv6
+* Tue Aug 05 2025 Jan Rybar <jrybar@redhat.com> - 0.117-14
+- aarch64: test failure with undefined symbol: __aarch64_ldadd4_acq_rel
+- Resolves: RHEL-98662
 
 * Tue May 28 2024 Jan Rybar <jrybar@redhat.com> - 0.117-13
 - session-monitor: watch sessions only

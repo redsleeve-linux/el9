@@ -1,0 +1,146 @@
+commit 17e62fe5f78d33db23bf43eb7c20accd56e65ebe (HEAD -> master, origin/master, origin/HEAD)
+Author: Nick Clifton <nickc@redhat.com>
+Date:   Tue Aug 19 15:25:39 2025 +0100
+
+    Add tests of the linker's --errror-execstack and --error-rwx-segments options
+
+diff -rup binutils-2.35.2.orig/ld/testsuite/ld-elf/elf.exp binutils-2.35.2/ld/testsuite/ld-elf/elf.exp
+--- binutils-2.35.2.orig/ld/testsuite/ld-elf/elf.exp	2025-08-19 16:49:58.651597488 +0100
++++ binutils-2.35.2/ld/testsuite/ld-elf/elf.exp	2025-08-19 16:50:14.483671894 +0100
+@@ -244,6 +244,13 @@ if { [istarget *-*-*linux*]
+ 	    {pr29072-a.s} \
+ 	    {{ld pr29072.a.warn}} \
+ 	    "pr29072-a.exe"] \
++	[list "Test --error-execstack with an executable .note.GNU-stack" \
++	    "--warn-execstack --error-execstack" \
++	    "" \
++	    "" \
++	    {pr29072-a.s} \
++	     {{ld gnu_execstack.err}} \
++	    "gnu_execstack.exe"] \
+ 	[list "PR 29072 (warn about -z execstack)" \
+ 	    "-z execstack --warn-execstack --no-error-execstack" \
+ 	    "" \
+@@ -251,6 +258,13 @@ if { [istarget *-*-*linux*]
+ 	    {stack.s} \
+ 	     {{ld pr29072.c.warn}} \
+ 	    "pr29072-c.exe"] \
++	[list "Test --error-execstack with -z execstack" \
++	    "-z execstack --warn-execstack --error-execstack" \
++	    "" \
++	    "" \
++	    {stack.s} \
++	     {{ld z_execstack.err}} \
++	    "execstack.exe"] \
+ 	[list "PR ld/29072 (suppress warnings about executable stack)" \
+ 	    "-e 0 --no-warn-execstack" \
+ 	    "" \
+@@ -258,13 +272,20 @@ if { [istarget *-*-*linux*]
+ 	    {pr29072-a.s} \
+ 	    {} \
+ 	    "pr29072-d.exe"] \
+-	[list "Ensure that a warning issued when creating a segment with RWX permissions" \
++	[list "Ensure that a warning is issued when creating a segment with RWX permissions" \
+ 	    "-e 0 -Tnobits-1.t --warn-rwx-segments --no-error-rwx-segments" \
+ 	    "" \
+ 	    "" \
+ 	    {nobits-1.s} \
+ 	     {{ld rwx-segments-1.l}} \
+ 	    "rwx-segments-1.exe"] \
++	[list "Ensure that a error can be issued when creating a segment with RWX permissions" \
++	    "-e 0 -Tnobits-1.t --warn-rwx-segments --error-rwx-segments" \
++	    "" \
++	    "" \
++	    {nobits-1.s} \
++	     {{ld rwx-segments-3.err}} \
++	    "rwx-segments-3.exe"] \
+ 	[list "Ensure that a warning issued when creating a TLS segment with execute permission" \
+ 	    "-e 0 -T rwx-segments-2.t --warn-rwx-segments --no-error-rwx-segments" \
+ 	    "" \
+@@ -272,6 +293,13 @@ if { [istarget *-*-*linux*]
+ 	    {size-2.s} \
+ 	     {{ld rwx-segments-2.l}} \
+ 	    "rwx-segments-2.exe"] \
++	[list "Ensure that an error cn be issued when creating a TLS segment with execute permission" \
++	    "-e 0 -T rwx-segments-2.t --warn-rwx-segments --error-rwx-segments" \
++	    "" \
++	    "" \
++	    {size-2.s} \
++	     {{ld rwx-segments-4.err}} \
++	    "rwx-segments-4.exe"] \
+ 	[list "Ensure that the RWX warning can be suppressed" \
+ 	    "-e 0 -Tnobits-1.t --no-warn-rwx-segments" \
+ 	    "" \
+@@ -293,6 +321,16 @@ if { [istarget *-*-*linux*]
+ 	    {{ld pr29072.b.warn}} \
+ 	    "pr29072-b.exe"] \
+ 	]
++
++      run_ld_link_tests [list \
++	[list "error when .note.GNU-stack is absent" \
++	 "-e 0 -z stack-size=0x123400 --warn-execstack --error-execstack" \
++	 "" \
++	 "" \
++	 {pr29072-b.s} \
++	 {{ld missing-execstack.err}} \
++	 "missing-execstack.exe"] \
++	]
+     } else {
+ 	run_ld_link_tests [list \
+ 	   [list "PR ld/29072 (ignore absent .note.GNU-stack)" \
+diff --git a/ld/testsuite/ld-elf/gnu_execstack.err b/ld/testsuite/ld-elf/gnu_execstack.err
+new file mode 100644
+index 00000000000..be70b63043a
+--- /dev/null
++++ b/ld/testsuite/ld-elf/gnu_execstack.err
+@@ -0,0 +1,3 @@
++#...
++.*: error: .*: is triggering the generation of an executable stack \(because it has an executable .note.GNU-stack section\)
++#...
+diff --git a/ld/testsuite/ld-elf/missing-execstack.err b/ld/testsuite/ld-elf/missing-execstack.err
+new file mode 100644
+index 00000000000..9549cf5cd28
+--- /dev/null
++++ b/ld/testsuite/ld-elf/missing-execstack.err
+@@ -0,0 +1,3 @@
++#...
++.*: error: .*\.o: is triggering the generation of an executable stack because it does not have a .note.GNU-stack section
++#...
+diff --git a/ld/testsuite/ld-elf/rwx-segments-3.err b/ld/testsuite/ld-elf/rwx-segments-3.err
+new file mode 100644
+index 00000000000..5a584db19be
+--- /dev/null
++++ b/ld/testsuite/ld-elf/rwx-segments-3.err
+@@ -0,0 +1,3 @@
++#...
++.* error: .* has a LOAD segment with RWX permissions
++#...
+\ No newline at end of file
+diff --git a/ld/testsuite/ld-elf/rwx-segments-4.err b/ld/testsuite/ld-elf/rwx-segments-4.err
+new file mode 100644
+index 00000000000..2603f57db47
+--- /dev/null
++++ b/ld/testsuite/ld-elf/rwx-segments-4.err
+@@ -0,0 +1,3 @@
++#...
++.*: error: .* has a TLS segment with execute permission
++#...
+diff --git a/ld/testsuite/ld-elf/z_execstack.err b/ld/testsuite/ld-elf/z_execstack.err
+new file mode 100644
+index 00000000000..703b42a9e01
+--- /dev/null
++++ b/ld/testsuite/ld-elf/z_execstack.err
+@@ -0,0 +1,4 @@
++#...
++.*: error: creating an executable stack because of -z execstack command line option
++#...
++
+
+diff -rup binutils-2.35.2.orig/ld/testsuite/ld-elf/z_execstack.err binutils-2.35.2/ld/testsuite/ld-elf/z_execstack.err
+--- binutils-2.35.2.orig/ld/testsuite/ld-elf/z_execstack.err	2025-08-20 15:22:19.495234206 +0100
++++ binutils-2.35.2/ld/testsuite/ld-elf/z_execstack.err	2025-08-20 15:22:55.953388857 +0100
+@@ -1,4 +1,3 @@
+ #...
+ .*: error: creating an executable stack because of -z execstack command line option
+ #...
+-

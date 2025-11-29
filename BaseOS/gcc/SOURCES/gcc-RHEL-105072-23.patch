@@ -1,0 +1,33 @@
+commit 49310a993308492348119f4033e4db0bda4fe46a
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Jun 6 11:01:07 2023 +0200
+
+    libgcc: Fix eh_frame fast path in find_fde_tail
+    
+    The eh_frame value is only used by linear_search_fdes, not the binary
+    search directly in find_fde_tail, so the bug is not immediately
+    apparent with most programs.
+    
+    Fixes commit e724b0480bfa5ec04f39be8c7290330b495c59de ("libgcc:
+    Special-case BFD ld unwind table encodings in find_fde_tail").
+    
+    libgcc/
+    
+            PR libgcc/109712
+            * unwind-dw2-fde-dip.c (find_fde_tail): Correct fast path for
+            parsing eh_frame.
+
+diff --git a/libgcc/unwind-dw2-fde-dip.c b/libgcc/unwind-dw2-fde-dip.c
+index d4821d7d19950f15..b46e95dc8f88ac5c 100644
+--- a/libgcc/unwind-dw2-fde-dip.c
++++ b/libgcc/unwind-dw2-fde-dip.c
+@@ -403,8 +403,8 @@ find_fde_tail (_Unwind_Ptr pc,
+ 	 BFD ld generates.  */
+       signed value __attribute__ ((mode (SI)));
+       memcpy (&value, p, sizeof (value));
++      eh_frame = p + value;
+       p += sizeof (value);
+-      dbase = value;		/* No adjustment because pcrel has base 0.  */
+     }
+   else
+     p = read_encoded_value_with_base (hdr->eh_frame_ptr_enc,

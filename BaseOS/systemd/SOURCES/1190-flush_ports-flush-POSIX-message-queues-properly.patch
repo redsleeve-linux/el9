@@ -1,0 +1,119 @@
+From 51b21b29997e2724433111e6ac695d5dc654a6b3 Mon Sep 17 00:00:00 2001
+From: "Todd C. Miller" <Todd.Miller@sudo.ws>
+Date: Tue, 6 May 2025 16:39:14 -0600
+Subject: [PATCH] flush_ports: flush POSIX message queues properly
+
+On Linux, read() on a message queue descriptor returns the message
+queue statistics, not the actual message queue data.  We need to use
+mq_receive() to drain the queues instead.
+
+Fixes a problem where a POSIX message queue socket unit with messages
+in the queue at shutdown time could result in a hang on reboot/shutdown.
+
+(cherry picked from commit ffb6adb76367d5ab7d43937ccaac5947717b5b78)
+
+Resolves: RHEL-90860
+---
+ src/basic/socket-util.c | 49 +++++++++++++++++++++++++++++++++++++++++
+ src/basic/socket-util.h |  1 +
+ src/core/socket.c       |  8 +++++--
+ 3 files changed, 56 insertions(+), 2 deletions(-)
+
+diff --git a/src/basic/socket-util.c b/src/basic/socket-util.c
+index 1d86ca3f55..c33a26acef 100644
+--- a/src/basic/socket-util.c
++++ b/src/basic/socket-util.c
+@@ -3,6 +3,7 @@
+ #include <arpa/inet.h>
+ #include <errno.h>
+ #include <limits.h>
++#include <mqueue.h>
+ #include <net/if.h>
+ #include <netdb.h>
+ #include <netinet/ip.h>
+@@ -1209,6 +1210,54 @@ int flush_accept(int fd) {
+         }
+ }
+ 
++ssize_t flush_mqueue(int fd) {
++        _cleanup_free_ char *buf = NULL;
++        struct mq_attr attr;
++        ssize_t count = 0;
++        int r;
++
++        assert(fd >= 0);
++
++        /* Similar to flush_fd() but flushes all messages from a POSIX message queue. */
++
++        for (;;) {
++                ssize_t l;
++
++                r = fd_wait_for_event(fd, POLLIN, /* timeout= */ 0);
++                if (r < 0) {
++                        if (r == -EINTR)
++                                continue;
++
++                        return r;
++                }
++                if (r == 0)
++                        return count;
++
++                if (!buf) {
++                        /* Buffer must be at least as large as mq_msgsize. */
++                        if (mq_getattr(fd, &attr) < 0)
++                                return -errno;
++
++                        buf = malloc(attr.mq_msgsize);
++                        if (!buf)
++                                return -ENOMEM;
++                }
++
++                l = mq_receive(fd, buf, attr.mq_msgsize, /* msg_prio = */ NULL);
++                if (l < 0) {
++                        if (errno == EINTR)
++                                continue;
++
++                        if (errno == EAGAIN)
++                                return count;
++
++                        return -errno;
++                }
++
++                count += l;
++        }
++}
++
+ struct cmsghdr* cmsg_find(struct msghdr *mh, int level, int type, socklen_t length) {
+         struct cmsghdr *cmsg;
+ 
+diff --git a/src/basic/socket-util.h b/src/basic/socket-util.h
+index 61bf8ff32b..4fbc732322 100644
+--- a/src/basic/socket-util.h
++++ b/src/basic/socket-util.h
+@@ -186,6 +186,7 @@ int receive_one_fd(int transport_fd, int flags);
+ ssize_t next_datagram_size_fd(int fd);
+ 
+ int flush_accept(int fd);
++ssize_t flush_mqueue(int fd);
+ 
+ #define CMSG_FOREACH(cmsg, mh)                                          \
+         for ((cmsg) = CMSG_FIRSTHDR(mh); (cmsg); (cmsg) = CMSG_NXTHDR((mh), (cmsg)))
+diff --git a/src/core/socket.c b/src/core/socket.c
+index 65b07e70fd..7abae70255 100644
+--- a/src/core/socket.c
++++ b/src/core/socket.c
+@@ -2284,8 +2284,12 @@ static void flush_ports(Socket *s) {
+                 if (p->fd < 0)
+                         continue;
+ 
+-                (void) flush_accept(p->fd);
+-                (void) flush_fd(p->fd);
++                if (p->type == SOCKET_MQUEUE)
++                        (void) flush_mqueue(p->fd);
++                else {
++                        (void) flush_accept(p->fd);
++                        (void) flush_fd(p->fd);
++                }
+         }
+ }
+ 

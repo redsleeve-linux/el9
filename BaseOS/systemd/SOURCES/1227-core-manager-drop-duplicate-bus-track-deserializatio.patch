@@ -1,0 +1,32 @@
+From 938b1847f5eee87ad0e0e95d62ee15ac73b50b87 Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Sat, 11 Jan 2025 18:38:49 +0100
+Subject: [PATCH] core/manager: drop duplicate bus track deserialization
+
+bus_init_api() now does this internally
+(after 8402ca04d1a063c3d8a9e3d5c16df8bb8778ae98).
+
+(cherry picked from commit af0e10354e567bfd0b9521376b2aad55f12a4e3d)
+
+Related: RHEL-111630
+---
+ src/core/manager.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/src/core/manager.c b/src/core/manager.c
+index 92f283d33d..653b0c2d22 100644
+--- a/src/core/manager.c
++++ b/src/core/manager.c
+@@ -1864,12 +1864,6 @@ int manager_startup(Manager *m, FILE *serialization, FDSet *fds, const char *roo
+                 /* Connect to the bus if we are good for it */
+                 manager_setup_bus(m);
+ 
+-                /* Now that we are connected to all possible buses, let's deserialize who is tracking us. */
+-                r = bus_track_coldplug(m->api_bus, &m->subscribed, false, m->subscribed_as_strv);
+-                if (r < 0)
+-                        log_warning_errno(r, "Failed to deserialized tracked clients, ignoring: %m");
+-                m->subscribed_as_strv = strv_free(m->subscribed_as_strv);
+-
+                 r = manager_varlink_init(m);
+                 if (r < 0)
+                         log_warning_errno(r, "Failed to set up Varlink, ignoring: %m");

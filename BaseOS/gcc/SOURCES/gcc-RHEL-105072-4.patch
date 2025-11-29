@@ -1,0 +1,40 @@
+commit 790854ea7670f11c14d431c102a49181d2915965
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Jan 4 15:47:30 2022 +0100
+
+    libgcc: Use _dl_find_object in _Unwind_Find_FDE
+    
+    libgcc/ChangeLog:
+    
+            * unwind-dw2-fde-dip.c (_Unwind_Find_FDE): Call _dl_find_object
+            if available.
+
+diff --git a/libgcc/unwind-dw2-fde-dip.c b/libgcc/unwind-dw2-fde-dip.c
+index fbb0fbdebb92d484..b837d8e490425652 100644
+--- a/libgcc/unwind-dw2-fde-dip.c
++++ b/libgcc/unwind-dw2-fde-dip.c
+@@ -504,6 +504,24 @@ _Unwind_Find_FDE (void *pc, struct dwarf_eh_bases *bases)
+   if (ret != NULL)
+     return ret;
+ 
++  /* Use DLFO_STRUCT_HAS_EH_DBASE as a proxy for the existence of a glibc-style
++     _dl_find_object function.  */
++#ifdef DLFO_STRUCT_HAS_EH_DBASE
++  {
++    struct dl_find_object dlfo;
++    if (_dl_find_object (pc, &dlfo) == 0)
++      return find_fde_tail ((_Unwind_Ptr) pc, dlfo.dlfo_eh_frame,
++# if DLFO_STRUCT_HAS_EH_DBASE
++			    (_Unwind_Ptr) dlfo.dlfo_eh_dbase,
++# else
++			    NULL,
++# endif
++			    bases);
++    else
++      return NULL;
++    }
++#endif /* DLFO_STRUCT_HAS_EH_DBASE */
++
+   data.pc = (_Unwind_Ptr) pc;
+ #if NEED_DBASE_MEMBER
+   data.dbase = NULL;

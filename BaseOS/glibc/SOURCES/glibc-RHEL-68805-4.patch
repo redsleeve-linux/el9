@@ -1,0 +1,358 @@
+commit be6818be31e756398e45f70e2819d78be0961223
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Tue Jan 28 20:22:56 2025 +0000
+
+    Make fclose seek input file to right offset (bug 12724)
+    
+    As discussed in bug 12724 and required by POSIX, before an input file
+    (based on an underlying seekable file descriptor) is closed, fclose is
+    sometimes required to seek that file descriptor to the correct offset,
+    so that any other file descriptors sharing the underlying open file
+    description are left at that offset (as a motivating example, a script
+    could call a sequence of commands each of which processes some data
+    from (seekable) stdin using stdio; fclose needs to do this so that
+    each successive command can read exactly the data not handled by
+    previous commands), but glibc fails to do this.
+    
+    The precise POSIX wording has changed a few times; in the 2024 edition
+    it's "If the file is not already at EOF, and the file is one capable
+    of seeking, the file offset of the underlying open file description
+    shall be set to the file position of the stream if the stream is the
+    active handle to the underlying file description.".
+    
+    Add appropriate logic to _IO_new_file_close_it to handle this case.  I
+    haven't made any attempt to test or change things in this area for the
+    "old" functions.
+    
+    Note that there was a previous attempt to fix bug 12724, reverted in
+    commit eb6cbd249f4465b01f428057bf6ab61f5f0c07e3.  The fix version here
+    addresses the original test in that bug report without breaking the
+    one given in a subsequent comment in that bug report (which works with
+    glibc before the patch, but maybe was broken by the original fix that
+    was reverted).
+    
+    The logic here tries to take care not to seek the file, even to its
+    newly computed current offset, if at EOF / possibly not the active
+    handle; even seeking to the current offset would be problematic
+    because of a potential race (fclose computes the current offset,
+    another thread or process with the active handle does its own seek,
+    fclose does a seek (not permitted by POSIX in this case) that loses
+    the effect of the seek on the active handle in another thread or
+    process).  There are tests included for various cases of being or not
+    being the active handle, though there aren't tests for the potential
+    race condition.
+    
+    Tested for x86_64.
+
+Conflicts:
+	stdio-common/Makefile (fixup context)
+
+diff --git a/libio/fileops.c b/libio/fileops.c
+index 83fd272c8e606b1b..47e9b5c27a5bca9f 100644
+--- a/libio/fileops.c
++++ b/libio/fileops.c
+@@ -128,15 +128,48 @@ _IO_new_file_init (struct _IO_FILE_plus *fp)
+ int
+ _IO_new_file_close_it (FILE *fp)
+ {
+-  int write_status;
++  int flush_status = 0;
+   if (!_IO_file_is_open (fp))
+     return EOF;
+ 
+   if ((fp->_flags & _IO_NO_WRITES) == 0
+       && (fp->_flags & _IO_CURRENTLY_PUTTING) != 0)
+-    write_status = _IO_do_flush (fp);
+-  else
+-    write_status = 0;
++    flush_status = _IO_do_flush (fp);
++  else if (fp->_fileno >= 0
++	   /* If this is the active handle, we must seek the
++	      underlying open file description (possibly shared with
++	      other file descriptors that remain open) to the correct
++	      offset.  But if this stream is in a state such that some
++	      other handle might have become the active handle, then
++	      (a) at the time it entered that state, the underlying
++	      open file description had the correct offset, and (b)
++	      seeking the underlying open file description, even to
++	      its newly determined current offset, is not safe because
++	      it can race with operations on a different active
++	      handle.  So check here for cases where it is necessary
++	      to seek, while avoiding seeking in cases where it is
++	      unsafe to do so.  */
++	   && (_IO_in_backup (fp)
++	       || (fp->_mode <= 0 && fp->_IO_read_ptr < fp->_IO_read_end)
++	       || (_IO_vtable_offset (fp) == 0
++		   && fp->_mode > 0 && (fp->_wide_data->_IO_read_ptr
++					< fp->_wide_data->_IO_read_end))))
++    {
++      off64_t o = _IO_SEEKOFF (fp, 0, _IO_seek_cur, 0);
++      if (o == EOF)
++	{
++	  if (errno != ESPIPE)
++	    flush_status = EOF;
++	}
++      else
++	{
++	  if (_IO_in_backup (fp))
++	    o -= fp->_IO_save_end - fp->_IO_save_base;
++	  flush_status = (_IO_SYSSEEK (fp, o, SEEK_SET) < 0 && errno != ESPIPE
++			  ? EOF
++			  : 0);
++	}
++    }
+ 
+   _IO_unsave_markers (fp);
+ 
+@@ -161,7 +194,7 @@ _IO_new_file_close_it (FILE *fp)
+   fp->_fileno = -1;
+   fp->_offset = _IO_pos_BAD;
+ 
+-  return close_status ? close_status : write_status;
++  return close_status ? close_status : flush_status;
+ }
+ libc_hidden_ver (_IO_new_file_close_it, _IO_file_close_it)
+ 
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index e155b96309f4486f..ed358394c90f2319 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -218,6 +218,7 @@ tests := \
+   tst-bz11319 \
+   tst-bz11319-fortify2 \
+   tst-cookie \
++  tst-fclose-offset \
+   tst-fdopen \
+   tst-fdopen2 \
+   tst-ferror \
+diff --git a/stdio-common/tst-fclose-offset.c b/stdio-common/tst-fclose-offset.c
+new file mode 100644
+index 0000000000000000..a31de1117c7dfeec
+--- /dev/null
++++ b/stdio-common/tst-fclose-offset.c
+@@ -0,0 +1,225 @@
++/* Test offset of input file descriptor after close (bug 12724).
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <stdio.h>
++#include <wchar.h>
++
++#include <support/check.h>
++#include <support/temp_file.h>
++#include <support/xstdio.h>
++#include <support/xunistd.h>
++
++int
++do_test (void)
++{
++  char *filename = NULL;
++  int fd = create_temp_file ("tst-fclose-offset", &filename);
++  TEST_VERIFY_EXIT (fd != -1);
++
++  /* Test offset of open file description for output and input streams
++     after fclose, case from bug 12724.  */
++
++  const char buf[] = "hello world";
++  xwrite (fd, buf, sizeof buf);
++  TEST_COMPARE (lseek (fd, 1, SEEK_SET), 1);
++  int fd2 = xdup (fd);
++  FILE *f = fdopen (fd2, "w");
++  TEST_VERIFY_EXIT (f != NULL);
++  TEST_COMPARE (fputc (buf[1], f), buf[1]);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 2);
++
++  /* Likewise for an input stream.  */
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "r");
++  TEST_VERIFY_EXIT (f != NULL);
++  TEST_COMPARE (fgetc (f), buf[2]);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 3);
++
++  /* Test offset of open file description for output and input streams
++     after fclose, case from comment on bug 12724 (failed after first
++     attempt at fixing that bug).  This verifies that the offset is
++     not reset when there has been no input or output on the FILE* (in
++     that case, the FILE* might not be the active handle).  */
++
++  TEST_COMPARE (lseek (fd, 0, SEEK_SET), 0);
++  xwrite (fd, buf, sizeof buf);
++  TEST_COMPARE (lseek (fd, 1, SEEK_SET), 1);
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "w");
++  TEST_VERIFY_EXIT (f != NULL);
++  TEST_COMPARE (lseek (fd, 4, SEEK_SET), 4);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 4);
++
++  /* Likewise for an input stream.  */
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "r");
++  TEST_VERIFY_EXIT (f != NULL);
++  TEST_COMPARE (lseek (fd, 4, SEEK_SET), 4);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 4);
++
++  /* Further cases without specific tests in bug 12724, to verify
++     proper operation of the rules about the offset only being set
++     when the stream is the active handle.  */
++
++  /* Test offset set by fclose after fseek and fgetc.  */
++  TEST_COMPARE (lseek (fd, 0, SEEK_SET), 0);
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "r");
++  TEST_VERIFY_EXIT (f != NULL);
++  TEST_COMPARE (fseek (f, 1, SEEK_SET), 0);
++  TEST_COMPARE (fgetc (f), buf[1]);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 2);
++
++  /* Test offset not set by fclose after fseek and fgetc, if that
++     fgetc is at EOF (in which case the active handle might have
++     changed).  */
++  TEST_COMPARE (lseek (fd, 0, SEEK_SET), 0);
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "r");
++  TEST_VERIFY_EXIT (f != NULL);
++  TEST_COMPARE (fseek (f, sizeof buf, SEEK_SET), 0);
++  TEST_COMPARE (fgetc (f), EOF);
++  TEST_COMPARE (lseek (fd, 4, SEEK_SET), 4);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 4);
++
++  /* Test offset not set by fclose after fseek and fgetc and fflush
++     (active handle might have changed after fflush).  */
++  TEST_COMPARE (lseek (fd, 0, SEEK_SET), 0);
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "r");
++  TEST_VERIFY_EXIT (f != NULL);
++  TEST_COMPARE (fseek (f, 1, SEEK_SET), 0);
++  TEST_COMPARE (fgetc (f), buf[1]);
++  TEST_COMPARE (fflush (f), 0);
++  TEST_COMPARE (lseek (fd, 4, SEEK_SET), 4);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 4);
++
++  /* Test offset not set by fclose after fseek and fgetc, if the
++     stream is unbuffered (active handle might change at any
++     time).  */
++  TEST_COMPARE (lseek (fd, 0, SEEK_SET), 0);
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "r");
++  TEST_VERIFY_EXIT (f != NULL);
++  setbuf (f, NULL);
++  TEST_COMPARE (fseek (f, 1, SEEK_SET), 0);
++  TEST_COMPARE (fgetc (f), buf[1]);
++  TEST_COMPARE (lseek (fd, 4, SEEK_SET), 4);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 4);
++
++  /* Also test such cases with the stream in wide mode.  */
++
++  /* Test offset set by fclose after fseek and fgetwc.  */
++  TEST_COMPARE (lseek (fd, 0, SEEK_SET), 0);
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "r");
++  TEST_VERIFY_EXIT (f != NULL);
++  TEST_COMPARE (fseek (f, 1, SEEK_SET), 0);
++  TEST_COMPARE (fgetwc (f), (wint_t) buf[1]);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 2);
++
++  /* Test offset not set by fclose after fseek and fgetwc, if that
++     fgetwc is at EOF (in which case the active handle might have
++     changed).  */
++  TEST_COMPARE (lseek (fd, 0, SEEK_SET), 0);
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "r");
++  TEST_VERIFY_EXIT (f != NULL);
++  TEST_COMPARE (fseek (f, sizeof buf, SEEK_SET), 0);
++  TEST_COMPARE (fgetwc (f), WEOF);
++  TEST_COMPARE (lseek (fd, 4, SEEK_SET), 4);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 4);
++
++  /* Test offset not set by fclose after fseek and fgetwc and fflush
++     (active handle might have changed after fflush).  */
++  TEST_COMPARE (lseek (fd, 0, SEEK_SET), 0);
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "r");
++  TEST_VERIFY_EXIT (f != NULL);
++  TEST_COMPARE (fseek (f, 1, SEEK_SET), 0);
++  TEST_COMPARE (fgetwc (f), (wint_t) buf[1]);
++  TEST_COMPARE (fflush (f), 0);
++  TEST_COMPARE (lseek (fd, 4, SEEK_SET), 4);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 4);
++
++  /* Test offset not set by fclose after fseek and fgetwc, if the
++     stream is unbuffered (active handle might change at any
++     time).  */
++  TEST_COMPARE (lseek (fd, 0, SEEK_SET), 0);
++  fd2 = xdup (fd);
++  f = fdopen (fd2, "r");
++  TEST_VERIFY_EXIT (f != NULL);
++  setbuf (f, NULL);
++  TEST_COMPARE (fseek (f, 1, SEEK_SET), 0);
++  TEST_COMPARE (fgetwc (f), (wint_t) buf[1]);
++  TEST_COMPARE (lseek (fd, 4, SEEK_SET), 4);
++  xfclose (f);
++  errno = 0;
++  TEST_COMPARE (lseek (fd2, 0, SEEK_CUR), -1);
++  TEST_COMPARE (errno, EBADF);
++  TEST_COMPARE (lseek (fd, 0, SEEK_CUR), 4);
++
++  return 0;
++}
++
++#include <support/test-driver.c>

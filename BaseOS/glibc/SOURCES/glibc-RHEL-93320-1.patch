@@ -1,0 +1,781 @@
+commit 44829b3ddb64e99e37343a0f25b2c082387d31a5
+Author: Noah Goldstein <goldstein.w.n@gmail.com>
+Date:   Thu Oct 21 15:54:57 2021 -0500
+
+    String: Add support for __memcmpeq() ABI on all targets
+    
+    No bug.
+    
+    This commit adds support for __memcmpeq() as a new ABI for all
+    targets. In this commit __memcmpeq() is implemented only as an alias
+    to the corresponding targets memcmp() implementation. __memcmpeq() is
+    added as a new symbol starting with GLIBC_2.35 and defined in string.h
+    with comments explaining its behavior. Basic tests that it is callable
+    and works where added in string/tester.c
+    
+    As discussed in the proposal "Add new ABI '__memcmpeq()' to libc"
+    __memcmpeq() is essentially a reserved namespace for bcmp(). The means
+    is shares the same specifications as memcmp() except the return value
+    for non-equal byte sequences is any non-zero value. This is less
+    strict than memcmp()'s return value specification and can be better
+    optimized when a boolean return is all that is needed.
+    
+    __memcmpeq() is meant to only be called by compilers if they can prove
+    that the return value of a memcmp() call is only used for its boolean
+    value.
+    
+    All tests in string/tester.c passed. As well build succeeds on
+    x86_64-linux-gnu target.
+
+diff --git a/string/Versions b/string/Versions
+index 298ecd401aa49fd5..864c4cf7a4bda473 100644
+--- a/string/Versions
++++ b/string/Versions
+@@ -89,4 +89,7 @@ libc {
+     sigdescr_np; sigabbrev_np;
+     strerrordesc_np; strerrorname_np;
+   }
++  GLIBC_2.35 {
++    __memcmpeq;
++  }
+ }
+diff --git a/string/memcmp.c b/string/memcmp.c
+index 9b46d7a905c8b788..eac411253050c0e7 100644
+--- a/string/memcmp.c
++++ b/string/memcmp.c
+@@ -359,3 +359,6 @@ libc_hidden_builtin_def(memcmp)
+ # undef bcmp
+ weak_alias (memcmp, bcmp)
+ #endif
++
++#undef __memcmpeq
++strong_alias (memcmp, __memcmpeq)
+diff --git a/string/string.h b/string/string.h
+index 8dcafb4ac4952853..639e2f56818f16b6 100644
+--- a/string/string.h
++++ b/string/string.h
+@@ -64,6 +64,22 @@ extern void *memset (void *__s, int __c, size_t __n) __THROW __nonnull ((1));
+ extern int memcmp (const void *__s1, const void *__s2, size_t __n)
+      __THROW __attribute_pure__ __nonnull ((1, 2));
+ 
++/* Compare N bytes of S1 and S2.  Return zero if S1 and S2 are equal.
++   Return some non-zero value otherwise.
++
++   Essentially __memcmpeq has the exact same semantics as memcmp
++   except the return value is less constrained.  memcmp is always a
++   correct implementation of __memcmpeq.  As well !!memcmp, -memcmp,
++   or bcmp are correct implementations.
++
++   __memcmpeq is meant to be used by compilers when memcmp return is
++   only used for its bolean value.
++
++   __memcmpeq is declared only for use by compilers.  Programs should
++   continue to use memcmp.  */
++extern int __memcmpeq (const void *__s1, const void *__s2, size_t __n)
++     __THROW __attribute_pure__ __nonnull ((1, 2));
++
+ /* Search N bytes of S for C.  */
+ #ifdef __CORRECT_ISO_CPP_STRING_H_PROTO
+ extern "C++"
+diff --git a/string/tester.c b/string/tester.c
+index 778160ae6ecd648e..605b3f00f97ae854 100644
+--- a/string/tester.c
++++ b/string/tester.c
+@@ -1449,6 +1449,19 @@ test_bcmp (void)
+   check(bcmp("abc", "def", 0) == 0, 8);	/* Zero count. */
+ }
+ 
++static void
++test_memcmpeq (void)
++{
++  it = "__memcmpeq";
++  check (__memcmpeq ("a", "a", 1) == 0, 1); /* Identity.  */
++  check (__memcmpeq ("abc", "abc", 3) == 0, 2); /* Multicharacter.  */
++  check (__memcmpeq ("abcd", "abce", 4) != 0, 3); /* Honestly unequal.  */
++  check (__memcmpeq ("abce", "abcd", 4) != 0, 4);
++  check (__memcmpeq ("alph", "beta", 4) != 0, 5);
++  check (__memcmpeq ("abce", "abcd", 3) == 0, 6); /* Count limited.  */
++  check (__memcmpeq ("abc", "def", 0) == 0, 8); /* Zero count.  */
++}
++
+ static void
+ test_strerror (void)
+ {
+@@ -1611,6 +1624,9 @@ main (void)
+   /* bcmp - somewhat like memcmp.  */
+   test_bcmp ();
+ 
++  /* __memcmpeq - somewhat like memcmp.  */
++  test_memcmpeq ();
++
+   /* strndup.  */
+   test_strndup ();
+ 
+diff --git a/sysdeps/aarch64/memcmp.S b/sysdeps/aarch64/memcmp.S
+index c1937f6f5c103a6f..37f37b91914c518b 100644
+--- a/sysdeps/aarch64/memcmp.S
++++ b/sysdeps/aarch64/memcmp.S
+@@ -177,4 +177,6 @@ L(ret_0):
+ END (memcmp)
+ #undef bcmp
+ weak_alias (memcmp, bcmp)
++#undef __memcmpeq
++strong_alias (memcmp, __memcmpeq)
+ libc_hidden_builtin_def (memcmp)
+diff --git a/sysdeps/csky/abiv2/memcmp.S b/sysdeps/csky/abiv2/memcmp.S
+index 1560387618799d0e..2a4ae577b024277d 100644
+--- a/sysdeps/csky/abiv2/memcmp.S
++++ b/sysdeps/csky/abiv2/memcmp.S
+@@ -138,5 +138,6 @@ ENTRY (memcmp)
+ 	br	.L_s1_aligned
+ END (memcmp)
+ weak_alias (memcmp, bcmp)
++strong_alias (memcmp, __memcmpeq)
+ libc_hidden_def (memcmp)
+ .weak memcmp
+diff --git a/sysdeps/i386/i686/memcmp.S b/sysdeps/i386/i686/memcmp.S
+index b26b124fada2048f..90266d904b52368a 100644
+--- a/sysdeps/i386/i686/memcmp.S
++++ b/sysdeps/i386/i686/memcmp.S
+@@ -405,4 +405,6 @@ L(table_32bytes) :
+ 
+ #undef bcmp
+ weak_alias (memcmp, bcmp)
++#undef __memcmpeq
++strong_alias (memcmp, __memcmpeq)
+ libc_hidden_builtin_def (memcmp)
+diff --git a/sysdeps/i386/i686/multiarch/memcmp-ia32.S b/sysdeps/i386/i686/multiarch/memcmp-ia32.S
+index 5f6658b89a0d1d77..a5b5c3d3491f2e5a 100644
+--- a/sysdeps/i386/i686/multiarch/memcmp-ia32.S
++++ b/sysdeps/i386/i686/multiarch/memcmp-ia32.S
+@@ -30,6 +30,9 @@
+ 
+ # undef weak_alias
+ # define weak_alias(original, alias)
++
++# undef strong_alias
++# define strong_alias(original, alias)
+ #endif
+ 
+ #include <sysdeps/i386/i686/memcmp.S>
+diff --git a/sysdeps/i386/i686/multiarch/memcmp.c b/sysdeps/i386/i686/multiarch/memcmp.c
+index 6e058a885775135c..3b2815edbc4d9d54 100644
+--- a/sysdeps/i386/i686/multiarch/memcmp.c
++++ b/sysdeps/i386/i686/multiarch/memcmp.c
+@@ -29,4 +29,5 @@
+ libc_ifunc_redirected (__redirect_memcmp, memcmp, IFUNC_SELECTOR ());
+ 
+ weak_alias (memcmp, bcmp)
++strong_alias (memcmp, __memcmpeq)
+ #endif
+diff --git a/sysdeps/i386/memcmp.S b/sysdeps/i386/memcmp.S
+index 1f212b0f6de8cde9..02473c2c0c827ba2 100644
+--- a/sysdeps/i386/memcmp.S
++++ b/sysdeps/i386/memcmp.S
+@@ -70,4 +70,6 @@ END (memcmp)
+ 
+ #undef bcmp
+ weak_alias (memcmp, bcmp)
++#undef __memcmpeq
++strong_alias (memcmp, __memcmpeq)
+ libc_hidden_builtin_def (memcmp)
+diff --git a/sysdeps/ia64/memcmp.S b/sysdeps/ia64/memcmp.S
+index 98570f4e364464ec..e9c3b645c742d34b 100644
+--- a/sysdeps/ia64/memcmp.S
++++ b/sysdeps/ia64/memcmp.S
+@@ -161,4 +161,5 @@ ENTRY(memcmp)
+ END(memcmp)
+ 
+ weak_alias (memcmp, bcmp)
++strong_alias (memcmp, __memcmpeq)
+ libc_hidden_builtin_def (memcmp)
+diff --git a/sysdeps/mach/hurd/i386/libc.abilist b/sysdeps/mach/hurd/i386/libc.abilist
+index c5da10a0cd0140e4..e849d6fa35456b4b 100644
+--- a/sysdeps/mach/hurd/i386/libc.abilist
++++ b/sysdeps/mach/hurd/i386/libc.abilist
+@@ -2285,6 +2285,7 @@ GLIBC_2.34 res_send F
+ GLIBC_2.34 shm_open F
+ GLIBC_2.34 shm_unlink F
+ GLIBC_2.34 timespec_getres F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/powerpc/powerpc32/405/memcmp.S b/sysdeps/powerpc/powerpc32/405/memcmp.S
+index 6a6a54d90f93e751..c2836040a7783fb2 100644
+--- a/sysdeps/powerpc/powerpc32/405/memcmp.S
++++ b/sysdeps/powerpc/powerpc32/405/memcmp.S
+@@ -126,3 +126,4 @@ L(st2):
+ END (memcmp)
+ libc_hidden_builtin_def (memcmp)
+ weak_alias (memcmp,bcmp)
++strong_alias (memcmp, __memcmpeq)
+diff --git a/sysdeps/powerpc/powerpc32/power4/memcmp.S b/sysdeps/powerpc/powerpc32/power4/memcmp.S
+index 814d2f211d95992e..f58e34aba5c2d3dc 100644
+--- a/sysdeps/powerpc/powerpc32/power4/memcmp.S
++++ b/sysdeps/powerpc/powerpc32/power4/memcmp.S
+@@ -1373,3 +1373,4 @@ END (memcmp)
+ 
+ libc_hidden_builtin_def (memcmp)
+ weak_alias (memcmp, bcmp)
++strong_alias (memcmp, __memcmpeq)
+diff --git a/sysdeps/powerpc/powerpc32/power4/multiarch/memcmp-power7.S b/sysdeps/powerpc/powerpc32/power4/multiarch/memcmp-power7.S
+index 8a929b2b443a8aff..b17d0e43b77e532d 100644
+--- a/sysdeps/powerpc/powerpc32/power4/multiarch/memcmp-power7.S
++++ b/sysdeps/powerpc/powerpc32/power4/multiarch/memcmp-power7.S
+@@ -38,4 +38,7 @@
+ #undef weak_alias
+ #define weak_alias(a, b)
+ 
++#undef strong_alias
++#define strong_alias(a, b)
++
+ #include <sysdeps/powerpc/powerpc32/power7/memcmp.S>
+diff --git a/sysdeps/powerpc/powerpc32/power4/multiarch/memcmp-ppc32.S b/sysdeps/powerpc/powerpc32/power4/multiarch/memcmp-ppc32.S
+index 317523b7435b8553..893b6cac9cd7e0cc 100644
+--- a/sysdeps/powerpc/powerpc32/power4/multiarch/memcmp-ppc32.S
++++ b/sysdeps/powerpc/powerpc32/power4/multiarch/memcmp-ppc32.S
+@@ -40,6 +40,10 @@
+ # undef weak_alias
+ # define weak_alias(a, b)					\
+   .weak b ; b = __memcmp_ppc
++
++# undef strong_alias
++# define strong_alias(a, b)					\
++  .globl b ; b = __memcmp_ppc
+ #endif
+ 
+ #include <sysdeps/powerpc/powerpc32/power4/memcmp.S>
+diff --git a/sysdeps/powerpc/powerpc32/power7/memcmp.S b/sysdeps/powerpc/powerpc32/power7/memcmp.S
+index 8a19953e2d0e8dbc..f8deb4e32cfcce9f 100644
+--- a/sysdeps/powerpc/powerpc32/power7/memcmp.S
++++ b/sysdeps/powerpc/powerpc32/power7/memcmp.S
+@@ -1373,3 +1373,4 @@ END (memcmp)
+ 
+ libc_hidden_builtin_def (memcmp)
+ weak_alias (memcmp, bcmp)
++strong_alias (memcmp, __memcmpeq)
+diff --git a/sysdeps/powerpc/powerpc64/le/power10/memcmp.S b/sysdeps/powerpc/powerpc64/le/power10/memcmp.S
+index 52f244e7e77cbdf9..f81c73a29c7f65e5 100644
+--- a/sysdeps/powerpc/powerpc64/le/power10/memcmp.S
++++ b/sysdeps/powerpc/powerpc64/le/power10/memcmp.S
+@@ -177,3 +177,4 @@ L(tail8):
+ END (MEMCMP)
+ libc_hidden_builtin_def (memcmp)
+ weak_alias (memcmp, bcmp)
++strong_alias (memcmp, __memcmpeq)
+diff --git a/sysdeps/powerpc/powerpc64/multiarch/memcmp-power10.S b/sysdeps/powerpc/powerpc64/multiarch/memcmp-power10.S
+index 73a0debd4a811d8e..22399f143d089b13 100644
+--- a/sysdeps/powerpc/powerpc64/multiarch/memcmp-power10.S
++++ b/sysdeps/powerpc/powerpc64/multiarch/memcmp-power10.S
+@@ -22,5 +22,7 @@
+ #define libc_hidden_builtin_def(name)
+ #undef weak_alias
+ #define weak_alias(name,alias)
++#undef strong_alias
++#define strong_alias(name,alias)
+ 
+ #include <sysdeps/powerpc/powerpc64/le/power10/memcmp.S>
+diff --git a/sysdeps/powerpc/powerpc64/multiarch/memcmp-power4.S b/sysdeps/powerpc/powerpc64/multiarch/memcmp-power4.S
+index d2b6c2f934e38001..fe68912a3b347916 100644
+--- a/sysdeps/powerpc/powerpc64/multiarch/memcmp-power4.S
++++ b/sysdeps/powerpc/powerpc64/multiarch/memcmp-power4.S
+@@ -22,5 +22,7 @@
+ #define libc_hidden_builtin_def(name)
+ #undef weak_alias
+ #define weak_alias(name,alias)
++#undef strong_alias
++#define strong_alias(name,alias)
+ 
+ #include <sysdeps/powerpc/powerpc64/power4/memcmp.S>
+diff --git a/sysdeps/powerpc/powerpc64/multiarch/memcmp-power7.S b/sysdeps/powerpc/powerpc64/multiarch/memcmp-power7.S
+index 8671e930f093cbdb..5739471a7d1a4f65 100644
+--- a/sysdeps/powerpc/powerpc64/multiarch/memcmp-power7.S
++++ b/sysdeps/powerpc/powerpc64/multiarch/memcmp-power7.S
+@@ -22,5 +22,7 @@
+ #define libc_hidden_builtin_def(name)
+ #undef weak_alias
+ #define weak_alias(name,alias)
++#undef strong_alias
++#define strong_alias(name,alias)
+ 
+ #include <sysdeps/powerpc/powerpc64/power7/memcmp.S>
+diff --git a/sysdeps/powerpc/powerpc64/multiarch/memcmp-power8.S b/sysdeps/powerpc/powerpc64/multiarch/memcmp-power8.S
+index eb2273d468478add..e6a93e88c616961e 100644
+--- a/sysdeps/powerpc/powerpc64/multiarch/memcmp-power8.S
++++ b/sysdeps/powerpc/powerpc64/multiarch/memcmp-power8.S
+@@ -22,5 +22,7 @@
+ #define libc_hidden_builtin_def(name)
+ #undef weak_alias
+ #define weak_alias(name,alias)
++#undef strong_alias
++#define strong_alias(name,alias)
+ 
+ #include <sysdeps/powerpc/powerpc64/power8/memcmp.S>
+diff --git a/sysdeps/powerpc/powerpc64/multiarch/memcmp-ppc64.c b/sysdeps/powerpc/powerpc64/multiarch/memcmp-ppc64.c
+index 1f9f219971fdbbd9..2bc5fa50d701c0c3 100644
+--- a/sysdeps/powerpc/powerpc64/multiarch/memcmp-ppc64.c
++++ b/sysdeps/powerpc/powerpc64/multiarch/memcmp-ppc64.c
+@@ -22,6 +22,10 @@
+ #define weak_alias(name, aliasname) \
+   extern __typeof (__memcmp_ppc) aliasname \
+     __attribute__ ((weak, alias ("__memcmp_ppc")));
++#undef strong_alias
++#define strong_alias(name, aliasname) \
++  extern __typeof (__memcmp_ppc) aliasname \
++    __attribute__ ((alias ("__memcmp_ppc")));
+ #if IS_IN (libc) && defined(SHARED)
+ # undef libc_hidden_builtin_def
+ # define libc_hidden_builtin_def(name) \
+diff --git a/sysdeps/powerpc/powerpc64/power4/memcmp.S b/sysdeps/powerpc/powerpc64/power4/memcmp.S
+index dc1be3a0d8d80d35..cc82be115ff2bd8e 100644
+--- a/sysdeps/powerpc/powerpc64/power4/memcmp.S
++++ b/sysdeps/powerpc/powerpc64/power4/memcmp.S
+@@ -1374,3 +1374,4 @@ L(duzeroLength):
+ END (MEMCMP)
+ libc_hidden_builtin_def (memcmp)
+ weak_alias (memcmp, bcmp)
++strong_alias (memcmp, __memcmpeq)
+diff --git a/sysdeps/powerpc/powerpc64/power7/memcmp.S b/sysdeps/powerpc/powerpc64/power7/memcmp.S
+index bc034a55bc18f520..3044f7ede95ca9bd 100644
+--- a/sysdeps/powerpc/powerpc64/power7/memcmp.S
++++ b/sysdeps/powerpc/powerpc64/power7/memcmp.S
+@@ -1059,3 +1059,4 @@ L(duzeroLength):
+ END (MEMCMP)
+ libc_hidden_builtin_def (memcmp)
+ weak_alias (memcmp, bcmp)
++strong_alias (memcmp, __memcmpeq)
+diff --git a/sysdeps/powerpc/powerpc64/power8/memcmp.S b/sysdeps/powerpc/powerpc64/power8/memcmp.S
+index b676b09a9b33c643..0c6a154502719064 100644
+--- a/sysdeps/powerpc/powerpc64/power8/memcmp.S
++++ b/sysdeps/powerpc/powerpc64/power8/memcmp.S
+@@ -1442,3 +1442,4 @@ L(duzeroLength):
+ END (MEMCMP)
+ libc_hidden_builtin_def (memcmp)
+ weak_alias (memcmp, bcmp)
++strong_alias (memcmp, __memcmpeq)
+diff --git a/sysdeps/s390/memcmp-z900.S b/sysdeps/s390/memcmp-z900.S
+index 995d52e47d713623..d625bf90dd7250ee 100644
+--- a/sysdeps/s390/memcmp-z900.S
++++ b/sysdeps/s390/memcmp-z900.S
+@@ -164,6 +164,7 @@ END(MEMCMP_Z196)
+    Otherwise see sysdeps/s390/memcmp.c.  */
+ strong_alias (MEMCMP_DEFAULT, memcmp)
+ weak_alias (memcmp, bcmp)
++strong_alias (memcmp, __memcmpeq)
+ #endif
+ 
+ #if defined SHARED && IS_IN (libc)
+diff --git a/sysdeps/s390/memcmp.c b/sysdeps/s390/memcmp.c
+index 0b4e9da71784fda3..52c20af77229d92f 100644
+--- a/sysdeps/s390/memcmp.c
++++ b/sysdeps/s390/memcmp.c
+@@ -46,4 +46,5 @@ s390_libc_ifunc_expr (__redirect_memcmp, memcmp,
+ 		      })
+ 		      )
+ weak_alias (memcmp, bcmp);
++strong_alias (memcmp, __memcmpeq)
+ #endif
+diff --git a/sysdeps/sparc/sparc64/memcmp.S b/sysdeps/sparc/sparc64/memcmp.S
+index 0935d31fec61e0c4..ded0fab090763336 100644
+--- a/sysdeps/sparc/sparc64/memcmp.S
++++ b/sysdeps/sparc/sparc64/memcmp.S
+@@ -139,4 +139,6 @@ END(memcmp)
+ 
+ #undef bcmp
+ weak_alias (memcmp, bcmp)
++#undef __memcmpeq
++strong_alias (memcmp, __memcmpeq)
+ libc_hidden_builtin_def (memcmp)
+diff --git a/sysdeps/unix/sysv/linux/aarch64/libc.abilist b/sysdeps/unix/sysv/linux/aarch64/libc.abilist
+index 21a2e50a884c3d64..f227ae6ceec97c73 100644
+--- a/sysdeps/unix/sysv/linux/aarch64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/aarch64/libc.abilist
+@@ -2612,3 +2612,4 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+diff --git a/sysdeps/unix/sysv/linux/alpha/libc.abilist b/sysdeps/unix/sysv/linux/alpha/libc.abilist
+index a201fd69bacc3281..0ccc3fc73ecc0e4d 100644
+--- a/sysdeps/unix/sysv/linux/alpha/libc.abilist
++++ b/sysdeps/unix/sysv/linux/alpha/libc.abilist
+@@ -2709,6 +2709,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/arc/libc.abilist b/sysdeps/unix/sysv/linux/arc/libc.abilist
+index 261143693778ba9f..fd80704787f4ef41 100644
+--- a/sysdeps/unix/sysv/linux/arc/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arc/libc.abilist
+@@ -2373,3 +2373,4 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+diff --git a/sysdeps/unix/sysv/linux/arm/be/libc.abilist b/sysdeps/unix/sysv/linux/arm/be/libc.abilist
+index a426241965d56df9..2ae6c58b8ad6fc01 100644
+--- a/sysdeps/unix/sysv/linux/arm/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arm/be/libc.abilist
+@@ -491,6 +491,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0xa0
+ GLIBC_2.4 _IO_2_1_stdin_ D 0xa0
+diff --git a/sysdeps/unix/sysv/linux/arm/le/libc.abilist b/sysdeps/unix/sysv/linux/arm/le/libc.abilist
+index 02f80418cc40ac06..fcfd1e8594d80aa1 100644
+--- a/sysdeps/unix/sysv/linux/arm/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arm/le/libc.abilist
+@@ -488,6 +488,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0xa0
+ GLIBC_2.4 _IO_2_1_stdin_ D 0xa0
+diff --git a/sysdeps/unix/sysv/linux/csky/libc.abilist b/sysdeps/unix/sysv/linux/csky/libc.abilist
+index b7676eb372398daf..ba034b85414a2b55 100644
+--- a/sysdeps/unix/sysv/linux/csky/libc.abilist
++++ b/sysdeps/unix/sysv/linux/csky/libc.abilist
+@@ -2647,3 +2647,4 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+diff --git a/sysdeps/unix/sysv/linux/hppa/libc.abilist b/sysdeps/unix/sysv/linux/hppa/libc.abilist
+index f6965c9d9594910a..b7460bec8ace47c2 100644
+--- a/sysdeps/unix/sysv/linux/hppa/libc.abilist
++++ b/sysdeps/unix/sysv/linux/hppa/libc.abilist
+@@ -2596,6 +2596,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/i386/libc.abilist b/sysdeps/unix/sysv/linux/i386/libc.abilist
+index 2e7603d9ed6728e2..a4dc341dededdc3b 100644
+--- a/sysdeps/unix/sysv/linux/i386/libc.abilist
++++ b/sysdeps/unix/sysv/linux/i386/libc.abilist
+@@ -2780,6 +2780,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/ia64/libc.abilist b/sysdeps/unix/sysv/linux/ia64/libc.abilist
+index dd3a56d3fef14600..94b222dbc7ffbb81 100644
+--- a/sysdeps/unix/sysv/linux/ia64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/ia64/libc.abilist
+@@ -2547,6 +2547,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist b/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
+index c1e0ea9c102a69d1..12fd3b63103c3e6e 100644
+--- a/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
++++ b/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
+@@ -492,6 +492,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0x98
+ GLIBC_2.4 _IO_2_1_stdin_ D 0x98
+diff --git a/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist b/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
+index 93161048ca26b91b..4d2296007ab1d922 100644
+--- a/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
++++ b/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
+@@ -2723,6 +2723,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist b/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
+index 0aaeec8a2707da2a..a223278a3d4a33d8 100644
+--- a/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
+@@ -2696,3 +2696,4 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+diff --git a/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist b/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
+index bec5f456c9756e83..780a4f5b0bf5518c 100644
+--- a/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
+@@ -2693,3 +2693,4 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
+index 97d2127f7828312a..cd65136062a6a876 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
+@@ -2688,6 +2688,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
+index acb0756c11995d34..b5b9902db56a4c79 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
+@@ -2686,6 +2686,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
+index ebc21dde1eca0d6b..57593d5f94a184f1 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
+@@ -2694,6 +2694,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
+index c68f7e3c6cc8baa7..e944d76bed0bfe06 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
+@@ -2598,6 +2598,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/nios2/libc.abilist b/sysdeps/unix/sysv/linux/nios2/libc.abilist
+index e5b6834f147f1edc..8af5a3a90dfe4089 100644
+--- a/sysdeps/unix/sysv/linux/nios2/libc.abilist
++++ b/sysdeps/unix/sysv/linux/nios2/libc.abilist
+@@ -2735,3 +2735,4 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
+index 132707c8ad52832b..3a0213b39f8f7abd 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
+@@ -2750,6 +2750,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
+index 0af2be31a0f4ff91..f57df0234b8bdee3 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
+@@ -2783,6 +2783,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
+index cf864632d0cc3438..259a0cfc5126ca9e 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
+@@ -2506,6 +2506,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
+index d566d675d00c881b..126541daf152e1ad 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
+@@ -2808,3 +2808,4 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist b/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
+index c9a7eacb32ebe277..05df4d13d2c35ad1 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
+@@ -2375,3 +2375,4 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist b/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
+index 8299131cb2ce932e..8e349cbff8cc0507 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
+@@ -2575,3 +2575,4 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist b/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
+index c3fe78f77fd11c78..e9de402766af0d8a 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
+@@ -2748,6 +2748,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist b/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
+index 83e542aa8c2563fa..1a010c745d78a07e 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
+@@ -2543,6 +2543,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/sh/be/libc.abilist b/sysdeps/unix/sysv/linux/sh/be/libc.abilist
+index dc502f683336ad37..22ce530975944ff6 100644
+--- a/sysdeps/unix/sysv/linux/sh/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sh/be/libc.abilist
+@@ -2603,6 +2603,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/sh/le/libc.abilist b/sysdeps/unix/sysv/linux/sh/le/libc.abilist
+index cba1abb55621ca74..960df07b83bd2cbf 100644
+--- a/sysdeps/unix/sysv/linux/sh/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sh/le/libc.abilist
+@@ -2600,6 +2600,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist b/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
+index d4a516fb47518e12..eedb376f3dfeb8fb 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
+@@ -2743,6 +2743,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist b/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
+index 6268875ba37ac0d4..86e0c92bef9255ab 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
+@@ -2570,6 +2570,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist b/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
+index 095e914b73705601..5e59d90623c2bcba 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
+@@ -2521,6 +2521,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist b/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
+index dd910f7fe934f260..94412dc134af283a 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
+@@ -2627,3 +2627,4 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __memcmpeq F
+diff --git a/sysdeps/x86_64/memcmp.S b/sysdeps/x86_64/memcmp.S
+index a9266494635ad2dd..1c217935edb18210 100644
+--- a/sysdeps/x86_64/memcmp.S
++++ b/sysdeps/x86_64/memcmp.S
+@@ -359,4 +359,6 @@ END(memcmp)
+ 
+ #undef bcmp
+ weak_alias (memcmp, bcmp)
++#undef __memcmpeq
++strong_alias (memcmp, __memcmpeq)
+ libc_hidden_builtin_def (memcmp)
+diff --git a/sysdeps/x86_64/multiarch/memcmp-sse2.S b/sysdeps/x86_64/multiarch/memcmp-sse2.S
+index b135fa2d4084b6d0..af737c5e6c65e9b2 100644
+--- a/sysdeps/x86_64/multiarch/memcmp-sse2.S
++++ b/sysdeps/x86_64/multiarch/memcmp-sse2.S
+@@ -26,6 +26,9 @@
+ 
+ # undef weak_alias
+ # define weak_alias(ignored1, ignored2)
++
++# undef strong_alias
++# define strong_alias(ignored1, ignored2)
+ #endif
+ 
+ #include <sysdeps/x86_64/memcmp.S>
+diff --git a/sysdeps/x86_64/multiarch/memcmp.c b/sysdeps/x86_64/multiarch/memcmp.c
+index fe725f35639793c2..4a3aad2c9c4a58fd 100644
+--- a/sysdeps/x86_64/multiarch/memcmp.c
++++ b/sysdeps/x86_64/multiarch/memcmp.c
+@@ -29,6 +29,8 @@
+ libc_ifunc_redirected (__redirect_memcmp, memcmp, IFUNC_SELECTOR ());
+ # undef bcmp
+ weak_alias (memcmp, bcmp)
++# undef __memcmpeq
++strong_alias (memcmp, __memcmpeq)
+ 
+ # ifdef SHARED
+ __hidden_ver1 (memcmp, __GI_memcmp, __redirect_memcmp)

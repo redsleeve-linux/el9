@@ -1,0 +1,36 @@
+In glibc-RHEL-93320-9.patch, the elf/tst-dl_find_object test was
+added.  It was later disabled in glibc-RHEL-93320-19.patch,
+as noted in the patch description.  This was missed when the
+patch was re-added in glibc-RHEL-107564.patch.  The test remains
+valuable because we do not test _dl_find_object in libc.a elsewhere
+in the glibc build, so this patch disables just the failing subtest,
+and puts an explanation directly into the test.
+
+diff --git a/elf/tst-dl_find_object.c b/elf/tst-dl_find_object.c
+index d8c217545d116453..6bfda7bd23a34c0d 100644
+--- a/elf/tst-dl_find_object.c
++++ b/elf/tst-dl_find_object.c
+@@ -231,6 +231,7 @@ do_test (void)
+   check (map_start, &expected, __LINE__);
+   check (map_end, &expected, __LINE__);
+ 
++#ifndef FOR_STATIC
+   /* Check that _dl_find_object works from a shared object (mostly for
+      static dlopen).  */
+   __typeof (_dl_find_object) *find_object
+@@ -238,6 +239,15 @@ do_test (void)
+   struct dl_find_object actual;
+   TEST_COMPARE (find_object (&main_program_data, &actual), 0);
+   check (&main_program_data, &actual, __LINE__); /* Reversed check.  */
++#else
++  /* Downstream, _dl_find_object does not work after static dlopen
++     because the ld.so copy loaded as part of static dlopen is not
++     initialized.  Upstream, we redirect _dl_find_object to the
++     statically version from the main program by patching a function
++     pointer in _rtld_global_ro.  Downstream, we have not changed the
++     layout of _rtld_global_ro, so this patching is missing.  */
++  printf ("info: skipping dlopen-based test for static build\n");
++#endif
+ 
+   return 0;
+ }

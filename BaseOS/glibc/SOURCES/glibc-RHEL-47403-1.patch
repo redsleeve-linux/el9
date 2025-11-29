@@ -1,0 +1,562 @@
+commit a93d9e03a31ec14405cb3a09aa95413b67067380
+Author: H.J. Lu <hjl.tools@gmail.com>
+Date:   Tue Aug 17 19:35:48 2021 -0700
+
+    Extend struct r_debug to support multiple namespaces [BZ #15971]
+    
+    Glibc does not provide an interface for debugger to access libraries
+    loaded in multiple namespaces via dlmopen.
+    
+    The current rtld-debugger interface is described in the file:
+    
+    elf/rtld-debugger-interface.txt
+    
+    under the "Standard debugger interface" heading.  This interface only
+    provides access to the first link-map (LM_ID_BASE).
+    
+    1. Bump r_version to 2 when multiple namespaces are used.  This triggers
+    the GDB bug:
+    
+    https://sourceware.org/bugzilla/show_bug.cgi?id=28236
+    
+    2. Add struct r_debug_extended to extend struct r_debug into a linked-list,
+    where each element correlates to an unique namespace.
+    3. Initialize the r_debug_extended structure.  Bump r_version to 2 for
+    the new namespace and add the new namespace to the namespace linked list.
+    4. Add _dl_debug_update to return the address of struct r_debug' of a
+    namespace.
+    5. Add a hidden symbol, _r_debug_extended, for struct r_debug_extended.
+    6. Provide the symbol, _r_debug, with size of struct r_debug, as an alias
+    of _r_debug_extended, for programs which reference _r_debug.
+    
+    This fixes BZ #15971.
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+Conflicts:
+	elf/Makefile (fixup context due to reordering)
+	elf/dl-open.c (modified line didn't exist downstream)
+
+diff --git a/csu/Makefile b/csu/Makefile
+index 3054329cea4a276d..e2390e4a7deb6941 100644
+--- a/csu/Makefile
++++ b/csu/Makefile
+@@ -88,6 +88,9 @@ endif
+ before-compile += $(objpfx)abi-tag.h
+ generated += abi-tag.h
+ 
++# Put it here to generate it earlier.
++gen-as-const-headers += rtld-sizes.sym
++
+ # These are the special initializer/finalizer files.  They are always the
+ # first and last file in the link.  crti.o ... crtn.o define the global
+ # "functions" _init and _fini to run the .init and .fini sections.
+diff --git a/csu/rtld-sizes.sym b/csu/rtld-sizes.sym
+new file mode 100644
+index 0000000000000000..13924d5efdbaa248
+--- /dev/null
++++ b/csu/rtld-sizes.sym
+@@ -0,0 +1,6 @@
++#include <link.h>
++
++--
++R_DEBUG_SIZE		sizeof (struct r_debug)
++R_DEBUG_EXTENDED_SIZE	sizeof (struct r_debug_extended)
++R_DEBUG_EXTENDED_ALIGN	__alignof (struct r_debug_extended)
+diff --git a/elf/Makefile b/elf/Makefile
+index 15bec14364266c77..b074cc29664b3e20 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -54,6 +54,7 @@ dl-routines = \
+   dl-catch \
+   dl-close \
+   dl-debug \
++  dl-debug-symbols \
+   dl-deps \
+   dl-exception \
+   dl-execstack \
+@@ -399,6 +400,7 @@ tests += \
+   tst-dlmodcount \
+   tst-dlmopen1 \
+   tst-dlmopen3 \
++  tst-dlmopen4 \
+   tst-dlmopen-dlerror \
+   tst-dlmopen-gethostbyname \
+   tst-dlmopen-twice \
+@@ -1973,6 +1975,8 @@ $(objpfx)tst-dlmopen2.out: $(objpfx)tst-dlmopen1mod.so
+ 
+ $(objpfx)tst-dlmopen3.out: $(objpfx)tst-dlmopen1mod.so
+ 
++$(objpfx)tst-dlmopen4.out: $(objpfx)tst-dlmopen1mod.so
++
+ $(objpfx)tst-audit1.out: $(objpfx)tst-auditmod1.so
+ tst-audit1-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
+ 
+diff --git a/elf/dl-close.c b/elf/dl-close.c
+index 9d158c25498fd8ae..bf699e58d753a1e2 100644
+--- a/elf/dl-close.c
++++ b/elf/dl-close.c
+@@ -469,7 +469,7 @@ _dl_close_worker (struct link_map *map, bool force)
+ #endif
+ 
+   /* Notify the debugger we are about to remove some loaded objects.  */
+-  struct r_debug *r = _dl_debug_initialize (0, nsid);
++  struct r_debug *r = _dl_debug_update (nsid);
+   r->r_state = RT_DELETE;
+   _dl_debug_state ();
+   LIBC_PROBE (unmap_start, 2, nsid, r);
+diff --git a/elf/dl-debug-symbols.S b/elf/dl-debug-symbols.S
+new file mode 100644
+index 0000000000000000..b7e9f5d9470c4da2
+--- /dev/null
++++ b/elf/dl-debug-symbols.S
+@@ -0,0 +1,36 @@
++/* Define symbols used to communicate dynamic linker state to the
++   debugger at runtime.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <rtld-sizes.h>
++
++/* Define 2 symbols, _r_debug_extended and _r_debug, which is an alias
++   of _r_debug_extended, but with the size of struct r_debug.  */
++
++	.globl	_r_debug
++	.type	_r_debug, %object
++	.size	_r_debug, R_DEBUG_SIZE
++	.hidden	_r_debug_extended
++	.globl	_r_debug_extended
++	.type	_r_debug_extended, %object
++	.size	_r_debug_extended, R_DEBUG_EXTENDED_SIZE
++	.section .bss
++	.balign	R_DEBUG_EXTENDED_ALIGN
++_r_debug:
++_r_debug_extended:
++	.zero	R_DEBUG_EXTENDED_SIZE
+diff --git a/elf/dl-debug.c b/elf/dl-debug.c
+index 2cd5f0975380445c..f637d4bb8de3db8c 100644
+--- a/elf/dl-debug.c
++++ b/elf/dl-debug.c
+@@ -30,37 +30,80 @@ extern const int verify_link_map_members[(VERIFY_MEMBER (l_addr)
+ 					  && VERIFY_MEMBER (l_prev))
+ 					 ? 1 : -1];
+ 
+-/* This structure communicates dl state to the debugger.  The debugger
+-   normally finds it via the DT_DEBUG entry in the dynamic section, but in
+-   a statically-linked program there is no dynamic section for the debugger
+-   to examine and it looks for this particular symbol name.  */
+-struct r_debug _r_debug;
++/* Update the `r_map' member and return the address of `struct r_debug'
++   of the namespace NS. */
+ 
++struct r_debug *
++_dl_debug_update (Lmid_t ns)
++{
++  struct r_debug_extended *r;
++  if (ns == LM_ID_BASE)
++    r = &_r_debug_extended;
++  else
++    r = &GL(dl_ns)[ns]._ns_debug;
++  if (r->base.r_map == NULL)
++    atomic_store_release (&r->base.r_map,
++			  (void *) GL(dl_ns)[ns]._ns_loaded);
++  return &r->base;
++}
+ 
+-/* Initialize _r_debug if it has not already been done.  The argument is
+-   the run-time load address of the dynamic linker, to be put in
+-   _r_debug.r_ldbase.  Returns the address of _r_debug.  */
++/* Initialize _r_debug_extended for the namespace NS.  LDBASE is the
++   run-time load address of the dynamic linker, to be put in
++   _r_debug_extended.r_ldbase.  Return the address of _r_debug.  */
+ 
+ struct r_debug *
+ _dl_debug_initialize (ElfW(Addr) ldbase, Lmid_t ns)
+ {
+-  struct r_debug *r;
++  struct r_debug_extended *r, **pp = NULL;
+ 
+   if (ns == LM_ID_BASE)
+-    r = &_r_debug;
+-  else
+-    r = &GL(dl_ns)[ns]._ns_debug;
++    {
++      r = &_r_debug_extended;
++      /* Initialize r_version to 1.  */
++      if (_r_debug_extended.base.r_version == 0)
++	_r_debug_extended.base.r_version = 1;
++    }
++  else if (DL_NNS > 1)
++    {
++      r = &GL(dl_ns)[ns]._ns_debug;
++      if (r->base.r_brk == 0)
++	{
++	  /* Add the new namespace to the linked list.  After a namespace
++	     is initialized, r_brk becomes non-zero.  A namespace becomes
++	     empty (r_map == NULL) when it is unused.  But it is never
++	     removed from the linked list.  */
++	  struct r_debug_extended *p;
++	  for (pp = &_r_debug_extended.r_next;
++	       (p = *pp) != NULL;
++	       pp = &p->r_next)
++	    ;
++
++	  r->base.r_version = 2;
++	}
++    }
++
++  if (r->base.r_brk == 0)
++    {
++      /* Tell the debugger where to find the map of loaded objects.
++	 This function is called from dlopen.  Initialize the namespace
++	 only once.  */
++      r->base.r_ldbase = ldbase ?: _r_debug_extended.base.r_ldbase;
++      r->base.r_brk = (ElfW(Addr)) &_dl_debug_state;
++      r->r_next = NULL;
++    }
++
++  if (r->base.r_map == NULL)
++    atomic_store_release (&r->base.r_map,
++			  (void *) GL(dl_ns)[ns]._ns_loaded);
+ 
+-  if (r->r_map == NULL || ldbase != 0)
++  if (pp != NULL)
+     {
+-      /* Tell the debugger where to find the map of loaded objects.  */
+-      r->r_version = 1	/* R_DEBUG_VERSION XXX */;
+-      r->r_ldbase = ldbase ?: _r_debug.r_ldbase;
+-      r->r_map = (void *) GL(dl_ns)[ns]._ns_loaded;
+-      r->r_brk = (ElfW(Addr)) &_dl_debug_state;
++      atomic_store_release (pp, r);
++      /* Bump r_version to 2 for the new namespace.  */
++      atomic_store_release (&_r_debug_extended.base.r_version, 2);
+     }
+ 
+-  return r;
++  return &r->base;
+ }
+ 
+ 
+diff --git a/elf/dl-load.c b/elf/dl-load.c
+index eb6b658b698f5694..5b0734c816b351f0 100644
+--- a/elf/dl-load.c
++++ b/elf/dl-load.c
+@@ -950,7 +950,7 @@ _dl_map_object_from_fd (const char *name, const char *origname, int fd,
+   /* Initialize to keep the compiler happy.  */
+   const char *errstring = NULL;
+   int errval = 0;
+-  struct r_debug *r = _dl_debug_initialize (0, nsid);
++  struct r_debug *r = _dl_debug_update (nsid);
+   bool make_consistent = false;
+ 
+   /* Get file information.  To match the kernel behavior, do not fill
+diff --git a/elf/dl-open.c b/elf/dl-open.c
+index 80af6518d4395906..eef724f7e9b2211d 100644
+--- a/elf/dl-open.c
++++ b/elf/dl-open.c
+@@ -596,7 +596,7 @@ dl_open_worker_begin (void *a)
+       if ((mode & RTLD_GLOBAL) && new->l_global == 0)
+ 	add_to_global_update (new);
+ 
+-      assert (_dl_debug_initialize (0, args->nsid)->r_state == RT_CONSISTENT);
++      assert (_dl_debug_update (args->nsid)->r_state == RT_CONSISTENT);
+ 
+       return;
+     }
+@@ -634,7 +634,7 @@ dl_open_worker_begin (void *a)
+ #endif
+ 
+   /* Notify the debugger all new objects are now ready to go.  */
+-  struct r_debug *r = _dl_debug_initialize (0, args->nsid);
++  struct r_debug *r = _dl_debug_update (args->nsid);
+   r->r_state = RT_CONSISTENT;
+   _dl_debug_state ();
+   LIBC_PROBE (map_complete, 3, args->nsid, r, new);
+@@ -840,7 +840,7 @@ no more namespaces available for dlmopen()"));
+ 	}
+ 
+       GL(dl_ns)[nsid].libc_map = NULL;
+-      _dl_debug_initialize (0, nsid)->r_state = RT_CONSISTENT;
++      _dl_debug_update (nsid)->r_state = RT_CONSISTENT;
+     }
+   /* Never allow loading a DSO in a namespace which is empty.  Such
+      direct placements is only causing problems.  Also don't allow
+@@ -916,7 +916,7 @@ no more namespaces available for dlmopen()"));
+       _dl_signal_exception (errcode, &exception, NULL);
+     }
+ 
+-  assert (_dl_debug_initialize (0, args.nsid)->r_state == RT_CONSISTENT);
++  assert (_dl_debug_update (args.nsid)->r_state == RT_CONSISTENT);
+ 
+   /* Release the lock.  */
+   __rtld_lock_unlock_recursive (GL(dl_load_lock));
+diff --git a/elf/dl-reloc-static-pie.c b/elf/dl-reloc-static-pie.c
+index 757205affe65d9e1..5b85df8a2eed1888 100644
+--- a/elf/dl-reloc-static-pie.c
++++ b/elf/dl-reloc-static-pie.c
+@@ -62,7 +62,7 @@ _dl_relocate_static_pie (void)
+   ELF_DYNAMIC_RELOCATE (main_map, NULL, 0, 0, 0);
+   main_map->l_relocated = 1;
+ 
+-  /* Initialize _r_debug.  */
++  /* Initialize _r_debug_extended.  */
+   struct r_debug *r = _dl_debug_initialize (0, LM_ID_BASE);
+   r->r_state = RT_CONSISTENT;
+ 
+diff --git a/elf/link.h b/elf/link.h
+index 21a351686b9bf7c8..0906bbe33fbd9f8f 100644
+--- a/elf/link.h
++++ b/elf/link.h
+@@ -34,14 +34,13 @@
+ #include <bits/elfclass.h>		/* Defines __ELF_NATIVE_CLASS.  */
+ #include <bits/link.h>
+ 
+-/* Rendezvous structure used by the run-time dynamic linker to communicate
+-   details of shared object loading to the debugger.  If the executable's
+-   dynamic section has a DT_DEBUG element, the run-time linker sets that
+-   element's value to the address where this structure can be found.  */
++/* The legacy rendezvous structure used by the run-time dynamic linker to
++   communicate details of shared object loading to the debugger.  */
+ 
+ struct r_debug
+   {
+-    int r_version;		/* Version number for this protocol.  */
++    /* Version number for this protocol.  It should be greater than 0.  */
++    int r_version;
+ 
+     struct link_map *r_map;	/* Head of the chain of loaded objects.  */
+ 
+@@ -63,16 +62,34 @@ struct r_debug
+     ElfW(Addr) r_ldbase;	/* Base address the linker is loaded at.  */
+   };
+ 
+-/* This is the instance of that structure used by the dynamic linker.  */
++/* This is the symbol of that structure provided by the dynamic linker.  */
+ extern struct r_debug _r_debug;
+ 
++/* The extended rendezvous structure used by the run-time dynamic linker
++   to communicate details of shared object loading to the debugger.  If
++   the executable's dynamic section has a DT_DEBUG element, the run-time
++   linker sets that element's value to the address where this structure
++   can be found.  */
++
++struct r_debug_extended
++  {
++    struct r_debug base;
++
++    /* The following field is added by r_version == 2.  */
++
++    /* Link to the next r_debug_extended structure.  Each r_debug_extended
++       structure represents a different namespace.  The first
++       r_debug_extended structure is for the default namespace.  */
++    struct r_debug_extended *r_next;
++  };
++
+ /* This symbol refers to the "dynamic structure" in the `.dynamic' section
+    of whatever module refers to `_DYNAMIC'.  So, to find its own
+-   `struct r_debug', a program could do:
++   `struct r_debug_extended', a program could do:
+      for (dyn = _DYNAMIC; dyn->d_tag != DT_NULL; ++dyn)
+        if (dyn->d_tag == DT_DEBUG)
+-	 r_debug = (struct r_debug *) dyn->d_un.d_ptr;
+-   */
++	 r_debug_extended = (struct r_debug_extended *) dyn->d_un.d_ptr;
++ */
+ extern ElfW(Dyn) _DYNAMIC[];
+ 
+ /* Structure describing a loaded shared object.  The `l_next' and `l_prev'
+diff --git a/elf/rtld-debugger-interface.txt b/elf/rtld-debugger-interface.txt
+index 61bc99e4b086612f..f3476d8308616f84 100644
+--- a/elf/rtld-debugger-interface.txt
++++ b/elf/rtld-debugger-interface.txt
+@@ -9,6 +9,9 @@ structure can be found.
+ 
+ The r_debug structure contains (amongst others) the following fields:
+ 
++  int r_version:
++    Version number for this protocol.  It should be greater than 0.
++
+   struct link_map *r_map:
+     A linked list of loaded objects.
+ 
+@@ -32,6 +35,18 @@ but there is no way for the debugger to discover whether any of the
+ objects in the link-map have been relocated or not.
+ 
+ 
++Extension to the r_debug structure
++==================================
++
++The r_debug_extended structure is an extension of the r_debug interface.
++If r_version is 2, one additional field is available:
++
++  struct r_debug_extended *r_next;
++    Link to the next r_debug_extended structure.  Each r_debug_extended
++    structure represents a different namespace.  A namespace is active
++    if its r_map field isn't NULL.  The first r_debug_extended structure
++    is for the default namespace.
++
+ Probe-based debugger interface
+ ==============================
+ 
+diff --git a/elf/rtld.c b/elf/rtld.c
+index d3d9e6b904ac78fd..7d8ed0ac1188d527 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -1725,7 +1725,7 @@ dl_main (const ElfW(Phdr) *phdr,
+      objects.  */
+   call_init_paths (&state);
+ 
+-  /* Initialize _r_debug.  */
++  /* Initialize _r_debug_extended.  */
+   struct r_debug *r = _dl_debug_initialize (GL(dl_rtld_map).l_addr,
+ 					    LM_ID_BASE);
+   r->r_state = RT_CONSISTENT;
+@@ -2531,7 +2531,7 @@ dl_main (const ElfW(Phdr) *phdr,
+ 
+   /* Notify the debugger all new objects are now ready to go.  We must re-get
+      the address since by now the variable might be in another object.  */
+-  r = _dl_debug_initialize (0, LM_ID_BASE);
++  r = _dl_debug_update (LM_ID_BASE);
+   r->r_state = RT_CONSISTENT;
+   _dl_debug_state ();
+   LIBC_PROBE (init_complete, 2, LM_ID_BASE, r);
+diff --git a/elf/tst-dlmopen4.c b/elf/tst-dlmopen4.c
+new file mode 100644
+index 0000000000000000..3fe150e50bc259f0
+--- /dev/null
++++ b/elf/tst-dlmopen4.c
+@@ -0,0 +1,72 @@
++/* Test struct r_debug_extended via DT_DEBUG.
++   Copyright (C) 2021 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <link.h>
++#include <stdlib.h>
++#include <string.h>
++#include <gnu/lib-names.h>
++#include <support/xdlfcn.h>
++#include <support/check.h>
++#include <support/test-driver.h>
++
++#ifndef ELF_MACHINE_GET_R_DEBUG
++# define ELF_MACHINE_GET_R_DEBUG(d) \
++    (__extension__ ({ 						\
++      struct r_debug_extended *debug;				\
++      if ((d)->d_tag == DT_DEBUG)				\
++	debug = (struct r_debug_extended *) (d)->d_un.d_ptr;	\
++      else							\
++	debug = NULL;						\
++      debug; }))
++#endif
++
++static int
++do_test (void)
++{
++  ElfW(Dyn) *d;
++  struct r_debug_extended *debug = NULL;
++
++  for (d = _DYNAMIC; d->d_tag != DT_NULL; ++d)
++    {
++      debug = ELF_MACHINE_GET_R_DEBUG (d);
++      if (debug != NULL)
++	break;
++    }
++
++  TEST_VERIFY_EXIT (debug != NULL);
++  TEST_COMPARE (debug->base.r_version, 1);
++  TEST_VERIFY_EXIT (debug->r_next == NULL);
++
++  void *h = xdlmopen (LM_ID_NEWLM, "$ORIGIN/tst-dlmopen1mod.so",
++		      RTLD_LAZY);
++
++  TEST_COMPARE (debug->base.r_version, 2);
++  TEST_VERIFY_EXIT (debug->r_next != NULL);
++  TEST_VERIFY_EXIT (debug->r_next->r_next == NULL);
++  TEST_VERIFY_EXIT (debug->r_next->base.r_map != NULL);
++  TEST_VERIFY_EXIT (debug->r_next->base.r_map->l_name != NULL);
++  const char *name = basename (debug->r_next->base.r_map->l_name);
++  TEST_COMPARE_STRING (name, "tst-dlmopen1mod.so");
++
++  xdlclose (h);
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/include/link.h b/include/link.h
+index 0dc63ef37d6a5666..0cf130ddb8af2e89 100644
+--- a/include/link.h
++++ b/include/link.h
+@@ -362,6 +362,10 @@ struct auditstate
+ };
+ 
+ 
++/* This is the hidden instance of struct r_debug_extended used by the
++   dynamic linker.  */
++extern struct r_debug_extended _r_debug_extended attribute_hidden;
++
+ #if __ELF_NATIVE_CLASS == 32
+ # define symbind symbind32
+ # define LA_SYMBIND "la_symbind32"
+diff --git a/sysdeps/generic/ldsodefs.h b/sysdeps/generic/ldsodefs.h
+index dc4e0555e4ed7f3c..695f3910234e87da 100644
+--- a/sysdeps/generic/ldsodefs.h
++++ b/sysdeps/generic/ldsodefs.h
+@@ -376,7 +376,7 @@ struct rtld_global
+       void (*free) (void *);
+     } _ns_unique_sym_table;
+     /* Keep track of changes to each namespace' list.  */
+-    struct r_debug _ns_debug;
++    struct r_debug_extended _ns_debug;
+   } _dl_ns[DL_NNS];
+   /* One higher than index of last used namespace.  */
+   EXTERN size_t _dl_nns;
+@@ -1128,12 +1128,16 @@ extern void _dl_sort_maps (struct link_map **maps, unsigned int nmaps,
+ extern void _dl_debug_state (void);
+ rtld_hidden_proto (_dl_debug_state)
+ 
+-/* Initialize `struct r_debug' if it has not already been done.  The
+-   argument is the run-time load address of the dynamic linker, to be put
+-   in the `r_ldbase' member.  Returns the address of the structure.  */
++/* Initialize `struct r_debug_extended' for the namespace NS.  LDBASE
++   is the run-time load address of the dynamic linker, to be put in the
++   `r_ldbase' member.  Return the address of the structure.  */
+ extern struct r_debug *_dl_debug_initialize (ElfW(Addr) ldbase, Lmid_t ns)
+      attribute_hidden;
+ 
++/* Update the `r_map' member and return the address of `struct r_debug'
++   of the namespace NS.  */
++extern struct r_debug *_dl_debug_update (Lmid_t ns) attribute_hidden;
++
+ /* Initialize the basic data structure for the search paths.  SOURCE
+    is either "LD_LIBRARY_PATH" or "--library-path".
+    GLIBC_HWCAPS_PREPEND adds additional glibc-hwcaps subdirectories to

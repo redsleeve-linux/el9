@@ -1,0 +1,125 @@
+From 1ff8791c68726c97d745ed0c8ec8f1f6f97255cf Mon Sep 17 00:00:00 2001
+From: Li Tian <litian@redhat.com>
+Date: Wed, 16 Jul 2025 11:41:22 +0800
+Subject: [PATCH] kernel-install: add --entry-type=type1|type2 option to
+ kernel-install
+
+Both kernel-core and kernel-uki-virt call kernel-install
+upon removal. Need an additional argument to avoid complete
+removal for both traditional kernel and UKI.
+
+And because kernel-install in RHEL9 is a shell script,
+we need a specific solution.
+
+Signed-off-by: Li Tian <litian@redhat.com>
+
+(cherry picked from commit b6d499768394297b1d313cdc72dab0720dc315f6)
+
+Resolves: RHEL-83932
+---
+ shell-completion/bash/kernel-install      | 14 ++++++++++++++
+ src/kernel-install/50-depmod.install      |  6 ++++++
+ src/kernel-install/90-loaderentry.install |  5 +++++
+ src/kernel-install/90-uki-copy.install    |  5 +++++
+ src/kernel-install/test-kernel-install.sh |  7 +++++++
+ 5 files changed, 37 insertions(+)
+
+diff --git a/shell-completion/bash/kernel-install b/shell-completion/bash/kernel-install
+index 4708777507..a06ffb471a 100644
+--- a/shell-completion/bash/kernel-install
++++ b/shell-completion/bash/kernel-install
+@@ -20,6 +20,15 @@ _kernel_install() {
+     local comps
+     local MACHINE_ID
+     local cur=${COMP_WORDS[COMP_CWORD]}
++    local prev=${COMP_WORDS[COMP_CWORD-1]}
++    local entry_types="type1 type2 all"
++
++    case "$prev" in
++        --entry-type)
++            COMPREPLY=( $(compgen -W "$entry_types" -- "$cur") )
++            return 0
++            ;;
++    esac
+ 
+     case $COMP_CWORD in
+         1)
+@@ -41,6 +50,11 @@ _kernel_install() {
+             ;;
+     esac
+ 
++    if [[ "${COMP_WORDS[1]}" == "remove" ]] && [[ $cur == -* ]]; then
++        COMPREPLY=( $(compgen -W '--entry-type' -- "$cur") )
++        return 0
++    fi
++
+     COMPREPLY=( $(compgen -W '$comps' -- "$cur") )
+     return 0
+ }
+diff --git a/src/kernel-install/50-depmod.install b/src/kernel-install/50-depmod.install
+index 43bd87c7ed..a3e06c3dbf 100755
+--- a/src/kernel-install/50-depmod.install
++++ b/src/kernel-install/50-depmod.install
+@@ -31,6 +31,12 @@ case "$COMMAND" in
+         exec depmod -a "$KERNEL_VERSION"
+         ;;
+     remove)
++        [ "$KERNEL_INSTALL_BOOT_ENTRY_TYPE" = "type2" ] || \
++        [ "$KERNEL_INSTALL_BOOT_ENTRY_TYPE" = "type1" ] && \
++        [ -d "/lib/modules/$KERNEL_VERSION/kernel" ] && \
++            echo "Multiple entry types exist, not removing modules.dep or associated files." && \
++            exit 0
++
+         [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && \
+             echo "Removing /lib/modules/${KERNEL_VERSION}/modules.dep and associated files"
+         exec rm -f \
+diff --git a/src/kernel-install/90-loaderentry.install b/src/kernel-install/90-loaderentry.install
+index 41a05534b9..896231e784 100755
+--- a/src/kernel-install/90-loaderentry.install
++++ b/src/kernel-install/90-loaderentry.install
+@@ -41,6 +41,11 @@ fi
+ 
+ case "$COMMAND" in
+     remove)
++        if [ -f "/lib/modules/$KERNEL_VERSION/vmlinuz" ] && [ "$KERNEL_INSTALL_BOOT_ENTRY_TYPE" = "type2" ]; then
++            [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && \
++                echo "BOOT_ENTRY_TYPE=type2, not removing loader entries."
++            exit 0
++        fi
+         [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && \
+             echo "Removing $BOOT_ROOT/loader/entries/$ENTRY_TOKEN-$KERNEL_VERSION*.conf"
+         exec rm -f \
+diff --git a/src/kernel-install/90-uki-copy.install b/src/kernel-install/90-uki-copy.install
+index d443c4b401..c35cd53592 100755
+--- a/src/kernel-install/90-uki-copy.install
++++ b/src/kernel-install/90-uki-copy.install
+@@ -33,6 +33,11 @@ UKI_DIR="$BOOT_ROOT/EFI/Linux"
+ 
+ case "$COMMAND" in
+     remove)
++        if [ "$KERNEL_INSTALL_BOOT_ENTRY_TYPE" = "type1" ]; then
++            [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && \
++                echo "BOOT_ENTRY_TYPE=type1, not removing UKI related."
++            exit 0
++        fi
+         [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && \
+             echo "Removing $UKI_DIR/$ENTRY_TOKEN-$KERNEL_VERSION*.efi"
+         exec rm -f \
+diff --git a/src/kernel-install/test-kernel-install.sh b/src/kernel-install/test-kernel-install.sh
+index 3b9ff76e60..23f3c2cf4a 100755
+--- a/src/kernel-install/test-kernel-install.sh
++++ b/src/kernel-install/test-kernel-install.sh
+@@ -54,6 +54,13 @@ test ! -f "$entry"
+ test ! -f "$BOOT_ROOT/the-token/1.1.1/linux"
+ test ! -f "$BOOT_ROOT/the-token/1.1.1/initrd"
+ 
++# Test --entry-type options
++"$kernel_install" -v add 1.1.1 "$D/sources/linux" "$D/sources/initrd"
++"$kernel_install" -v remove 1.1.1 --entry-type=type1
++test ! -e "$entry"
++test ! -e "$BOOT_ROOT/the-token/1.1.1/linux"
++test ! -e "$BOOT_ROOT/the-token/1.1.1/initrd"
++
+ # Invoke kernel-install as installkernel
+ ln -s --relative -v "$kernel_install" "$D/sources/installkernel"
+ "$D/sources/installkernel" -v 1.1.2 "$D/sources/linux" System.map /somedirignored

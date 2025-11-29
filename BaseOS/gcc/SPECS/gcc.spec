@@ -1,10 +1,11 @@
+%global source_date_epoch_from_changelog 1
 %global DATE 20240719
 %global gitrev a985e3068a6f8045f8a6f2d2d5ae75f5eb0a8767
 %global gcc_version 11.5.0
 %global gcc_major 11
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 5
+%global gcc_release 11
 %global nvptx_tools_gitrev 5f6f343a302d620b0868edab376c00b15741e39e
 %global newlib_cygwin_gitrev 50e2a63b04bdd018484605fbb954fd1bd5147fa0
 %global _unpackaged_files_terminate_build 0
@@ -128,7 +129,7 @@
 Summary:              Various compilers (C, C++, Objective-C, ...)
 Name:                 gcc
 Version:              %{gcc_version}
-Release:              %{gcc_release}%{?dist}.redsleeve
+Release:              %{gcc_release}%{?dist}
 # libgcc, libgfortran, libgomp, libstdc++ and crtstuff have
 # GCC Runtime Exception.
 License:              GPLv3+ and GPLv3+ with exceptions and GPLv2+ with exceptions and LGPLv2+ and BSD
@@ -202,7 +203,10 @@ BuildRequires:        glibc >= 2.3.90-35
 %endif
 %ifarch %{multilib_64_archs} sparcv9 ppc
 # Ensure glibc{,-devel} is installed for both multilib arches
-BuildRequires:        /lib/libc.so.6 /usr/lib/libc.so /lib64/libc.so.6 /usr/lib64/libc.so
+BuildRequires:        (glibc32 or glibc-devel(%{__isa_name}-32))
+%endif
+%ifarch sparcv9 ppc
+BuildRequires:        (glibc64 or glibc-devel(%{__isa_name}-64))
 %endif
 %if %{build_ada}
 # Ada requires Ada to build
@@ -299,6 +303,35 @@ Patch36:              gcc11-libgfortran-flush.patch
 Patch37:              gcc11-pr113960.patch
 Patch38:              gcc11-pr105157.patch
 Patch39:              gcc11-testsuite-fixes-4.patch
+Patch40:              gcc11-pr99888.patch
+Patch41:              gcc11-pr118976.patch
+Patch42:              gcc-RHEL-105072-1.patch
+Patch43:              gcc-RHEL-105072-2.patch
+Patch44:              gcc-RHEL-105072-3.patch
+Patch45:              gcc-RHEL-105072-4.patch
+Patch46:              gcc-RHEL-105072-5.patch
+Patch47:              gcc-RHEL-105072-6.patch
+Patch48:              gcc-RHEL-105072-7.patch
+Patch49:              gcc-RHEL-105072-8.patch
+Patch50:              gcc-RHEL-105072-9.patch
+Patch51:              gcc-RHEL-105072-10.patch
+Patch52:              gcc-RHEL-105072-11.patch
+Patch53:              gcc-RHEL-105072-12.patch
+Patch54:              gcc-RHEL-105072-13.patch
+Patch55:              gcc-RHEL-105072-14.patch
+Patch56:              gcc-RHEL-105072-15.patch
+Patch57:              gcc-RHEL-105072-16.patch
+Patch58:              gcc-RHEL-105072-17.patch
+Patch59:              gcc-RHEL-105072-18.patch
+Patch60:              gcc-RHEL-105072-19.patch
+Patch61:              gcc-RHEL-105072-20.patch
+Patch62:              gcc-RHEL-105072-21.patch
+Patch63:              gcc-RHEL-105072-22.patch
+Patch64:              gcc-RHEL-105072-23.patch
+Patch65:              gcc-RHEL-105072-24.patch
+Patch66:              gcc-RHEL-105072-25.patch
+Patch67:              gcc-RHEL-105072-26.patch
+Patch68:              gcc-RHEL-105072-27.patch
 
 Patch100:             gcc11-fortran-fdec-duplicates.patch
 Patch101:             gcc11-fortran-flogical-as-integer.patch
@@ -310,6 +343,11 @@ Patch106:             gcc11-fortran-fdec-non-logical-if.patch
 Patch107:             gcc11-fortran-fdec-promotion.patch
 Patch108:             gcc11-fortran-fdec-sequence.patch
 Patch109:             gcc11-fortran-fdec-add-missing-indexes.patch
+
+# Pretty printer update.
+Patch1000:            gcc11-libstdc++-prettyprinter-update-15.patch
+Patch1001:            gcc11-libstdc++-prettyprinter-update-15-tests.patch
+Patch1002:            gcc11-libstdc++-prettyprinter-update-15-tests-48362.patch
 
 # On ARM EABI systems, we do want -gnueabi to be part of the
 # target triple.
@@ -356,6 +394,8 @@ You'll need this package in order to compile C code.
 %package -n libgcc
 Summary:              GCC version 11 shared support library
 Autoreq:              false
+# This expresses the dependency on _dl_find_object.
+Requires:             libc.so.6(GLIBC_2.35)%[0%{?__isa_bits} == 64 ? "(64bit)" : ""]
 %if !%{build_ada}
 Obsoletes:            libgnat < %{version}-%{release}
 %endif
@@ -903,6 +943,35 @@ mark them as cross compiled.
 %patch37 -p1 -b .pr113960~
 %patch38 -p1 -b .pr105157~
 %patch39 -p1 -b .testsuite4~
+%patch40 -p1 -b .pr99888~
+%patch41 -p1 -b .pr118976~
+%patch42 -p1 -b .rhel-105072-1~
+%patch43 -p1 -b .rhel-105072-2~
+%patch44 -p1 -b .rhel-105072-3~
+%patch45 -p1 -b .rhel-105072-4~
+%patch46 -p1 -b .rhel-105072-5~
+%patch47 -p1 -b .rhel-105072-6~
+%patch48 -p1 -b .rhel-105072-7~
+%patch49 -p1 -b .rhel-105072-8~
+%patch50 -p1 -b .rhel-105072-9~
+%patch51 -p1 -b .rhel-105072-10~
+%patch52 -p1 -b .rhel-105072-11~
+%patch53 -p1 -b .rhel-105072-12~
+%patch54 -p1 -b .rhel-105072-13~
+%patch55 -p1 -b .rhel-105072-14~
+%patch56 -p1 -b .rhel-105072-15~
+%patch57 -p1 -b .rhel-105072-16~
+%patch58 -p1 -b .rhel-105072-17~
+%patch59 -p1 -b .rhel-105072-18~
+%patch60 -p1 -b .rhel-105072-19~
+%patch61 -p1 -b .rhel-105072-20~
+%patch62 -p1 -b .rhel-105072-21~
+%patch63 -p1 -b .rhel-105072-22~
+%patch64 -p1 -b .rhel-105072-23~
+%patch65 -p1 -b .rhel-105072-24~
+%patch66 -p1 -b .rhel-105072-25~
+%patch67 -p1 -b .rhel-105072-26~
+%patch68 -p1 -b .rhel-105072-27~
 
 %if 0%{?rhel} >= 9
 %patch100 -p1 -b .fortran-fdec-duplicates~
@@ -916,6 +985,10 @@ mark them as cross compiled.
 %patch108 -p1 -b .fortran-fdec-sequence~
 %patch109 -p1 -b .fortran-fdec-add-missing-indexes~
 %endif
+
+%patch1000 -p1 -b .libstdc++-prettyprinter-update-15
+%patch1001 -p1 -b .libstdc++-prettyprinter-update-15-tests
+%patch1002 -p1 -b .libstdc++-prettyprinter-update-15-tests-48362
 
 %ifarch %{arm}
 rm -f gcc/testsuite/go.test/test/fixedbugs/issue19182.go
@@ -1205,9 +1278,6 @@ CONFIGURE_OPTS_NATIVE="\
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
 	--with-float=hard --with-fpu=vfpv3-d16 --with-abi=aapcs-linux \
-%endif
-%ifarch armv6hl
-	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch mips mipsel
 	--with-arch=mips32r2 --with-fp-32=xx \
@@ -1821,9 +1891,9 @@ mv -f %{buildroot}%{_prefix}/%{_lib}/libstdc++*gdb.py* \
       %{buildroot}%{_datadir}/gdb/auto-load/%{_prefix}/%{_lib}/
 pushd ../libstdc++-v3/python
 for i in `find . -name \*.py`; do
-  touch -r $i %{buildroot}%{_prefix}/share/gcc-%{gcc_major}/python/$i
+  touch -d @$SOURCE_DATE_EPOCH %{buildroot}%{_prefix}/share/gcc-%{gcc_major}/python/$i
 done
-touch -r hook.in %{buildroot}%{_datadir}/gdb/auto-load/%{_prefix}/%{_lib}/libstdc++*gdb.py
+touch -d @$SOURCE_DATE_EPOCH %{buildroot}%{_datadir}/gdb/auto-load/%{_prefix}/%{_lib}/libstdc++*gdb.py
 popd
 for f in `find %{buildroot}%{_prefix}/share/gcc-%{gcc_major}/python/ \
 	       %{buildroot}%{_datadir}/gdb/auto-load/%{_prefix}/%{_lib}/ -name \*.py`; do
@@ -3602,11 +3672,29 @@ end
 %endif
 
 %changelog
-* Fri Feb 14 2025 Jacco Ligthart <jacco@redsleeve.org> 11.5.0-5.redsleeve
-- added config options for armv6hl
+* Thu Jul 31 2025 Florian Weimer  <fweimer@redhat.com> - 11.5.0-11
+- Adjust glibc32 build dependency (RHEL-105072)
+
+* Tue Jul 29 2025 Florian Weimer  <fweimer@redhat.com> - 11.5.0-10
+- Exception handling performance improvements (RHEL-105072)
+- libgcc: Use _dl_find_object to find DWARF data in unwinder
+- libgcc: Use lock-free data structures for run-time unwinder registration
+
+* Fri Jun 27 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 11.5.0-9
+- Pin modification time for python files to SOURCE_DATE_EPOCH (RHEL-100148).
+
+* Mon Jun 23 2025 Siddhesh Poyarekar <siddhesh@redhat.com> - 11.5.0-8
+- Sync libstdc++ pretty printers to latest GTS (RHEL-81975)
+
+* Thu May 29 2025 Joseph Myers <josmyers@redhat.com> - 11.5.0-7
+- Fix folding of BIT_NOT_EXPR for POLY_INT_CST (PR 118976, RHEL-90239)
+
+* Wed May 21 2025 David Malcolm <dmalcolm@redhat.com> - 11.5.0-6
+- rs6000: Rework ELFv2 support for -fpatchable-function-entry (PR target/99888,
+  RHEL-75806)
 
 * Fri Feb  7 2025 Marek Polacek <polacek@redhat.com> 11.5.0-5
-- rebuild for CVE-2020-11023 (RHEL-78373)
+- rebuild for CVE-2020-11023 (RHEL-78377)
 
 * Mon Jan 27 2025 Marek Polacek <polacek@redhat.com> 11.5.0-4
 - revert the PR middle-end/57245 patch (RHEL-76359)

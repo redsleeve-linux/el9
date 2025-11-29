@@ -1,0 +1,77 @@
+commit f2326c2ec0a0a8db7bc7f4db8cce3002768fc3b6
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Nov 6 10:33:44 2024 +0100
+
+    elf: Introduce _dl_relocate_object_no_relro
+    
+    And make _dl_protect_relro apply RELRO conditionally.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+diff --git a/elf/dl-reloc.c b/elf/dl-reloc.c
+index ded506da9e180eac..239f5505f805b008 100644
+--- a/elf/dl-reloc.c
++++ b/elf/dl-reloc.c
+@@ -189,12 +189,9 @@ _dl_nothread_init_static_tls (struct link_map *map)
+ #include "dynamic-link.h"
+ 
+ void
+-_dl_relocate_object (struct link_map *l, struct r_scope_elem *scope[],
+-		     int reloc_mode, int consider_profiling)
++_dl_relocate_object_no_relro (struct link_map *l, struct r_scope_elem *scope[],
++			      int reloc_mode, int consider_profiling)
+ {
+-  if (l->l_relocated)
+-    return;
+-
+   struct textrels
+   {
+     caddr_t start;
+@@ -325,17 +322,24 @@ _dl_relocate_object (struct link_map *l, struct r_scope_elem *scope[],
+ 
+       textrels = textrels->next;
+     }
+-
+-  /* In case we can protect the data now that the relocations are
+-     done, do it.  */
+-  if (l->l_relro_size != 0)
+-    _dl_protect_relro (l);
+ }
+ 
++void
++_dl_relocate_object (struct link_map *l, struct r_scope_elem *scope[],
++		     int reloc_mode, int consider_profiling)
++{
++  if (l->l_relocated)
++    return;
++  _dl_relocate_object_no_relro (l, scope, reloc_mode, consider_profiling);
++  _dl_protect_relro (l);
++}
+ 
+ void
+ _dl_protect_relro (struct link_map *l)
+ {
++  if (l->l_relro_size == 0)
++    return;
++
+   ElfW(Addr) start = ALIGN_DOWN((l->l_addr
+ 				 + l->l_relro_addr),
+ 				GLRO(dl_pagesize));
+diff --git a/sysdeps/generic/ldsodefs.h b/sysdeps/generic/ldsodefs.h
+index 537d1293c7b5543b..dc4e0555e4ed7f3c 100644
+--- a/sysdeps/generic/ldsodefs.h
++++ b/sysdeps/generic/ldsodefs.h
+@@ -1073,6 +1073,13 @@ extern void _dl_relocate_object (struct link_map *map,
+ 				 int reloc_mode, int consider_profiling)
+      attribute_hidden;
+ 
++/* Perform relocation, but do not apply RELRO.  Does not check
++   L->relocated.  Otherwise the same as _dl_relocate_object.  */
++void _dl_relocate_object_no_relro (struct link_map *map,
++				   struct r_scope_elem *scope[],
++				   int reloc_mode, int consider_profiling)
++     attribute_hidden;
++
+ /* Protect PT_GNU_RELRO area.  */
+ extern void _dl_protect_relro (struct link_map *map) attribute_hidden;
+ 

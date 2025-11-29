@@ -1,0 +1,264 @@
+commit ea85e7d55087075376a29261e722e4fae14ecbe7
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Jul 4 21:46:30 2025 +0200
+
+    elf: Restore support for _r_debug interpositions and copy relocations
+    
+    The changes in commit a93d9e03a31ec14405cb3a09aa95413b67067380
+    ("Extend struct r_debug to support multiple namespaces [BZ #15971]")
+    break the dyninst dynamic instrumentation tool.  It brings its
+    own definition of _r_debug (rather than a declaration).
+    
+    Furthermore, it turns out it is rather hard to use the proposed
+    handshake for accessing _r_debug via DT_DEBUG. If applications want
+    to access _r_debug, they can do so directly if the relevant code has
+    been built as PIC.  To protect against harm from accidental copy
+    relocations due to linker relaxations, this commit restores copy
+    relocation support by adjusting both copies if interposition or
+    copy relocations are in play.  Therefore, it is possible to
+    use a hidden reference in ld.so to access _r_debug.
+    
+    Only perform the copy relocation initialization if libc has been
+    loaded.  Otherwise, the ld.so search scope can be empty, and the
+    lookup of the _r_debug symbol mail fail.
+    
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+
+Conflicts:
+	elf/rtld.c: Adjust for prelink.
+
+diff --git a/elf/Makefile b/elf/Makefile
+index 721f254d121118c0..3eac746d21042ec9 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -404,6 +404,8 @@ tests += \
+   tst-dlmopen1 \
+   tst-dlmopen3 \
+   tst-dlmopen4 \
++  tst-dlmopen4-nonpic \
++  tst-dlmopen4-pic \
+   tst-dlopen-auditdup \
+   tst-dlopen-constructor-null \
+   tst-dlopen-self \
+@@ -1986,6 +1988,13 @@ $(objpfx)tst-dlmopen3.out: $(objpfx)tst-dlmopen1mod.so
+ 
+ $(objpfx)tst-dlmopen4.out: $(objpfx)tst-dlmopen1mod.so
+ 
++CFLAGS-tst-dlmopen4-pic.c += -fPIC
++$(objpfx)tst-dlmopen4-pic.out: $(objpfx)tst-dlmopen1mod.so
++
++CFLAGS-tst-dlmopen4-nonpic.c += -fno-pie
++tst-dlmopen4-nonpic-no-pie = yes
++$(objpfx)tst-dlmopen4-nonpic.out: $(objpfx)tst-dlmopen1mod.so
++
+ $(objpfx)tst-audit1.out: $(objpfx)tst-auditmod1.so
+ tst-audit1-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
+ 
+diff --git a/elf/dl-debug-symbols.S b/elf/dl-debug-symbols.S
+index 28456ab1f237ea87..629b0c0c6b2cd9e1 100644
+--- a/elf/dl-debug-symbols.S
++++ b/elf/dl-debug-symbols.S
+@@ -38,3 +38,4 @@
+ _r_debug:
+ _r_debug_extended:
+ 	.zero	R_DEBUG_EXTENDED_SIZE
++rtld_hidden_def (_r_debug)
+diff --git a/elf/dl-debug.c b/elf/dl-debug.c
+index f840a1b92292968d..4388a04cdf828898 100644
+--- a/elf/dl-debug.c
++++ b/elf/dl-debug.c
+@@ -16,6 +16,7 @@
+    License along with the GNU C Library; if not, see
+    <https://www.gnu.org/licenses/>.  */
+ 
++#include <assert.h>
+ #include <ldsodefs.h>
+ 
+ 
+@@ -37,6 +38,37 @@ extern const int verify_link_map_members[(VERIFY_MEMBER (l_addr)
+    to LM_ID_BASE + 1.  See elf/dl-debug-symbols.S.  */
+ struct r_debug_extended _r_debug_array[DL_NNS - 1];
+ 
++/* If not null, pointer to the _r_debug in the main executable.  */
++static struct r_debug *_r_debug_main;
++
++void
++_dl_debug_post_relocate (struct link_map *main_map)
++{
++  /* Perform a full symbol search in all objects, to maintain
++     compatibility if interposed _r_debug definitions.  The lookup
++     cannot fail because there is a definition in ld.so, and this
++     function is only called if the ld.so search scope is not empty.  */
++  const ElfW(Sym) *sym = NULL;
++  lookup_t result =_dl_lookup_symbol_x ("_r_debug", main_map, &sym,
++					main_map->l_scope, NULL, 0, 0, NULL);
++  if (sym->st_size >= sizeof (struct r_debug))
++    {
++      struct r_debug *main_r_debug = DL_SYMBOL_ADDRESS (result, sym);
++      if (main_r_debug != &_r_debug_extended.base)
++	{
++	  /* The extended version of the struct is not available in
++	     the main executable because a copy relocation has been
++	     used.  r_map etc. have already been copied as part of the
++	     copy relocation processing.  */
++	  main_r_debug->r_version = 1;
++
++          /* Record that dual updates of the initial link map are
++             required.  */
++          _r_debug_main = main_r_debug;
++	}
++    }
++}
++
+ /* Return the r_debug object for the namespace NS.  */
+ static inline struct r_debug_extended *
+ get_rdebug (Lmid_t ns)
+@@ -71,6 +103,11 @@ void
+ _dl_debug_change_state (struct r_debug *r, int state)
+ {
+   atomic_store_release (&r->r_state, state);
++#ifdef SHARED
++  if (r == &_r_debug_extended.base && _r_debug_main != NULL)
++    /* Update the copy-relocation of _r_debug.  */
++    atomic_store_release (&_r_debug_main->r_state, state);
++#endif
+   _dl_debug_state ();
+ }
+ 
+@@ -103,7 +140,9 @@ _dl_debug_initialize (ElfW(Addr) ldbase, Lmid_t ns)
+ 	  if (ns - 1 == LM_ID_BASE)
+ 	    {
+ 	      atomic_store_release (&_r_debug_extended.r_next, r);
+-	      /* Now there are multiple namespaces.  */
++	      /* Now there are multiple namespaces.  Note that this
++		 deliberately does not update the copy in the main
++		 executable (if it exists).  */
+ 	      atomic_store_release (&_r_debug_extended.base.r_version, 2);
+ 	    }
+ 	  else
+@@ -116,8 +155,15 @@ _dl_debug_initialize (ElfW(Addr) ldbase, Lmid_t ns)
+     }
+ 
+   if (r->base.r_map == NULL)
+-    atomic_store_release (&r->base.r_map,
+-			  (void *) GL(dl_ns)[ns]._ns_loaded);
++    {
++      struct link_map_public *l = (void *) GL(dl_ns)[ns]._ns_loaded;
++      atomic_store_release (&r->base.r_map, l);
++#ifdef SHARED
++      if (ns == LM_ID_BASE && _r_debug_main != NULL)
++	/* Update the copy-relocation of _r_debug.  */
++	atomic_store_release (&_r_debug_main->r_map, l);
++#endif
++    }
+ 
+   return &r->base;
+ }
+diff --git a/elf/rtld.c b/elf/rtld.c
+index 0fe9986e4c7ed830..dac827e249b2fe14 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -2395,6 +2395,9 @@ dl_main (const ElfW(Phdr) *phdr,
+       /* Likewise for the locking implementation.  */
+       __rtld_mutex_init ();
+ 
++      /* Update copy-relocated _r_debug if necessary.  */
++      _dl_debug_post_relocate (main_map);
++
+       /* Mark all the objects so we know they have been already relocated.  */
+       for (struct link_map *l = main_map; l != NULL; l = l->l_next)
+ 	{
+@@ -2505,6 +2508,9 @@ dl_main (const ElfW(Phdr) *phdr,
+ 
+ 	  __rtld_mutex_init ();
+ 	  __rtld_malloc_init_real (main_map);
++
++	  /* Update copy-relocated _r_debug if necessary.  */
++	  _dl_debug_post_relocate (main_map);
+ 	}
+ 
+       /* All ld.so initialization is complete.  Apply RELRO.  */
+diff --git a/elf/tst-dlmopen4-nonpic.c b/elf/tst-dlmopen4-nonpic.c
+new file mode 100644
+index 0000000000000000..ad4e40995337f4f9
+--- /dev/null
++++ b/elf/tst-dlmopen4-nonpic.c
+@@ -0,0 +1,2 @@
++#define BUILD_FOR_NONPIC
++#include "tst-dlmopen4.c"
+diff --git a/elf/tst-dlmopen4-pic.c b/elf/tst-dlmopen4-pic.c
+new file mode 100644
+index 0000000000000000..919fa85c2579fb5d
+--- /dev/null
++++ b/elf/tst-dlmopen4-pic.c
+@@ -0,0 +1,2 @@
++#define BUILD_FOR_PIC
++#include "tst-dlmopen4.c"
+diff --git a/elf/tst-dlmopen4.c b/elf/tst-dlmopen4.c
+index 3fe150e50bc259f0..633addf41978cee8 100644
+--- a/elf/tst-dlmopen4.c
++++ b/elf/tst-dlmopen4.c
+@@ -53,6 +53,15 @@ do_test (void)
+   TEST_COMPARE (debug->base.r_version, 1);
+   TEST_VERIFY_EXIT (debug->r_next == NULL);
+ 
++#ifdef BUILD_FOR_PIC
++  /* In a PIC build, using _r_debug directly should give us the same
++     object.  */
++  TEST_VERIFY (&_r_debug == &debug->base);
++#endif
++#ifdef BUILD_FOR_NONPIC
++  TEST_COMPARE (_r_debug.r_version, 1);
++#endif
++
+   void *h = xdlmopen (LM_ID_NEWLM, "$ORIGIN/tst-dlmopen1mod.so",
+ 		      RTLD_LAZY);
+ 
+@@ -64,6 +73,19 @@ do_test (void)
+   const char *name = basename (debug->r_next->base.r_map->l_name);
+   TEST_COMPARE_STRING (name, "tst-dlmopen1mod.so");
+ 
++#ifdef BUILD_FOR_NONPIC
++  /* If a copy relocation is used, it must be at version 1.  */
++  if (&_r_debug != &debug->base)
++    {
++      TEST_COMPARE (_r_debug.r_version, 1);
++      TEST_COMPARE ((uintptr_t) _r_debug.r_map,
++		    (uintptr_t) debug->base.r_map);
++      TEST_COMPARE (_r_debug.r_brk, debug->base.r_brk);
++      TEST_COMPARE (_r_debug.r_state, debug->base.r_state);
++      TEST_COMPARE (_r_debug.r_ldbase, debug->base.r_ldbase);
++    }
++#endif
++
+   xdlclose (h);
+ 
+   return 0;
+diff --git a/include/link.h b/include/link.h
+index 0cf130ddb8af2e89..bafac6c9628b183c 100644
+--- a/include/link.h
++++ b/include/link.h
+@@ -366,6 +366,8 @@ struct auditstate
+    dynamic linker.  */
+ extern struct r_debug_extended _r_debug_extended attribute_hidden;
+ 
++rtld_hidden_proto (_r_debug)
++
+ #if __ELF_NATIVE_CLASS == 32
+ # define symbind symbind32
+ # define LA_SYMBIND "la_symbind32"
+diff --git a/sysdeps/generic/ldsodefs.h b/sysdeps/generic/ldsodefs.h
+index 371c32dd79c3ea2b..484893c2928db8e7 100644
+--- a/sysdeps/generic/ldsodefs.h
++++ b/sysdeps/generic/ldsodefs.h
+@@ -1140,6 +1140,10 @@ rtld_hidden_proto (_dl_debug_state)
+ extern struct r_debug *_dl_debug_initialize (ElfW(Addr) ldbase, Lmid_t ns)
+      attribute_hidden;
+ 
++/* This is called after relocation processing to handle a potential
++   copy relocation for _r_debug.  */
++void _dl_debug_post_relocate (struct link_map *main_map) attribute_hidden;
++
+ /* Update the `r_map' member and return the address of `struct r_debug'
+    of the namespace NS.  */
+ extern struct r_debug *_dl_debug_update (Lmid_t ns) attribute_hidden;

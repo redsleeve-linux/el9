@@ -1,0 +1,203 @@
+commit 21fbc0a19366f89638a30eef2b53c6d4baafdb88
+Author: Paul Eggert <eggert@cs.ucla.edu>
+Date:   Thu Jun 22 13:44:50 2023 -0700
+
+    Call "CST" a time zone abbreviation, not a name
+    
+    In documentation, call strings like "CST" time zone abbreviations, not
+    time zone names.  This terminology is more precise, and is what tzdb uses.
+    A string like "CST" is ambiguous and does not fully name a time zone.
+
+diff --git a/manual/conf.texi b/manual/conf.texi
+index ba9847aaa4483585..158285dbf06c76ab 100644
+--- a/manual/conf.texi
++++ b/manual/conf.texi
+@@ -85,10 +85,10 @@ If defined, the unvarying maximum number of streams that a single
+ process can have open simultaneously.  @xref{Opening Streams}.
+ @end deftypevr
+ 
+-@cindex limits, time zone name length
++@cindex limits, time zone abbreviation length
+ @deftypevr Macro int TZNAME_MAX
+ @standards{POSIX.1, limits.h}
+-If defined, the unvarying maximum length of a time zone name.
++If defined, the unvarying maximum length of a time zone abbreviation.
+ @xref{Time Zone Functions}.
+ @end deftypevr
+ 
+@@ -1044,7 +1044,7 @@ simultaneously.  Its value is @code{8}.
+ @item _POSIX_TZNAME_MAX
+ @standards{POSIX.1, limits.h}
+ The value of this macro is the most restrictive limit permitted by POSIX
+-for the maximum length of a time zone name.  Its value is @code{3}.
++for the maximum length of a time zone abbreviation.  Its value is @code{3}.
+ 
+ @item _POSIX2_RE_DUP_MAX
+ @standards{POSIX.2, limits.h}
+diff --git a/manual/time.texi b/manual/time.texi
+index ed13a1b4ddb64978..ea088ce846b26e8d 100644
+--- a/manual/time.texi
++++ b/manual/time.texi
+@@ -1037,7 +1037,7 @@ The @code{tm_gmtoff} field is derived from BSD and is a GNU library
+ extension; it is not visible in a strict @w{ISO C} environment.
+ 
+ @item const char *tm_zone
+-This field is the name for the time zone that was used to compute this
++This field is the abbreviation for the time zone that was used to compute this
+ broken-down time value.  Like @code{tm_gmtoff}, this field is a BSD and
+ GNU extension, and is not visible in a strict @w{ISO C} environment.
+ @end table
+@@ -2217,7 +2217,7 @@ The full alternative year representation.
+ The offset from GMT in @w{ISO 8601}/RFC822 format.
+ 
+ @item %Z
+-The timezone name.
++The time zone abbreviation.
+ 
+ @emph{Note:} Currently, this is not fully implemented.  The format is
+ recognized, input is consumed but no field in @var{tm} is set.
+@@ -2378,7 +2378,7 @@ current time of the timezone matched, not of the current timezone of the
+ runtime environment.
+ 
+ @emph{Note}: This is not implemented (currently).  The problem is that
+-timezone names are not unique.  If a fixed timezone is assumed for a
++time zone abbreviations are not unique.  If a fixed time zone is assumed for a
+ given string (say @code{EST} meaning US East Coast time), then uses for
+ countries other than the USA will fail.  So far we have found no good
+ solution to this.
+@@ -2534,10 +2534,10 @@ summer time) in the local time zone:
+ @r{@var{std} @var{offset}}
+ @end smallexample
+ 
+-The @var{std} string specifies the name of the time zone.  It must be
++The @var{std} string specifies the time zone abbreviation.  It must be
+ three or more characters long and must not contain a leading colon,
+ embedded digits, commas, nor plus and minus signs.  There is no space
+-character separating the time zone name from the @var{offset}, so these
++character separating the time zone abbreviation from the @var{offset}, so these
+ restrictions are necessary to parse the specification correctly.
+ 
+ The @var{offset} specifies the time value you must add to the local time
+@@ -2561,7 +2561,7 @@ The second format is used when there is Daylight Saving Time:
+ @end smallexample
+ 
+ The initial @var{std} and @var{offset} specify the standard time zone, as
+-described above.  The @var{dst} string and @var{offset} specify the name
++described above.  The @var{dst} string and @var{offset} are the abbreviation
+ and offset for the corresponding Daylight Saving Time zone; if the
+ @var{offset} is omitted, it defaults to one hour ahead of standard time.
+ 
+@@ -2690,10 +2690,10 @@ community of volunteers and put in the public domain.
+ @deftypevar {char *} tzname [2]
+ @standards{POSIX.1, time.h}
+ The array @code{tzname} contains two strings, which are the standard
+-names of the pair of time zones (standard and Daylight
+-Saving) that the user has selected.  @code{tzname[0]} is the name of
++abbreviations of the pair of time zones (standard and Daylight
++Saving) that the user has selected.  @code{tzname[0]} abbreviates
+ the standard time zone (for example, @code{"EST"}), and @code{tzname[1]}
+-is the name for the time zone when Daylight Saving Time is in use (for
++abbreviates the time zone when Daylight Saving Time is in use (for
+ example, @code{"EDT"}).  These correspond to the @var{std} and @var{dst}
+ strings (respectively) from the @code{TZ} environment variable.  If
+ Daylight Saving Time is never used, @code{tzname[1]} is the empty string.
+diff --git a/posix/bits/posix1_lim.h b/posix/bits/posix1_lim.h
+index c645847858029165..54626e16c059e1f5 100644
+--- a/posix/bits/posix1_lim.h
++++ b/posix/bits/posix1_lim.h
+@@ -134,7 +134,7 @@
+ /* Maximum number of characters in a tty name.  */
+ #define	_POSIX_TTY_NAME_MAX	9
+ 
+-/* Maximum length of a timezone name (element of `tzname').  */
++/* Maximum length of a time zone abbreviation (element of 'tzname').  */
+ #ifdef __USE_XOPEN2K
+ # define _POSIX_TZNAME_MAX	6
+ #else
+diff --git a/time/mktime.c b/time/mktime.c
+index 74d9bbaa5b375723..850b6cdc144bbeda 100644
+--- a/time/mktime.c
++++ b/time/mktime.c
+@@ -536,7 +536,7 @@ __time64_t
+ __mktime64 (struct tm *tp)
+ {
+   /* POSIX.1 8.1.1 requires that whenever mktime() is called, the
+-     time zone names contained in the external variable 'tzname' shall
++     time zone abbreviations contained in the external variable 'tzname' shall
+      be set as if the tzset() function had been called.  */
+   __tzset ();
+ 
+diff --git a/time/time.h b/time/time.h
+index bde870c9342a01a3..a6f00196ab4d1649 100644
+--- a/time/time.h
++++ b/time/time.h
+@@ -214,7 +214,7 @@ extern char *__REDIRECT_NTH (ctime_r, (const time_t *__restrict __timer,
+ 
+ 
+ /* Defined in localtime.c.  */
+-extern char *__tzname[2];	/* Current timezone names.  */
++extern char *__tzname[2];	/* Current time zone abbreviations.  */
+ extern int __daylight;		/* If daylight-saving time is ever in use.  */
+ extern long int __timezone;	/* Seconds west of UTC.  */
+ 
+diff --git a/time/tzfile.c b/time/tzfile.c
+index 61cbaebd3e41f95e..07164448d9179b9c 100644
+--- a/time/tzfile.c
++++ b/time/tzfile.c
+@@ -407,7 +407,7 @@ __tzfile_read (const char *file, size_t extra, char **extrap)
+ 
+   fclose (f);
+ 
+-  /* First "register" all timezone names.  */
++  /* First "register" all time zone abbreviations.  */
+   for (i = 0; i < num_types; ++i)
+     if (__tzstring (&zone_names[types[i].idx]) == NULL)
+       goto ret_free_transitions;
+@@ -564,7 +564,7 @@ __tzfile_default (const char *std, const char *dst,
+   types[1].offset = dstoff;
+   types[1].isdst = 1;
+ 
+-  /* Reset the zone names to point to the user's names.  */
++  /* Reset time zone abbreviations to point to the user's abbreviations.  */
+   __tzname[0] = (char *) std;
+   __tzname[1] = (char *) dst;
+ 
+diff --git a/time/tzset.c b/time/tzset.c
+index 2fc51194b63bda8e..889b1a426ef25a8b 100644
+--- a/time/tzset.c
++++ b/time/tzset.c
+@@ -145,7 +145,7 @@ compute_offset (unsigned int ss, unsigned int mm, unsigned int hh)
+   return ss + mm * 60 + hh * 60 * 60;
+ }
+ 
+-/* Parses the time zone name at *TZP, and writes a pointer to an
++/* Parses the time zone abbreviation at *TZP, and writes a pointer to an
+    interned string to tz_rules[WHICHRULE].name.  On success, advances
+    *TZP, and returns true.  Returns false otherwise.  */
+ static bool
+@@ -324,10 +324,10 @@ __tzset_parse_tz (const char *tz)
+   memset (tz_rules, '\0', sizeof tz_rules);
+   tz_rules[0].name = tz_rules[1].name = "";
+ 
+-  /* Get the standard timezone name.  */
++  /* Get the standard time zone abbreviations.  */
+   if (parse_tzname (&tz, 0) && parse_offset (&tz, 0))
+     {
+-      /* Get the DST timezone name (if any).  */
++      /* Get the DST time zone abbreviation (if any).  */
+       if (*tz != '\0')
+ 	{
+ 	  if (parse_tzname (&tz, 1))
+diff --git a/timezone/tst-bz28707.c b/timezone/tst-bz28707.c
+index 0a9df1e9a094f1e9..ead469bb7b15d089 100644
+--- a/timezone/tst-bz28707.c
++++ b/timezone/tst-bz28707.c
+@@ -37,7 +37,7 @@ do_test (void)
+   tzset ();
+ 
+   return
+-    /* Sanity-check that we got the right timezone-name for DST.  For
++    /* Sanity-check that we got the right abbreviation for DST.  For
+        normal time, we're likely to get "-00" (the "unspecified" marker),
+        even though the POSIX timezone string says "-04".  Let's not test
+        that.  */

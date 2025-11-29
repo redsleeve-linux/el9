@@ -6,8 +6,8 @@
 
 Summary:              Red Hat specific rpm configuration files
 Name:                 redhat-rpm-config
-Version:              209
-Release:              1%{?dist}.redsleeve
+Version:              210
+Release:              1%{?dist}
 # No version specified.
 License:              GPL+
 URL:                  https://src.fedoraproject.org/rpms/redhat-rpm-config
@@ -60,9 +60,6 @@ Source202:            brp-python-bytecompile
 # https://github.com/fedora-python/marshalparser
 Source203:            brp-fix-pyc-reproducibility
 
-# for converting llvm LTO bitcode objects into ELF
-Source204:            brp-llvm-compile-lto-elf
-
 # Dependency generator scripts (deprecated)
 Source300:            find-provides
 Source304:            find-requires
@@ -89,7 +86,6 @@ Source801:            forge.lua
 # Documentation
 Source900:            buildflags.md
 
-Patch1: macros-arm.patch
 
 BuildArch:            noarch
 BuildRequires:        perl-generators
@@ -129,10 +125,6 @@ Requires:             %{_bindir}/file
 Requires:             %{_bindir}/grep
 Requires:             %{_bindir}/sed
 Requires:             %{_bindir}/xargs
-
-# for brp-llvm-compile-lto-elf
-Requires:             (llvm if clang)
-Requires:             (gawk if clang)
 
 # -fstack-clash-protection and -fcf-protection require GCC 8.
 Conflicts:            gcc < 8.0.1-0.22
@@ -174,8 +166,6 @@ install -p -m 644 -t %{buildroot}%{_fileattrsdir} *.attr
 mkdir -p %{buildroot}%{_rpmluadir}/fedora/{rpm,srpm}
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora common.lua
 install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
-
-patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
 
 # This trigger is used to decide which version of the annobin plugin for gcc
 # should be used.  See comments in the script for full details.
@@ -259,12 +249,11 @@ patch --no-backup-if-mismatch %{buildroot}%{rrcdir}/macros %{PATCH1}
 %doc buildflags.md
 
 %changelog
-* Mon Jun 09 2025 Jacco Ligthart <jaco@redsleeve.org> 209-1.el9.redsleeve
-- patched for sha1 build-ids on arm when using clang
-- cherry picked from https://src.fedoraproject.org/rpms/redhat-rpm-config/pull-request/155
-
-* Tue Apr 22 2025 Release Engineering <releng@rockylinux.org> - 209-1
+* Fri Oct 31 2025 Release Engineering <releng@rockylinux.org> - 210-1
 - Add Rocky to dist.sh
+
+* Mon Jun 02 2025 Nikita Popov <npopov@redhat.com> - 210-1
+- Use Fat LTO with Clang
 
 * Wed Dec 11 2024 Mikolaj Izdebski <mizdebsk@redhat.com> - 209-1
 - Add java_arches macro

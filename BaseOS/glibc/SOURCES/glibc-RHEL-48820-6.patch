@@ -1,0 +1,28 @@
+commit 39183f47d8bc9eda711c9797b18d69d7a02af91c
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Jan 8 16:55:31 2025 +0100
+
+    elf: Minimize library dependencies of tst-nolink-libc.c
+    
+    On 32-bit Arm, -fasynchronous-unwind-tables creates a reference
+    to the symbol __aeabi_unwind_cpp_pr0.  Compile the tests without
+    this flag even if it is passed as part of CC, to avoid linker
+    failures.
+
+diff --git a/elf/Makefile b/elf/Makefile
+index d30f7f67e73a646e..dc93f631a682a006 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -2910,8 +2910,10 @@ tst-rtld-no-malloc-preload-ENV = LD_PRELOAD=$(objpfx)tst-auditmod1.so
+ # a port adds them to the tests variables.  Neither test variant is
+ # linked against libc.so, but tst-nolink-libc-1 is linked against
+ # ld.so.  The test is always run directly, not under the dynamic
+-# linker.
+-CFLAGS-tst-nolink-libc.c += $(no-stack-protector)
++# linker.  It is necessary to minimize run-time dependencies, by
++# disabling stack protection and unwinding.
++CFLAGS-tst-nolink-libc.c += $(no-stack-protector) \
++ -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables
+ $(objpfx)tst-nolink-libc-1: $(objpfx)tst-nolink-libc.o $(objpfx)ld.so
+ 	$(LINK.o) -nostdlib -nostartfiles -o $@ $< \
+ 	  -Wl,--dynamic-linker=$(objpfx)ld.so,--no-as-needed $(objpfx)ld.so

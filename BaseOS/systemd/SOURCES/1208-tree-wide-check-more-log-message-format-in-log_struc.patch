@@ -1,0 +1,46 @@
+From d281329eaba88a8ea16bda1c4216ee2d73376d90 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 18 Mar 2025 15:50:43 +0900
+Subject: [PATCH] tree-wide: check more log message format in log_struct() and
+ friends
+
+This introduce LOG_ITEM() macro that checks arbitrary formats in
+log_struct().
+Then, drop _printf_ attribute from log_struct_internal(), as it does not
+help so much, and compiler checked only the first format string.
+
+Hopefully, this silences false-positive warnings by Coverity.
+
+[dtardon: Backported just the immediate fix for a compiler warning.]
+
+(cherry picked from commit 3cf6a3a3d4acf8347ccd0250274f517e6b2e9fe6)
+
+Related: RHEL-100353
+---
+ src/basic/log.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/basic/log.c b/src/basic/log.c
+index 2e1642dc20..20bf45170c 100644
+--- a/src/basic/log.c
++++ b/src/basic/log.c
+@@ -959,7 +959,9 @@ int log_struct_internal(
+                         iovec[n++] = IOVEC_MAKE_STRING(header);
+ 
+                         va_start(ap, format);
++                        DISABLE_WARNING_FORMAT_NONLITERAL;
+                         r = log_format_iovec(iovec, ELEMENTSOF(iovec), &n, true, error, format, ap);
++                        REENABLE_WARNING;
+                         if (r < 0)
+                                 fallback = true;
+                         else {
+@@ -993,7 +995,9 @@ int log_struct_internal(
+                 errno = ERRNO_VALUE(error);
+ 
+                 va_copy(aq, ap);
++                DISABLE_WARNING_FORMAT_NONLITERAL;
+                 (void) vsnprintf(buf, sizeof buf, format, aq);
++                REENABLE_WARNING;
+                 va_end(aq);
+ 
+                 if (startswith(buf, "MESSAGE=")) {

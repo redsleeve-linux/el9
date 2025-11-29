@@ -1,0 +1,35 @@
+commit cc5372806a4bf34cb5c9038d1716b5ea6202abd0
+Author: Alejandro Colomar <alx.manpages@gmail.com>
+Date:   Wed May 31 22:44:22 2023 +0200
+
+    Fix invalid use of NULL in epoll_pwait2(2) test
+    
+    epoll_pwait2(2)'s second argument should be nonnull.  We're going to add
+    __nonnull to the prototype, so let's fix the test accordingly.  We can
+    use a dummy variable to avoid passing NULL.
+    
+    Reported-by: Adhemerval Zanella Netto <adhemerval.zanella@linaro.org>
+    Signed-off-by: Alejandro Colomar <alx@kernel.org>
+
+diff --git a/sysdeps/unix/sysv/linux/tst-epoll.c b/sysdeps/unix/sysv/linux/tst-epoll.c
+index 3ef6ca9fbd3c5a2b..c31d4793115acc7d 100644
+--- a/sysdeps/unix/sysv/linux/tst-epoll.c
++++ b/sysdeps/unix/sysv/linux/tst-epoll.c
+@@ -180,6 +180,8 @@ epoll_pwait2_check (int epfd, struct epoll_event *ev, int maxev, int tmo,
+ static int
+ do_test (void)
+ {
++  struct epoll_event ev;
++
+   {
+     struct sigaction sa;
+     sa.sa_handler = handler;
+@@ -191,7 +193,7 @@ do_test (void)
+     xsigaction (SIGCHLD, &sa, NULL);
+   }
+ 
+-  int r = epoll_pwait2 (-1, NULL, 0, NULL, NULL);
++  int r = epoll_pwait2 (-1, &ev, 0, NULL, NULL);
+   TEST_COMPARE (r, -1);
+   bool pwait2_supported = errno != ENOSYS;
+ 

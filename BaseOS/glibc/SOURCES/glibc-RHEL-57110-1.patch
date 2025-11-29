@@ -1,0 +1,67 @@
+commit 43afae31e0d7579deef13536c4c3704afaa017da
+Author: Maciej W. Rozycki <macro@redhat.com>
+Date:   Thu May 29 22:11:38 2025 +0100
+
+    manual: Document error codes missing for 'socket'
+    
+    Add missing EAFNOSUPPORT, ESOCKTNOSUPPORT, EPROTOTYPE, EINVAL, EPERM,
+    and ENOMEM error codes, and adjust existing descriptions accordingly.
+    
+    On Linux either ENOBUFS or ENOMEM is returned in the case of a memory
+    allocation failure, depending on the namespace requested, e.g. AF_INET
+    returns ENOMEM while AF_INET6 returns ENOBUFS, so document these codes
+    as alternatives.
+    
+    Similarly EPERM is returned rather than EACCES on Linux, so document
+    these codes as alternatives as well.  We might want to convert EPERM to
+    EACCES for POSIX compliance, but it is beyond the scope of this change,
+    and software has to expect either anyway, owing to the long-established
+    practice.
+    
+    Finally ESOCKTNOSUPPORT is returned rather than EPROTONOSUPPORT for an
+    unsupported style except for the AF_QIPCRTR namespace where EPROTOTYPE
+    is used, so document these codes as alternatives too.
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+diff --git a/manual/socket.texi b/manual/socket.texi
+index 63d550e9d484dc65..5199c3734be40136 100644
+--- a/manual/socket.texi
++++ b/manual/socket.texi
+@@ -2205,9 +2205,19 @@ socket, or @code{-1} in case of error.  The following @code{errno} error
+ conditions are defined for this function:
+ 
+ @table @code
++@item EAFNOSUPPORT
++The @var{namespace} requested is not supported.
++
++@item ESOCKTNOSUPPORT
++@itemx EPROTONOSUPPORT
++@itemx EPROTOTYPE
++The @var{style} is not supported by the @var{namespace} specified.
++
+ @item EPROTONOSUPPORT
+-The @var{protocol} or @var{style} is not supported by the
+-@var{namespace} specified.
++The @var{protocol} is not supported by the @var{namespace} specified.
++
++@item EINVAL
++The @var{style} or @var{protocol} requested is not valid.
+ 
+ @item EMFILE
+ The process already has too many file descriptors open.
+@@ -2216,11 +2226,13 @@ The process already has too many file descriptors open.
+ The system already has too many file descriptors open.
+ 
+ @item EACCES
++@itemx EPERM
+ The process does not have the privilege to create a socket of the specified
+ @var{style} or @var{protocol}.
+ 
+ @item ENOBUFS
+-The system ran out of internal buffer space.
++@itemx ENOMEM
++Insufficient memory was available.
+ @end table
+ 
+ The file descriptor returned by the @code{socket} function supports both

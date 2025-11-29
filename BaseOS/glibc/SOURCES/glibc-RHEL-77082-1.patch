@@ -1,0 +1,87 @@
+commit 0d21b3783f49ae94207a1bb9acd5dc8b071f0b13
+Author: Joe Simmons-Talbott <josimmon@redhat.com>
+Date:   Tue Apr 4 09:57:45 2023 -0400
+
+    stdlib: Add testcases for abs(). (BZ #30263)
+    
+    Test minimum and maximum int values, zero, and part of the range
+    of int values.  Use '-fno-builtin' to ensure we are testing the
+    implementation.
+    
+    Reviewed-by: Wilco Dijkstra  <Wilco.Dijkstra@arm.com>
+
+Conflicts:
+	stdlib/Makefile (fixup context)
+
+diff --git a/stdlib/Makefile b/stdlib/Makefile
+index 4f5de988cee07932..9eb6e1b6ee1df080 100644
+--- a/stdlib/Makefile
++++ b/stdlib/Makefile
+@@ -86,6 +86,7 @@ tests := \
+   testmb2 \
+   testrand \
+   testsort \
++  tst-abs \
+   tst-at_quick_exit \
+   tst-atexit \
+   tst-atof1 \
+@@ -174,6 +175,8 @@ LDLIBS-test-dlclose-exit-race = $(shared-thread-library)
+ LDFLAGS-test-dlclose-exit-race = $(LDFLAGS-rdynamic)
+ LDLIBS-test-dlclose-exit-race-helper.so = $(libsupport) $(shared-thread-library)
+ 
++CFLAGS-tst-abs.c += -fno-builtin
++
+ ifeq ($(have-cxx-thread_local),yes)
+ CFLAGS-tst-quick_exit.o = -std=c++11
+ LDLIBS-tst-quick_exit = -lstdc++
+diff --git a/stdlib/tst-abs.c b/stdlib/tst-abs.c
+new file mode 100644
+index 0000000000000000..2b96aedc3e2c0eef
+--- /dev/null
++++ b/stdlib/tst-abs.c
+@@ -0,0 +1,45 @@
++/* Basic tests for abs.
++   Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++#include <stdlib.h>
++
++#include <support/check.h>
++
++#define LARGE_PRIME 49999
++
++static int do_test (void)
++{
++  int i;
++
++  TEST_COMPARE(abs(INT_MAX), INT_MAX);
++  TEST_COMPARE(abs(INT_MIN + 1), INT_MAX);
++  TEST_COMPARE(abs(-1), 1);
++  TEST_COMPARE(abs(0), 0);
++  TEST_COMPARE(abs(1), 1);
++
++  for (i = INT_MIN + 1; i < 0; i += LARGE_PRIME)
++    TEST_COMPARE(abs(i), -i);
++
++  for (i = 0; i < INT_MAX - LARGE_PRIME; i += LARGE_PRIME)
++    TEST_COMPARE(abs(i), i);
++
++  return EXIT_SUCCESS;
++}
++
++#include <support/test-driver.c>

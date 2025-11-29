@@ -1,0 +1,49 @@
+From 1c9d65c6100edfd6050b34dcf29a7a1bbdf5e89a Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Sat, 29 Mar 2025 14:00:39 +0000
+Subject: [PATCH] copy: Set the total size in bytes copied
+
+Ensure that src->size contains the total size in bytes copied.  There
+is (only) one place where this is not known in advance, which is when
+we are reading from a pipe.
+
+(cherry picked from commit afe4f390a65a0d1b9f3625bf90c73726866e0a64)
+---
+ copy/main.c          | 3 +++
+ copy/synch-copying.c | 6 ++++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/copy/main.c b/copy/main.c
+index ae9840ae..cd7b2fd2 100644
+--- a/copy/main.c
++++ b/copy/main.c
+@@ -479,6 +479,9 @@ main (int argc, char *argv[])
+   /* Always set the progress bar to 100% at the end of the copy. */
+   progress_bar (1, 1);
+ 
++  /* We should always know the total size copied here. */
++  assert (src->size >= 0);
++
+   /* Shut down the source side. */
+   src->ops->close (src);
+ 
+diff --git a/copy/synch-copying.c b/copy/synch-copying.c
+index 2f6627bf..200c97f6 100644
+--- a/copy/synch-copying.c
++++ b/copy/synch-copying.c
+@@ -53,6 +53,12 @@ synch_copying (void)
+       offset += r;
+       progress_bar (offset, src->size);
+     }
++
++    /* Record the total amount of data that was copied.  In all other
++     * cases, src->size will already be set to the true size, so here
++     * is the only place we have to set this.
++     */
++    src->size = offset;
+   }
+ 
+   /* Otherwise we know how much we're copying, so we can copy in whole
+-- 
+2.47.1
+

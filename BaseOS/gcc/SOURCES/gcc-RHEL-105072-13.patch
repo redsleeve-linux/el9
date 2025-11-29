@@ -1,0 +1,48 @@
+commit acdb24166d13d87c374e578d2ad5d58249171930
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Mon Oct 17 11:09:17 2022 +0200
+
+    libgcc: Move cfa_how into potential padding in struct frame_state_reg_info
+    
+    On many architectures, there is a padding gap after the how array
+    member, and cfa_how can be moved there.  This reduces the size of the
+    struct and the amount of memory that uw_frame_state_for has to clear.
+    
+    There is no measurable performance benefit from this on x86-64 (even
+    though the memset goes from 120 to 112 bytes), but it seems to be a
+    good idea to do anyway.
+    
+    libgcc/
+    
+            * unwind-dw2.h (struct frame_state_reg_info): Move cfa_how member
+            and reduce its size.
+
+diff --git a/libgcc/unwind-dw2.h b/libgcc/unwind-dw2.h
+index 22241b1f0d14cffc..437c785efa4f297d 100644
+--- a/libgcc/unwind-dw2.h
++++ b/libgcc/unwind-dw2.h
+@@ -50,6 +50,12 @@ typedef struct
+     } reg[__LIBGCC_DWARF_FRAME_REGISTERS__+1];
+     unsigned char how[__LIBGCC_DWARF_FRAME_REGISTERS__+1];
+ 
++    enum {
++      CFA_UNSET,
++      CFA_REG_OFFSET,
++      CFA_EXP
++    } cfa_how : 8;
++
+     /* Used to implement DW_CFA_remember_state.  */
+     struct frame_state_reg_info *prev;
+ 
+@@ -58,11 +64,6 @@ typedef struct
+     _Unwind_Sword cfa_offset;
+     _Unwind_Word cfa_reg;
+     const unsigned char *cfa_exp;
+-    enum {
+-      CFA_UNSET,
+-      CFA_REG_OFFSET,
+-      CFA_EXP
+-    } cfa_how;
+   } regs;
+ 
+   /* The PC described by the current frame state.  */

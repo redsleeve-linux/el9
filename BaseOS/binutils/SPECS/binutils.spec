@@ -2,7 +2,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 63%{?dist}.redsleeve
+Release: 67%{?dist}
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -510,6 +510,29 @@ Patch91: binutils-linker-diagnostic-message.patch
 # Lifetime: Fixed in 2.45
 Patch92: binutils-aarch64-small-plt0.patch
 
+# Purpose:  Adds support for z17 as an s390 cpu name.
+# Lifetime: Fixed in 2.45
+Patch93: binutils-s390-z17-cpu-name.patch
+
+# Purpose:  Add missing tests of AArch64 instructions to the assembler testsuite.
+# Lifetime: Fixed in 2.45
+Patch94: binutils-AArch64-missing-assembler-tests-1.patch
+Patch95: binutils-AArch64-missing-assembler-tests-2.patch
+Patch96: binutils-AArch64-missing-assembler-tests-3.patch
+Patch97: binutils-AArch64-missing-assembler-tests-4.patch
+Patch98: binutils-AArch64-missing-assembler-tests-5.patch
+Patch99: binutils-AArch64-missing-assembler-tests-6.patch
+Patch100: binutils-AArch64-missing-assembler-tests-7.patch
+Patch101: binutils-AArch64-missing-assembler-tests-8.patch
+Patch102: binutils-AArch64-missing-assembler-tests-9.patch
+Patch103: binutils-AArch64-missing-assembler-tests-10.patch
+Patch104: binutils-AArch64-missing-assembler-tests-11.patch
+Patch105: binutils-AArch64-missing-assembler-tests-12.patch
+
+# Purpose:  Adds tests for the --error-execstack and --error-rwx-segments linker commmand line options.
+# Lifetime: Fixed in 2.46
+Patch106: binutils-execstack-error-tests.patch
+
 #----------------------------------------------------------------------------
 
 Provides: bundled(libiberty)
@@ -575,7 +598,6 @@ Requires(post): coreutils
 BuildRequires: elfutils-debuginfod-client-devel
 %endif
 
-Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 %description
@@ -1370,8 +1392,17 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
-* Fri Jun 06 2025 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-63.redsleeve
-- minor adjustments for armv6
+* Tue Aug 19 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-67
+- Adds tests for the linker's --error-execstack and --error-rwx-segments command line options.  (RHEL-109970)
+
+* Tue Jul 22 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-66
+- Add missing tests of AArch64 instructions to the assembler testsuite.  (RHEL-104630)
+
+* Mon Jun 02 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-65
+- NVR bump to allow rebuilding for RHEL-9.7  (RHEL-87216)
+
+* Tue Apr 15 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-64
+- Adds z17 as a cpu name for the s390x architecture.  (RHEL-87216)
 
 * Fri Feb 07 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-63
 - Fix seg-fault in AArch64 linker when building u-boot.  (RHEL-78350)

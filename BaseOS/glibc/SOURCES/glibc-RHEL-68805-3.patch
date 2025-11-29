@@ -1,0 +1,119 @@
+commit 377e9733b50ce41e496c467ddcc112f73c88f3bd
+Author: Joseph Myers <josmyers@redhat.com>
+Date:   Tue Jan 28 19:38:27 2025 +0000
+
+    Fix fflush after ungetc on input file (bug 5994)
+    
+    As discussed in bug 5994 (plus duplicates), POSIX requires fflush
+    after ungetc to discard pushed-back characters but preserve the file
+    position indicator.  For this purpose, each ungetc decrements the file
+    position indicator by 1; it is unspecified after ungetc at the start
+    of the file, and after ungetwc, so no special handling is needed for
+    either of those cases.
+    
+    This is fixed with appropriate logic in _IO_new_file_sync.  I haven't
+    made any attempt to test or change things in this area for the "old"
+    functions; the case of files using mmap is addressed in a subsequent
+    patch (and there seem to be no problems in this area with files opened
+    with fmemopen).
+    
+    Tested for x86_64.
+
+diff --git a/libio/fileops.c b/libio/fileops.c
+index d40748e0fc548fff..83fd272c8e606b1b 100644
+--- a/libio/fileops.c
++++ b/libio/fileops.c
+@@ -799,6 +799,11 @@ _IO_new_file_sync (FILE *fp)
+   if (fp->_IO_write_ptr > fp->_IO_write_base)
+     if (_IO_do_flush(fp)) return EOF;
+   delta = fp->_IO_read_ptr - fp->_IO_read_end;
++  if (_IO_in_backup (fp))
++    {
++      _IO_switch_to_main_get_area (fp);
++      delta += fp->_IO_read_ptr - fp->_IO_read_end;
++    }
+   if (delta != 0)
+     {
+       off64_t new_pos = _IO_SYSSEEK (fp, delta, 1);
+diff --git a/stdio-common/Makefile b/stdio-common/Makefile
+index 95fd52fbf1b1b3fb..e155b96309f4486f 100644
+--- a/stdio-common/Makefile
++++ b/stdio-common/Makefile
+@@ -277,6 +277,7 @@ tests := \
+   tst-swscanf \
+   tst-tmpnam \
+   tst-ungetc \
++  tst-ungetc-fflush \
+   tst-ungetc-leak \
+   tst-ungetc-nomem \
+   tst-unlockedio \
+diff --git a/stdio-common/tst-ungetc-fflush.c b/stdio-common/tst-ungetc-fflush.c
+new file mode 100644
+index 0000000000000000..a86d1fdb7f8cac88
+--- /dev/null
++++ b/stdio-common/tst-ungetc-fflush.c
+@@ -0,0 +1,64 @@
++/* Test flushing input file after ungetc (bug 5994).
++   Copyright (C) 2025 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++
++#include <support/check.h>
++#include <support/temp_file.h>
++#include <support/xstdio.h>
++#include <support/xunistd.h>
++
++int
++do_test (void)
++{
++  char *filename = NULL;
++  int fd = create_temp_file ("tst-ungetc-fflush", &filename);
++  TEST_VERIFY_EXIT (fd != -1);
++  xclose (fd);
++
++  /* Test as in bug 5994.  */
++  FILE *fp = xfopen (filename, "w");
++  TEST_VERIFY_EXIT (fputs ("#include", fp) >= 0);
++  xfclose (fp);
++  fp = xfopen (filename, "r");
++  TEST_COMPARE (fgetc (fp), '#');
++  TEST_COMPARE (fgetc (fp), 'i');
++  TEST_COMPARE (ungetc ('@', fp), '@');
++  TEST_COMPARE (fflush (fp), 0);
++  TEST_COMPARE (lseek (fileno (fp), 0, SEEK_CUR), 1);
++  TEST_COMPARE (fgetc (fp), 'i');
++  TEST_COMPARE (fgetc (fp), 'n');
++  xfclose (fp);
++
++  /* Test as in bug 12799 (duplicate of 5994).  */
++  fp = xfopen (filename, "w+");
++  TEST_VERIFY_EXIT (fputs ("hello world", fp) >= 0);
++  rewind (fp);
++  TEST_VERIFY (fileno (fp) >= 0);
++  char buffer[10];
++  TEST_COMPARE (fread (buffer, 1, 5, fp), 5);
++  TEST_COMPARE (fgetc (fp), ' ');
++  TEST_COMPARE (ungetc ('@', fp), '@');
++  TEST_COMPARE (fflush (fp), 0);
++  TEST_COMPARE (fgetc (fp), ' ');
++  xfclose (fp);
++
++  return 0;
++}
++
++#include <support/test-driver.c>

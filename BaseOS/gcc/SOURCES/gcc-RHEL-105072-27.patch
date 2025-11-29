@@ -1,0 +1,299 @@
+commit 21109b37e8585a7a1b27650fcbf1749380016108
+Author: Jakub Jelinek <jakub@redhat.com>
+Date:   Mon Mar 10 10:34:00 2025 +0100
+
+    libgcc: Fix up unwind-dw2-btree.h [PR119151]
+    
+    The following testcase shows a bug in unwind-dw2-btree.h.
+    In short, the header provides lock-free btree data structure (so no parent
+    link on nodes, both insertion and deletion are done in top-down walks
+    with some locking of just a few nodes at a time so that lookups can notice
+    concurrent modifications and retry, non-leaf (inner) nodes contain keys
+    which are initially the base address of the left-most leaf entry of the
+    following child (or all ones if there is none) minus one, insertion ensures
+    balancing of the tree to ensure [d/2, d] entries filled through aggressive
+    splitting if it sees a full tree while walking, deletion performs various
+    operations like merging neighbour trees, merging into parent or moving some
+    nodes from neighbour to the current one).
+    What differs from the textbook implementations is mostly that the leaf nodes
+    don't include just address as a key, but address range, address + size
+    (where we don't insert any ranges with zero size) and the lookups can be
+    performed for any address in the [address, address + size) range.  The keys
+    on inner nodes are still just address-1, so the child covers all nodes
+    where addr <= key unless it is covered already in children to the left.
+    The user (static executables or JIT) should always ensure there is no
+    overlap in between any of the ranges.
+    
+    In the testcase a bunch of insertions are done, always followed by one
+    removal, followed by one insertion of a range slightly different from the
+    removed one.  E.g. in the first case [&code[0x50], &code[0x59]] range
+    is removed and then we insert [&code[0x4c], &code[0x53]] range instead.
+    This is valid, it doesn't overlap anything.  But the problem is that some
+    non-leaf (inner) one used the &code[0x4f] key (after the 11 insertions
+    completely correctly).  On removal, nothing adjusts the keys on the parent
+    nodes (it really can't in the top-down only walk, the keys could be many nodes
+    above it and unlike insertion, removal only knows the start address, doesn't
+    know the removed size and so will discover it only when reaching the leaf
+    node which contains it; plus even if it knew the address and size, it still
+    doesn't know what the second left-most leaf node will be (i.e. the one after
+    removal)).  And on insertion, if nodes aren't split at a level, nothing
+    adjusts the inner keys either.  If a range is inserted and is either fully
+    bellow key (keys are - 1, so having address + size - 1 being equal to key is
+    fine) or fully after key (i.e. address > key), it works just fine, but if
+    the key is in a middle of the range like in this case, &code[0x4f] is in the
+    middle of the [&code[0x4c], &code[0x53]] range, then insertion works fine
+    (we only use size on the leaf nodes), and lookup of the addresses below
+    the key work fine too (i.e. [&code[0x4c], &code[0x4f]] will succeed).
+    The problem is with lookups after the key (i.e. [&code[0x50, &code[0x53]]),
+    the lookup looks for them in different children of the btree and doesn't
+    find an entry and returns NULL.
+    
+    As users need to ensure non-overlapping entries at any time, the following
+    patch fixes it by adjusting keys during insertion where we know not just
+    the address but also size; if we find during the top-down walk a key
+    which is in the middle of the range being inserted, we simply increase the
+    key to be equal to address + size - 1 of the range being inserted.
+    There can't be any existing leaf nodes overlapping the range in correct
+    programs and the btree rebalancing done on deletion ensures we don't have
+    any empty nodes which would also cause problems.
+    
+    The patch adjusts the keys in two spots, once for the current node being
+    walked (the last hunk in the header, with large comment trying to explain
+    it) and once during inner node splitting in a parent node if we'd otherwise
+    try to add that key in the middle of the range being inserted into the
+    parent node (in that case it would be missed in the last hunk).
+    The testcase covers both of those spots, so succeeds with GCC 12 (which
+    didn't have btrees) and fails with vanilla GCC trunk and also fails if
+    either the
+      if (fence < base + size - 1)
+        fence = iter->content.children[slot].separator = base + size - 1;
+    or
+      if (left_fence >= target && left_fence < target + size - 1)
+        left_fence = target + size - 1;
+    hunk is removed (of course, only with the current node sizes, i.e. up to
+    15 children of inner nodes and up to 10 entries in leaf nodes).
+    
+    2025-03-10  Jakub Jelinek  <jakub@redhat.com>
+                Michael Leuchtenburg  <michael@slashhome.org>
+    
+            PR libgcc/119151
+            * unwind-dw2-btree.h (btree_split_inner): Add size argument.  If
+            left_fence is in the middle of [target,target + size - 1] range,
+            increase it to target + size - 1.
+            (btree_insert): Adjust btree_split_inner caller.  If fence is smaller
+            than base + size - 1, increase it and separator of the slot to
+            base + size - 1.
+    
+            * gcc.dg/pr119151.c: New test.
+
+diff --git a/gcc/testsuite/gcc.dg/pr119151.c b/gcc/testsuite/gcc.dg/pr119151.c
+new file mode 100644
+index 0000000000000000..6ef0f12ce9ae6c06
+--- /dev/null
++++ b/gcc/testsuite/gcc.dg/pr119151.c
+@@ -0,0 +1,151 @@
++/* PR libgcc/119151 */
++/* Should be run just on targets which don't have _Unwind_Find_FDE in libc.so.  */
++/* { dg-do run { target { { x86_64-*-linux* aarch64*-*-linux* powerpc64*-*-linux* riscv*-*-linux* } && lp64 } } } */
++/* { dg-options "-O2" } */
++
++struct object
++{
++  void *pc_begin, *tbase, *dbase, *single;
++  __SIZE_TYPE__ i;
++  void *fde_end, *next;
++};
++struct dwarf_eh_bases
++{
++  void *tbase, *dbase, *func;
++};
++extern void __register_frame_info (const void *, struct object *);
++extern void *__deregister_frame_info (const void *);
++extern const void *_Unwind_Find_FDE (void *, struct dwarf_eh_bases *);
++#define DW_EH_PE_sdata8	0x0c
++#define DW_EH_PE_pcrel	0x10
++#define DW_CFA_def_cfa	0x0c
++#define DW_CFA_offset	0x80
++
++struct __attribute__((aligned (8))) eh_frame_cie {
++  unsigned len;
++  unsigned tag;
++  unsigned char version;
++  unsigned char augmentation[3];
++  unsigned char code_align_factor;
++  unsigned char data_align_factor;
++  unsigned char ra_column;
++  unsigned char augmentation_size;
++  unsigned char encoding;
++  unsigned char def_cfa;
++  unsigned char def_cfa_op1, def_cfa_op2;
++  unsigned char offset;
++  unsigned char offset_op;
++};
++struct __attribute__((aligned (8))) eh_frame_fde {
++  unsigned len;
++  unsigned cie_offset;
++  unsigned long long begin, size;
++  unsigned char augmentation;
++};
++struct eh_frame_cie_fde {
++  struct eh_frame_cie cie;
++  struct eh_frame_fde fde;
++  unsigned int zero;
++  struct object obj;
++} eh_frame[256];
++unsigned ehidx;
++unsigned char code[0x800] __attribute__((aligned (8)));
++
++void *
++register_range (void *addr, unsigned size)
++{
++  /* Fills in empty-ish CIE and FDE with pcrel sdata8 encoding so that
++     we don't need to worry about lp64 large code models.
++     We don't actually execute anything in code and only _Unwind_Find_FDE,
++     don't actually try to unwind anything.  */
++  eh_frame[ehidx].cie.len
++    = (unsigned) ((char *) &eh_frame[ehidx].fde
++		  - (char *) &eh_frame[ehidx].cie.tag);
++  eh_frame[ehidx].cie.tag = 0;
++  eh_frame[ehidx].cie.version = 3;
++  __builtin_memcpy (eh_frame[ehidx].cie.augmentation, "zR", 3);
++  eh_frame[ehidx].cie.code_align_factor = 1;
++  eh_frame[ehidx].cie.data_align_factor = 0x78; /* sleb128 -8 */
++  eh_frame[ehidx].cie.ra_column = 0x10;
++  eh_frame[ehidx].cie.augmentation_size = 1;
++  eh_frame[ehidx].cie.encoding = DW_EH_PE_pcrel | DW_EH_PE_sdata8;
++  eh_frame[ehidx].cie.def_cfa = DW_CFA_def_cfa;
++  eh_frame[ehidx].cie.def_cfa_op1 = 7;
++  eh_frame[ehidx].cie.def_cfa_op2 = 8;
++  eh_frame[ehidx].cie.offset = DW_CFA_offset + 0x10;
++  eh_frame[ehidx].cie.offset_op = 1;
++  eh_frame[ehidx].fde.len
++    = (unsigned) ((char *) &eh_frame[ehidx].zero
++		  - (char *) &eh_frame[ehidx].fde.cie_offset);
++  eh_frame[ehidx].fde.cie_offset
++    = (unsigned) ((char *) &eh_frame[ehidx].fde.cie_offset
++		  - (char *) &eh_frame[ehidx].cie);
++  eh_frame[ehidx].fde.begin
++    = (__INTPTR_TYPE__) ((__UINTPTR_TYPE__) addr
++			 - (__UINTPTR_TYPE__) &eh_frame[ehidx].fde.begin);
++  eh_frame[ehidx].fde.size = size;
++  eh_frame[ehidx].fde.augmentation = 0;
++  eh_frame[ehidx].zero = 0;
++  __register_frame_info (&eh_frame[ehidx].cie, &eh_frame[ehidx].obj);
++  ++ehidx;
++  return &eh_frame[ehidx - 1].cie;
++}
++
++void
++unregister (void *eh_frame)
++{
++  __deregister_frame_info (eh_frame);
++}
++
++int
++main ()
++{
++  for (int i = 0; i < 0x50; i += 0x10)
++    register_range (&code[i], 10);
++  void *p = register_range (&code[0x50], 10);
++  for (int i = 0x60; i < 0xb0; i += 0x10)
++    register_range (&code[i], 10);
++  unregister (p);
++  register_range (&code[0x4c], 8);
++  struct dwarf_eh_bases bases;
++  const void *q = _Unwind_Find_FDE (&code[0x4c], &bases);
++  const void *r = _Unwind_Find_FDE (&code[0x51], &bases);
++  if (!q || q != r)
++    __builtin_abort ();
++  for (int i = 0; i <= 0xa0; i += 0x10)
++    if (i != 0x50)
++      {
++        q = _Unwind_Find_FDE (&code[i], &bases);
++        r = _Unwind_Find_FDE (&code[i + 9], &bases);
++        if (!q || q != r)
++	  __builtin_abort ();
++      }
++  for (int i = 0xb0; i < 0x240; i += 0x10)
++    register_range (&code[i], 10);
++  p = register_range (&code[0x240], 10);
++  for (int i = 0x250; i < 0x470; i += 0x10)
++    register_range (&code[i], 10);
++  void *s = register_range (&code[0x470], 10);
++  for (int i = 0x480; i < 0x700; i += 0x10)
++    register_range (&code[i], 10);
++  unregister (p);
++  register_range (&code[0x23c], 16);
++  q = _Unwind_Find_FDE (&code[0x23d], &bases);
++  r = _Unwind_Find_FDE (&code[0x24b], &bases);
++  if (!q || q != r)
++    __builtin_abort ();
++  unregister (s);
++  register_range (&code[0x46c], 16);
++  q = _Unwind_Find_FDE (&code[0x46d], &bases);
++  r = _Unwind_Find_FDE (&code[0x47b], &bases);
++  if (!q || q != r)
++    __builtin_abort ();
++  for (int i = 0; i < 0x700; i += 0x10)
++    if (i != 0x50 && i != 0x240 && i != 0x470)
++      {
++        q = _Unwind_Find_FDE (&code[i], &bases);
++        r = _Unwind_Find_FDE (&code[i + 9], &bases);
++        if (!q || q != r)
++	  __builtin_abort ();
++      }
++}
+diff --git a/libgcc/unwind-dw2-btree.h b/libgcc/unwind-dw2-btree.h
+index ace507d9ffbdffb7..e3f3a11a7b5443d6 100644
+--- a/libgcc/unwind-dw2-btree.h
++++ b/libgcc/unwind-dw2-btree.h
+@@ -474,7 +474,8 @@ btree_handle_root_split (struct btree *t, struct btree_node **node,
+ // Split an inner node.
+ static void
+ btree_split_inner (struct btree *t, struct btree_node **inner,
+-		   struct btree_node **parent, uintptr_type target)
++		   struct btree_node **parent, uintptr_type target,
++		   uintptr_type size)
+ {
+   // Check for the root.
+   btree_handle_root_split (t, inner, parent);
+@@ -490,6 +491,9 @@ btree_split_inner (struct btree *t, struct btree_node **inner,
+       = left_inner->content.children[split + index];
+   left_inner->entry_count = split;
+   uintptr_type left_fence = btree_node_get_fence_key (left_inner);
++  if (left_fence >= target && left_fence < target + size - 1)
++    // See the PR119151 comment in btree_insert.
++    left_fence = target + size - 1;
+   btree_node_update_separator_after_split (*parent, right_fence, left_fence,
+ 					   right_inner);
+   if (target <= left_fence)
+@@ -753,13 +757,28 @@ btree_insert (struct btree *t, uintptr_type base, uintptr_type size,
+     {
+       // Use eager splits to avoid lock coupling up.
+       if (iter->entry_count == max_fanout_inner)
+-	btree_split_inner (t, &iter, &parent, base);
++	btree_split_inner (t, &iter, &parent, base, size);
+ 
+       unsigned slot = btree_node_find_inner_slot (iter, base);
+       if (parent)
+ 	btree_node_unlock_exclusive (parent);
+       parent = iter;
+       fence = iter->content.children[slot].separator;
++      if (fence < base + size - 1)
++	// The separator was set to the base - 1 of the leftmost leaf child
++	// at some point but such an entry could have been removed afterwards.
++	// As both insertion and removal are just walking down the tree with
++	// only a few current nodes locked at a time, updating the separator
++	// on removal is not possible, especially because btree_remove does
++	// not know the size until it reaches leaf node.  We must ensure that
++	// the separator is not in a middle of some entry though, as
++	// btree_lookup can look up any address in the entry's range and if
++	// the separator is in the middle, addresses below it or equal to it
++	// would be found while addresses above it would result in failed
++	// lookup.  Update the separator now.  Assumption that users
++	// ensure no overlapping registered ranges, there should be no
++	// current entry for any address in the range.  See PR119151.
++	fence = iter->content.children[slot].separator = base + size - 1;
+       iter = iter->content.children[slot].child;
+       btree_node_lock_exclusive (iter);
+     }

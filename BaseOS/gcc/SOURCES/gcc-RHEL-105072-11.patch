@@ -1,0 +1,42 @@
+commit 386ebf75f4c0342b1f823f4e4aba07abda3288d1
+Author: Thomas Neumann <tneumann@users.sourceforge.net>
+Date:   Fri Sep 23 15:57:13 2022 +0200
+
+    fix assert in __deregister_frame_info_bases
+    
+    When using the atomic fast path deregistering can fail during
+    program shutdown if the lookup structures are already destroyed.
+    The assert in __deregister_frame_info_bases takes that into
+    account. In the non-fast-path case however is not aware of
+    program shutdown, which caused a compiler error on such platforms.
+    We fix that by introducing a constant for in_shutdown in
+    non-fast-path builds.
+    We also drop the destructor priority, as it is not supported on
+    all platforms and we no longer rely upon the priority anyway.
+    
+    libgcc/ChangeLog:
+            * unwind-dw2-fde.c: Introduce a constant for in_shutdown
+            for the non-fast-path case. Drop destructor priority.
+
+diff --git a/libgcc/unwind-dw2-fde.c b/libgcc/unwind-dw2-fde.c
+index b0d07ccd53b30f4c..27fea89dc314ccd0 100644
+--- a/libgcc/unwind-dw2-fde.c
++++ b/libgcc/unwind-dw2-fde.c
+@@ -51,7 +51,7 @@ static struct btree registered_frames;
+ static bool in_shutdown;
+ 
+ static void
+-release_registered_frames (void) __attribute__ ((destructor (110)));
++release_registered_frames (void) __attribute__ ((destructor));
+ static void
+ release_registered_frames (void)
+ {
+@@ -67,6 +67,8 @@ static void
+ init_object (struct object *ob);
+ 
+ #else
++/* Without fast path frame deregistration must always succeed.  */
++static const int in_shutdown = 0;
+ 
+ /* The unseen_objects list contains objects that have been registered
+    but not yet categorized in any way.  The seen_objects list has had

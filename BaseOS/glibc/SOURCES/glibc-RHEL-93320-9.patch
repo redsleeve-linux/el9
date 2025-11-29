@@ -1,0 +1,49 @@
+commit 06200aac9bec34dbcac28b8c60e49a77e7851c1f
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Mon Jan 17 09:57:19 2022 +0100
+
+    elf/tst-dl_find_object: Disable subtests for non-contiguous maps (bug 28732)
+    
+    Reviewed-by: H.J. Lu <hjl.tools@gmail.com>
+
+diff --git a/elf/tst-dl_find_object.c b/elf/tst-dl_find_object.c
+index 9abffa35d479c8fc..d8c217545d116453 100644
+--- a/elf/tst-dl_find_object.c
++++ b/elf/tst-dl_find_object.c
+@@ -71,19 +71,24 @@ check (void *address,
+               __FILE__, line, address,
+               actual.dlfo_flags, expected->dlfo_flags);
+     }
+-  if (actual.dlfo_flags != expected->dlfo_flags)
++  if (expected->dlfo_link_map->l_contiguous)
+     {
+-      support_record_failure ();
+-      printf ("%s:%d: error: %p: map start is %p, expected %p\n",
+-              __FILE__, line,
+-              address, actual.dlfo_map_start, expected->dlfo_map_start);
+-    }
+-  if (actual.dlfo_map_end != expected->dlfo_map_end)
+-    {
+-      support_record_failure ();
+-      printf ("%s:%d: error: %p: map end is %p, expected %p\n",
+-              __FILE__, line,
+-              address, actual.dlfo_map_end, expected->dlfo_map_end);
++      /* If the mappings are not contiguous, the actual and execpted
++         mappings may differ, so this subtest will not work.  */
++      if (actual.dlfo_flags != expected->dlfo_flags)
++        {
++          support_record_failure ();
++          printf ("%s:%d: error: %p: map start is %p, expected %p\n",
++                  __FILE__, line,
++                  address, actual.dlfo_map_start, expected->dlfo_map_start);
++        }
++      if (actual.dlfo_map_end != expected->dlfo_map_end)
++        {
++          support_record_failure ();
++          printf ("%s:%d: error: %p: map end is %p, expected %p\n",
++                  __FILE__, line,
++                  address, actual.dlfo_map_end, expected->dlfo_map_end);
++        }
+     }
+   if (actual.dlfo_link_map != expected->dlfo_link_map)
+     {

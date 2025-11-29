@@ -21,7 +21,7 @@
 Name: systemd
 Url: https://systemd.io
 Version: 252
-Release: 51%{?dist}.2.redsleeve
+Release: 55%{?dist}.2.rocky.0.1
 # For a breakdown of the licensing, see README
 License: LGPLv2+ and MIT and GPLv2+
 Summary: System and Service Manager
@@ -1193,14 +1193,146 @@ Patch1107: 1107-core-Handle-cgroup-pruning-in-on_cgroup_empty_event.patch
 Patch1108: 1108-Fix-failing-test.patch
 Patch1109: 1109-unit-don-t-gc-unit-in-oom-queue.patch
 Patch1110: 1110-core-do-not-GC-units-jobs-that-are-in-the-D-Bus-queu.patch
-Patch1111: 1111-unit-always-return-1-in-log_kill.patch
-Patch1112: 1112-Add-a-set-of-assertion-macros-to-tests.h.patch
-Patch1113: 1113-Follow-up-with-the-PR-31819.patch
-Patch1114: 1114-Added-more-ASSERT-macro-and-also-make-some-test-file.patch
-Patch1115: 1115-sd-event-drop-inotify-event-from-buffer-when-no-even.patch
-Patch1116: 1116-test-add-test-case-for-issue-38265.patch
-
-Patch2000: arm32-patch-for-disable-service.patch
+Patch1111: 1111-man-be-even-clearer-that-tmpfiles-user-group-mode-ar.patch
+Patch1112: 1112-unit-always-return-1-in-log_kill.patch
+Patch1113: 1113-ci-enable-mkosi-workflow-for-z-stream-branches.patch
+Patch1114: 1114-ci-mkosi-bump-fedora-version-from-39-to-41.patch
+Patch1115: 1115-man-mention-that-rhel-9.0-net-naming-scheme-is-the-s.patch
+Patch1116: 1116-backlight-Drop-support-for-actual_brightness.patch
+Patch1117: 1117-unit-add-conditions-and-deps-to-make-oomd.socket-and.patch
+Patch1118: 1118-udev-net_id-introduce-naming-scheme-for-RHEL-9.7.patch
+Patch1119: 1119-Add-a-set-of-assertion-macros-to-tests.h.patch
+Patch1120: 1120-Follow-up-with-the-PR-31819.patch
+Patch1121: 1121-Added-more-ASSERT-macro-and-also-make-some-test-file.patch
+Patch1122: 1122-sd-event-drop-inotify-event-from-buffer-when-no-even.patch
+Patch1123: 1123-test-add-test-case-for-issue-38265.patch
+Patch1124: 1124-test-answer-2nd-mdadm-create-question-for-compat-wit.patch
+Patch1125: 1125-sysusers-cross-check-user-and-group-names-too.patch
+Patch1126: 1126-test-sysusers-check-group-creation-with-matching-use.patch
+Patch1127: 1127-user-sessions-do-not-remove-etc-nologin.patch
+Patch1128: 1128-hwdb-f20-micmute.patch
+Patch1129: 1129-hwdb-f21-touchpad_toggle.patch
+Patch1130: 1130-hwdb-f22-touchpad_on.patch
+Patch1131: 1131-hwdb-f23-touchpad_off.patch
+Patch1132: 1132-hwdb-drop-some-now-redundant-mappings.patch
+Patch1133: 1133-hwdb-Add-micmute-for-System76.patch
+Patch1134: 1134-hwdb-Add-newer-System76-Pangolins.patch
+Patch1135: 1135-hwdb-WALTOP-International-Corp.-Slim-Tablet-Stylus.patch
+Patch1136: 1136-hwdb-add-MSI-Claw-8-AT-Keyboard-Scancodes-36180.patch
+Patch1137: 1137-Adds-asus-T103HAF-rotation-matrix-to-60-sensor.hwdb-.patch
+Patch1138: 1138-hwdb-fix-screen-rotation-for-EXO-Wings-2in1-w1125-36.patch
+Patch1139: 1139-hwdb-XBox-Series-Elite-controller-modalias-entry-has.patch
+Patch1140: 1140-hwdb-add-front-button-support-for-MSI-Claw-7-AI-A2VM.patch
+Patch1141: 1141-hwdb-add-accel-orientation-and-location-for-the-BMAX.patch
+Patch1142: 1142-hwdb.d-add-support-for-Akoya-P15645.patch
+Patch1143: 1143-hwdb.d-add-ANP09-Intel-n100-tablet-sensor-configurat.patch
+Patch1144: 1144-hwdb-add-axis-range-corrections-for-the-Lenovo-Yoga-.patch
+Patch1145: 1145-hwdb-add-GOLD-WARRIOR-SIM-PhoenixRC-10411R.patch
+Patch1146: 1146-hwdb-add-Code-Mercenaries-Hard-und-Software-GmbH-Vir.patch
+Patch1147: 1147-hwdb-Add-accel-orientation-quirk-for-the-GPD-Pocket-.patch
+Patch1148: 1148-hwdb-add-rotation-profile-matrix-for-Rog-Ally-X-2024.patch
+Patch1149: 1149-hwdb-fix-backspace-not-working-on-HP-Pavilion-laptop.patch
+Patch1150: 1150-hwdb-keyboard-Map-FN-key-on-TUXEDO-NB02-devices.patch
+Patch1151: 1151-hwdb-add-G-Mode-key-support-37175.patch
+Patch1152: 1152-hwdb-keyboard-Map-FN-key-on-TUXEDO-InfinityFlex-14-G.patch
+Patch1153: 1153-hwdb-add-HP-150-Wired-Mouse-37341.patch
+Patch1154: 1154-Add-emulated-release-to-G-Mode-key.patch
+Patch1155: 1155-hwdb-keyboard-Add-Alienware-special-keys.patch
+Patch1156: 1156-hwdb-add-bladeRF-SDR-devices.patch
+Patch1157: 1157-hwdb-append-ID_SOFTWARE_RADIO-to-hwdb-parser.patch
+Patch1158: 1158-hwdb.d-reword-and-simplify-boilerplate-texts.patch
+Patch1159: 1159-hwdb.d-update-expand-boilerplate-on-various-hwdb-fil.patch
+Patch1160: 1160-hwdb-say-that-settings-can-be-also-set-to-0.patch
+Patch1161: 1161-hwdb-add-Analog-Devices-PLUTO-SDR.patch
+Patch1162: 1162-hwdb-append-ID_MM_DEVICE_IGNORE-to-hwdb-parser.patch
+Patch1163: 1163-hwdb-run-update-hwdb.patch
+Patch1164: 1164-hwdb-run-update-hwdb-autosuspend.patch
+Patch1165: 1165-hwdb-add-missing-PLUTO-SDR-vendor-name.patch
+Patch1166: 1166-hwdb-add-Ettus-Research-SDR-devices.patch
+Patch1167: 1167-hwdb-add-RTL-SDR-devices.patch
+Patch1168: 1168-hwdb-merge-entries-for-Ettus-Research-B200.patch
+Patch1169: 1169-hwdb-make-Saitek-PLC-Pro-Flight-Rudder-Pedals-a-joys.patch
+Patch1170: 1170-hwdb-fix-touchpad-for-ASUS-X1504ZA-37696.patch
+Patch1171: 1171-hwdb-add-support-for-Loupedeck-devices.patch
+Patch1172: 1172-hwdb-Acer-Nitro-ANV15-51-Mic-Toggle.patch
+Patch1173: 1173-hwdb-Added-Beacn-and-TC-Helicon-Audio-controllers-37.patch
+Patch1174: 1174-hwdb-Add-support-for-Lenovo-IdeaPad-Slim-5-series.patch
+Patch1175: 1175-hwdb-Add-hwbd-definitions-for-maker-tools.patch
+Patch1176: 1176-hwdb-Add-accel-orientation-quirk-for-the-Microtech-e.patch
+Patch1177: 1177-hwdb-add-70-maker-tools.hwdb-to-meson.build.patch
+Patch1178: 1178-hwdb-fix-typo-in-70-maker-tools.hwdb.patch
+Patch1179: 1179-hwdb-update.patch
+Patch1180: 1180-Fix-Positivo-K116J-search-key-and-www-shortcut.patch
+Patch1181: 1181-hwdb-Acer-Nitro-ANV15-51-Nitro-Sense-Toggle.patch
+Patch1182: 1182-hwdb-several-cleanups.patch
+Patch1183: 1183-hwdb-disable-Asus-ROG-keyboards-sending-poweroff.patch
+Patch1184: 1184-hwdb-update.patch
+Patch1185: 1185-hwdb-update-autosuspend-rules.patch
+Patch1186: 1186-hwdb-set-touchpad-resolution-for-ThinkPad-T14-Gen2a.patch
+Patch1187: 1187-Revert-hwdb-disable-Asus-ROG-keyboards-sending-power.patch
+Patch1188: 1188-hwdb-Add-launch-emoji-keyboard-mapping-for-Asus-M160.patch
+Patch1189: 1189-Enable-KEY_PERFORMANCE-key-present-on-Linux-6.17.patch
+Patch1190: 1190-flush_ports-flush-POSIX-message-queues-properly.patch
+Patch1191: 1191-kernel-install-add-entry-type-type1-type2-option-to-.patch
+Patch1192: 1192-kernel-install-add-entry-type-type1-type2-option-to-.patch
+Patch1193: 1193-kernel-install-do-not-mix-and.patch
+Patch1194: 1194-man-kernel-install-mention-entry-type-option-in-the-.patch
+Patch1195: 1195-cgroup-add-support-for-memory.peak.patch
+Patch1196: 1196-core-include-peak-memory-in-unit_log_resources.patch
+Patch1197: 1197-run-include-peak-memory-in-output.patch
+Patch1198: 1198-core-ensure-init.scope-is-realized-after-drop-ins-ha.patch
+Patch1199: 1199-core-add-possibility-to-not-track-certain-unit-types.patch
+Patch1200: 1200-tree-wide-check-more-log-message-format-in-log_struc.patch
+Patch1201: 1201-build-add-some-coloring-to-version-output.patch
+Patch1202: 1202-core-output-log-cycle-path-in-one-log-message-not-ma.patch
+Patch1203: 1203-core-make-log-cycle-messages-recognizable-via-messag.patch
+Patch1204: 1204-core-change-ordering-cycle-log-message-log-levels.patch
+Patch1205: 1205-core-cast-log_oom-got-void.patch
+Patch1206: 1206-core-when-removing-a-job-from-a-transaction-include-.patch
+Patch1207: 1207-catalog-add-entries-for-the-order-cycle-log-messages.patch
+Patch1208: 1208-tree-wide-check-more-log-message-format-in-log_struc.patch
+Patch1209: 1209-core-transaction-do-not-attempt-to-log-n-a-as-a-jour.patch
+Patch1210: 1210-meson-etc-systemd-network-is-also-used-by-udevd.patch
+Patch1211: 1211-test-add-tests-for-format_timestamp-and-parse_timest.patch
+Patch1212: 1212-test-time-util-disable-failing-tests.patch
+Patch1213: 1213-test-test-parse_timestamp-in-various-timezone.patch
+Patch1214: 1214-systemctl-logind-add-missing-asserts.patch
+Patch1215: 1215-systemctl-logind-make-logind_schedule_shutdown-accep.patch
+Patch1216: 1216-systemctl-add-option-when-for-scheduled-shutdown.patch
+Patch1217: 1217-test-time-util-add-test-cases-to-invalidate-show-and.patch
+Patch1218: 1218-sd-bus-make-bus_add_match_full-accept-timeout.patch
+Patch1219: 1219-core-unit-add-get_timeout_start_usec-in-UnitVTable-a.patch
+Patch1220: 1220-core-unit-increase-the-NameOwnerChanged-GetNameOwner.patch
+Patch1221: 1221-core-sd-bus-drop-empty-lines-between-function-call-a.patch
+Patch1222: 1222-core-do-not-disconnect-from-bus-when-failed-to-insta.patch
+Patch1223: 1223-dbus-stash-the-subscriber-list-when-we-disconenct-fr.patch
+Patch1224: 1224-manager-s-deserialized_subscribed-subscribed_as_strv.patch
+Patch1225: 1225-bus-util-do-not-reset-the-count-returned-by-sd_bus_t.patch
+Patch1226: 1226-core-manager-restore-bus-track-deserialization-clean.patch
+Patch1227: 1227-core-manager-drop-duplicate-bus-track-deserializatio.patch
+Patch1228: 1228-sd-bus-bus-track-use-install_callback-in-sd_bus_trac.patch
+Patch1229: 1229-Revert-test-time-util-disable-failing-tests.patch
+Patch1230: 1230-test-use-get_timezones-to-iterate-all-known-timezone.patch
+Patch1231: 1231-test-time-util-do-not-fail-on-DST-change.patch
+Patch1232: 1232-test-time-util-suppress-timestamp-conversion-failure.patch
+Patch1233: 1233-test-time-util-do-more-suppression-of-time-zone-chec.patch
+Patch1234: 1234-test-time-util-fix-truncation-of-usec-to-sec.patch
+Patch1235: 1235-test-unset-TZ-before-timezone-sensitive-unit-tests-a.patch
+Patch1236: 1236-meson-extend-timeout-for-test-time-util.patch
+Patch1237: 1237-time-util-use-DEFINE_STRING_TABLE_LOOKUP_TO_STRING-m.patch
+Patch1238: 1238-time-util-align-string-table.patch
+Patch1239: 1239-time-util-rename-variables.patch
+Patch1240: 1240-time-util-add-assertions.patch
+Patch1241: 1241-time-util-drop-redundant-else.patch
+Patch1242: 1242-time-util-do-not-use-strdupa.patch
+Patch1243: 1243-time-util-use-result-from-startswith_no_case.patch
+Patch1244: 1244-time-util-use-usec_add-and-usec_sub_unsigned.patch
+Patch1245: 1245-time-util-shorten-code-a-bit.patch
+Patch1246: 1246-time-util-rename-variables.patch
+Patch1247: 1247-time-util-drop-unnecessary-assignment-of-timezone-na.patch
+Patch1248: 1248-time-util-make-parse_timestamp-use-the-RFC-822-ISO-8.patch
+Patch1249: 1249-time-util-fix-typo.patch
+Patch1250: 1250-ci-bump-the-tools-tree-to-F42.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -1258,7 +1390,7 @@ BuildRequires: libseccomp-devel
 BuildRequires: meson >= 0.43
 BuildRequires: gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires: valgrind-devel
+BuildRequires: valgrind-devel
 BuildRequires: pkgconfig(bash-completion)
 BuildRequires: pkgconfig(tss2-esys)
 BuildRequires: pkgconfig(tss2-rc)
@@ -2078,23 +2210,161 @@ systemd-hwdb update &>/dev/null || :
 %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
 
 %changelog
-* Thu Aug 07 2025 Jacco Ligthart <jacco@redsleeve.org> - 252-51.2.redsleeve
-- removed valgrind
-- added a patch from upstream to be able to disable services.
-
-* Tue Sep 16 2025 Release Engineering <releng@rockylinux.org> - 252-51
+* Tue Nov 11 2025 Release Engineering <releng@rockylinux.org> - 252-55.rocky.0.1
 - Set support URL to the wiki
 - Set sbat mail to security@rockylinux.org
 
-* Mon Aug 11 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-51.2
-- Add a set of assertion macros to tests.h (ASSERT_OK(), ASSERT_EQ(), ASSERT_GE(), ASSERT_LE()) that log the failed condition before crashing and convert test-gpt.c test file to use them (RHEL-108481)
-- Follow up with the PR #31819 (RHEL-108481)
-- Added more ASSERT macro and also make some test file to use them (RHEL-108481)
-- sd-event: drop inotify event from buffer when no event source is triggered (RHEL-108481)
-- test: add test case for issue #38265 (RHEL-108481)
+* Fri Sep 12 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-55.2
+- Revert "test-time-util: disable failing tests" (RHEL-110954)
+- test: use get_timezones() to iterate all known timezones (RHEL-110954)
+- test-time-util: do not fail on DST change (RHEL-110954)
+- test-time-util: suppress timestamp conversion failures for Africa/Khartoum timezone (RHEL-110954)
+- test-time-util: do more suppression of time zone checks (RHEL-110954)
+- test-time-util: fix truncation of usec to sec (RHEL-110954)
+- test: unset TZ before timezone-sensitive unit tests are run (RHEL-110954)
+- meson: extend timeout for test-time-util (RHEL-110954)
+- time-util: use DEFINE_STRING_TABLE_LOOKUP_TO_STRING() macro (RHEL-110954)
+- time-util: align string table (RHEL-110954)
+- time-util: rename variables (RHEL-110954)
+- time-util: add assertions (RHEL-110954)
+- time-util: drop redundant else (RHEL-110954)
+- time-util: do not use strdupa() (RHEL-110954)
+- time-util: use result from startswith_no_case() (RHEL-110954)
+- time-util: use usec_add() and usec_sub_unsigned() (RHEL-110954)
+- time-util: shorten code a bit (RHEL-110954)
+- time-util: rename variables (RHEL-110954)
+- time-util: drop unnecessary assignment of timezone name (RHEL-110954)
+- time-util: make parse_timestamp() use the RFC-822/ISO 8601 standard timezone spec (RHEL-110954)
+- time-util: fix typo (RHEL-110954)
+- ci: bump the tools tree to F42 (RHEL-110954)
 
-* Tue Apr 08 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-51.1
-- unit: always return 1 in log_kill (RHEL-86239)
+* Fri Aug 29 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-55.1
+- meson: /etc/systemd/network is also used by udevd (RHEL-111611)
+- test: add tests for format_timestamp() and parse_timestamp() with various timezone (RHEL-110954)
+- test-time-util: disable failing tests (RHEL-110954)
+- test: test parse_timestamp() in various timezone (RHEL-110954)
+- systemctl: logind: add missing asserts (RHEL-110954)
+- systemctl: logind: make logind_schedule_shutdown accept action as param (RHEL-110954)
+- systemctl: add option --when for scheduled shutdown (RHEL-110954)
+- test-time-util: add test cases to invalidate "show" and "cancel" (RHEL-110954)
+- sd-bus: make bus_add_match_full accept timeout (RHEL-111630)
+- core/unit: add get_timeout_start_usec in UnitVTable and define it for service (RHEL-111630)
+- core/unit: increase the NameOwnerChanged/GetNameOwner timeout to the unit's start timeout (RHEL-111630)
+- core,sd-bus: drop empty lines between function call and error check (RHEL-111630)
+- core: do not disconnect from bus when failed to install signal match (RHEL-111630)
+- dbus: stash the subscriber list when we disconenct from the bus (RHEL-111630)
+- manager: s/deserialized_subscribed/subscribed_as_strv (RHEL-111630)
+- bus-util: do not reset the count returned by sd_bus_track_count_name() (RHEL-111630)
+- core/manager: restore bus track deserialization cleanup in manager_reload() (RHEL-111630)
+- core/manager: drop duplicate bus track deserialization (RHEL-111630)
+- sd-bus/bus-track: use install_callback in sd_bus_track_add_name() (RHEL-111630)
+
+* Fri Aug 15 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-55
+- tree-wide: check more log message format in log_struct() and friends (RHEL-100353)
+- build: add some coloring to --version output (RHEL-100353)
+- core: output log cycle path in one log message, not many (RHEL-100353)
+- core: make log cycle messages recognizable via message IDs (RHEL-100353)
+- core: change ordering cycle log message log levels (RHEL-100353)
+- core: cast log_oom() got void (RHEL-100353)
+- core: when removing a job from a transaction, include in structured log message which (RHEL-100353)
+- catalog: add entries for the order cycle log messages (RHEL-100353)
+- tree-wide: check more log message format in log_struct() and friends (RHEL-100353)
+- core/transaction: do not attempt to log "n/a" as a journal field (RHEL-100353)
+
+* Wed Aug 13 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-54
+- unit: add conditions and deps to make oomd.socket and .service consistent (RHEL-90417)
+- udev/net_id: introduce naming scheme for RHEL-9.7 (RHEL-25516)
+- Add a set of assertion macros to tests.h (ASSERT_OK(), ASSERT_EQ(), ASSERT_GE(), ASSERT_LE()) that log the failed condition before crashing and convert test-gpt.c test file to use them (RHEL-103753)
+- Follow up with the PR #31819 (RHEL-103753)
+- Added more ASSERT macro and also make some test file to use them (RHEL-103753)
+- sd-event: drop inotify event from buffer when no event source is triggered (RHEL-103753)
+- test: add test case for issue #38265 (RHEL-103753)
+- test: answer 2nd mdadm --create question for compat with new version (RHEL-79977)
+- sysusers: cross-check user and group names too (RHEL-72572)
+- test-sysusers: check group creation with matching user entry (RHEL-72572)
+- user-sessions: do not remove /etc/nologin (RHEL-85467)
+- hwdb: f20 → micmute (RHEL-72697)
+- hwdb: f21 → touchpad_toggle (RHEL-72697)
+- hwdb: f22 → touchpad_on (RHEL-72697)
+- hwdb: f23 → touchpad_off (RHEL-72697)
+- hwdb: drop some now redundant mappings (RHEL-72697)
+- hwdb: Add micmute for System76 (RHEL-72697)
+- hwdb: Add newer System76 Pangolins (RHEL-72697)
+- hwdb: WALTOP International Corp. Slim Tablet Stylus (RHEL-72697)
+- hwdb: add MSI Claw 8 AT Keyboard Scancodes (#36180) (RHEL-72697)
+- Adds asus T103HAF rotation matrix to 60-sensor.hwdb (#36177) (RHEL-72697)
+- hwdb: fix screen rotation for EXO Wings 2in1 w1125 (#36283) (RHEL-72697)
+- hwdb: XBox Series Elite controller modalias entry has been added. (#36305) (RHEL-72697)
+- hwdb: add front button support for MSI Claw 7 AI+ A2VM (RHEL-72697)
+- hwdb: add accel orientation and location for the BMAX Y14 (RHEL-72697)
+- hwdb.d: add support for Akoya P15645 (RHEL-72697)
+- hwdb.d: add ANP09 Intel n100 tablet sensor configuration (#36390) (RHEL-72697)
+- hwdb: add axis range corrections for the Lenovo Yoga Slim 7 14ARE05 (RHEL-72697)
+- hwdb: add GOLD WARRIOR SIM PhoenixRC 10411R (RHEL-72697)
+- hwdb: add Code Mercenaries Hard- und Software GmbH Virtual RC USB (RHEL-72697)
+- hwdb: Add accel orientation quirk for the GPD Pocket 4 (RHEL-72697)
+- hwdb: add rotation profile matrix for Rog Ally X (2024) (#36591) (RHEL-72697)
+- hwdb: fix backspace not working on HP Pavilion laptop (#36777) (RHEL-72697)
+- hwdb/keyboard: Map FN key on TUXEDO NB02 devices (RHEL-72697)
+- hwdb: add G-Mode key support (#37175) (RHEL-72697)
+- hwdb/keyboard: Map FN key on TUXEDO InfinityFlex 14 Gen1 (RHEL-72697)
+- hwdb: add HP 150 Wired Mouse (#37341) (RHEL-72697)
+- Add emulated release to G-Mode key (RHEL-72697)
+- hwdb: keyboard: Add Alienware special keys (RHEL-72697)
+- hwdb: add bladeRF SDR devices (RHEL-72697)
+- hwdb: append ID_SOFTWARE_RADIO to hwdb parser (RHEL-72697)
+- hwdb.d: reword and simplify boilerplate texts (RHEL-72697)
+- hwdb.d: update/expand boilerplate on various hwdb files (RHEL-72697)
+- hwdb: say that settings can be also set to 0 (RHEL-72697)
+- hwdb: add Analog Devices PLUTO SDR (RHEL-72697)
+-  hwdb: append ID_MM_DEVICE_IGNORE to hwdb parser (RHEL-72697)
+- hwdb: run "update-hwdb" (RHEL-72697)
+- hwdb: run "update-hwdb-autosuspend" (RHEL-72697)
+- hwdb: add missing PLUTO SDR vendor name (RHEL-72697)
+- hwdb: add Ettus Research SDR devices (RHEL-72697)
+- hwdb: add RTL-SDR devices (RHEL-72697)
+- hwdb: merge entries for Ettus Research B200 (RHEL-72697)
+- hwdb: make Saitek PLC Pro Flight Rudder Pedals a joystick (#37601) (RHEL-72697)
+- hwdb: fix touchpad for ASUS X1504ZA (#37696) (RHEL-72697)
+- hwdb: add support for Loupedeck devices (RHEL-72697)
+- hwdb: Acer Nitro ANV15-51 Mic Toggle (RHEL-72697)
+- hwdb: Added Beacn and TC-Helicon Audio controllers (#37798) (RHEL-72697)
+- hwdb: Add support for Lenovo IdeaPad Slim 5 series (RHEL-72697)
+- hwdb: Add hwbd definitions for maker tools (RHEL-72697)
+- hwdb: Add accel orientation quirk for the Microtech e-tab Pro (RHEL-72697)
+- hwdb: add 70-maker-tools.hwdb to meson.build (RHEL-72697)
+- hwdb: fix typo in 70-maker-tools.hwdb (RHEL-72697)
+- hwdb: update (RHEL-72697)
+- Fix Positivo K116J search key and www shortcut (RHEL-72697)
+- hwdb: Acer Nitro ANV15-51 Nitro Sense Toggle (RHEL-72697)
+- hwdb: several cleanups (RHEL-72697)
+- hwdb: disable Asus ROG keyboards sending poweroff (RHEL-72697)
+- hwdb: update (RHEL-72697)
+- hwdb: update autosuspend rules (RHEL-72697)
+- hwdb: set touchpad resolution for ThinkPad T14 Gen2a (RHEL-72697)
+- Revert "hwdb: disable Asus ROG keyboards sending poweroff" (RHEL-72697)
+- hwdb: Add launch emoji keyboard mapping for Asus M1607KA (RHEL-72697)
+- Enable KEY_PERFORMANCE key present on Linux 6.17 (RHEL-72697)
+- flush_ports: flush POSIX message queues properly (RHEL-90860)
+- kernel-install: add --entry-type=type1|type2 option to kernel-install (RHEL-83932)
+- kernel-install: add --entry-type=type1|type2 option to kernel-install.in (RHEL-83932)
+- kernel-install: do not mix || and && (RHEL-83932)
+- man/kernel-install: mention --entry-type= option in the man page (RHEL-83932)
+- cgroup: add support for memory.peak (RHEL-95797)
+- core: include peak memory in unit_log_resources() (RHEL-95797)
+- run: include peak memory in output (RHEL-95797)
+- core: ensure init.scope is realized after drop-ins have been loaded (RHEL-103488)
+- core: add possibility to not track certain unit types (RHEL-89796)
+
+* Tue Apr 15 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-53
+- man: mention that rhel-9.0 net naming scheme is the same as v251 (RHEL-86891)
+- backlight: Drop support for actual_brightness (RHEL-86714)
+
+* Wed Apr 09 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-52
+- man: be even clearer that tmpfiles user/group/mode are applied on existing inodes (RHEL-15051)
+- unit: always return 1 in log_kill (RHEL-78170)
+- ci: enable mkosi workflow for z-stream branches (RHEL-79977)
+- ci(mkosi): bump fedora version from 39 to 41 (RHEL-79977)
 
 * Tue Jan 28 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-51
 - ci: use ubuntu 22:04 for deploy of man pages (RHEL-70884)

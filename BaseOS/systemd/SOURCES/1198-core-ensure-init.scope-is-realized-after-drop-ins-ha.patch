@@ -1,0 +1,92 @@
+From f53755c29ce0d41d716d35e6d98e638a654b7f55 Mon Sep 17 00:00:00 2001
+From: Luca Boccassi <bluca@debian.org>
+Date: Fri, 20 Jan 2023 23:00:38 +0000
+Subject: [PATCH] core: ensure init.scope is realized after drop-ins have been
+ loaded
+
+If we add a drop-in for init.scope (e.g.: to set some memory limit),
+it will be loaded long after the cgroup has already been realized.
+Do it again when creating the special unit.
+
+(cherry picked from commit 020b2e41ea776cff73392da8084a0725b590d245)
+
+Resolves: RHEL-103488
+---
+ src/core/cgroup.c          | 2 +-
+ src/core/cgroup.h          | 1 +
+ src/core/scope.c           | 4 ++++
+ test/TEST-55-OOMD/test.sh  | 6 ++++++
+ test/units/testsuite-55.sh | 3 +++
+ 5 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/cgroup.c b/src/core/cgroup.c
+index 7a1aed3874..dcf9177f6f 100644
+--- a/src/core/cgroup.c
++++ b/src/core/cgroup.c
+@@ -2471,7 +2471,7 @@ static bool unit_has_mask_enables_realized(
+                 ((u->cgroup_enabled_mask | enable_mask) & CGROUP_MASK_V2) == (u->cgroup_enabled_mask & CGROUP_MASK_V2);
+ }
+ 
+-static void unit_add_to_cgroup_realize_queue(Unit *u) {
++void unit_add_to_cgroup_realize_queue(Unit *u) {
+         assert(u);
+ 
+         if (u->in_cgroup_realize_queue)
+diff --git a/src/core/cgroup.h b/src/core/cgroup.h
+index 314b723cfd..d620ebf1a4 100644
+--- a/src/core/cgroup.h
++++ b/src/core/cgroup.h
+@@ -262,6 +262,7 @@ int unit_realize_cgroup(Unit *u);
+ void unit_prune_cgroup(Unit *u);
+ int unit_watch_cgroup(Unit *u);
+ int unit_watch_cgroup_memory(Unit *u);
++void unit_add_to_cgroup_realize_queue(Unit *u);
+ 
+ void unit_release_cgroup(Unit *u);
+ /* Releases the cgroup only if it is recursively empty.
+diff --git a/src/core/scope.c b/src/core/scope.c
+index 087ac2853a..4e1a954c6c 100644
+--- a/src/core/scope.c
++++ b/src/core/scope.c
+@@ -784,6 +784,10 @@ static void scope_enumerate_perpetual(Manager *m) {
+ 
+         unit_add_to_load_queue(u);
+         unit_add_to_dbus_queue(u);
++        /* Enqueue an explicit cgroup realization here. Unlike other cgroups this one already exists and is
++         * populated (by us, after all!) already, even when we are not in a reload cycle. Hence we cannot
++         * apply the settings at creation time anymore, but let's at least apply them asynchronously. */
++        unit_add_to_cgroup_realize_queue(u);
+ }
+ 
+ static const char* const scope_result_table[_SCOPE_RESULT_MAX] = {
+diff --git a/test/TEST-55-OOMD/test.sh b/test/TEST-55-OOMD/test.sh
+index 4dc414294c..4032896061 100755
+--- a/test/TEST-55-OOMD/test.sh
++++ b/test/TEST-55-OOMD/test.sh
+@@ -16,6 +16,12 @@ test_append_files() {
+ 
+         cat >>"${initdir:?}/etc/fstab" <<EOF
+ UUID=$(blkid -o value -s UUID "${LOOPDEV}p2")    none    swap    defaults 0 0
++EOF
++
++        mkdir -p "${initdir:?}/etc/systemd/system/init.scope.d/"
++        cat >>"${initdir:?}/etc/systemd/system/init.scope.d/test-55-oomd.conf" <<EOF
++[Scope]
++MemoryHigh=10G
+ EOF
+     )
+ }
+diff --git a/test/units/testsuite-55.sh b/test/units/testsuite-55.sh
+index 8fa1d01fd0..0887eac08f 100755
+--- a/test/units/testsuite-55.sh
++++ b/test/units/testsuite-55.sh
+@@ -5,6 +5,9 @@ set -o pipefail
+ 
+ systemd-analyze log-level debug
+ 
++# Ensure that the init.scope.d drop-in is applied on boot
++test "$(cat /sys/fs/cgroup/init.scope/memory.high)" != "max"
++
+ # Loose checks to ensure the environment has the necessary features for systemd-oomd
+ [[ -e /proc/pressure ]] || echo "no PSI" >>/skipped
+ cgroup_type="$(stat -fc %T /sys/fs/cgroup/)"

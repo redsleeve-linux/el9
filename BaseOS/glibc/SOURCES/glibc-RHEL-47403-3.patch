@@ -1,0 +1,32 @@
+commit 1b5e65ef6a442fdccf88d43c3048f98292d85631
+Author: Paul Pluzhnikov <ppluzhnikov@google.com>
+Date:   Sat Mar 25 21:27:01 2023 +0000
+
+    Minor: don't call _dl_debug_update (which can have side effects) inside assert
+
+diff --git a/elf/dl-open.c b/elf/dl-open.c
+index eef724f7e9b2211d..0d2b4cd4785a226a 100644
+--- a/elf/dl-open.c
++++ b/elf/dl-open.c
+@@ -596,7 +596,9 @@ dl_open_worker_begin (void *a)
+       if ((mode & RTLD_GLOBAL) && new->l_global == 0)
+ 	add_to_global_update (new);
+ 
+-      assert (_dl_debug_update (args->nsid)->r_state == RT_CONSISTENT);
++      const int r_state __attribute__ ((unused))
++        = _dl_debug_update (args->nsid)->r_state;
++      assert (r_state == RT_CONSISTENT);
+ 
+       return;
+     }
+@@ -916,7 +918,9 @@ no more namespaces available for dlmopen()"));
+       _dl_signal_exception (errcode, &exception, NULL);
+     }
+ 
+-  assert (_dl_debug_update (args.nsid)->r_state == RT_CONSISTENT);
++  const int r_state __attribute__ ((unused))
++    = _dl_debug_update (args.nsid)->r_state;
++  assert (r_state == RT_CONSISTENT);
+ 
+   /* Release the lock.  */
+   __rtld_lock_unlock_recursive (GL(dl_load_lock));

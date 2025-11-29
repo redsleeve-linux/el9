@@ -1,0 +1,812 @@
+commit 5f3a7ebc358fdcbafcab4f1bf4067120fb519dfc
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Wed Jan 12 11:31:53 2022 -0300
+
+    Linux: Add epoll_pwait2 (BZ #27359)
+    
+    It is similar to epoll_wait, with the difference the timeout has
+    nanosecond resoluting by using struct timespec instead of int.
+    
+    Although Linux interface only provides 64 bit time_t support, old
+    32 bit interface is also provided (so keep in sync with current
+    practice and to no force opt-in on 64 bit time_t).
+    
+    Checked on x86_64-linux-gnu and i686-linux-gnu.
+    
+    Reviewed-by: Florian Weimer <fweimer@redhat.com>
+
+Conflicts:
+	sysdeps/unix/sysv/linux/Makefile
+		Updated for layout change
+	sysdeps/unix/sysv/linux/or1k/libc.abilist
+		Omitted
+
+diff --git a/include/sys/epoll.h b/include/sys/epoll.h
+index 86e0a54e62a5628b..8049381a269956ce 100644
+--- a/include/sys/epoll.h
++++ b/include/sys/epoll.h
+@@ -4,6 +4,14 @@
+ # ifndef _ISOMAC
+ 
+ libc_hidden_proto (epoll_pwait)
++#if __TIMESIZE == 64
++# define __epoll_pwait2_time64 epoll_pwait2
++#else
++extern int __epoll_pwait2_time64 (int fd, struct epoll_event *ev, int maxev,
++				  const struct __timespec64 *tmo,
++				  const sigset_t *s);
++libc_hidden_proto (__epoll_pwait2_time64)
++#endif
+ 
+ # endif /* !_ISOMAC */
+ #endif
+diff --git a/sysdeps/unix/sysv/linux/Makefile b/sysdeps/unix/sysv/linux/Makefile
+index 94eb2665b27371a4..61a40e31bacdbc22 100644
+--- a/sysdeps/unix/sysv/linux/Makefile
++++ b/sysdeps/unix/sysv/linux/Makefile
+@@ -55,7 +55,7 @@ endif
+ 
+ ifeq ($(subdir),misc)
+ sysdep_routines += adjtimex clone umount umount2 readahead sysctl \
+-		   setfsuid setfsgid epoll_pwait signalfd \
++		   setfsuid setfsgid epoll_pwait epoll_pwait2 signalfd \
+ 		   eventfd eventfd_read eventfd_write prlimit \
+ 		   personality epoll_wait tee vmsplice splice \
+ 		   open_by_handle_at mlock2 pkey_mprotect pkey_set pkey_get \
+@@ -131,6 +131,7 @@ tests += tst-clone tst-clone2 tst-clone3 tst-fanotify tst-personality \
+ 	 tst-clock_adjtime tst-adjtimex tst-ntp_adjtime tst-ntp_gettime \
+ 	 tst-ntp_gettimex tst-sigtimedwait tst-misalign-clone \
+   tst-close_range \
++  tst-epoll \
+   tst-prctl \
+   tst-scm_rights \
+   tst-getauxval \
+@@ -160,6 +161,7 @@ endif
+ tests-time64 += \
+   tst-adjtimex-time64 \
+   tst-clock_adjtime-time64 \
++  tst-epoll-time64 \
+   tst-ntp_adjtime-time64 \
+   tst-ntp_gettime-time64 \
+   tst-ntp_gettimex-time64 \
+diff --git a/sysdeps/unix/sysv/linux/Versions b/sysdeps/unix/sysv/linux/Versions
+index 3f8809a1581f27d0..ded087f30ea953fc 100644
+--- a/sysdeps/unix/sysv/linux/Versions
++++ b/sysdeps/unix/sysv/linux/Versions
+@@ -293,6 +293,12 @@ libc {
+ %endif
+     close_range;
+   }
++  GLIBC_2.35 {
++%ifdef TIME64_NON_DEFAULT
++    __epoll_pwait2_time64;
++%endif
++    epoll_pwait2;
++  }
+   GLIBC_PRIVATE {
+     # functions used in other libraries
+     __syscall_rt_sigqueueinfo;
+diff --git a/sysdeps/unix/sysv/linux/aarch64/libc.abilist b/sysdeps/unix/sysv/linux/aarch64/libc.abilist
+index fed942ed4b9ef469..c1a5ee90e6d4c63e 100644
+--- a/sysdeps/unix/sysv/linux/aarch64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/aarch64/libc.abilist
+@@ -2614,3 +2614,4 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+diff --git a/sysdeps/unix/sysv/linux/alpha/libc.abilist b/sysdeps/unix/sysv/linux/alpha/libc.abilist
+index 28679327043ff0f2..1a30d0666bb76f41 100644
+--- a/sysdeps/unix/sysv/linux/alpha/libc.abilist
++++ b/sysdeps/unix/sysv/linux/alpha/libc.abilist
+@@ -2711,6 +2711,7 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/arc/libc.abilist b/sysdeps/unix/sysv/linux/arc/libc.abilist
+index 239db7bab0a18a87..e5dfdab357c72440 100644
+--- a/sysdeps/unix/sysv/linux/arc/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arc/libc.abilist
+@@ -2375,3 +2375,4 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+diff --git a/sysdeps/unix/sysv/linux/arm/be/libc.abilist b/sysdeps/unix/sysv/linux/arm/be/libc.abilist
+index bc79dcfe8ab4c723..4d3fd872788ba1f0 100644
+--- a/sysdeps/unix/sysv/linux/arm/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arm/be/libc.abilist
+@@ -491,8 +491,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0xa0
+ GLIBC_2.4 _IO_2_1_stdin_ D 0xa0
+diff --git a/sysdeps/unix/sysv/linux/arm/le/libc.abilist b/sysdeps/unix/sysv/linux/arm/le/libc.abilist
+index 614607fd6baa8c6f..009dc9da14ee5eed 100644
+--- a/sysdeps/unix/sysv/linux/arm/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arm/le/libc.abilist
+@@ -488,8 +488,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0xa0
+ GLIBC_2.4 _IO_2_1_stdin_ D 0xa0
+diff --git a/sysdeps/unix/sysv/linux/csky/libc.abilist b/sysdeps/unix/sysv/linux/csky/libc.abilist
+index 2b61543f0dd47034..df8da506cde36eeb 100644
+--- a/sysdeps/unix/sysv/linux/csky/libc.abilist
++++ b/sysdeps/unix/sysv/linux/csky/libc.abilist
+@@ -2647,5 +2647,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+diff --git a/sysdeps/unix/sysv/linux/epoll_pwait2.c b/sysdeps/unix/sysv/linux/epoll_pwait2.c
+new file mode 100644
+index 0000000000000000..e38a1b2349edb040
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/epoll_pwait2.c
+@@ -0,0 +1,44 @@
++/* Implementation of epoll_pwait2 syscall wrapper.
++   Copyright (C) 2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <sys/epoll.h>
++#include <sysdep.h>
++
++int
++__epoll_pwait2_time64 (int fd, struct epoll_event *ev, int maxev,
++		       const struct __timespec64 *tmo, const sigset_t *s)
++{
++  /* The syscall only supports 64-bit time_t.  */
++  return SYSCALL_CANCEL (epoll_pwait2, fd, ev, maxev, tmo, s, __NSIG_BYTES);
++}
++#if __TIMESIZE != 64
++libc_hidden_def (__epoll_pwait2_time64)
++
++int
++epoll_pwait2 (int fd, struct epoll_event *ev, int maxev,
++	      const struct timespec *tmo, const sigset_t *s)
++{
++  struct __timespec64 tmo64, *ptmo64 = NULL;
++  if (tmo != NULL)
++    {
++      tmo64 = valid_timespec_to_timespec64 (*tmo);
++      ptmo64 = &tmo64;
++    }
++  return __epoll_pwait2_time64 (fd, ev, maxev, ptmo64, s);
++}
++#endif
+diff --git a/sysdeps/unix/sysv/linux/hppa/libc.abilist b/sysdeps/unix/sysv/linux/hppa/libc.abilist
+index 6b3cb1adb40c0a01..7ea1b017d05cc1fb 100644
+--- a/sysdeps/unix/sysv/linux/hppa/libc.abilist
++++ b/sysdeps/unix/sysv/linux/hppa/libc.abilist
+@@ -2596,8 +2596,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/i386/libc.abilist b/sysdeps/unix/sysv/linux/i386/libc.abilist
+index 7f608c1b64454bff..99ccf354b3d1a762 100644
+--- a/sysdeps/unix/sysv/linux/i386/libc.abilist
++++ b/sysdeps/unix/sysv/linux/i386/libc.abilist
+@@ -2780,8 +2780,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/ia64/libc.abilist b/sysdeps/unix/sysv/linux/ia64/libc.abilist
+index 865deec43f99a036..201542d1e76daa60 100644
+--- a/sysdeps/unix/sysv/linux/ia64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/ia64/libc.abilist
+@@ -2549,6 +2549,7 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist b/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
+index a172d746328ddeeb..32fd72a78df65bd8 100644
+--- a/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
++++ b/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
+@@ -492,8 +492,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0x98
+ GLIBC_2.4 _IO_2_1_stdin_ D 0x98
+diff --git a/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist b/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
+index 174e9c7739f966ac..d26f0ae6c2475984 100644
+--- a/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
++++ b/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
+@@ -2723,8 +2723,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist b/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
+index d042be1369b7d264..520ca0882d8d720b 100644
+--- a/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
+@@ -2696,5 +2696,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+diff --git a/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist b/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
+index 332da62de23b88b8..9162c3139661b2c9 100644
+--- a/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
+@@ -2693,5 +2693,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
+index 2d6ec0d0e8f3c797..656fdbdcaa70dad6 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
+@@ -2688,8 +2688,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
+index 6c5befa72bb5602b..5f0b90d318030622 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
+@@ -2686,8 +2686,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
+index 5fb24c97e1e6f05d..9f4891fc08d71521 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
+@@ -2694,8 +2694,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
+index f4f29fc15ee8f1a2..f1b0644bc33ba065 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
+@@ -2600,6 +2600,7 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/nios2/libc.abilist b/sysdeps/unix/sysv/linux/nios2/libc.abilist
+index 2e7300cd0512ad78..1cf88e38b943eeb9 100644
+--- a/sysdeps/unix/sysv/linux/nios2/libc.abilist
++++ b/sysdeps/unix/sysv/linux/nios2/libc.abilist
+@@ -2735,5 +2735,7 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
+index 129a2f16a7b731d3..9692335d106f9400 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
+@@ -2750,8 +2750,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
+index 7e232267791057a3..7da0ed59f2ccb080 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
+@@ -2783,8 +2783,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
+index 6f97392b7030ee95..72cf6851988a7b91 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
+@@ -2508,6 +2508,7 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
+index 29058a041a9cdba1..ee7f67f4d09ba7ae 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
+@@ -2810,3 +2810,4 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist b/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
+index d2924766d2f33039..b8c0854508ec8714 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
+@@ -2377,3 +2377,4 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist b/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
+index b770e05da3ae0350..90f331fc0bc06278 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
+@@ -2577,3 +2577,4 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist b/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
+index bed3433a2b75d3b4..ded5e3c0ce4da82c 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
+@@ -2748,8 +2748,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist b/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
+index 4f1a143da504d98c..4b262992540d18d6 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
+@@ -2545,6 +2545,7 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/sh/be/libc.abilist b/sysdeps/unix/sysv/linux/sh/be/libc.abilist
+index 92c8dec8ec28c54a..8bfd716fd238a35b 100644
+--- a/sysdeps/unix/sysv/linux/sh/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sh/be/libc.abilist
+@@ -2603,8 +2603,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/sh/le/libc.abilist b/sysdeps/unix/sysv/linux/sh/le/libc.abilist
+index 263da58cb7dada2c..47fd204d84ea2432 100644
+--- a/sysdeps/unix/sysv/linux/sh/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sh/le/libc.abilist
+@@ -2600,8 +2600,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist b/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
+index 0171efe7db109153..9b82f15109ca4b1a 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
+@@ -2743,8 +2743,10 @@ GLIBC_2.34 tss_create F
+ GLIBC_2.34 tss_delete F
+ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
++GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist b/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
+index 7f8d45f362e63584..94caf012a7e9cada 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
+@@ -2572,6 +2572,7 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/sys/epoll.h b/sysdeps/unix/sysv/linux/sys/epoll.h
+index b6751f66971b82ca..5eb611da1bfd802f 100644
+--- a/sysdeps/unix/sysv/linux/sys/epoll.h
++++ b/sysdeps/unix/sysv/linux/sys/epoll.h
+@@ -22,6 +22,7 @@
+ #include <sys/types.h>
+ 
+ #include <bits/types/sigset_t.h>
++#include <bits/types/struct_timespec.h>
+ 
+ /* Get the platform-dependent flags.  */
+ #include <bits/epoll.h>
+@@ -133,6 +134,26 @@ extern int epoll_pwait (int __epfd, struct epoll_event *__events,
+ 			int __maxevents, int __timeout,
+ 			const __sigset_t *__ss);
+ 
++/* Same as epoll_pwait, but the timeout as a timespec.
++
++   This function is a cancellation point and therefore not marked with
++   __THROW.  */
++#ifndef __USE_TIME_BITS64
++extern int epoll_pwait2 (int __epfd, struct epoll_event *__events,
++			 int __maxevents, const struct timespec *__timeout,
++			 const __sigset_t *__ss);
++#else
++# ifdef __REDIRECT
++extern int __REDIRECT (epoll_pwait2, (int __epfd, struct epoll_event *__ev,
++				      int __maxevs,
++				      const struct timespec *__timeout,
++				      const __sigset_t *__ss),
++		       __epoll_pwait2_time64);
++# else
++#  define epoll_pwait2 __epoll_pwait2_time64
++# endif
++#endif
++
+ __END_DECLS
+ 
+ #endif /* sys/epoll.h */
+diff --git a/sysdeps/unix/sysv/linux/tst-epoll-time64.c b/sysdeps/unix/sysv/linux/tst-epoll-time64.c
+new file mode 100644
+index 0000000000000000..2e0236792e460ce0
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/tst-epoll-time64.c
+@@ -0,0 +1 @@
++#include "tst-epoll.c"
+diff --git a/sysdeps/unix/sysv/linux/tst-epoll.c b/sysdeps/unix/sysv/linux/tst-epoll.c
+new file mode 100644
+index 0000000000000000..3ef6ca9fbd3c5a2b
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/tst-epoll.c
+@@ -0,0 +1,211 @@
++/* Basic tests for Linux epoll_* wrappers.
++   Copyright (C) 2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <errno.h>
++#include <intprops.h>
++#include <support/check.h>
++#include <support/support.h>
++#include <support/xsignal.h>
++#include <support/xunistd.h>
++#include <support/xtime.h>
++#include <stdlib.h>
++#include <sys/epoll.h>
++
++/* The test focus on checking if the timeout argument is correctly handled
++   by glibc wrappers.  */
++
++static void
++handler (int sig)
++{
++}
++
++typedef int (*epoll_wait_check_t) (int, struct epoll_event *, int,
++				   int, const sigset_t *);
++
++static void
++test_epoll_basic (epoll_wait_check_t epoll_wait_check)
++{
++  {
++    sigset_t ss_usr1;
++    sigemptyset (&ss_usr1);
++    sigaddset (&ss_usr1, SIGUSR1);
++    TEST_COMPARE (sigprocmask (SIG_BLOCK, &ss_usr1, NULL), 0);
++  }
++
++  int fds[2][2];
++  xpipe (fds[0]);
++  xpipe (fds[1]);
++
++  sigset_t ss;
++  TEST_COMPARE (sigprocmask (SIG_SETMASK, NULL, &ss), 0);
++  sigdelset (&ss, SIGUSR1);
++
++  int efd = epoll_create1 (0);
++  TEST_VERIFY_EXIT (efd != -1);
++
++  struct epoll_event event;
++
++  event.data.fd = fds[1][0];
++  event.events = EPOLLIN | EPOLLET;
++  TEST_COMPARE (epoll_ctl (efd, EPOLL_CTL_ADD, fds[1][0], &event), 0);
++
++  pid_t parent = getpid ();
++  pid_t p = xfork ();
++  if (p == 0)
++    {
++      xclose (fds[0][1]);
++      xclose (fds[1][0]);
++
++      event.data.fd = fds[0][0];
++      event.events = EPOLLIN | EPOLLET;
++      TEST_COMPARE (epoll_ctl (efd, EPOLL_CTL_ADD, fds[0][0], &event), 0);
++
++      int e;
++      do
++	{
++	  if (getppid () != parent)
++	    FAIL_EXIT1 ("getppid()=%d != parent=%d", getppid(), parent);
++
++	  errno = 0;
++	  e = epoll_wait_check (efd, &event, 1, 500, &ss);
++	}
++      while (e == 0);
++
++      TEST_COMPARE (e, -1);
++      TEST_COMPARE (errno, EINTR);
++
++      TEMP_FAILURE_RETRY (write (fds[1][1], "foo", 3));
++
++      exit (0);
++    }
++
++  xclose (fds[0][0]);
++  xclose (fds[1][1]);
++
++  /* Wait some time so child is blocked on the syscall.  */
++  nanosleep (&(struct timespec) {0, 10000000}, NULL);
++  TEST_COMPARE (kill (p, SIGUSR1), 0);
++
++  int e = epoll_wait_check (efd, &event, 1, 500000000, &ss);
++  TEST_COMPARE (e, 1);
++  TEST_VERIFY (event.events & EPOLLIN);
++
++  xclose (fds[0][1]);
++  xclose (fds[1][0]);
++  xclose (efd);
++}
++
++
++static void
++test_epoll_large_timeout (epoll_wait_check_t epoll_wait_check)
++{
++  timer_t t = support_create_timer (0, 100000000, true, NULL);
++
++  int fds[2];
++  xpipe (fds);
++
++  fd_set rfds;
++  FD_ZERO (&rfds);
++  FD_SET (fds[0], &rfds);
++
++  sigset_t ss;
++  TEST_COMPARE (sigprocmask (SIG_SETMASK, NULL, &ss), 0);
++  sigdelset (&ss, SIGALRM);
++
++  int efd = epoll_create1 (0);
++  TEST_VERIFY_EXIT (efd != -1);
++
++  struct epoll_event event;
++  event.data.fd = fds[0];
++  event.events = EPOLLIN | EPOLLET;
++  TEST_COMPARE (epoll_ctl (efd, EPOLL_CTL_ADD, fds[0], &event), 0);
++
++  int tmo = TYPE_MAXIMUM (int);
++  TEST_COMPARE (epoll_wait_check (efd, &event, 1, tmo, &ss), -1);
++  TEST_VERIFY (errno == EINTR || errno == EOVERFLOW);
++
++  TEST_COMPARE (epoll_wait_check (efd, &event, 1, -1, &ss), -1);
++  TEST_VERIFY (errno == EINTR || errno == EOVERFLOW);
++
++  support_delete_timer (t);
++
++  xclose (fds[0]);
++  xclose (fds[1]);
++  xclose (efd);
++}
++
++
++static int
++epoll_wait_check (int epfd, struct epoll_event *ev, int maxev, int tmo,
++		  const sigset_t *ss)
++{
++  sigset_t orig;
++  TEST_COMPARE (sigprocmask (SIG_SETMASK, ss, &orig), 0);
++  int r = epoll_wait (epfd, ev, maxev, tmo);
++  TEST_COMPARE (sigprocmask (SIG_SETMASK, &orig, NULL), 0);
++  return r;
++}
++
++static int
++epoll_pwait_check (int epfd, struct epoll_event *ev, int maxev, int tmo,
++		   const sigset_t *ss)
++{
++  return epoll_pwait (epfd, ev, maxev, tmo, ss);
++}
++
++static int
++epoll_pwait2_check (int epfd, struct epoll_event *ev, int maxev, int tmo,
++		    const sigset_t *ss)
++{
++  time_t s = tmo == -1 ? TYPE_MAXIMUM (time_t) : tmo / 1000;
++  long int ns = tmo == -1 ? 0 : (tmo % 1000) * 1000000;
++  return epoll_pwait2 (epfd, ev, maxev, &(struct timespec) { s, ns }, ss);
++}
++
++static int
++do_test (void)
++{
++  {
++    struct sigaction sa;
++    sa.sa_handler = handler;
++    sa.sa_flags = 0;
++    sigemptyset (&sa.sa_mask);
++    xsigaction (SIGUSR1, &sa, NULL);
++
++    sa.sa_handler = SIG_IGN;
++    xsigaction (SIGCHLD, &sa, NULL);
++  }
++
++  int r = epoll_pwait2 (-1, NULL, 0, NULL, NULL);
++  TEST_COMPARE (r, -1);
++  bool pwait2_supported = errno != ENOSYS;
++
++  test_epoll_basic (epoll_wait_check);
++  test_epoll_basic (epoll_pwait_check);
++  if (pwait2_supported)
++    test_epoll_basic (epoll_pwait2_check);
++
++  test_epoll_large_timeout (epoll_wait_check);
++  test_epoll_large_timeout (epoll_pwait_check);
++  if (pwait2_supported)
++    test_epoll_large_timeout (epoll_pwait2_check);
++
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist b/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
+index c2f1a8ecc6d04dcf..140e9e8c1ce7dd37 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
+@@ -2523,6 +2523,7 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist b/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
+index 8b43acf1005f1790..04d13ce27e3747f5 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
+@@ -2629,3 +2629,4 @@ GLIBC_2.34 tss_get F
+ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
++GLIBC_2.35 epoll_pwait2 F

@@ -156,8 +156,9 @@ end \
 ##############################################################################
 Summary: The GNU libc libraries
 Name: glibc
-Version: %{glibcversion}
-Release: 168%{?dist}.23.redsleeve
+%{lua:dofile(rpm.expand([[%_sourcedir/patch-git.lua]]))}
+Version: %{lua:patchgit.version()}
+Release: %{lua:patchgit.release()}
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -198,6 +199,13 @@ Source11: parse-SUPPORTED.py
 # Include in the source RPM for reference.
 Source12: ChangeLog.old
 Source13: nscd-sysusers.conf
+Source14: glibc.abignore
+Source15: verify-ld-so-abi.sh
+Source16: ld-so-abi-aarch64.baseline
+Source17: ld-so-abi-i386.baseline
+Source18: ld-so-abi-ppc64le.baseline
+Source19: ld-so-abi-s390x.baseline
+Source20: ld-so-abi-x86_64.baseline
 
 # glibc_ldso: ABI-specific program interpreter name.  Used for debuginfo
 # extraction (wrap-find-debuginfo.sh) and smoke testing ($run_ldso below).
@@ -217,11 +225,6 @@ Source13: nscd-sysusers.conf
 %endif
 %ifarch aarch64
 %global glibc_ldso /lib/ld-linux-aarch64.so.1
-%global glibc_has_libnldbl 0
-%global glibc_has_libmvec 0
-%endif
-%ifarch armv6hl
-%global glibc_ldso /lib/ld-linux-armhf.so.3
 %global glibc_has_libnldbl 0
 %global glibc_has_libmvec 0
 %endif
@@ -273,8 +276,6 @@ Source13: nscd-sysusers.conf
 %global glibc_has_libmvec 0
 %endif
 
-Source1000: glibc-arm-dl-tunables.list
-
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
 # the definition of __debug_install_post.
@@ -286,7 +287,7 @@ local original = rpm.expand("%{macrobody:__debug_install_post}")
 -- Avoid embedded newlines that confuse the macro definition.
 original = original:match("^%s*(.-)%s*$"):gsub("\\\n", "")
 rpm.define("__debug_install_post bash " .. wrapper
-  .. " " .. sysroot .. " %{_prefix}/%{glibc_ldso} " .. original)
+  .. " " .. sysroot .. " %{_prefix}%{glibc_ldso} " .. original)
 }
 
 # sysroot package support.  These contain arch-specific packages, so
@@ -716,481 +717,12 @@ Patch408: glibc-upstream-2.34-327.patch
 # glibc-2.34-328-g2def56a349 conflicts with glibc-rh2096191-2.patch;
 # glibc-rh2129005.patch contains the original master branch commit instead.
 Patch409: glibc-rh2129005.patch
-Patch410: glibc-upstream-2.34-329.patch
-Patch411: glibc-upstream-2.34-330.patch
-Patch412: glibc-upstream-2.34-331.patch
-Patch413: glibc-upstream-2.34-332.patch
-Patch414: glibc-upstream-2.34-333.patch
-Patch415: glibc-upstream-2.34-334.patch
-Patch416: glibc-upstream-2.34-335.patch
-Patch417: glibc-upstream-2.34-336.patch
-Patch418: glibc-upstream-2.34-337.patch
-Patch419: glibc-upstream-2.34-338.patch
-Patch420: glibc-upstream-2.34-339.patch
-Patch421: glibc-upstream-2.34-340.patch
-Patch422: glibc-upstream-2.34-341.patch
-Patch423: glibc-upstream-2.34-342.patch
-Patch424: glibc-upstream-2.34-343.patch
-Patch425: glibc-upstream-2.34-344.patch
-Patch426: glibc-upstream-2.34-345.patch
-Patch427: glibc-upstream-2.34-346.patch
-Patch428: glibc-upstream-2.34-347.patch
-Patch429: glibc-upstream-2.34-348.patch
-Patch430: glibc-upstream-2.34-349.patch
-Patch431: glibc-upstream-2.34-350.patch
-Patch432: glibc-upstream-2.34-351.patch
-Patch433: glibc-upstream-2.34-352.patch
-Patch434: glibc-upstream-2.34-353.patch
-Patch435: glibc-upstream-2.34-354.patch
-Patch436: glibc-upstream-2.34-355.patch
-Patch437: glibc-upstream-2.34-356.patch
-Patch438: glibc-upstream-2.34-357.patch
-Patch439: glibc-upstream-2.34-358.patch
-Patch440: glibc-upstream-2.34-359.patch
-# glibc-2.34-360-g75b0edb7ef only changes NEWS.
-Patch441: glibc-upstream-2.34-361.patch
-Patch442: glibc-upstream-2.34-362.patch
-Patch443: glibc-upstream-2.34-363.patch
-Patch444: glibc-upstream-2.34-364.patch
-Patch445: glibc-upstream-2.34-365.patch
-Patch446: glibc-rh2149102.patch
-Patch447: glibc-upstream-2.34-366.patch
-Patch448: glibc-upstream-2.34-367.patch
-Patch449: glibc-upstream-2.34-368.patch
-Patch450: glibc-upstream-2.34-369.patch
-Patch451: glibc-upstream-2.34-370.patch
-Patch452: glibc-upstream-2.34-371.patch
-Patch453: glibc-upstream-2.34-372.patch
-Patch454: glibc-upstream-2.34-373.patch
-Patch455: glibc-upstream-2.34-374.patch
-Patch456: glibc-upstream-2.34-375.patch
-Patch457: glibc-upstream-2.34-376.patch
-Patch458: glibc-upstream-2.34-377.patch
-Patch459: glibc-upstream-2.34-378.patch
-Patch460: glibc-upstream-2.34-379.patch
-Patch461: glibc-upstream-2.34-380.patch
-Patch462: glibc-upstream-2.34-381.patch
-Patch463: glibc-upstream-2.34-382.patch
-Patch464: glibc-upstream-2.34-383.patch
-Patch465: glibc-upstream-2.34-384.patch
-Patch466: glibc-rh2162962.patch
-Patch467: glibc-upstream-2.34-385.patch
-Patch468: glibc-upstream-2.34-386.patch
-# glibc-upstream-2.34-387.patch is a NEWS-only update.  Skipped downstream.
-Patch469: glibc-upstream-2.34-388.patch
-Patch470: glibc-upstream-2.34-389.patch
-Patch471: glibc-rh2172953.patch
-Patch472: glibc-rh2149615-1.patch
-Patch473: glibc-rh2149615-2.patch
-Patch474: glibc-rh2169978-1.patch
-Patch475: glibc-rh2169978-2.patch
-Patch476: glibc-rh2149615-3.patch
-Patch477: glibc-rh2166710.patch
-# glibc-upstream-2.34-390.patch backported above as glibc-rh2172953.patch.
-Patch478: glibc-upstream-2.34-391.patch
-Patch479: glibc-upstream-2.34-392.patch
-Patch480: glibc-upstream-2.34-393.patch
-Patch481: glibc-upstream-2.34-394.patch
-Patch482: glibc-upstream-2.34-395.patch
-Patch483: glibc-upstream-2.34-396.patch
-Patch484: glibc-upstream-2.34-397.patch
-# glibc-upstream-2.34-398.patch not backported because we can avoid the
-# ABI tunable issue downstream, using @order directives.
-
-# This marks the end of backports via upstream release/2.34/master.
-# All future backports need maintain CentOS 9 Stream and RHEL 9 only.
-
-Patch485: glibc-rh2215368.patch
-Patch486: glibc-rh2213908.patch
-Patch487: glibc-rh2189923.patch
-Patch488: glibc-RHEL-729.patch
-Patch489: glibc-rh2222188-1.patch
-Patch490: glibc-rh2222188-2.patch
-Patch491: glibc-rh2222188-3.patch
-Patch492: glibc-rh2222188-4.patch
-Patch493: glibc-rh2222188-5.patch
-Patch494: glibc-rh2224289-1.patch
-Patch495: glibc-rh2224289-2.patch
-Patch496: glibc-rh2224349.patch
-Patch497: glibc-rh2224289-3.patch
-Patch498: glibc-rh2224504-1.patch
-Patch499: glibc-rh2224504-2.patch
-Patch500: glibc-rh2213907-1.patch
-Patch501: glibc-rh2213907-2.patch
-Patch502: glibc-rh2213907-3.patch
-Patch503: glibc-rh2213907-4.patch
-Patch504: glibc-rh2213907-5.patch
-Patch505: glibc-rh2213907-6.patch
-Patch506: glibc-rh2166710-2.patch
-Patch507: glibc-rh2166710-3.patch
-Patch508: glibc-rh2222188-6.patch
-Patch509: glibc-rh2213907-7.patch
-Patch510: glibc-RHEL-1017-1.patch
-Patch511: glibc-RHEL-1017-2.patch
-Patch512: glibc-RHEL-1017-3.patch
-Patch513: glibc-RHEL-1017-4.patch
-# (Reverted fixes for RHEL-2491 were here.)
-Patch519: glibc-rh2234716.patch
-Patch520: glibc-RHEL-2438.patch
-Patch521: glibc-RHEL-2426-1.patch
-Patch522: glibc-RHEL-2426-2.patch
-Patch523: glibc-RHEL-2426-3.patch
-Patch524: glibc-RHEL-2426-4.patch
-Patch525: glibc-RHEL-2426-5.patch
-Patch526: glibc-RHEL-2426-6.patch
-Patch527: glibc-RHEL-2426-7.patch
-Patch528: glibc-RHEL-2426-8.patch
-Patch529: glibc-RHEL-2426-9.patch
-Patch530: glibc-RHEL-2426-10.patch
-Patch531: glibc-RHEL-2426-11.patch
-Patch532: glibc-RHEL-2426-12.patch
-Patch533: glibc-RHEL-2426-13.patch
-Patch534: glibc-RHEL-3000.patch
-Patch535: glibc-RHEL-2426-14.patch
-Patch536: glibc-RHEL-2426-15.patch
-Patch537: glibc-RHEL-1191.patch
-Patch538: glibc-RHEL-3397.patch
-Patch539: glibc-RHEL-2123.patch
-Patch540: glibc-RHEL-16275.patch
-Patch541: glibc-RHEL-2491.patch
-Patch542: glibc-RHEL-14383-1.patch
-Patch543: glibc-RHEL-14383-2.patch
-Patch544: glibc-RHEL-2338-1.patch
-Patch545: glibc-RHEL-2338-2.patch
-Patch546: glibc-RHEL-2338-3.patch
-Patch547: glibc-RHEL-2338-4.patch
-Patch548: glibc-RHEL-15343-1.patch
-Patch549: glibc-RHEL-15343-2.patch
-Patch550: glibc-RHEL-15343-3.patch
-Patch551: glibc-RHEL-15343-4.patch
-Patch552: glibc-rhel-17157.patch
-Patch553: glibc-RHEL-16016-1.patch
-Patch554: glibc-RHEL-16016-2.patch
-Patch555: glibc-RHEL-16016-3.patch
-Patch556: glibc-RHEL-16016-4.patch
-Patch557: glibc-RHEL-16016-5.patch
-Patch558: glibc-RHEL-16016-6.patch
-Patch559: glibc-RHEL-16016-7.patch
-Patch560: glibc-RHEL-17319-1.patch
-Patch561: glibc-RHEL-17319-2.patch
-Patch562: glibc-RHEL-17319-3.patch
-Patch563: glibc-RHEL-17319-4.patch
-Patch564: glibc-RHEL-17465-1.patch
-Patch565: glibc-RHEL-17465-2.patch
-Patch566: glibc-RHEL-19862.patch
-Patch567: glibc-RHEL-16643-1.patch
-Patch568: glibc-RHEL-16643-2.patch
-Patch569: glibc-RHEL-16643-3.patch
-Patch570: glibc-RHEL-16643-4.patch
-Patch571: glibc-RHEL-16643-5.patch
-Patch572: glibc-RHEL-16643-6.patch
-Patch573: glibc-RHEL-19444.patch
-Patch574: glibc-RHEL-21556.patch
-Patch575: glibc-RHEL-23472.patch
-Patch576: glibc-RHEL-20172-1.patch
-Patch577: glibc-RHEL-20172-2.patch
-Patch578: glibc-RHEL-21884.patch
-Patch579: glibc-RHEL-25531-1.patch
-Patch580: glibc-RHEL-25531-2.patch
-Patch581: glibc-RHEL-25531-3.patch
-Patch582: glibc-RHEL-25531-4.patch
-Patch583: glibc-RHEL-25046.patch
-Patch584: glibc-RHEL-32681-1.patch
-Patch585: glibc-RHEL-32681-2.patch
-Patch586: glibc-RHEL-39006.patch
-Patch587: glibc-RHEL-22165-1.patch
-Patch588: glibc-RHEL-22165-2.patch
-Patch589: glibc-RHEL-22165-3.patch
-Patch590: glibc-RHEL-22165-4.patch
-Patch591: glibc-RHEL-22165-5.patch
-Patch592: glibc-RHEL-31805.patch
-Patch593: glibc-RHEL-25063.patch
-Patch594: glibc-RHEL-34265.patch
-Patch595: glibc-RHEL-34268-1.patch
-Patch596: glibc-RHEL-34268-2.patch
-Patch597: glibc-RHEL-34272-1.patch
-Patch598: glibc-RHEL-34272-2.patch
-Patch599: glibc-RHEL-39000-1.patch
-Patch600: glibc-RHEL-39000-2.patch
-Patch601: glibc-RHEL-39000-3.patch
-Patch602: glibc-RHEL-39992-1.patch
-Patch603: glibc-RHEL-39992-2.patch
-Patch604: glibc-RHEL-30823.patch
-Patch605: glibc-RHEL-25257-1.patch
-Patch606: glibc-RHEL-25257-2.patch
-Patch607: glibc-RHEL-46741-1.patch
-Patch608: glibc-RHEL-46741-2.patch
-Patch609: glibc-RHEL-50101-1.patch
-Patch610: glibc-RHEL-50101-2.patch
-Patch611: glibc-RHEL-50101-3.patch
-Patch612: glibc-RHEL-54007.patch
-Patch613: glibc-RHEL-46723-1.patch
-Patch614: glibc-RHEL-46723-2.patch
-Patch615: glibc-RHEL-36148-1.patch
-Patch616: glibc-RHEL-36148-2.patch
-Patch617: glibc-RHEL-36148-3.patch
-Patch618: glibc-RHEL-49489-1.patch
-Patch619: glibc-RHEL-49489-2.patch
-Patch620: glibc-RHEL-54447-1.patch
-Patch621: glibc-RHEL-54447-2.patch
-Patch622: glibc-RHEL-54447-3.patch
-Patch623: glibc-RHEL-54447-4.patch
-Patch624: glibc-RHEL-54447-5.patch
-Patch625: glibc-RHEL-54447-6.patch
-Patch626: glibc-RHEL-54447-7.patch
-Patch627: glibc-RHEL-54447-8.patch
-Patch628: glibc-RHEL-54447-9.patch
-Patch629: glibc-RHEL-54447-10.patch
-Patch630: glibc-RHEL-46979-1.patch
-Patch631: glibc-RHEL-46979-2.patch
-Patch632: glibc-RHEL-46979-3.patch
-Patch633: glibc-RHEL-46979-4.patch
-Patch634: glibc-RHEL-59494-1.patch
-Patch635: glibc-RHEL-59494-2.patch
-Patch636: glibc-RHEL-59494-3.patch
-Patch637: glibc-RHEL-41189.patch
-Patch638: glibc-RHEL-46728.patch
-Patch639: glibc-RHEL-46734.patch
-Patch640: glibc-RHEL-46735.patch
-Patch641: glibc-RHEL-60466-1.patch
-Patch642: glibc-RHEL-60466-2.patch
-Patch643: glibc-RHEL-46739-1.patch
-Patch644: glibc-RHEL-46739-2.patch
-Patch645: glibc-RHEL-46739-3.patch
-Patch646: glibc-RHEL-46739-4.patch
-Patch647: glibc-RHEL-46739-5.patch
-Patch648: glibc-RHEL-46739-6.patch
-Patch649: glibc-RHEL-46739-7.patch
-Patch650: glibc-RHEL-46739-8.patch
-Patch651: glibc-RHEL-46739-9.patch
-Patch652: glibc-RHEL-46739-10.patch
-Patch653: glibc-RHEL-46739-11.patch
-Patch654: glibc-RHEL-50545-1.patch
-Patch655: glibc-RHEL-50545-2.patch
-Patch656: glibc-RHEL-50545-3.patch
-Patch657: glibc-RHEL-50545-4.patch
-Patch658: glibc-RHEL-50545-5.patch
-Patch659: glibc-RHEL-50545-6.patch
-Patch660: glibc-RHEL-50545-7.patch
-Patch661: glibc-RHEL-50545-8.patch
-Patch662: glibc-RHEL-50545-9.patch
-Patch663: glibc-RHEL-50545-10.patch
-Patch664: glibc-RHEL-50545-11.patch
-Patch665: glibc-RHEL-50545-12.patch
-Patch666: glibc-RHEL-50545-13.patch
-Patch667: glibc-RHEL-50545-14.patch
-Patch668: glibc-RHEL-50662-1.patch
-Patch669: glibc-RHEL-50662-2.patch
-Patch670: glibc-RHEL-50662-3.patch
-Patch671: glibc-RHEL-50662-4.patch
-Patch672: glibc-RHEL-50662-5.patch
-Patch673: glibc-RHEL-50662-6.patch
-Patch674: glibc-RHEL-46724.patch
-Patch675: glibc-RHEL-66253-1.patch
-Patch676: glibc-RHEL-66253-2.patch
-Patch677: glibc-RHEL-66253-3.patch
-Patch678: glibc-RHEL-46733-1.patch
-Patch679: glibc-RHEL-46733-2.patch
-Patch680: glibc-RHEL-46733-3.patch
-Patch681: glibc-RHEL-54413.patch
-Patch682: glibc-RHEL-46736-1.patch
-Patch683: glibc-RHEL-46736-2.patch
-Patch684: glibc-RHEL-46736-3.patch
-Patch685: glibc-RHEL-46736-4.patch
-Patch686: glibc-RHEL-46736-5.patch
-Patch687: glibc-RHEL-46736-6.patch
-Patch688: glibc-RHEL-46736-7.patch
-Patch689: glibc-RHEL-46736-8.patch
-Patch690: glibc-RHEL-46736-9.patch
-Patch691: glibc-RHEL-46736-10.patch
-Patch692: glibc-RHEL-46736-11.patch
-Patch693: glibc-RHEL-50548-1.patch
-Patch694: glibc-RHEL-50548-2.patch
-Patch695: glibc-RHEL-50548-3.patch
-Patch696: glibc-RHEL-46725-1.patch
-Patch697: glibc-RHEL-46725-2.patch
-Patch698: glibc-RHEL-46725-3.patch
-Patch699: glibc-RHEL-46725-4.patch
-Patch700: glibc-RHEL-46725-5.patch
-Patch701: glibc-RHEL-46725-6.patch
-Patch702: glibc-RHEL-46725-7.patch
-Patch703: glibc-RHEL-46725-8.patch
-Patch704: glibc-RHEL-46725-9.patch
-Patch705: glibc-RHEL-46725-10.patch
-Patch706: glibc-RHEL-46725-11.patch
-Patch707: glibc-RHEL-46725-12.patch
-Patch708: glibc-RHEL-1915-1.patch
-Patch709: glibc-RHEL-1915-2.patch
-Patch710: glibc-RHEL-1915-3.patch
-Patch711: glibc-RHEL-1915-4.patch
-Patch712: glibc-RHEL-1915-5.patch
-Patch713: glibc-RHEL-1915-6.patch
-Patch714: glibc-RHEL-1915-7.patch
-Patch715: glibc-RHEL-1915-8.patch
-Patch716: glibc-RHEL-1915-9.patch
-Patch717: glibc-RHEL-47467.patch
-Patch718: glibc-RHEL-56032.patch
-Patch719: glibc-RHEL-67692-1.patch
-Patch720: glibc-RHEL-67692-2.patch
-Patch721: glibc-RHEL-67692-3.patch
-Patch722: glibc-RHEL-67692-4.patch
-Patch723: glibc-RHEL-46738-1.patch
-Patch724: glibc-RHEL-46738-2.patch
-Patch725: glibc-RHEL-46738-3.patch
-Patch726: glibc-RHEL-46738-4.patch
-Patch727: glibc-RHEL-65356-1.patch
-Patch728: glibc-RHEL-65356-2.patch
-Patch729: glibc-RHEL-38225-1.patch
-Patch730: glibc-RHEL-38225-2.patch
-Patch731: glibc-RHEL-54250.patch
-Patch732: glibc-RHEL-56743.patch
-Patch733: glibc-RHEL-57586.patch
-Patch734: glibc-RHEL-56539.patch
-Patch735: glibc-RHEL-56540-1.patch
-Patch736: glibc-RHEL-56540-2.patch
-Patch737: glibc-RHEL-56540-3.patch
-Patch738: glibc-RHEL-58671.patch
-Patch739: glibc-RHEL-46740.patch
-Patch740: glibc-RHEL-65910.patch
-Patch741: glibc-RHEL-69028.patch
-Patch742: glibc-RHEL-70395-1.patch
-Patch743: glibc-RHEL-70395-2.patch
-Patch744: glibc-RHEL-68850-1.patch
-Patch745: glibc-RHEL-68850-2.patch
-Patch746: glibc-RHEL-61568.patch
-Patch747: glibc-RHEL-58979.patch
-Patch748: glibc-RHEL-65354.patch
-Patch749: glibc-RHEL-56542-1.patch
-Patch750: glibc-RHEL-56542-2.patch
-Patch751: glibc-RHEL-56542-3.patch
-Patch752: glibc-RHEL-56542-4.patch
-Patch753: glibc-RHEL-56542-5.patch
-Patch754: glibc-RHEL-56542-6.patch
-Patch755: glibc-RHEL-56542-7.patch
-Patch756: glibc-RHEL-56542-8.patch
-Patch757: glibc-RHEL-56542-9.patch
-Patch758: glibc-RHEL-65358-1.patch
-Patch759: glibc-RHEL-65358-2.patch
-Patch760: glibc-RHEL-65358-3.patch
-Patch761: glibc-RHEL-65358-4.patch
-Patch762: glibc-RHEL-65358-5.patch
-Patch763: glibc-RHEL-58989-1.patch
-Patch764: glibc-RHEL-58989-2.patch
-Patch765: glibc-RHEL-62716-1.patch
-Patch766: glibc-RHEL-62716-2.patch
-Patch767: glibc-RHEL-68857.patch
-Patch768: glibc-RHEL-69633-1.patch
-Patch769: glibc-RHEL-69633-2.patch
-Patch770: glibc-RHEL-58987-1.patch
-Patch771: glibc-RHEL-58987-2.patch
-Patch772: glibc-RHEL-61559-1.patch
-Patch773: glibc-RHEL-61559-2.patch
-Patch774: glibc-RHEL-61559-3.patch
-Patch775: glibc-RHEL-61559-4.patch
-Patch776: glibc-RHEL-50550.patch
-Patch777: glibc-RHEL-65359-1.patch
-Patch778: glibc-RHEL-65359-2.patch
-Patch779: glibc-RHEL-65359-3.patch
-Patch780: glibc-RHEL-65359-4.patch
-Patch781: glibc-RHEL-75810.patch
-Patch782: glibc-RHEL-46761-1.patch
-Patch783: glibc-RHEL-46761-2.patch
-Patch784: glibc-RHEL-46761-3.patch
-Patch785: glibc-RHEL-46761-4.patch
-Patch786: glibc-RHEL-75810-2.patch
-Patch787: glibc-RHEL-75810-3.patch
-Patch788: glibc-RHEL-46761-5.patch
-Patch789: glibc-RHEL-75938.patch
-Patch790: glibc-RHEL-67592-1.patch
-Patch791: glibc-RHEL-67592-2.patch
-Patch792: glibc-RHEL-67592-3.patch
-Patch793: glibc-RHEL-67592-4.patch
-Patch794: glibc-RHEL-2419-1.patch
-Patch795: glibc-RHEL-2419-2.patch
-Patch796: glibc-RHEL-2419-3.patch
-Patch797: glibc-RHEL-2419-4.patch
-Patch798: glibc-RHEL-2419-5.patch
-Patch799: glibc-RHEL-2419-6.patch
-Patch800: glibc-RHEL-2419-7.patch
-Patch801: glibc-RHEL-2419-8.patch
-Patch802: glibc-RHEL-2419-9.patch
-Patch803: glibc-RHEL-2419-10.patch
-Patch804: glibc-RHEL-46738-5.patch
-Patch805: glibc-RHEL-46761-6.patch
-Patch806: glibc-RHEL-24740-1.patch
-Patch807: glibc-RHEL-24740-2.patch
-Patch808: glibc-RHEL-24740-3.patch
-Patch809: glibc-RHEL-71547.patch
-Patch810: glibc-RHEL-46729.patch
-Patch811: glibc-RHEL-61569-1.patch
-Patch812: glibc-RHEL-61569-2.patch
-Patch813: glibc-RHEL-83581.patch
-Patch814: glibc-RHEL-83525.patch
-Patch815: glibc-RHEL-83528-1.patch
-Patch816: glibc-RHEL-83528-2.patch
-Patch817: glibc-RHEL-80088-1.patch
-Patch818: glibc-RHEL-80088-2.patch
-Patch819: glibc-RHEL-80088-3.patch
-Patch820: glibc-RHEL-80088-4.patch
-Patch821: glibc-RHEL-80088-5.patch
-Patch822: glibc-RHEL-84325.patch
-Patch823: glibc-RHEL-83968.patch
-Patch824: glibc-RHEL-83980-1.patch
-Patch825: glibc-RHEL-83980-2.patch
-Patch826: glibc-RHEL-83980-3.patch
-Patch827: glibc-RHEL-83980-4.patch
-Patch828: glibc-RHEL-83970-1.patch
-Patch829: glibc-RHEL-83970-2.patch
-Patch830: glibc-RHEL-83970-3.patch
-Patch831: glibc-RHEL-83970-4.patch
-Patch832: glibc-RHEL-83970-5.patch
-Patch833: glibc-RHEL-83970-6.patch
-Patch834: glibc-RHEL-83970-7.patch
-Patch835: glibc-RHEL-83970-8.patch
-Patch836: glibc-RHEL-83984-1.patch
-Patch837: glibc-RHEL-83984-2.patch
-Patch838: glibc-RHEL-83984-3.patch
-Patch839: glibc-RHEL-83984-4.patch
-Patch840: glibc-RHEL-83984-5.patch
-Patch841: glibc-RHEL-83984-6.patch
-Patch842: glibc-RHEL-83984-7.patch
-Patch843: glibc-RHEL-83984-8.patch
-Patch844: glibc-RHEL-84306-1.patch
-Patch845: glibc-RHEL-84306-2.patch
-Patch846: glibc-RHEL-84306-3.patch
-Patch847: glibc-RHEL-84306-4.patch
-Patch848: glibc-RHEL-84306-5.patch
-Patch849: glibc-RHEL-84306-6.patch
-Patch850: glibc-RHEL-84306-7.patch
-Patch851: glibc-RHEL-84306-8.patch
-Patch852: glibc-RHEL-84306-9.patch
-Patch853: glibc-RHEL-84306-10.patch
-Patch854: glibc-RHEL-84306-11.patch
-Patch855: glibc-RHEL-84306-12.patch
-Patch856: glibc-RHEL-84306-13.patch
-Patch857: glibc-RHEL-84306-14.patch
-Patch858: glibc-RHEL-84306-15.patch
-Patch859: glibc-RHEL-83982-1.patch
-Patch860: glibc-RHEL-83982-2.patch
-Patch861: glibc-RHEL-83982-3.patch
-Patch862: glibc-RHEL-92690-1.patch
-Patch863: glibc-RHEL-92690-2.patch
-Patch864: glibc-RHEL-92690-3.patch
-Patch865: glibc-RHEL-92690-4.patch
-Patch866: glibc-RHEL-92690-5.patch
-Patch867: glibc-RHEL-92690-6.patch
-Patch868: glibc-RHEL-92690-7.patch
-Patch869: glibc-RHEL-92690-8.patch
-Patch870: glibc-RHEL-71583.patch
-Patch871: glibc-RHEL-93665-1.patch
-Patch872: glibc-RHEL-93665-2.patch
-Patch873: glibc-RHEL-93877.patch
-Patch874: glibc-RHEL-95547-1.patch
-Patch875: glibc-RHEL-95547-2.patch
-Patch876: glibc-RHEL-95547-3.patch
-Patch877: glibc-RHEL-104150.patch
-Patch878: glibc-RHEL-105328.patch
-Patch879: glibc-RHEL-106230.patch
+# ^ The above patch list is legacy.  Some patches do not apply when sorted
+# in intra-commit lexicographic order used by patch-git.  Therefore, the
+# above list enforces the required historical, non-standard ordering.
+# Subsequent patches are auto-sorted and applied by patch-git tooling right
+# under this.
+%{lua:patchgit.patches()}
 
 ##############################################################################
 # Continued list of core "glibc" package information:
@@ -1215,6 +747,9 @@ Provides: rtld(GNU_HASH)
 
 # We need libgcc for cancellation support in POSIX threads.
 Requires: libgcc%{_isa}
+# Encourage the package manager to break the libgcc/glibc dependency
+# cycle by installing libgcc first.  (This is the historic installation order.)
+Requires(pre): libgcc%{_isa}
 
 Requires: glibc-common = %{version}-%{release}
 
@@ -1230,6 +765,10 @@ Requires: basesystem
 # after nss_*.x86_64.  (See below for the other ordering.)
 Recommends: (nss_db(x86-32) if nss_db(x86-64))
 Recommends: (nss_hesiod(x86-32) if nss_hesiod(x86-64))
+# Deinstall the glibc32 package if present.  This helps tests that do
+# not run against the compose.
+Conflicts: glibc32 <= %{version}-%{release}
+Obsoletes: glibc32 <= %{version}-%{release}
 %endif
 
 # This is for building auxiliary programs like memusage, nscd
@@ -1251,6 +790,10 @@ BuildRequires: audit-libs-devel >= 1.1.3, sed >= 3.95, libcap-devel, gettext
 # And use instead (which should be reverted some time in the future):
 BuildRequires: procps-ng, util-linux, gawk
 BuildRequires: systemtap-sdt-devel
+
+%if %{with testsuite}
+BuildRequires: gdb
+%endif
 
 %if %{with valgrind}
 # Require valgrind for smoke testing the dynamic loader to make sure we
@@ -2020,14 +1563,36 @@ that can be installed across architectures.
 %endif
 
 ##############################################################################
+# glibc32 (only for use in building GCC, not shipped)
+##############################################################################
+%ifarch x86_64
+%package -n glibc32
+Summary: The GNU libc libraries (32-bit)
+Conflicts: glibc(x86-32)
+%dnl The gcc package does not use ELF dependencies to install glibc32:
+%dnl BuildRequires: (glibc32 or glibc-devel(%{__isa_name}-32))
+%dnl Not generating the ELF dependencies for glibc32 makes it less likely
+%dnl that the package is selected by accident over glibc.i686.
+AutoReqProv: no
+
+%description -n glibc32
+This package is only used for internal building of multilib aware
+packages, like gcc, due to a technical limitation in the distribution
+build environment. Any package which needs both 32-bit and 64-bit
+runtimes at the same time must install glibc32 (marked as a 64-bit
+package) to access the 32-bit development files during a 64-bit build.
+
+This package is not supported or intended for use outside of the
+distribution build enviroment. Regular users can install both 32-bit and
+64-bit runtimes and development files without any problems.
+
+%endif
+
+##############################################################################
 # Prepare for the build.
 ##############################################################################
 %prep
 %autosetup -n %{glibcsrcdir} -p1
-
-%ifarch %{arm}
-cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
-%endif
 
 ##############################################################################
 # %%prep - Additional prep required...
@@ -2055,6 +1620,12 @@ diff -u \
   --label "spec file" localedata/SUPPORTED.spec \
   --label "glibc localedata/SUPPORTED" localedata/SUPPORTED.glibc
 rm localedata/SUPPORTED.spec localedata/SUPPORTED.glibc
+
+# Prepare for ld.so ABI check
+cp %{SOURCE15} .
+chmod +x verify-ld-so-abi.sh
+
+cp %{_sourcedir}/*.baseline .
 
 ##############################################################################
 # Build glibc...
@@ -2194,14 +1765,12 @@ build()
 		--with-nonshared-cflags="$BuildFlagsNonshared" \
 		--enable-bind-now \
 		--build=%{target} \
+		${configure_host} \
 		--enable-stack-protector=strong \
 		--enable-tunables \
 		--enable-systemtap \
 		${core_with_options} \
 		%{?glibc_rtld_early_cflags:--with-rtld-early-cflags=%glibc_rtld_early_cflags} \
-%ifarch x86_64 %{ix86}
-	       --enable-cet \
-%endif
 %ifarch %{ix86}
 		--disable-multi-arch \
 %endif
@@ -2222,6 +1791,17 @@ build()
 	%make_build -r %{glibc_make_flags}
 	popd
 }
+
+%ifarch x86_64
+# Build for the glibc32 package.
+GCC="$GCC -m32" GXX="$GXX -m32" BuildFlags="${BuildFlags/-m64/-m32}" configure_host="--host=i686-linux-gnu" build 32
+%endif
+
+configure_host=""
+
+%ifarch x86_64
+configure_host="--enable-cet"
+%endif
 
 # Default set of compiler options.
 build
@@ -2263,6 +1843,19 @@ for d in %{glibc_sysroot}%{_libdir}; do
 	mkdir -p $d
 	(cd $d && ln -sf . lp64d)
 done
+%endif
+
+%ifarch x86_64
+# Install for the glibc32 package.
+pushd build-%{target}-32
+%make_build install_root=%{glibc_sysroot} install
+popd
+pushd %{glibc_sysroot}
+rm -rf etc var usr/bin usr/lib/gconv usr/libexec usr/sbin usr/share
+rm -f lib/libnss_db* lib/libnss_hesiod* lib/libnsl* usr/lib/libnsl* usr/lib/libnss*
+rm usr/lib/libc_malloc_debug.so
+strip -g usr/lib/*.o
+popd
 %endif
 
 # Build and install:
@@ -2416,11 +2009,15 @@ ln locale-archive locale-archive.real
 # each langpack ends up retaining a copy.  If we convert these to symbolic
 # links instead, we save ~350K each when they get installed that way.
 #
-# LC_MEASUREMENT and LC_PAPER also have several duplicates but we don't
-# bother with these because they are only ~30 bytes each.
+# To simplify testing, do this for LC_NAME and LC_NUMERIC as well,
+# although the savings are minimal.  (It is not clear what is smaller:
+# multiple short symbolic links, or one file hard linked into multiple
+# directories.)
 pushd %{glibc_sysroot}/usr/lib/locale
-for f in $(find eo *_* -samefile C.utf8/LC_CTYPE); do
-  rm $f && ln -s '../C.utf8/LC_CTYPE' $f
+for k in CTYPE NAME NUMERIC; do
+  for f in $(find eo *_* -samefile C.utf8/LC_$k); do
+    rm $f && ln -s ../C.utf8/LC_$k $f
+  done
 done
 popd
 
@@ -2567,7 +2164,17 @@ pushd %{glibc_sysroot}/%{sysroot_prefix}
 mkdir -p usr/lib usr/lib64
 
 cp -a %{glibc_sysroot}/%{_prefix}/include usr/.
+%ifarch x86_64
+# 32-bit headers for glibc32 don't go in the sysroot.
+rm usr/include/gnu/*-32.h
+%endif
 for lib in lib lib64;  do
+%ifarch x86_64
+    if [ "$lib" = "lib" ]; then
+	# 32-bit libraries built for glibc32 don't go in the sysroot.
+	continue
+    fi
+%endif
     for pfx in "" %{_prefix}/; do
 	if test -d %{glibc_sysroot}/$pfx$lib ; then
 	    # Implement UsrMove: everything goes into usr/$lib.  Only
@@ -2787,6 +2394,11 @@ $run_ldso /usr/bin/valgrind --error-exitcode=1 \
 	$run_ldso /usr/bin/true --help >/dev/null
 %endif
 %endif
+
+# Verify ld.so ABI.
+if test -f "ld-so-abi-%{_arch}.baseline" ; then
+    ./verify-ld-so-abi.sh %{_arch} %{glibc_sysroot}%{_prefix}%{glibc_ldso}
+fi
 
 %endif
 
@@ -3187,78 +2799,217 @@ update_gconv_modules_cache ()
 %{sysroot_prefix}
 %endif
 
+%ifarch x86_64
+%files -n glibc32
+%{_includedir}/gnu/lib-names-32.h
+%{_includedir}/gnu/stubs-32.h
+%{_prefix}/lib/*.a
+%{_prefix}/lib/*.o
+%{_prefix}/lib/*.so*
+%{_prefix}/lib/audit/*
+%endif
+
 %changelog
-* Thu Aug 07 2025 Jacco Ligthart <jacco@redsleeve.org> - 2.34-168.23.redsleeve
-- add dl-tunables.list for arm
+%{lua:patchgit.changelog()}
+* Tue Sep 30 2025 DJ Delorie <dj@redhat.com> - 2.34-231.1
+- nss: Group merge does not react to ERANGE during merge (RHEL-114262)
 
-* Tue Jul 29 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.23
-- Fix namespace pollution in inet_ntop with fortification (RHEL-106230)
+* Tue Aug 19 2025 Arjun Shankar <arjun@redhat.com> - 2.34-231
+- Define __libc_tsd_CTYPE_* TLS variables as initial-exec (RHEL-107518)
 
-* Thu Jul 24 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.22
-- CVE-2025-8058: Double free in regcomp (RHEL-105328)
+* Tue Aug 19 2025 Arjun Shankar <arjun@redhat.com> - 2.34-230
+- elf: Remove a duplicate test related Makefile target (RHEL-108220)
 
-* Wed Jul 23 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.21
-- iconv: Do not create executable output files (RHEL-104150)
+* Tue Aug 19 2025 Arjun Shankar <arjun@redhat.com> - 2.34-229
+- inet: Fix namespace pollution in fortification header (RHEL-106206)
 
-* Mon Jun 16 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-168.20
-- CVE-2025-5702 glibc: Vector register overwrite bug in glibc (RHEL-95547)
+* Mon Aug 11 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-228
+- Handle load segment gaps in _dl_find_object (RHEL-104852)
 
-* Wed May 28 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.19
-- elf: Keep using minimal malloc after early DTV resize (RHEL-93877)
+* Mon Aug 11 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-227
+- Disable failing subtest of elf/tst-dl_find_object-static (RHEL-108221)
 
-* Wed May 28 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-168.18
-- Fix deadlock in popen after multi-threaded fork (RHEL-93665)
+* Thu Aug 07 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-226
+- Prevent inlining of _dl_debug_state (RHEL-105965)
 
-* Tue May 27 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.17
-- x86: Avoid integer truncation with large cache sizes (RHEL-71583)
+* Tue Aug 05 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-225
+- Add definition of _dl_find_object to libc.a (RHEL-107564)
 
-* Thu May 22 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.16
-- SGID test enhancements (RHEL-92690)
+* Thu Jul 31 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-224
+- Add support for new IBM Z17 hardware in glibc (RHEL-50086)
 
-* Wed May 21 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-168.15
-- CVE-2025-4802: static setuid dlopen may search LD_LIBRARY_PATH (RHEL-92690)
+* Wed Jul 30 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-223
+- Add ld-so-abi-check
 
-* Tue Apr  8 2025 Florian Weimer <fweimer@redhat.com> - 2.34-168.14
-- Increase reliability of stdio-common/tst-setvbuf2 (RHEL-83982)
+* Wed Jul 30 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-222
+- Build glibc32 from the main glibc package (RHEL-106470)
 
-* Wed Apr  2 2025 DJ Delorie <dj@redhat.com> - 2.34-168.13
-- Extend setvbuf testing (RHEL-83982)
+* Tue Jul 29 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-221
+- Use Requires(pre): libgcc%%{_isa} to break libgcc cycle (RHEL-106166)
 
-* Wed Apr  2 2025 Florian Weimer <fweimer@redhat.com> - 2.34-168.12
-- Extend scanf testing (RHEL-84306)
+* Mon Jul 28 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-220
+- Revert downstream changes as `_dl_find_object` has been backported
+  (RHEL-105957)
 
-* Tue Apr 01 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-168.11
-- Fortify inet_ntop and inet_pton (RHEL-83984)
+* Fri Jul 25 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-219
+- The dynamic linker no longer crashed when processing specific symbol versions.
+  (RHEL-74251)
 
-* Fri Mar 28 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.10
-- Add sched_setattr, sched_getattr, pthread_gettid_np (RHEL-83970)
+* Fri Jul 25 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-218
+- CVE-2025-8058: Double free in regcomp (RHEL-105327)
 
-* Thu Mar 27 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.9
-- Improve printf fortification against %n in writeable memory (RHEL-83980)
+* Wed Jul 23 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-217
+- iconv: Do not create executable output files (RHEL-103952)
 
-* Fri Mar 21 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.8
-- nptl: extend test coverage for sched_yield (RHEL-83968)
+* Mon Jul 14 2025 Benjamin Herrenschmidt <benh@amazon.com> - 2.34-216
+- Backport GLIBC_2.35 libc symbols incl. _dl_find_object (RHEL-93320)
 
-* Fri Mar 21 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.7
-- Make test tst-cpuclock2 run more reliably (RHEL-84325)
+* Thu Jul 10 2025 Arjun Shankar <arjun@redhat.com> - 2.34-215
+- Extend struct r_debug to support multiple namespaces (RHEL-101986)
 
-* Fri Mar 21 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.6
-- nptl: Keep __rseq_size consistent (RHEL-80088)
+* Wed Jul 09 2025 Arjun Shankar <arjun@redhat.com> - 2.34-214
+- Signal la_objopen for ld.so with dlmopen (RHEL-49549)
 
-* Fri Mar 21 2025 Arjun Shankar <arjun@redhat.com> - 2.34-168.5
-- assert: Add test for CVE-2025-0395 (RHEL-83528)
+* Wed Jul 09 2025 Arjun Shankar <arjun@redhat.com> - 2.34-213
+- Reduce spurious rebuilds while running tests (RHEL-95247)
 
-* Thu Mar 20 2025 Patsy Griffin <patsy@redhat.com> - 2.34-168.4
-- Use rseq area unconditionally in sched_getcpu (RHEL-83525)
+* Tue Jul 08 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-212
+- Prevented `ld.so` from asserting and crashing during audited library loads.
+  (RHEL-47403)
 
-* Wed Mar 19 2025 Patsy Griffin <patsy@redhat.com> - 2.34-168.3
-- tst-fopen-threaded: Only check EOF for failing read (RHEL-83581)
+* Tue Jul 08 2025 Arjun Shankar <arjun@redhat.com> - 2.34-211
+- Improve qsort implementation (RHEL-24168)
 
-* Wed Mar 05 2025 Frederic Berat <fberat@redhat.com> - 2.34-168.2
-- Improve cpuset test coverage (RHEL-82118)
+* Tue Jul 01 2025 Arjun Shankar <arjun@redhat.com> - 2.34-210
+- Add new tests for clock_nanosleep (RHEL-62188)
 
-* Wed Mar 05 2025 Frederic Berat <fberat@redhat.com> - 2.34-168.1
-- Increase test coverage for standard IO APIs (RHEL-82259)
+* Tue Jul 01 2025 Arjun Shankar <arjun@redhat.com> - 2.34-209
+- Add new test for if_nameindex and if_indextoname (RHEL-53909)
+
+* Thu Jun 26 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-208
+- Switch to main malloc after final ld.so self-relocation. (RHEL-48820)
+
+* Tue Jun 24 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-207
+- CVE-2025-5702 glibc: Vector register overwrite bug in glibc (RHEL-95546)
+
+* Wed Jun 18 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-206
+- langpacks: Use symlinks for LC_NAME, LC_NUMERIC files if possible (RHEL-97434)
+
+* Wed Jun 11 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-205
+- Add testcases for abs(), labs(), and llabs() functions. (RHEL-77082)
+
+* Wed Jun 11 2025 Arjun Shankar <arjun@redhat.com> - 2.34-204
+- manual: Document error codes of several socket functions (RHEL-57110)
+
+* Thu Jun 05 2025 Arjun Shankar <arjun@redhat.com> - 2.34-203
+- manual: Document several *at file system interface functions (RHEL-50546)
+
+* Wed Jun 04 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-202
+- x86: Avoid integer truncation with large cache sizes (RHEL-71584)
+
+* Wed Jun 04 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-201
+- Report error if setaffinity wrapper fails (RHEL-94634)
+
+* Tue Jun 03 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-200
+- manual: Document the clock_nanosleep function (RHEL-57671)
+
+* Tue May 27 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-199
+- Ensure fallback initialization of ctype TLS data pointers to fix segfaults in
+  programs using dlmopen or auditors (RHEL-72017)
+
+* Mon May 26 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-198
+- Document additional CLOCK_* values in glibc manual (RHEL-57587)
+
+* Thu May 22 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-197
+- Prevent `,ccs=` from being treated as individual mode flags in `fopen` calls
+  (RHEL-92095)
+
+* Thu May 22 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-196
+- SGID test enhancements (RHEL-92697)
+
+* Wed May 21 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-195
+- CVE-2025-4802: static setuid dlopen may search LD_LIBRARY_PATH (RHEL-92697)
+
+* Mon May 19 2025 DJ Delorie <dj@redhat.com> - 2.34-194
+- manual: Improve the documentation of the Thread APIs (RHEL-61558)
+
+* Fri May 16 2025 Florian Weimer  <fweimer@redhat.com> - 2.34-193
+- manual: Clarifications for listing directories (RHEL-56546)
+
+* Thu May 15 2025 Patsy Griffin <patsy@redhat.com> - 2.34-192
+- elf: Keep using minimal malloc after early DTV resize (RHEL-71922)
+
+* Wed May 14 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-191
+- Improve POSIX semaphore documentation (RHEL-65355)
+
+* Wed May 14 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-190
+- Add test case for fflush (RHEL-63210)
+
+* Mon May 05 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-189
+- Resolve stdio flushing issues (RHEL-68805)
+
+* Tue Apr 22 2025 Patsy Griffin <patsy@redhat.com> - 2.34-188
+- libio: Fix a deadlock after fork in popen  
+- libio: Correctly link tst-popen-fork against libpthread (RHEL-59712)
+
+* Tue Apr  8 2025 Florian Weimer <fweimer@redhat.com> - 2.34-187
+- Document behavior of sched_yield with SCHED_RR and SCHED_OTHER (RHEL-61560)
+
+* Tue Apr  8 2025 Florian Weimer <fweimer@redhat.com> - 2.34-186
+- Increase reliability of stdio-common/tst-setvbuf2 (RHEL-46737)
+
+* Wed Apr  2 2025 DJ Delorie <dj@redhat.com> - 2.34-185
+- Extend setvbuf testing (RHEL-46737)
+
+* Wed Apr  2 2025 Florian Weimer <fweimer@redhat.com> - 2.34-184
+- Extend scanf testing (RHEL-46726)
+
+* Mon Mar 31 2025 Frédéric Bérat <fberat@redhat.com> - 2.34-183
+- Fortify inet_ntop and inet_pton (RHEL-44920)
+
+* Thu Mar 27 2025 Arjun Shankar <arjun@redhat.com> - 2.34-182
+- Improve printf fortification against %n in writeable memory (RHEL-80538)
+
+* Thu Mar 20 2025 Arjun Shankar <arjun@redhat.com> - 2.34-181
+- Make test tst-cpuclock2 run more reliably (RHEL-84305)
+
+* Fri Mar 14 2025 Arjun Shankar <arjun@redhat.com> - 2.34-180
+- Fix a race condition in a threaded fopen test (RHEL-83007)
+
+* Fri Mar 14 2025 Arjun Shankar <arjun@redhat.com> - 2.34-179
+- assert: Add test for CVE-2025-0395 (RHEL-83527)
+
+* Fri Mar 14 2025 Arjun Shankar <arjun@redhat.com> - 2.34-178
+- nptl: extend test coverage for sched_yield (RHEL-61561)
+
+* Fri Mar 14 2025 Arjun Shankar <arjun@redhat.com> - 2.34-177
+- Fix missing rseq acceleration for sched_getcpu (RHEL-28119)
+
+* Wed Mar 12 2025 Florian Weimer <fweimer@redhat.com> - 2.34-176
+- Add sched_setattr, sched_getattr, pthread_gettid_np (RHEL-56627, RHEL-83017)
+
+* Mon Mar 10 2025 Tulio Magno Quites Machado Filho <tuliom@redhat.com> - 2.34-175
+- Backport fwrite tests and a fix for BZ 29459 (RHEL-55471)
+
+* Fri Mar 07 2025 Arjun Shankar <arjun@redhat.com> - 2.34-174
+- nptl: Keep __rseq_size consistent (RHEL-65280)
+
+* Thu Mar 06 2025 Arjun Shankar <arjun@redhat.com> - 2.34-173
+- Make __rseq_size useful for feature detection (RHEL-65280)
+
+* Mon Mar 03 2025 Frederic Berat <fberat@redhat.com> - 2.34-172
+- Backport: support: Add support_next_to_fault_before support function
+  (RHEL-61569)
+- Backport: posix: Rewrite cpuset tests (RHEL-61569)
+
+* Mon Mar 03 2025 Frederic Berat <fberat@redhat.com> - 2.34-171
+- Backport: Add new tests for fopen (RHEL-46729)
+
+* Fri Feb 28 2025 DJ Delorie <dj@redhat.com> - 2.34-170
+- manual: Update signal descriptions (RHEL-67593)
+
+* Fri Feb 14 2025 Tulio Magno Quites Machado Filho <tuliom@redhat.com> - 2.34-169
+- Backport documentation for time functions (RHEL-57585)
 
 * Thu Feb 13 2025 Florian Weimer <fweimer@redhat.com> - 2.34-168
 - Fix transliteration regression in iconv tool (RHEL-71547)

@@ -1,0 +1,222 @@
+commit 0d344b557604e966dc7f91739881f03e1f221efd
+Author: Szabolcs Nagy <szabolcs.nagy@arm.com>
+Date:   Thu Feb 10 17:42:56 2022 +0000
+
+    aarch64: Fix pac-ret with unusual dwarf in libgcc unwinder [PR104689]
+    
+    The RA_SIGN_STATE dwarf pseudo-register is normally only set using the
+    DW_CFA_AARCH64_negate_ra_state (== DW_CFA_window_save) operation which
+    toggles the return address signedness state (the default state is 0).
+    (It may be set by remember/restore_state CFI too, those save/restore
+    the state of all registers.)
+    
+    However RA_SIGN_STATE can be set directly via DW_CFA_val_expression too.
+    GCC does not generate such CFI but some other compilers reportedly do.
+    
+    Note: the toggle operation must not be mixed with other dwarf register
+    rule CFI within the same CIE and FDE.
+    
+    In libgcc we assume REG_UNSAVED means the RA_STATE is set using toggle
+    operations, otherwise we assume its value is set by other CFI.
+    
+    libgcc/ChangeLog:
+    
+            PR target/104689
+            * config/aarch64/aarch64-unwind.h (aarch64_frob_update_context):
+            Handle the !REG_UNSAVED case.
+            * unwind-dw2.c (execute_cfa_program): Fail toggle if !REG_UNSAVED.
+    
+    gcc/testsuite/ChangeLog:
+    
+            PR target/104689
+            * gcc.target/aarch64/pr104689.c: New test.
+
+diff --git a/gcc/testsuite/gcc.target/aarch64/pr104689.c b/gcc/testsuite/gcc.target/aarch64/pr104689.c
+new file mode 100644
+index 0000000000000000..3b7adbdfe7d6f969
+--- /dev/null
++++ b/gcc/testsuite/gcc.target/aarch64/pr104689.c
+@@ -0,0 +1,149 @@
++/* PR target/104689. Unwind across pac-ret frames with unusual dwarf.  */
++/* { dg-do run } */
++/* { dg-require-effective-target lp64 } */
++/* { dg-options "-fexceptions -O2" } */
++
++#include <unwind.h>
++#include <stdlib.h>
++#include <stdio.h>
++
++#define die() \
++  do { \
++    printf ("%s:%d: reached unexpectedly.\n", __FILE__, __LINE__); \
++    fflush (stdout); \
++    abort (); \
++  } while (0)
++
++
++/* Code to invoke unwinding with a logging callback.  */
++
++static struct _Unwind_Exception exc;
++
++static _Unwind_Reason_Code
++force_unwind_stop (int version, _Unwind_Action actions,
++                   _Unwind_Exception_Class exc_class,
++                   struct _Unwind_Exception *exc_obj,
++                   struct _Unwind_Context *context,
++                   void *stop_parameter)
++{
++  printf ("%s: CFA: %p PC: %p actions: %d\n",
++	  __func__,
++	  (void *)_Unwind_GetCFA (context),
++	  (void *)_Unwind_GetIP (context),
++	  (int)actions);
++  if (actions & _UA_END_OF_STACK)
++    die ();
++  return _URC_NO_REASON;
++}
++
++static void force_unwind (void)
++{
++#ifndef __USING_SJLJ_EXCEPTIONS__
++  _Unwind_ForcedUnwind (&exc, force_unwind_stop, 0);
++#else
++  _Unwind_SjLj_ForcedUnwind (&exc, force_unwind_stop, 0);
++#endif
++}
++
++
++/* Define functions with unusual pac-ret dwarf via top level asm.  */
++
++#define STR(x) #x
++#define DW_CFA_val_expression 0x16
++#define RA_SIGN_STATE 34
++#define DW_OP_lit0 0x30
++#define DW_OP_lit1 0x31
++
++#define cfi_escape(a1, a2, a3, a4) \
++  ".cfi_escape " STR(a1) ", " STR(a2) ", " STR(a3) ", " STR(a4)
++
++/* Bytes: 0x16 0x22 0x01 0x30  */
++#define SET_RA_STATE_0 \
++  cfi_escape (DW_CFA_val_expression, RA_SIGN_STATE, 1, DW_OP_lit0)
++
++/* Bytes: 0x16 0x22 0x01 0x31  */
++#define SET_RA_STATE_1 \
++  cfi_escape (DW_CFA_val_expression, RA_SIGN_STATE, 1, DW_OP_lit1)
++
++/* These function call their argument.  */
++void unusual_pac_ret (void *);
++void unusual_no_pac_ret (void *);
++
++asm(""
++".global unusual_pac_ret\n"
++".type unusual_pac_ret, %function\n"
++"unusual_pac_ret:\n"
++"	.cfi_startproc\n"
++"	" SET_RA_STATE_0 "\n"
++"	hint	25 // paciasp\n"
++"	" SET_RA_STATE_1 "\n"
++"	stp	x29, x30, [sp, -16]!\n"
++"	.cfi_def_cfa_offset 16\n"
++"	.cfi_offset 29, -16\n"
++"	.cfi_offset 30, -8\n"
++"	mov	x29, sp\n"
++"	blr	x0\n"
++"	ldp	x29, x30, [sp], 16\n"
++"	.cfi_restore 30\n"
++"	.cfi_restore 29\n"
++"	.cfi_def_cfa_offset 0\n"
++"	hint	29 // autiasp\n"
++"	" SET_RA_STATE_0 "\n"
++"	ret\n"
++"	.cfi_endproc\n");
++
++asm(""
++".global unusual_no_pac_ret\n"
++".type unusual_no_pac_ret, %function\n"
++"unusual_no_pac_ret:\n"
++"	.cfi_startproc\n"
++"	" SET_RA_STATE_0 "\n"
++"	stp	x29, x30, [sp, -16]!\n"
++"	.cfi_def_cfa_offset 16\n"
++"	.cfi_offset 29, -16\n"
++"	.cfi_offset 30, -8\n"
++"	mov	x29, sp\n"
++"	blr	x0\n"
++"	ldp	x29, x30, [sp], 16\n"
++"	.cfi_restore 30\n"
++"	.cfi_restore 29\n"
++"	.cfi_def_cfa_offset 0\n"
++"	ret\n"
++"	.cfi_endproc\n");
++
++
++/* Functions to create a call chain with mixed pac-ret dwarf.  */
++
++__attribute__((target("branch-protection=pac-ret")))
++static void f2_pac_ret (void)
++{
++  force_unwind ();
++  die ();
++}
++
++__attribute__((target("branch-protection=none")))
++static void f1_no_pac_ret (void)
++{
++  unusual_pac_ret (f2_pac_ret);
++  die ();
++}
++
++__attribute__((noinline, target("branch-protection=pac-ret")))
++static void f0_pac_ret (void)
++{
++  unusual_no_pac_ret (f1_no_pac_ret);
++  die ();
++}
++
++static void cleanup_handler (void *p)
++{
++  printf ("%s: Success.\n", __func__);
++  exit (0);
++}
++
++int main ()
++{
++  char dummy __attribute__((cleanup (cleanup_handler)));
++  f0_pac_ret ();
++  die ();
++}
+diff --git a/libgcc/config/aarch64/aarch64-unwind.h b/libgcc/config/aarch64/aarch64-unwind.h
+index b6faa9b495094d8e..3158af4c8c371fac 100644
+--- a/libgcc/config/aarch64/aarch64-unwind.h
++++ b/libgcc/config/aarch64/aarch64-unwind.h
+@@ -78,7 +78,13 @@ static inline void
+ aarch64_frob_update_context (struct _Unwind_Context *context,
+ 			     _Unwind_FrameState *fs)
+ {
+-  if (fs->regs.reg[DWARF_REGNUM_AARCH64_RA_STATE].loc.offset & 0x1)
++  const int reg = DWARF_REGNUM_AARCH64_RA_STATE;
++  int ra_signed;
++  if (fs->regs.reg[reg].how == REG_UNSAVED)
++    ra_signed = fs->regs.reg[reg].loc.offset & 0x1;
++  else
++    ra_signed = _Unwind_GetGR (context, reg) & 0x1;
++  if (ra_signed)
+     /* The flag is used for re-authenticating EH handler's address.  */
+     context->flags |= RA_SIGNED_BIT;
+   else
+diff --git a/libgcc/unwind-dw2.c b/libgcc/unwind-dw2.c
+index 41af7e23f47602ec..43d06531fce9bed1 100644
+--- a/libgcc/unwind-dw2.c
++++ b/libgcc/unwind-dw2.c
+@@ -1204,7 +1204,9 @@ execute_cfa_program (const unsigned char *insn_ptr,
+ #if defined (__aarch64__) && !defined (__ILP32__)
+ 	  /* This CFA is multiplexed with Sparc.  On AArch64 it's used to toggle
+ 	     return address signing status.  */
+-	  fs->regs.reg[DWARF_REGNUM_AARCH64_RA_STATE].loc.offset ^= 1;
++	  reg = DWARF_REGNUM_AARCH64_RA_STATE;
++	  gcc_assert (fs->regs.reg[reg].how == REG_UNSAVED);
++	  fs->regs.reg[reg].loc.offset ^= 1;
+ #else
+ 	  /* ??? Hardcoded for SPARC register window configuration.  */
+ 	  if (__LIBGCC_DWARF_FRAME_REGISTERS__ >= 32)

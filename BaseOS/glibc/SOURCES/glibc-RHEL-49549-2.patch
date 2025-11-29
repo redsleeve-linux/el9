@@ -1,0 +1,174 @@
+commit ab5aa2ee3d3f978e474803cbbc5fe805ad30e293
+Author: Andreas Schwab <schwab@suse.de>
+Date:   Thu Mar 23 16:46:20 2023 +0100
+
+    dlopen: skip debugger notification for DSO loaded from sprof (bug 30258)
+    
+    Avoid inconsistent state in the debugger interface.
+
+Conflicts:
+	elf/Makefile: Test differences.
+
+diff --git a/elf/Makefile b/elf/Makefile
+index 86d4dd9960088ee1..721f254d121118c0 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -528,6 +528,7 @@ tests-container += \
+ 
+ test-srcs = \
+   tst-pathopt \
++  tst-sprof-basic \
+   # tests-srcs
+ 
+ ifeq (yes,$(have-fpie))
+@@ -860,6 +861,7 @@ modules-names = \
+   tst-sonamemove-linkmod1 \
+   tst-sonamemove-runmod1 \
+   tst-sonamemove-runmod2 \
++  tst-sprof-mod \
+   tst-tls19mod1 \
+   tst-tls19mod2 \
+   tst-tls19mod3 \
+@@ -1114,6 +1116,7 @@ tests-special += \
+   $(objpfx)tst-rtld-help.out \
+   $(objpfx)tst-rtld-load-self.out \
+   $(objpfx)tst-rtld-preload.out \
++  $(objpfx)tst-sprof-basic.out \
+   # tests-special
+ endif
+ tests-special += \
+@@ -2946,3 +2949,11 @@ $(objpfx)tst-dlopen-constructor-null: \
+   $(objpfx)tst-dlopen-constructor-null-mod2.so
+ $(objpfx)tst-dlopen-constructor-null-mod2.so: \
+   $(objpfx)tst-dlopen-constructor-null-mod1.so
++
++LDFLAGS-tst-sprof-mod.so = -Wl,-soname,tst-sprof-mod.so
++$(objpfx)tst-sprof-basic: $(objpfx)tst-sprof-mod.so
++$(objpfx)tst-sprof-basic.out: tst-sprof-basic.sh $(objpfx)tst-sprof-basic
++	$(SHELL) $< $(common-objpfx) '$(test-wrapper-env)' \
++		 '$(run-program-env)' > $@; \
++	$(evaluate-test)
++generated += tst-sprof-mod.so.profile
+diff --git a/elf/dl-load.c b/elf/dl-load.c
+index 98a91d40b74cb76b..5c1be6e80cd52e2f 100644
+--- a/elf/dl-load.c
++++ b/elf/dl-load.c
+@@ -1465,6 +1465,10 @@ cannot enable executable stack as shared object requires");
+   /* Now that the object is fully initialized add it to the object list.  */
+   _dl_add_to_namespace_list (l, nsid);
+ 
++  /* Skip auditing and debugger notification when called from 'sprof'.  */
++  if (mode & __RTLD_SPROF)
++    return l;
++
+   /* Signal that we are going to add new objects.  */
+   struct r_debug *r = _dl_debug_update (nsid);
+   if (r->r_state == RT_CONSISTENT)
+diff --git a/elf/tst-sprof-basic.c b/elf/tst-sprof-basic.c
+new file mode 100644
+index 0000000000000000..5e4083305a4acdd6
+--- /dev/null
++++ b/elf/tst-sprof-basic.c
+@@ -0,0 +1,25 @@
++/* Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++void hello (void);
++
++int
++main (void)
++{
++  hello ();
++  return 0;
++}
+diff --git a/elf/tst-sprof-basic.sh b/elf/tst-sprof-basic.sh
+new file mode 100755
+index 0000000000000000..901db61708c1b8ec
+--- /dev/null
++++ b/elf/tst-sprof-basic.sh
+@@ -0,0 +1,41 @@
++#!/bin/sh
++# Test basic functionality of sprof
++# Copyright (C) 2023 Free Software Foundation, Inc.
++# This file is part of the GNU C Library.
++
++# The GNU C Library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2.1 of the License, or (at your option) any later version.
++
++# The GNU C Library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++
++# You should have received a copy of the GNU Lesser General Public
++# License along with the GNU C Library; if not, see
++# <https://www.gnu.org/licenses/>.
++
++set -e
++
++common_objpfx=$1
++test_wrapper_env=$2
++run_program_env=$3
++
++sprof_mod=tst-sprof-mod.so
++
++${test_wrapper_env} \
++${run_program_env} \
++LD_PROFILE=$sprof_mod \
++LD_PROFILE_OUTPUT=${common_objpfx}elf \
++LD_LIBRARY_PATH=${common_objpfx}.:${common_objpfx}elf \
++  ${common_objpfx}elf/ld.so ${common_objpfx}elf/tst-sprof-basic
++
++${test_wrapper_env} \
++${run_program_env} \
++LD_LIBRARY_PATH=${common_objpfx}.:${common_objpfx}elf \
++  ${common_objpfx}elf/ld.so ${common_objpfx}elf/sprof -p $sprof_mod \
++  ${common_objpfx}elf/${sprof_mod}.profile
++
++exit $?
+diff --git a/elf/tst-sprof-mod.c b/elf/tst-sprof-mod.c
+new file mode 100644
+index 0000000000000000..8b3f5e8e07f42ae6
+--- /dev/null
++++ b/elf/tst-sprof-mod.c
+@@ -0,0 +1,24 @@
++/* Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++
++void
++hello (void)
++{
++  printf ("Hello World\n");
++}

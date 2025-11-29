@@ -1,0 +1,37 @@
+commit 88f7ef881d1b9507aa934104c338b958c37821d7
+Author: Tulio Magno Quites Machado Filho <tuliom@redhat.com>
+Date:   Fri Jan 31 10:26:22 2025 -0300
+
+    libio: Initialize _total_written for all kinds of streams
+    
+    Move the initialization code to a general place instead of keeping it
+    specific to file-backed streams.
+    
+    Fixes: 596a61cf6b (libio: Start to return errors when flushing fwrite's buffer [BZ #29459], 2025-01-28)
+    Reported-by: Florian Weimer <fweimer@redhat.com>
+    Reviewed-by: Arjun Shankar <arjun@redhat.com>
+
+diff --git a/libio/fileops.c b/libio/fileops.c
+index b2354d42b420b80c..d40748e0fc548fff 100644
+--- a/libio/fileops.c
++++ b/libio/fileops.c
+@@ -114,7 +114,6 @@ _IO_new_file_init_internal (struct _IO_FILE_plus *fp)
+ 
+   _IO_link_in (fp);
+   fp->file._fileno = -1;
+-  fp->file._total_written = 0;
+ }
+ 
+ /* External version of _IO_new_file_init_internal which switches off
+diff --git a/libio/genops.c b/libio/genops.c
+index a82c1b96767e14e0..cf6985938255e70d 100644
+--- a/libio/genops.c
++++ b/libio/genops.c
+@@ -586,6 +586,7 @@ _IO_no_init (FILE *fp, int flags, int orientation,
+        stream.  */
+     fp->_wide_data = (struct _IO_wide_data *) -1L;
+   fp->_freeres_list = NULL;
++  fp->_total_written = 0;
+ }
+ 
+ int

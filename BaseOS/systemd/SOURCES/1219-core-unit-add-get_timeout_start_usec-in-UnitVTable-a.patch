@@ -1,0 +1,52 @@
+From 42c47cd24767a8d1903905735ec4abfa5571cc17 Mon Sep 17 00:00:00 2001
+From: licunlong <licunlong1@huawei.com>
+Date: Thu, 15 Jun 2023 10:47:32 +0800
+Subject: [PATCH] core/unit: add get_timeout_start_usec in UnitVTable and
+ define it for service
+
+(cherry picked from commit f5a9d2ee2a849aca1f2d15485d020142ff33cc30)
+
+Related: RHEL-111630
+---
+ src/core/service.c | 6 ++++++
+ src/core/unit.h    | 3 +++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/src/core/service.c b/src/core/service.c
+index 433df0afe3..305f3b7170 100644
+--- a/src/core/service.c
++++ b/src/core/service.c
+@@ -4383,6 +4383,11 @@ static int service_get_timeout(Unit *u, usec_t *timeout) {
+         return 1;
+ }
+ 
++static usec_t service_get_timeout_start_usec(Unit *u) {
++        Service *s = SERVICE(ASSERT_PTR(u));
++        return s->timeout_start_usec;
++}
++
+ static bool pick_up_pid_from_bus_name(Service *s) {
+         assert(s);
+ 
+@@ -4870,6 +4875,7 @@ const UnitVTable service_vtable = {
+         .bus_commit_properties = bus_service_commit_properties,
+ 
+         .get_timeout = service_get_timeout,
++        .get_timeout_start_usec = service_get_timeout_start_usec,
+         .needs_console = service_needs_console,
+         .exit_status = service_exit_status,
+         .status_text = service_status_text,
+diff --git a/src/core/unit.h b/src/core/unit.h
+index 4bb85b55be..fdea76458d 100644
+--- a/src/core/unit.h
++++ b/src/core/unit.h
+@@ -713,6 +713,9 @@ typedef struct UnitVTable {
+         /* Returns the next timeout of a unit */
+         int (*get_timeout)(Unit *u, usec_t *timeout);
+ 
++        /* Returns the start timeout of a unit */
++        usec_t (*get_timeout_start_usec)(Unit *u);
++
+         /* Returns the main PID if there is any defined, or 0. */
+         pid_t (*main_pid)(Unit *u);
+ 

@@ -1,0 +1,85 @@
+From 981fe5fd80faf511aa265e841a380c9b46be30e6 Mon Sep 17 00:00:00 2001
+From: Jens Remus <jremus@linux.ibm.com>
+Date: Wed, 9 Apr 2025 08:59:24 +0200
+Subject: [PATCH] s390: Add support for z17 as CPU name
+
+So far IBM z17 was identified as arch15.  Add the real name, as it has
+been announced. [1]
+
+[1]: IBM z17 announcement letter, AD25-0015,
+     https://www.ibm.com/docs/en/announcements/z17-makes-more-possible
+
+gas/
+	* config/tc-s390.c (s390_parse_cpu): Add z17 as alternate CPU
+	name for arch15.
+	* doc/c-s390.texi: Likewise.
+	* doc/as.texi: Likewise.
+
+opcodes/
+	* s390-mkopc.c (main): Add z17 as alternate CPU name for arch15.
+
+Signed-off-by: Jens Remus <jremus@linux.ibm.com>
+---
+diff -rup binutils.orig/gas/config/tc-s390.c binutils-2.35.2/gas/config/tc-s390.c
+--- binutils.orig/gas/config/tc-s390.c	2025-04-15 14:56:47.312547273 +0100
++++ binutils-2.35.2/gas/config/tc-s390.c	2025-04-15 14:57:09.926769869 +0100
+@@ -295,7 +295,7 @@ s390_parse_cpu (const char *         arg
+       S390_INSTR_FLAG_HTM | S390_INSTR_FLAG_VX },
+     { STRING_COMMA_LEN ("z16"), STRING_COMMA_LEN ("arch14"),
+       S390_INSTR_FLAG_HTM | S390_INSTR_FLAG_VX },
+-    { STRING_COMMA_LEN (""), STRING_COMMA_LEN ("arch15"),
++    { STRING_COMMA_LEN ("z17"), STRING_COMMA_LEN ("arch15"),
+       S390_INSTR_FLAG_HTM | S390_INSTR_FLAG_VX }
+   };
+   static struct
+Only in binutils-2.35.2/gas/config: tc-s390.c.orig
+diff -rup binutils.orig/gas/doc/as.texi binutils-2.35.2/gas/doc/as.texi
+--- binutils.orig/gas/doc/as.texi	2025-04-15 14:56:47.219547061 +0100
++++ binutils-2.35.2/gas/doc/as.texi	2025-04-15 14:57:09.927100746 +0100
+@@ -1873,7 +1873,8 @@ Specify which s390 processor variant is
+ @samp{arch6}), @samp{z9-109}, @samp{z9-ec} (or @samp{arch7}), @samp{z10} (or
+ @samp{arch8}), @samp{z196} (or @samp{arch9}), @samp{zEC12} (or @samp{arch10}),
+ @samp{z13} (or @samp{arch11}), @samp{z14} (or @samp{arch12}), @samp{z15}
+-(or @samp{arch13}), @samp{z16} (or @samp{arch14}), or @samp{arch15}.
++(or @samp{arch13}), @samp{z16} (or @samp{arch14}), or @samp{z17} (or
++@samp{arch15}).
+ @item -mregnames
+ @itemx -mno-regnames
+ Allow or disallow symbolic names for registers.
+Only in binutils-2.35.2/gas/doc: as.texi.orig
+diff -rup binutils.orig/gas/doc/c-s390.texi binutils-2.35.2/gas/doc/c-s390.texi
+--- binutils.orig/gas/doc/c-s390.texi	2025-04-15 14:56:47.219547061 +0100
++++ binutils-2.35.2/gas/doc/c-s390.texi	2025-04-15 14:57:09.927358592 +0100
+@@ -18,7 +18,8 @@ and eleven chip levels. The architecture
+ Architecture (ESA) and the newer z/Architecture mode. The chip levels
+ are g5 (or arch3), g6, z900 (or arch5), z990 (or arch6), z9-109, z9-ec
+ (or arch7), z10 (or arch8), z196 (or arch9), zEC12 (or arch10), z13
+-(or arch11), z14 (or arch12), z15 (or arch13), z16 (or arch14), or arch15.
++(or arch11), z14 (or arch12), z15 (or arch13), z16 (or arch14), or
++z17 (arch15).
+ 
+ @menu
+ * s390 Options::                Command-line Options.
+@@ -73,7 +74,7 @@ are recognized:
+ @code{z14} (or @code{arch12}),
+ @code{z15} (or @code{arch13}),
+ @code{z16} (or @code{arch14}), and
+-@code{arch15}.
++@code{z17} (or @code{arch15}).
+ 
+ Assembling an instruction that is not supported on the target
+ processor results in an error message.
+diff -rup binutils.orig/opcodes/s390-mkopc.c binutils-2.35.2/opcodes/s390-mkopc.c
+--- binutils.orig/opcodes/s390-mkopc.c	2025-04-15 14:56:46.996546553 +0100
++++ binutils-2.35.2/opcodes/s390-mkopc.c	2025-04-15 14:57:09.927435074 +0100
+@@ -383,7 +383,8 @@ main (void)
+       else if (strcmp (cpu_string, "z16") == 0
+ 	       || strcmp (cpu_string, "arch14") == 0)
+ 	min_cpu = S390_OPCODE_ARCH14;
+-      else if (strcmp (cpu_string, "arch15") == 0)
++      else if (strcmp (cpu_string, "z17") == 0
++	       || strcmp (cpu_string, "arch15") == 0)
+ 	min_cpu = S390_OPCODE_ARCH15;
+       else {
+ 	fprintf (stderr, "Couldn't parse cpu string %s\n", cpu_string);
+Only in binutils-2.35.2/opcodes: s390-mkopc.c.orig

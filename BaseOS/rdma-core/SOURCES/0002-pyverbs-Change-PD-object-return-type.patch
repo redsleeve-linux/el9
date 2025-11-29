@@ -1,0 +1,43 @@
+From 47c3855f3b84c47cb471cbba8090a6997e07be57 Mon Sep 17 00:00:00 2001
+From: Shachar Kagan <skagan@nvidia.com>
+Date: Mon, 28 Apr 2025 17:18:18 +0300
+Subject: [PATCH] pyverbs: Change PD object return type
+
+Change PD object return type to be compatible with Cython 3.x
+
+Signed-off-by: Shachar Kagan <skagan@nvidia.com>
+Signed-off-by: Edward Srouji <edwards@nvidia.com>
+---
+ pyverbs/pd.pyx                            | 2 +-
+ pyverbs/providers/mlx5/mlx5dv_objects.pyx | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/pyverbs/pd.pyx b/pyverbs/pd.pyx
+index 2d84e0b68d10..d8845e8a058b 100644
+--- a/pyverbs/pd.pyx
++++ b/pyverbs/pd.pyx
+@@ -151,7 +151,7 @@ cdef class PD(PyverbsCM):
+ 
+     @property
+     def pd(self):
+-        return <object>self.pd
++        return <uintptr_t>self.pd
+ 
+ 
+ cdef void *pd_alloc(v.ibv_pd *pd, void *pd_context, size_t size,
+diff --git a/pyverbs/providers/mlx5/mlx5dv_objects.pyx b/pyverbs/providers/mlx5/mlx5dv_objects.pyx
+index e7776205a150..0567e81a06e8 100644
+--- a/pyverbs/providers/mlx5/mlx5dv_objects.pyx
++++ b/pyverbs/providers/mlx5/mlx5dv_objects.pyx
+@@ -182,7 +182,7 @@ cdef class Mlx5DvObj(PyverbsObject):
+             self.dv_qp = dv_qp
+         if pd:
+             dv_pd = Mlx5DvPD()
+-            self.obj.pd.in_ = <v.ibv_pd*>pd.pd
++            self.obj.pd.in_ = <v.ibv_pd*><uintptr_t>pd.pd
+             self.obj.pd.out = &(dv_pd.dv_pd)
+             self.dv_pd = dv_pd
+         if srq:
+-- 
+2.49.0
+

@@ -1,0 +1,103 @@
+commit e096b7a1896886eb7dd2732ccbf1184b0eec9a63
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Oct 25 16:50:10 2024 +0200
+
+    elf: Signal LA_ACT_CONSISTENT to auditors after RT_CONSISTENT switch
+    
+    Auditors can call into the dynamic loader again if
+    LA_ACT_CONSISTENT, and  those recursive calls could observe
+    r_state != RT_CONSISTENT.
+    
+    We should consider failing dlopen/dlmopen/dlclose if
+    r_state != RT_CONSISTENT.  The dynamic linker is probably not
+    in a state in which it can handle reentrant calls.  This
+    needs further investigation.
+    
+    Reviewed-by: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+
+Conflicts:
+	elf/rtld.c (kept SHARED guard downstream)
+
+diff --git a/elf/dl-close.c b/elf/dl-close.c
+index bf699e58d753a1e2..8a4c3528a124d4e7 100644
+--- a/elf/dl-close.c
++++ b/elf/dl-close.c
+@@ -759,6 +759,11 @@ _dl_close_worker (struct link_map *map, bool force)
+   /* TLS is cleaned up for the unloaded modules.  */
+   __rtld_lock_unlock_recursive (GL(dl_load_tls_lock));
+ 
++  /* Notify the debugger those objects are finalized and gone.  */
++  r->r_state = RT_CONSISTENT;
++  _dl_debug_state ();
++  LIBC_PROBE (unmap_complete, 2, nsid, r);
++
+ #ifdef SHARED
+   /* Auditing checkpoint: we have deleted all objects.  Also, do not notify
+      auditors of the cleanup of a failed audit module loading attempt.  */
+@@ -771,11 +776,6 @@ _dl_close_worker (struct link_map *map, bool force)
+       --GL(dl_nns);
+     while (GL(dl_ns)[GL(dl_nns) - 1]._ns_loaded == NULL);
+ 
+-  /* Notify the debugger those objects are finalized and gone.  */
+-  r->r_state = RT_CONSISTENT;
+-  _dl_debug_state ();
+-  LIBC_PROBE (unmap_complete, 2, nsid, r);
+-
+   /* Recheck if we need to retry, release the lock.  */
+  out:
+   if (dl_close_state == rerun)
+diff --git a/elf/dl-open.c b/elf/dl-open.c
+index 0b0bfb8acda28caa..5095ea4f96b6cf49 100644
+--- a/elf/dl-open.c
++++ b/elf/dl-open.c
+@@ -638,17 +638,17 @@ dl_open_worker_begin (void *a)
+ #endif
+       }
+ 
+-#ifdef SHARED
+-  /* Auditing checkpoint: we have added all objects.  */
+-  _dl_audit_activity_nsid (new->l_ns, LA_ACT_CONSISTENT);
+-#endif
+-
+   /* Notify the debugger all new objects are now ready to go.  */
+   struct r_debug *r = _dl_debug_update (args->nsid);
+   r->r_state = RT_CONSISTENT;
+   _dl_debug_state ();
+   LIBC_PROBE (map_complete, 3, args->nsid, r, new);
+ 
++#ifdef SHARED
++  /* Auditing checkpoint: we have added all objects.  */
++  _dl_audit_activity_nsid (new->l_ns, LA_ACT_CONSISTENT);
++#endif
++
+   _dl_open_check (new);
+ 
+   /* Print scope information.  */
+diff --git a/elf/rtld.c b/elf/rtld.c
+index 7d8ed0ac1188d527..cd233174c9d944b2 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -2524,11 +2524,6 @@ dl_main (const ElfW(Phdr) *phdr,
+      _dl_relocate_object might need to call `mprotect' for DT_TEXTREL.  */
+   _dl_sysdep_start_cleanup ();
+ 
+-#ifdef SHARED
+-  /* Auditing checkpoint: we have added all objects.  */
+-  _dl_audit_activity_nsid (LM_ID_BASE, LA_ACT_CONSISTENT);
+-#endif
+-
+   /* Notify the debugger all new objects are now ready to go.  We must re-get
+      the address since by now the variable might be in another object.  */
+   r = _dl_debug_update (LM_ID_BASE);
+@@ -2536,6 +2531,11 @@ dl_main (const ElfW(Phdr) *phdr,
+   _dl_debug_state ();
+   LIBC_PROBE (init_complete, 2, LM_ID_BASE, r);
+ 
++#ifdef SHARED
++  /* Auditing checkpoint: we have added all objects.  */
++  _dl_audit_activity_nsid (LM_ID_BASE, LA_ACT_CONSISTENT);
++#endif
++
+ #if defined USE_LDCONFIG && !defined MAP_COPY
+   /* We must munmap() the cache file.  */
+   _dl_unload_cache ();

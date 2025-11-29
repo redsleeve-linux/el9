@@ -1,0 +1,68 @@
+From 0078cf3a12a57fc0576407752c88881dfe7ed4d6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Thu, 5 Dec 2024 13:32:19 +0100
+Subject: [PATCH] test-time-util: do more suppression of time zone checks
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The issue is directly triggered by tzdata-2024b, where the setting of timezone
+started to fail and the tests stopped passing. But those timestamps in 1/1/1970
+appear to have some problems already before:
+
+  $ sudo date -s 'Thu 1970-01-01 13:00:01 WET'
+  Thu Jan  1 03:00:01 PM EET 1970
+  $ sudo date -s 'Thu 1970-01-01 12:00:01 WET'
+  date: cannot set date: Invalid argument
+  Thu Jan  1 02:00:01 PM EET 1970
+  $ rpm -q tzdata
+  tzdata-2024a-9.fc41.noarch
+
+The same issue appears with other timezones. So move the first timestamp one
+day forward to avoid the issue.
+
+After the previous problem is solved, we also get the problem already seen
+previously where the roundtrip returns a time that is off by one hour:
+
+@86401000000 → Fri 1970-01-02 00:00:01 WET → @82801000000 → Thu 1970-01-01 23:00:01 WET
+Assertion 'x / USEC_PER_SEC == y / USEC_PER_SEC' failed at src/test/test-time-util.c:415, function test_format_timestamp_impl(). Aborting.
+
+Extend the override to suppress this.
+
+(cherry picked from commit 3cf362f6f57b7d0b5f6b86a49316303b0dda7599)
+
+Related: RHEL-110954
+---
+ src/test/test-time-util.c | 11 ++++++-----
+ 1 file changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/src/test/test-time-util.c b/src/test/test-time-util.c
+index 2550ffdba2..45d7541415 100644
+--- a/src/test/test-time-util.c
++++ b/src/test/test-time-util.c
+@@ -393,11 +393,12 @@ static void test_format_timestamp_impl(usec_t x) {
+         assert_se(yy);
+ 
+         success = (x / USEC_PER_SEC == y / USEC_PER_SEC) && streq(xx, yy);
+-        /* Workaround for https://github.com/systemd/systemd/issues/28472 */
++        /* Workaround for https://github.com/systemd/systemd/issues/28472
++         * and https://github.com/systemd/systemd/pull/35471. */
+         override = !success &&
+-                   (STRPTR_IN_SET(tzname[0], "CAT", "EAT") ||
+-                    STRPTR_IN_SET(tzname[1], "CAT", "EAT")) &&
+-                   DIV_ROUND_UP(y - x, USEC_PER_SEC) == 3600; /* 1 hour, ignore fractional second */
++                   (STRPTR_IN_SET(tzname[0], "CAT", "EAT", "WET") ||
++                    STRPTR_IN_SET(tzname[1], "CAT", "EAT", "WET")) &&
++                   DIV_ROUND_UP(x > y ? x - y : y - x, USEC_PER_SEC) == 3600; /* 1 hour, ignore fractional second */
+         log_full(success ? LOG_DEBUG : override ? LOG_WARNING : LOG_ERR,
+                  "@" USEC_FMT " → %s → @" USEC_FMT " → %s%s",
+                  x, xx, y, yy,
+@@ -409,7 +410,7 @@ static void test_format_timestamp_impl(usec_t x) {
+ }
+ 
+ static void test_format_timestamp_loop(void) {
+-        test_format_timestamp_impl(USEC_PER_SEC);
++        test_format_timestamp_impl(USEC_PER_DAY + USEC_PER_SEC);
+ 
+         /* Two cases which trigger https://github.com/systemd/systemd/issues/28472 */
+         test_format_timestamp_impl(1504938962980066);

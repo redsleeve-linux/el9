@@ -1,0 +1,37 @@
+From 805c757b16ee8ec65ea9bad9318de3c845490f19 Mon Sep 17 00:00:00 2001
+From: Li Tian <litian@redhat.com>
+Date: Fri, 18 Jul 2025 09:16:20 +0800
+Subject: [PATCH] kernel-install: do not mix || and &&
+
+This also slightly updates log message, and make it shown only when
+verbose mode is enabled.
+
+Signed-off-by: Li Tian <litian@redhat.com>
+
+(cherry picked from commit 9026f17907553b42257e9cc26969143795ae0f44)
+
+Resolves: RHEL-83932
+---
+ src/kernel-install/50-depmod.install | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/src/kernel-install/50-depmod.install b/src/kernel-install/50-depmod.install
+index a3e06c3dbf..4cfea578fd 100755
+--- a/src/kernel-install/50-depmod.install
++++ b/src/kernel-install/50-depmod.install
+@@ -31,11 +31,11 @@ case "$COMMAND" in
+         exec depmod -a "$KERNEL_VERSION"
+         ;;
+     remove)
+-        [ "$KERNEL_INSTALL_BOOT_ENTRY_TYPE" = "type2" ] || \
+-        [ "$KERNEL_INSTALL_BOOT_ENTRY_TYPE" = "type1" ] && \
+-        [ -d "/lib/modules/$KERNEL_VERSION/kernel" ] && \
+-            echo "Multiple entry types exist, not removing modules.dep or associated files." && \
++        if [ -n "$KERNEL_INSTALL_BOOT_ENTRY_TYPE" ] && [ -d "/lib/modules/$KERNEL_VERSION/kernel" ]; then
++            [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && \
++                echo "Multiple entry types may exist, not removing modules.dep or associated files."
+             exit 0
++        fi
+ 
+         [ "$KERNEL_INSTALL_VERBOSE" -gt 0 ] && \
+             echo "Removing /lib/modules/${KERNEL_VERSION}/modules.dep and associated files"

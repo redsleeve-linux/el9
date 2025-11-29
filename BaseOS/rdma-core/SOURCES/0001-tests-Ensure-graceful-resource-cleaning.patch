@@ -1,0 +1,89 @@
+From a9eb7409fb0b6af5dc54ae222286926b6a028ef0 Mon Sep 17 00:00:00 2001
+From: Edward Srouji <edwards@nvidia.com>
+Date: Tue, 4 Mar 2025 16:02:35 +0200
+Subject: [PATCH] tests: Ensure graceful resource cleaning
+
+A SEGFAULT was observed recently on some environments with
+python 3.12.X.
+To work around the issue and ensure that python garbage collector exiting
+gracefully, a new decorator was added that catches SkipTest unittest
+exceptions and closes the context and its underlying resources.
+
+An a example of a segmentation fault occurrence that this test fixes:
+$ python3 tests/run_tests.py test_mlx5_dma_memcpy
+sTraceback (most recent call last):
+  File "cq.pyx", line 359, in pyverbs.cq.CQEX.close
+pyverbs.pyverbs_error.PyverbsRDMAError: Failed to destroy CQEX. Errno:
+9, Bad file descriptor
+Exception ignored in: 'pyverbs.cq.CQEX.__dealloc__'
+Traceback (most recent call last):
+  File "cq.pyx", line 359, in pyverbs.cq.CQEX.close
+pyverbs.pyverbs_error.PyverbsRDMAError: Failed to destroy CQEX. Errno:
+9, Bad file descriptor
+Segmentation fault (core dumped)
+
+Signed-off-by: Edward Srouji <edwards@nvidia.com>
+---
+ tests/base.py | 32 +++++++++++++++++++++++++++++++-
+ 1 file changed, 31 insertions(+), 1 deletion(-)
+
+diff --git a/tests/base.py b/tests/base.py
+index 2738714612ec..c6ffa1beca1a 100644
+--- a/tests/base.py
++++ b/tests/base.py
+@@ -3,6 +3,7 @@
+ 
+ import multiprocessing as mp
+ import subprocess
++import functools
+ import unittest
+ import tempfile
+ import random
+@@ -532,7 +533,35 @@ class RDMACMBaseTest(RDMATestCase):
+         sys.exit(2)
+ 
+ 
+-class BaseResources(object):
++def catch_skiptest(func):
++    """
++    Decorator to catch unittest.SkipTest in __init__ resource functions.
++    It gracefully closes the context and all of its underlying resources.
++    """
++    @functools.wraps(func)
++    def wrapper(self, *args, **kwargs):
++        try:
++            func(self, *args, **kwargs)
++        except unittest.SkipTest as e:
++            if hasattr(self, 'ctx') and self.ctx:
++               self.ctx.close()
++            raise e
++    return wrapper
++
++
++class SkipTestMeta(type):
++    """
++    Metaclass to automatically wrap __init__ in catch_skiptest.
++    It should only be used in resource classes, such as those inheriting from
++    BaseResources.
++    """
++    def __new__(cls, name, bases, dct):
++        if "__init__" in dct:
++            dct["__init__"] = catch_skiptest(dct["__init__"])
++        return super().__new__(cls, name, bases, dct)
++
++
++class BaseResources(object, metaclass=SkipTestMeta):
+     """
+     BaseResources class is a base aggregator object which contains basic
+     resources like Context and PD. It opens a context over the given device
+@@ -548,6 +577,7 @@ class BaseResources(object):
+         self.dev_name = dev_name
+         self.gid_index = gid_index
+         self.ib_port = ib_port
++        self.ctx = None
+         self.create_context()
+         self.create_pd()
+ 
+-- 
+2.49.0
+

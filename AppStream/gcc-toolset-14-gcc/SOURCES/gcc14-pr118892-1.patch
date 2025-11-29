@@ -1,0 +1,39 @@
+From 021ccf9dee0c14455a205f2555326e027e9047d8 Mon Sep 17 00:00:00 2001
+From: Richard Sandiford <richard.sandiford@arm.com>
+Date: Wed, 16 Apr 2025 13:20:25 +0100
+Subject: [PATCH] Make force_subreg emit nothing on failure
+
+While adding more uses of force_subreg, I realised that it should
+be more careful to emit no instructions on failure.  This kind of
+failure should be very rare, so I don't think it's a case worth
+optimising for.
+
+gcc/
+	* explow.cc (force_subreg): Emit no instructions on failure.
+
+(cherry picked from commit 01044471ea39f9be4803c583ef2a946abc657f99)
+---
+ gcc/explow.cc | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/gcc/explow.cc b/gcc/explow.cc
+index f6843398c4b..bd93c878064 100644
+--- a/gcc/explow.cc
++++ b/gcc/explow.cc
+@@ -756,8 +756,12 @@ force_subreg (machine_mode outermode, rtx op,
+   if (x)
+     return x;
+ 
++  auto *start = get_last_insn ();
+   op = copy_to_mode_reg (innermode, op);
+-  return simplify_gen_subreg (outermode, op, innermode, byte);
++  rtx res = simplify_gen_subreg (outermode, op, innermode, byte);
++  if (!res)
++    delete_insns_since (start);
++  return res;
+ }
+ 
+ /* If X is a memory ref, copy its contents to a new temp reg and return
+-- 
+2.50.1
+

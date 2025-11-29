@@ -1,0 +1,79 @@
+From 925e76167ce2465c5c9d990d97c2db99f459640b Mon Sep 17 00:00:00 2001
+From: Josh Stone <jistone@redhat.com>
+Date: Wed, 4 Jun 2025 15:03:19 -0700
+Subject: [PATCH 1/2] Ensure stack in `ThirBuildCx::mirror_exprs`
+
+This solve a stack overflow found on Fedora s390x when building
+`tests/ui/parser/survive-peano-lesson-queue.rs`. Note that the singular
+`mirror_expr` method already has this stack check, but in this case the
+plural method was the one recursing too deeply.
+---
+ compiler/rustc_mir_build/src/thir/cx/expr.rs | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/compiler/rustc_mir_build/src/thir/cx/expr.rs b/compiler/rustc_mir_build/src/thir/cx/expr.rs
+index 226dc920a496c..78c168778ac9d 100644
+--- a/compiler/rustc_mir_build/src/thir/cx/expr.rs
++++ b/compiler/rustc_mir_build/src/thir/cx/expr.rs
+@@ -38,7 +38,10 @@ impl<'tcx> ThirBuildCx<'tcx> {
+     }
+ 
+     pub(crate) fn mirror_exprs(&mut self, exprs: &'tcx [hir::Expr<'tcx>]) -> Box<[ExprId]> {
+-        exprs.iter().map(|expr| self.mirror_expr_inner(expr)).collect()
++        // `mirror_exprs` may also recurse deeply, so it needs protection from stack overflow.
++        // Note that we *could* forward to `mirror_expr` for that, but we can consolidate the
++        // overhead of stack growth by doing it outside the iteration.
++        ensure_sufficient_stack(|| exprs.iter().map(|expr| self.mirror_expr_inner(expr)).collect())
+     }
+ 
+     #[instrument(level = "trace", skip(self, hir_expr))]
+
+From af2a85bd75c011fb3453a4963400918e096e1896 Mon Sep 17 00:00:00 2001
+From: Josh Stone <jistone@redhat.com>
+Date: Wed, 4 Jun 2025 15:16:38 -0700
+Subject: [PATCH 2/2] Ensure stack in `Parser::parse_ty`
+
+This solve a stack overflow found on Fedora s390x when building
+`tests/ui/associated-consts/issue-93775.rs`.
+---
+ compiler/rustc_parse/src/parser/ty.rs | 20 ++++++++++++--------
+ 1 file changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/compiler/rustc_parse/src/parser/ty.rs b/compiler/rustc_parse/src/parser/ty.rs
+index 17481731b1107..6eaec2e29ad48 100644
+--- a/compiler/rustc_parse/src/parser/ty.rs
++++ b/compiler/rustc_parse/src/parser/ty.rs
+@@ -7,6 +7,7 @@ use rustc_ast::{
+     Pinnedness, PolyTraitRef, PreciseCapturingArg, TraitBoundModifiers, TraitObjectSyntax, Ty,
+     TyKind, UnsafeBinderTy,
+ };
++use rustc_data_structures::stack::ensure_sufficient_stack;
+ use rustc_errors::{Applicability, Diag, PResult};
+ use rustc_span::{ErrorGuaranteed, Ident, Span, kw, sym};
+ use thin_vec::{ThinVec, thin_vec};
+@@ -104,14 +105,17 @@ fn can_begin_dyn_bound_in_edition_2015(t: &Token) -> bool {
+ impl<'a> Parser<'a> {
+     /// Parses a type.
+     pub fn parse_ty(&mut self) -> PResult<'a, P<Ty>> {
+-        self.parse_ty_common(
+-            AllowPlus::Yes,
+-            AllowCVariadic::No,
+-            RecoverQPath::Yes,
+-            RecoverReturnSign::Yes,
+-            None,
+-            RecoverQuestionMark::Yes,
+-        )
++        // Make sure deeply nested types don't overflow the stack.
++        ensure_sufficient_stack(|| {
++            self.parse_ty_common(
++                AllowPlus::Yes,
++                AllowCVariadic::No,
++                RecoverQPath::Yes,
++                RecoverReturnSign::Yes,
++                None,
++                RecoverQuestionMark::Yes,
++            )
++        })
+     }
+ 
+     pub(super) fn parse_ty_with_generics_recovery(

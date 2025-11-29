@@ -1,0 +1,74 @@
+From 24ce505814d3c30ae17e34512521e6e87a5336e1 Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekleta@redhat.com>
+Date: Wed, 7 Sep 2022 17:37:34 +0200
+Subject: [PATCH] core: add possibility to not track certain unit types
+
+(cherry picked from commit 88e4bfa62bd2561e04a90dc009e7a3865e0878fb)
+
+Resolves: RHEL-89796
+---
+ docs/ENVIRONMENT.md |  9 +++++++++
+ src/core/unit.c     | 18 ++++++++++++++++++
+ 2 files changed, 27 insertions(+)
+
+diff --git a/docs/ENVIRONMENT.md b/docs/ENVIRONMENT.md
+index 51b1e851ff..54b779d312 100644
+--- a/docs/ENVIRONMENT.md
++++ b/docs/ENVIRONMENT.md
+@@ -272,6 +272,15 @@ All tools:
+   it is either set to `system` or `user` depending on whether the NSS/PAM
+   module is called by systemd in `--system` or `--user` mode.
+ 
++* `$SYSTEMD_SUPPORT_DEVICE`, `$SYSTEMD_SUPPORT_MOUNT`, `$SYSTEMD_SUPPORT_SWAP` -
++  can be set to `0` to mark respective unit type as unsupported. Generally,
++  having less units saves system resources so these options might be useful
++  for cases where we don't need to track given unit type, e.g. `--user` manager
++  often doesn't need to deal with device or swap units because they are
++  handled by the `--system` manager (PID 1). Note that setting certain unit
++  type as unsupported may not prevent loading some units of that type if they
++  are referenced by other units of another supported type.
++
+ `systemd-remount-fs`:
+ 
+ * `$SYSTEMD_REMOUNT_ROOT_RW=1` — if set and no entry for the root directory
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 56580b1716..0d65880ac7 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -22,6 +22,7 @@
+ #include "dbus-unit.h"
+ #include "dbus.h"
+ #include "dropin.h"
++#include "env-util.h"
+ #include "escape.h"
+ #include "execute.h"
+ #include "fd-util.h"
+@@ -4853,11 +4854,28 @@ int unit_setup_dynamic_creds(Unit *u) {
+ }
+ 
+ bool unit_type_supported(UnitType t) {
++        static int8_t cache[_UNIT_TYPE_MAX] = {}; /* -1: disabled, 1: enabled: 0: don't know */
++        int r;
++
+         if (_unlikely_(t < 0))
+                 return false;
+         if (_unlikely_(t >= _UNIT_TYPE_MAX))
+                 return false;
+ 
++        if (cache[t] == 0) {
++                char *e;
++
++                e = strjoina("SYSTEMD_SUPPORT_", unit_type_to_string(t));
++
++                r = getenv_bool(ascii_strupper(e));
++                if (r < 0 && r != -ENXIO)
++                        log_debug_errno(r, "Failed to parse $%s, ignoring: %m", e);
++
++                cache[t] = r == 0 ? -1 : 1;
++        }
++        if (cache[t] < 0)
++                return false;
++
+         if (!unit_vtable[t]->supported)
+                 return true;
+ 

@@ -1,0 +1,74 @@
+From c0f5bfe59f56321ebf62b73724b4a6a12e176946 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 18 Jun 2025 11:47:25 +0200
+Subject: [PATCH] core: make log cycle messages recognizable via message IDs
+
+(cherry picked from commit 5bbad6244ffc3849511c6ca652a27f1af550c599)
+
+Resolves: RHEL-100353
+---
+ src/core/transaction.c    | 9 +++++++--
+ src/systemd/sd-messages.h | 9 +++++++++
+ 2 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/transaction.c b/src/core/transaction.c
+index 747c9101e3..2d4c48b82a 100644
+--- a/src/core/transaction.c
++++ b/src/core/transaction.c
+@@ -3,6 +3,8 @@
+ #include <fcntl.h>
+ #include <unistd.h>
+ 
++#include "sd-messages.h"
++
+ #include "alloc-util.h"
+ #include "bus-common-errors.h"
+ #include "bus-error.h"
+@@ -409,6 +411,7 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
+                 if (cycle_path_text)
+                         log_struct(LOG_WARNING,
+                                    LOG_UNIT_MESSAGE(j->unit, "%s", cycle_path_text),
++                                   LOG_MESSAGE_ID(SD_MESSAGE_UNIT_ORDERING_CYCLE_STR),
+                                    LOG_ITEM("%s", strna(unit_ids)));
+ 
+                 if (delete) {
+@@ -419,7 +422,8 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
+                                                     "Job %s/%s deleted to break ordering cycle starting with %s/%s",
+                                                     delete->unit->id, job_type_to_string(delete->type),
+                                                     j->unit->id, job_type_to_string(j->type)),
+-                                   "%s", strna(unit_ids));
++                                   LOG_MESSAGE_ID(SD_MESSAGE_DELETING_JOB_BECAUSE_ORDERING_CYCLE_STR),
++                                   LOG_ITEM("%s", strna(unit_ids)));
+ 
+                         if (log_get_show_color())
+                                 status = ANSI_HIGHLIGHT_RED " SKIP " ANSI_NORMAL;
+@@ -438,7 +442,8 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
+                 log_struct(LOG_ERR,
+                            LOG_UNIT_MESSAGE(j->unit, "Unable to break cycle starting with %s/%s",
+                                             j->unit->id, job_type_to_string(j->type)),
+-                           "%s", strna(unit_ids));
++                           LOG_MESSAGE_ID(SD_MESSAGE_CANT_BREAK_ORDERING_CYCLE_STR),
++                           LOG_ITEM("%s", strna(unit_ids)));
+ 
+                 return sd_bus_error_setf(e, BUS_ERROR_TRANSACTION_ORDER_IS_CYCLIC,
+                                          "Transaction order is cyclic. See system logs for details.");
+diff --git a/src/systemd/sd-messages.h b/src/systemd/sd-messages.h
+index 51241c9426..67765c0f05 100644
+--- a/src/systemd/sd-messages.h
++++ b/src/systemd/sd-messages.h
+@@ -192,6 +192,15 @@ _SD_BEGIN_DECLARATIONS;
+ #define SD_MESSAGE_TPM_PCR_EXTEND                     SD_ID128_MAKE(3f,7d,5e,f3,e5,4f,43,02,b4,f0,b1,43,bb,27,0c,ab)
+ #define SD_MESSAGE_TPM_PCR_EXTEND_STR                 SD_ID128_MAKE_STR(3f,7d,5e,f3,e5,4f,43,02,b4,f0,b1,43,bb,27,0c,ab)
+ 
++#define SD_MESSAGE_UNIT_ORDERING_CYCLE                SD_ID128_MAKE(f2,7a,3f,94,40,6a,47,83,b9,46,a9,bc,84,9e,94,52)
++#define SD_MESSAGE_UNIT_ORDERING_CYCLE_STR            SD_ID128_MAKE_STR(f2,7a,3f,94,40,6a,47,83,b9,46,a9,bc,84,9e,94,52)
++
++#define SD_MESSAGE_DELETING_JOB_BECAUSE_ORDERING_CYCLE     SD_ID128_MAKE(50,84,36,75,42,f7,47,2d,bc,6a,94,12,5d,5d,eb,ce)
++#define SD_MESSAGE_DELETING_JOB_BECAUSE_ORDERING_CYCLE_STR SD_ID128_MAKE_STR(50,84,36,75,42,f7,47,2d,bc,6a,94,12,5d,5d,eb,ce)
++
++#define SD_MESSAGE_CANT_BREAK_ORDERING_CYCLE          SD_ID128_MAKE(b3,11,2d,da,d1,90,45,53,8c,76,68,5b,a5,91,8a,80)
++#define SD_MESSAGE_CANT_BREAK_ORDERING_CYCLE_STR      SD_ID128_MAKE_STR(b3,11,2d,da,d1,90,45,53,8c,76,68,5b,a5,91,8a,80)
++
+ _SD_END_DECLARATIONS;
+ 
+ #endif

@@ -1,0 +1,81 @@
+From 9d5baaa92c6609191fd2488389562ac1ad1f0fb2 Mon Sep 17 00:00:00 2001
+From: Jonathan Wakely <jwakely@redhat.com>
+Date: Fri, 28 Mar 2025 15:41:41 +0000
+Subject: [PATCH] libstdc++: Fix -Warray-bounds warning in std::vector<bool>
+ [PR110498]
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In this case, we need to tell the compiler that the current size is not
+larger than the new size so that all the existing elements can be copied
+to the new storage. This avoids bogus warnings about overflowing the new
+storage when the compiler can't tell that that cannot happen.
+
+We might as well also hoist the loads of begin() and end() before the
+allocation too. All callers will have loaded at least begin() before
+calling _M_reallocate.
+
+libstdc++-v3/ChangeLog:
+
+	PR libstdc++/110498
+	* include/bits/vector.tcc (vector<bool, A>::_M_reallocate):
+	Hoist loads of begin() and end() before allocation and use them
+	to state an unreachable condition.
+	* testsuite/23_containers/vector/bool/capacity/110498.cc: New
+	test.
+
+Reviewed-by: Tomasz Kamiński <tkaminsk@redhat.com>
+
+(cherry picked from commit aa3aaf2bfb8fcc17076993df4297597b68bc5f60)
+---
+ libstdc++-v3/include/bits/vector.tcc           |  5 ++++-
+ .../vector/bool/capacity/110498.cc             | 18 ++++++++++++++++++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+ create mode 100644 libstdc++-v3/testsuite/23_containers/vector/bool/capacity/110498.cc
+
+diff --git a/libstdc++-v3/include/bits/vector.tcc b/libstdc++-v3/include/bits/vector.tcc
+index dafc2a31a8b..c59c15beacd 100644
+--- a/libstdc++-v3/include/bits/vector.tcc
++++ b/libstdc++-v3/include/bits/vector.tcc
+@@ -1059,9 +1059,12 @@ _GLIBCXX_BEGIN_NAMESPACE_CONTAINER
+     vector<bool, _Alloc>::
+     _M_reallocate(size_type __n)
+     {
++      const iterator __begin = begin(), __end = end();
++      if (size_type(__end - __begin) > __n)
++	__builtin_unreachable();
+       _Bit_pointer __q = this->_M_allocate(__n);
+       iterator __start(std::__addressof(*__q), 0);
+-      iterator __finish(_M_copy_aligned(begin(), end(), __start));
++      iterator __finish(_M_copy_aligned(__begin, __end, __start));
+       this->_M_deallocate();
+       this->_M_impl._M_start = __start;
+       this->_M_impl._M_finish = __finish;
+diff --git a/libstdc++-v3/testsuite/23_containers/vector/bool/capacity/110498.cc b/libstdc++-v3/testsuite/23_containers/vector/bool/capacity/110498.cc
+new file mode 100644
+index 00000000000..d2d09e10d19
+--- /dev/null
++++ b/libstdc++-v3/testsuite/23_containers/vector/bool/capacity/110498.cc
+@@ -0,0 +1,18 @@
++// { dg-options "-O3 -Werror=array-bounds" }
++// { dg-do compile }
++
++// Bug libstdc++/110498
++// Spurious warnings stringop-overflow and array-bounds copying data as bytes
++// into vector::reserve
++
++#include <vector>
++
++void f(std::vector<bool>& v)
++{
++  // Warning emitted when set to any number in the range [1,64].
++  const std::size_t reserve_size = 30;
++
++  v.reserve(reserve_size);
++  v.push_back(0);
++}
++
+-- 
+2.49.0
+

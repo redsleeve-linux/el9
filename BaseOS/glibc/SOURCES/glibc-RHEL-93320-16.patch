@@ -1,0 +1,891 @@
+commit 342cc934a3bf74ac618e2318d738f22ac93257ba
+Author: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+Date:   Mon Jun 14 14:41:31 2021 -0300
+
+    posix: Add terminal control setting support for posix_spawn
+    
+    Currently there is no proper way to set the controlling terminal through
+    posix_spawn in race free manner [1].  This forces shell implementations
+    to keep using fork+exec when launching background process groups,
+    even when using posix_spawn yields better performance.
+    
+    This patch adds a new GNU extension so the creating process can
+    configure the created process terminal group.  This is done with a new
+    flag, POSIX_SPAWN_TCSETPGROUP, along with two new attribute functions:
+    posix_spawnattr_tcsetpgrp_np, and posix_spawnattr_tcgetpgrp_np.
+    The function sets a new attribute, spawn-tcgroupfd, that references to
+    the controlling terminal.
+    
+    The controlling terminal is set after the spawn-pgroup attribute, and
+    uses the spawn-tcgroupfd along with current creating process group
+    (so it is composable with POSIX_SPAWN_SETPGROUP).
+    
+    To create a process and set the controlling terminal, one can use the
+    following sequence:
+    
+        posix_spawnattr_t attr;
+        posix_spawnattr_init (&attr);
+        posix_spawnattr_setflags (&attr, POSIX_SPAWN_TCSETPGROUP);
+        posix_spawnattr_tcsetpgrp_np (&attr, tcfd);
+    
+    If the idea is also to create a new process groups:
+    
+        posix_spawnattr_t attr;
+        posix_spawnattr_init (&attr);
+        posix_spawnattr_setflags (&attr, POSIX_SPAWN_TCSETPGROUP
+                                         | POSIX_SPAWN_SETPGROUP);
+        posix_spawnattr_tcsetpgrp_np (&attr, tcfd);
+        posix_spawnattr_setpgroup (&attr, 0);
+    
+    The controlling terminal file descriptor is ignored if the new flag is
+    not set.
+    
+    This interface is slight different than the one provided by QNX [2],
+    which only provides the POSIX_SPAWN_TCSETPGROUP flag.  The QNX
+    documentation does not specify how the controlling terminal is obtained
+    nor how it iteracts with POSIX_SPAWN_SETPGROUP.  Since a glibc
+    implementation is library based, it is more straightforward and avoid
+    requires additional file descriptor operations to request the caller
+    to setup the controlling terminal file descriptor (and it also allows
+    a bit less error handling by posix_spawn).
+    
+    Checked on x86_64-linux-gnu and i686-linux-gnu.
+    
+    [1] https://github.com/ksh93/ksh/issues/79
+    [2] https://www.qnx.com/developers/docs/7.0.0/index.html#com.qnx.doc.neutrino.lib_ref/topic/p/posix_spawn.html
+    
+    Reviewed-by: Carlos O'Donell <carlos@redhat.com>
+    Tested-by: Carlos O'Donell <carlos@redhat.com>
+
+Conflicts:
+	posix/Makefile
+		Updated for layout change
+	sysdeps/unix/sysv/linux/or1k/libc.abilist
+		Omitted
+
+diff --git a/include/unistd.h b/include/unistd.h
+index 5824485629793ccb..a5f6a5ca673a07cf 100644
+--- a/include/unistd.h
++++ b/include/unistd.h
+@@ -173,6 +173,8 @@ extern int __truncate (const char *path, __off_t __length);
+ extern void *__sbrk (intptr_t __delta);
+ libc_hidden_proto (__sbrk)
+ 
++extern int __tcsetpgrp (int fd, __pid_t pgrp);
++libc_hidden_proto (__tcsetpgrp)
+ 
+ /* This variable is set nonzero at startup if the process's effective
+    IDs differ from its real IDs, or it is otherwise indicated that
+diff --git a/posix/Makefile b/posix/Makefile
+index 4c32a088a73723c7..8cd6963029585e3d 100644
+--- a/posix/Makefile
++++ b/posix/Makefile
+@@ -64,6 +64,7 @@ routines :=								      \
+ 	spawnattr_getpgroup spawnattr_setpgroup spawn spawnp spawni	      \
+ 	spawnattr_getsigmask spawnattr_getschedpolicy spawnattr_getschedparam \
+ 	spawnattr_setsigmask spawnattr_setschedpolicy spawnattr_setschedparam \
++	spawnattr_tcgetpgrp spawnattr_tcsetpgrp				      \
+ 	posix_madvise							      \
+ 	get_child_max sched_cpucount sched_cpualloc sched_cpufree \
+ 	streams-compat \
+@@ -111,7 +112,7 @@ tests		:= test-errno tstgetopt testfnm runtests runptests \
+ 		   tst-sched_getaffinity \
+ 		   tst-cpuset-dynamic \
+ 		   tst-cpuset-static \
+-
++		   tst-spawn6
+ 
+ # Test for the glob symbol version that was replaced in glibc 2.27.
+ ifeq ($(have-GLIBC_2.26)$(build-shared),yesyes)
+@@ -292,6 +293,7 @@ tst-execvpe5-ARGS = -- $(host-test-program-cmd)
+ tst-spawn-ARGS = -- $(host-test-program-cmd)
+ tst-spawn-static-ARGS = $(tst-spawn-ARGS)
+ tst-spawn5-ARGS = -- $(host-test-program-cmd)
++tst-spawn6-ARGS = -- $(host-test-program-cmd)
+ tst-dir-ARGS = `pwd` `cd $(common-objdir)/$(subdir); pwd` `cd $(common-objdir); pwd` $(objpfx)tst-dir
+ tst-chmod-ARGS = $(objdir)
+ tst-vfork3-ARGS = --test-dir=$(objpfx)
+diff --git a/posix/Versions b/posix/Versions
+index a78792135fb6a707..e4f4f649b0f21e85 100644
+--- a/posix/Versions
++++ b/posix/Versions
+@@ -156,6 +156,10 @@ libc {
+     execveat;
+     posix_spawn_file_actions_addclosefrom_np;
+   }
++  GLIBC_2.35 {
++    posix_spawnattr_tcgetpgrp_np;
++    posix_spawnattr_tcsetpgrp_np;
++  }
+   GLIBC_PRIVATE {
+     __libc_fork; __libc_pread; __libc_pwrite;
+     __nanosleep_nocancel; __pause_nocancel;
+diff --git a/posix/spawn.h b/posix/spawn.h
+index 990d8a6ba28855ae..742d4cb6257907b5 100644
+--- a/posix/spawn.h
++++ b/posix/spawn.h
+@@ -34,7 +34,8 @@ typedef struct
+   sigset_t __ss;
+   struct sched_param __sp;
+   int __policy;
+-  int __pad[16];
++  int __ctty_fd;
++  int __pad[15];
+ } posix_spawnattr_t;
+ 
+ 
+@@ -59,6 +60,7 @@ typedef struct
+ #ifdef __USE_GNU
+ # define POSIX_SPAWN_USEVFORK		0x40
+ # define POSIX_SPAWN_SETSID		0x80
++# define POSIX_SPAWN_TCSETPGROUP	0x100
+ #endif
+ 
+ 
+@@ -166,6 +168,18 @@ extern int posix_spawnattr_setschedparam (posix_spawnattr_t *__restrict __attr,
+ 					  __restrict __schedparam)
+      __THROW __nonnull ((1, 2));
+ 
++#ifdef __USE_GNU
++/* Make the spawned process the foreground process group on the terminal
++   associated with FD (which must be a controlling terminal, and still be
++   associated with its session).  */
++extern int posix_spawnattr_tcsetpgrp_np (posix_spawnattr_t *__attr, int fd)
++     __THROW __nonnull ((1));
++
++/* Return the associated terminal FD in the attribute structure.  */
++extern int posix_spawnattr_tcgetpgrp_np (const posix_spawnattr_t *
++					 __restrict __attr, int *fd)
++     __THROW __nonnull ((1, 2));
++#endif
+ 
+ /* Initialize data structure for file attribute for `spawn' call.  */
+ extern int posix_spawn_file_actions_init (posix_spawn_file_actions_t *
+diff --git a/posix/spawnattr_setflags.c b/posix/spawnattr_setflags.c
+index 2b033a50fc08180f..95f521d04d71aca2 100644
+--- a/posix/spawnattr_setflags.c
++++ b/posix/spawnattr_setflags.c
+@@ -26,7 +26,8 @@
+ 		   | POSIX_SPAWN_SETSCHEDPARAM				      \
+ 		   | POSIX_SPAWN_SETSCHEDULER				      \
+ 		   | POSIX_SPAWN_SETSID					      \
+-		   | POSIX_SPAWN_USEVFORK)
++		   | POSIX_SPAWN_USEVFORK				      \
++		   | POSIX_SPAWN_TCSETPGROUP)
+ 
+ /* Store flags in the attribute structure.  */
+ int
+diff --git a/posix/spawnattr_tcgetpgrp.c b/posix/spawnattr_tcgetpgrp.c
+new file mode 100644
+index 0000000000000000..8db33e447498ce7d
+--- /dev/null
++++ b/posix/spawnattr_tcgetpgrp.c
+@@ -0,0 +1,26 @@
++/* Get the controlling terminal option.
++   Copyright (C) 2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <spawn.h>
++
++int
++posix_spawnattr_tcgetpgrp_np (const posix_spawnattr_t *attr, int *fd)
++{
++  *fd = attr->__ctty_fd;
++  return 0;
++}
+diff --git a/posix/spawnattr_tcsetpgrp.c b/posix/spawnattr_tcsetpgrp.c
+new file mode 100644
+index 0000000000000000..c3b2ea2718e2a1f3
+--- /dev/null
++++ b/posix/spawnattr_tcsetpgrp.c
+@@ -0,0 +1,26 @@
++/* Set the controlling terminal option.
++   Copyright (C) 2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <spawn.h>
++
++int
++posix_spawnattr_tcsetpgrp_np (posix_spawnattr_t *attr, int fd)
++{
++  attr->__ctty_fd = fd;
++  return 0;
++}
+diff --git a/posix/tst-spawn6.c b/posix/tst-spawn6.c
+new file mode 100644
+index 0000000000000000..5f95bd1938a69552
+--- /dev/null
++++ b/posix/tst-spawn6.c
+@@ -0,0 +1,175 @@
++/* Check posix_spawn set controlling terminal extension.
++   Copyright (C) 2022 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <array_length.h>
++#include <errno.h>
++#include <fcntl.h>
++#include <getopt.h>
++#include <intprops.h>
++#include <paths.h>
++#include <spawn.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <string.h>
++#include <support/check.h>
++#include <support/xunistd.h>
++#include <sys/wait.h>
++
++static int
++handle_restart (const char *argv1)
++{
++  int fd = xopen (_PATH_TTY, O_RDONLY, 0600);
++
++  /* If process group is not changed (POSIX_SPAWN_SETPGROUP), then check
++     the creating process one, otherwise check against the process group
++     itself.  */
++  pid_t pgrp;
++  if (strcmp (argv1, "setgrpr") != 0)
++    TEST_COMPARE (sscanf (argv1, "%d", &pgrp), 1);
++  else
++    {
++      pgrp = getpgrp ();
++      /* Check if a new process group was actually created.  */
++      pid_t ppid = getppid ();
++      pid_t pgid = getpgid (ppid);
++      TEST_VERIFY (pgid != pgrp);
++    }
++
++  TEST_COMPARE (tcgetpgrp (fd), pgrp);
++
++  xclose (fd);
++  return 0;
++}
++
++static int restart;
++#define CMDLINE_OPTIONS \
++  { "restart", no_argument, &restart, 1 },
++
++static void
++run_subprogram (int argc, char *argv[], const posix_spawnattr_t *attr,
++		int exp_err)
++{
++  short int flags;
++  TEST_COMPARE (posix_spawnattr_getflags (attr, &flags), 0);
++  bool setpgrp = flags & POSIX_SPAWN_SETPGROUP;
++
++  char *spargv[9];
++  char pgrp[INT_STRLEN_BOUND (pid_t)];
++
++  int i = 0;
++  for (; i < argc - 1; i++)
++    spargv[i] = argv[i + 1];
++  spargv[i++] = (char *) "--direct";
++  spargv[i++] = (char *) "--restart";
++  if (setpgrp)
++    spargv[i++] = (char *) "setgrpr";
++  else
++    {
++      snprintf (pgrp, sizeof pgrp, "%d", getpgrp ());
++      spargv[i++] = pgrp;
++    }
++  spargv[i] = NULL;
++  TEST_VERIFY_EXIT (i < array_length (spargv));
++
++  pid_t pid;
++  TEST_COMPARE (posix_spawn (&pid, argv[1], NULL, attr, spargv, environ),
++		exp_err);
++  if (exp_err != 0)
++    return;
++
++  int status;
++  TEST_COMPARE (xwaitpid (pid, &status, WUNTRACED), pid);
++  TEST_VERIFY (WIFEXITED (status));
++  TEST_VERIFY (!WIFSTOPPED (status));
++  TEST_VERIFY (!WIFSIGNALED (status));
++  TEST_COMPARE (WEXITSTATUS (status), 0);
++}
++
++static int
++do_test (int argc, char *argv[])
++{
++  /* We must have either:
++     - four parameters left if called initially:
++       + path to ld.so         optional
++       + "--library-path"      optional
++       + the library path      optional
++       + the application name
++     - six parameters left if called through re-execution:
++       + --setgrpr             optional
++   */
++
++  if (restart)
++    return handle_restart (argv[1]);
++
++  int tcfd = xopen (_PATH_TTY, O_RDONLY, 0600);
++
++  /* Check getters and setters.  */
++  {
++    posix_spawnattr_t attr;
++    TEST_COMPARE (posix_spawnattr_init (&attr), 0);
++    TEST_COMPARE (posix_spawnattr_tcsetpgrp_np (&attr, tcfd), 0);
++
++    int fd;
++    TEST_COMPARE (posix_spawnattr_tcgetpgrp_np (&attr, &fd), 0);
++    TEST_COMPARE (tcfd, fd);
++  }
++
++  /* Check setting the controlling terminal without changing the group.  */
++  {
++    posix_spawnattr_t attr;
++    TEST_COMPARE (posix_spawnattr_init (&attr), 0);
++    TEST_COMPARE (posix_spawnattr_setflags (&attr, POSIX_SPAWN_TCSETPGROUP),
++		  0);
++    TEST_COMPARE (posix_spawnattr_tcsetpgrp_np (&attr, tcfd), 0);
++
++    run_subprogram (argc, argv, &attr, 0);
++  }
++
++  /* Check setting both the controlling terminal and the create a new process
++     group.  */
++  {
++    posix_spawnattr_t attr;
++    TEST_COMPARE (posix_spawnattr_init (&attr), 0);
++    TEST_COMPARE (posix_spawnattr_setflags (&attr, POSIX_SPAWN_TCSETPGROUP
++						   | POSIX_SPAWN_SETPGROUP),
++		  0);
++    TEST_COMPARE (posix_spawnattr_setpgroup (&attr, 0), 0);
++    TEST_COMPARE (posix_spawnattr_tcsetpgrp_np (&attr, tcfd), 0);
++
++    run_subprogram (argc, argv, &attr, 0);
++  }
++
++  /* Trying to set the controlling terminal after a setsid incurs in a ENOTTY
++     from tcsetpgrp.  */
++  {
++    posix_spawnattr_t attr;
++    TEST_COMPARE (posix_spawnattr_init (&attr), 0);
++    TEST_COMPARE (posix_spawnattr_setflags (&attr, POSIX_SPAWN_TCSETPGROUP
++						   | POSIX_SPAWN_SETSID), 0);
++    TEST_COMPARE (posix_spawnattr_tcsetpgrp_np (&attr, tcfd), 0);
++
++    run_subprogram (argc, argv, &attr, ENOTTY);
++  }
++
++  xclose (tcfd);
++
++  return 0;
++}
++
++#define TEST_FUNCTION_ARGV do_test
++#include <support/test-driver.c>
+diff --git a/sysdeps/mach/hurd/spawni.c b/sysdeps/mach/hurd/spawni.c
+index 060e389bbbd2d1de..4d71181643c19b0d 100644
+--- a/sysdeps/mach/hurd/spawni.c
++++ b/sysdeps/mach/hurd/spawni.c
+@@ -390,6 +390,19 @@ retry:
+   if (!err && (flags & POSIX_SPAWN_SETPGROUP) != 0)
+     err = __proc_setpgrp (proc, new_pid, attrp->__pgrp);
+ 
++  /* Set the controlling terminal.  */
++  if (!err && (flags & POSIX_SPAWN_TCSETPGROUP) != 0)
++    {
++      pid_t pgrp;
++      /* Check if it is possible to avoid an extra syscall.  */
++      if ((attrp->__flags & POSIX_SPAWN_SETPGROUP) != 0 && attrp->__pgrp != 0)
++	pgrp = attrp->__pgrp;
++      else
++	err = __proc_getpgrp (proc, new_pid, &pgrp);
++      if (!err)
++        err = __tcsetpgrp (attrp->__ctty_fd, pgrp);
++    }
++
+   /* Set the effective user and group IDs.  */
+   if (!err && (flags & POSIX_SPAWN_RESETIDS) != 0)
+     {
+diff --git a/sysdeps/unix/bsd/tcsetpgrp.c b/sysdeps/unix/bsd/tcsetpgrp.c
+index 98c88db3ae879a17..3930b4f674172195 100644
+--- a/sysdeps/unix/bsd/tcsetpgrp.c
++++ b/sysdeps/unix/bsd/tcsetpgrp.c
+@@ -22,7 +22,9 @@
+ 
+ /* Set the foreground process group ID of FD set PGRP_ID.  */
+ int
+-tcsetpgrp (int fd, pid_t pgrp_id)
++__tcsetpgrp (int fd, pid_t pgrp_id)
+ {
+   return __ioctl (fd, TIOCSPGRP, &pgrp_id);
+ }
++weak_alias (__tcsetpgrp, tcsetpgrp)
++libc_hidden_def (__tcsetpgrp)
+diff --git a/sysdeps/unix/sysv/linux/aarch64/libc.abilist b/sysdeps/unix/sysv/linux/aarch64/libc.abilist
+index c1a5ee90e6d4c63e..9dd574d9e2a7b541 100644
+--- a/sysdeps/unix/sysv/linux/aarch64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/aarch64/libc.abilist
+@@ -2615,3 +2615,5 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+diff --git a/sysdeps/unix/sysv/linux/alpha/libc.abilist b/sysdeps/unix/sysv/linux/alpha/libc.abilist
+index 1a30d0666bb76f41..f66704877eb43052 100644
+--- a/sysdeps/unix/sysv/linux/alpha/libc.abilist
++++ b/sysdeps/unix/sysv/linux/alpha/libc.abilist
+@@ -2712,6 +2712,8 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/arc/libc.abilist b/sysdeps/unix/sysv/linux/arc/libc.abilist
+index e5dfdab357c72440..97aa3da1ad15a459 100644
+--- a/sysdeps/unix/sysv/linux/arc/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arc/libc.abilist
+@@ -2376,3 +2376,5 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+diff --git a/sysdeps/unix/sysv/linux/arm/be/libc.abilist b/sysdeps/unix/sysv/linux/arm/be/libc.abilist
+index 4d3fd872788ba1f0..18f4364856980df6 100644
+--- a/sysdeps/unix/sysv/linux/arm/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arm/be/libc.abilist
+@@ -495,6 +495,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0xa0
+ GLIBC_2.4 _IO_2_1_stdin_ D 0xa0
+diff --git a/sysdeps/unix/sysv/linux/arm/le/libc.abilist b/sysdeps/unix/sysv/linux/arm/le/libc.abilist
+index 009dc9da14ee5eed..2c12c020b1f2f320 100644
+--- a/sysdeps/unix/sysv/linux/arm/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/arm/le/libc.abilist
+@@ -492,6 +492,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0xa0
+ GLIBC_2.4 _IO_2_1_stdin_ D 0xa0
+diff --git a/sysdeps/unix/sysv/linux/csky/libc.abilist b/sysdeps/unix/sysv/linux/csky/libc.abilist
+index df8da506cde36eeb..7f28516feb9b3ce0 100644
+--- a/sysdeps/unix/sysv/linux/csky/libc.abilist
++++ b/sysdeps/unix/sysv/linux/csky/libc.abilist
+@@ -2651,3 +2651,5 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+diff --git a/sysdeps/unix/sysv/linux/hppa/libc.abilist b/sysdeps/unix/sysv/linux/hppa/libc.abilist
+index 7ea1b017d05cc1fb..9776f20763a46963 100644
+--- a/sysdeps/unix/sysv/linux/hppa/libc.abilist
++++ b/sysdeps/unix/sysv/linux/hppa/libc.abilist
+@@ -2600,6 +2600,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/i386/libc.abilist b/sysdeps/unix/sysv/linux/i386/libc.abilist
+index 99ccf354b3d1a762..96b50d0a9bd68a19 100644
+--- a/sysdeps/unix/sysv/linux/i386/libc.abilist
++++ b/sysdeps/unix/sysv/linux/i386/libc.abilist
+@@ -2784,6 +2784,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/ia64/libc.abilist b/sysdeps/unix/sysv/linux/ia64/libc.abilist
+index 201542d1e76daa60..9b2eebfbf1b91f06 100644
+--- a/sysdeps/unix/sysv/linux/ia64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/ia64/libc.abilist
+@@ -2550,6 +2550,8 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist b/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
+index 32fd72a78df65bd8..71cd35488e3b60ab 100644
+--- a/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
++++ b/sysdeps/unix/sysv/linux/m68k/coldfire/libc.abilist
+@@ -496,6 +496,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 _Exit F
+ GLIBC_2.4 _IO_2_1_stderr_ D 0x98
+ GLIBC_2.4 _IO_2_1_stdin_ D 0x98
+diff --git a/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist b/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
+index d26f0ae6c2475984..ced01a501dd816a6 100644
+--- a/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
++++ b/sysdeps/unix/sysv/linux/m68k/m680x0/libc.abilist
+@@ -2727,6 +2727,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist b/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
+index 520ca0882d8d720b..5406c01f1de62803 100644
+--- a/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/microblaze/be/libc.abilist
+@@ -2700,3 +2700,5 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+diff --git a/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist b/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
+index 9162c3139661b2c9..53b8ade4c3c16c9f 100644
+--- a/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/microblaze/le/libc.abilist
+@@ -2697,3 +2697,5 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
+index 656fdbdcaa70dad6..919973ea46866c8a 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips32/fpu/libc.abilist
+@@ -2692,6 +2692,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
+index 5f0b90d318030622..cf5a8dc1208d1f45 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips32/nofpu/libc.abilist
+@@ -2690,6 +2690,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
+index 9f4891fc08d71521..003c3bd0a6bb0595 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n32/libc.abilist
+@@ -2698,6 +2698,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist b/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
+index f1b0644bc33ba065..73629c2f21aed4a3 100644
+--- a/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/mips/mips64/n64/libc.abilist
+@@ -2601,6 +2601,8 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/nios2/libc.abilist b/sysdeps/unix/sysv/linux/nios2/libc.abilist
+index 1cf88e38b943eeb9..9e8645ebc0a996a7 100644
+--- a/sysdeps/unix/sysv/linux/nios2/libc.abilist
++++ b/sysdeps/unix/sysv/linux/nios2/libc.abilist
+@@ -2739,3 +2739,5 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
+index 9692335d106f9400..3d1ba9887c327899 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/fpu/libc.abilist
+@@ -2754,6 +2754,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
+index 7da0ed59f2ccb080..d979a3b93b98cc5a 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc32/nofpu/libc.abilist
+@@ -2787,6 +2787,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
+index 72cf6851988a7b91..44688e52cf99e9fc 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/be/libc.abilist
+@@ -2509,6 +2509,8 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
+index ee7f67f4d09ba7ae..40682711eb73fb12 100644
+--- a/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/powerpc/powerpc64/le/libc.abilist
+@@ -2811,3 +2811,5 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist b/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
+index b8c0854508ec8714..e239d626b32e03ba 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/riscv/rv32/libc.abilist
+@@ -2378,3 +2378,5 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+diff --git a/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist b/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
+index 90f331fc0bc06278..ab0c4e70927d3dc0 100644
+--- a/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/riscv/rv64/libc.abilist
+@@ -2578,3 +2578,5 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist b/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
+index ded5e3c0ce4da82c..74e3a4651f215344 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/s390/s390-32/libc.abilist
+@@ -2752,6 +2752,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist b/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
+index 4b262992540d18d6..e5553f06b205f0cf 100644
+--- a/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/s390/s390-64/libc.abilist
+@@ -2546,6 +2546,8 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/sh/be/libc.abilist b/sysdeps/unix/sysv/linux/sh/be/libc.abilist
+index 8bfd716fd238a35b..9662041cd4c5df83 100644
+--- a/sysdeps/unix/sysv/linux/sh/be/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sh/be/libc.abilist
+@@ -2607,6 +2607,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/sh/le/libc.abilist b/sysdeps/unix/sysv/linux/sh/le/libc.abilist
+index 47fd204d84ea2432..bf90e924a671f1c1 100644
+--- a/sysdeps/unix/sysv/linux/sh/le/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sh/le/libc.abilist
+@@ -2604,6 +2604,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist b/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
+index 9b82f15109ca4b1a..ddb0d0621f80426b 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sparc/sparc32/libc.abilist
+@@ -2747,6 +2747,8 @@ GLIBC_2.35 __epoll_pwait2_time64 F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 _IO_fprintf F
+ GLIBC_2.4 _IO_printf F
+ GLIBC_2.4 _IO_sprintf F
+diff --git a/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist b/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
+index 94caf012a7e9cada..ca14224cb7d5740d 100644
+--- a/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/sparc/sparc64/libc.abilist
+@@ -2573,6 +2573,8 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/spawni.c b/sysdeps/unix/sysv/linux/spawni.c
+index 6b0bade4d41eafd5..601850638d538ae0 100644
+--- a/sysdeps/unix/sysv/linux/spawni.c
++++ b/sysdeps/unix/sysv/linux/spawni.c
+@@ -164,6 +164,17 @@ __spawni_child (void *arguments)
+       && __setpgid (0, attr->__pgrp) != 0)
+     goto fail;
+ 
++  /* Set the controlling terminal.  */
++  if ((attr->__flags & POSIX_SPAWN_TCSETPGROUP) != 0)
++    {
++      /* Check if it is possible to avoid an extra syscall.  */
++      pid_t pgrp = (attr->__flags & POSIX_SPAWN_SETPGROUP) != 0
++		    && attr->__pgrp != 0
++		   ? attr->__pgrp : __getpgid (0);
++      if (__tcsetpgrp (attr->__ctty_fd, pgrp) != 0)
++	goto fail;
++    }
++
+   /* Set the effective user and group IDs.  */
+   if ((attr->__flags & POSIX_SPAWN_RESETIDS) != 0
+       && (local_seteuid (__getuid ()) != 0
+diff --git a/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist b/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
+index 140e9e8c1ce7dd37..661d928adf2ac13c 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
++++ b/sysdeps/unix/sysv/linux/x86_64/64/libc.abilist
+@@ -2524,6 +2524,8 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+ GLIBC_2.4 __confstr_chk F
+ GLIBC_2.4 __fgets_chk F
+ GLIBC_2.4 __fgets_unlocked_chk F
+diff --git a/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist b/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
+index 04d13ce27e3747f5..bb8058dfa4144bbc 100644
+--- a/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
++++ b/sysdeps/unix/sysv/linux/x86_64/x32/libc.abilist
+@@ -2630,3 +2630,5 @@ GLIBC_2.34 tss_set F
+ GLIBC_2.35 __memcmpeq F
+ GLIBC_2.35 _dl_find_object F
+ GLIBC_2.35 epoll_pwait2 F
++GLIBC_2.35 posix_spawnattr_tcgetpgrp_np F
++GLIBC_2.35 posix_spawnattr_tcsetpgrp_np F
+diff --git a/termios/tcsetpgrp.c b/termios/tcsetpgrp.c
+index 05630cd04cb5f83a..9bd94a70bc9e879f 100644
+--- a/termios/tcsetpgrp.c
++++ b/termios/tcsetpgrp.c
+@@ -21,7 +21,7 @@
+ 
+ /* Set the foreground process group ID of FD set PGRP_ID.  */
+ int
+-tcsetpgrp (int fd, pid_t pgrp_id)
++__tcsetpgrp (int fd, pid_t pgrp_id)
+ {
+   if (fd < 0)
+     {
+@@ -32,6 +32,7 @@ tcsetpgrp (int fd, pid_t pgrp_id)
+   __set_errno (ENOSYS);
+   return -1;
+ }
+-
++weak_alias (__tcsetpgrp, tcsetpgrp);
++libc_hidden_def (__tcsetpgrp)
+ 
+ stub_warning (tcsetpgrp)

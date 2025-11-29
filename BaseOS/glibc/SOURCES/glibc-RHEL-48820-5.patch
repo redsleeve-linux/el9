@@ -1,0 +1,228 @@
+commit 706209867f1ba89c458033408d419e92d8055f58
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Jan 7 09:18:07 2025 +0100
+
+    elf: Second ld.so relocation only if libc.so has been loaded
+    
+    Commit 8f8dd904c4a2207699bb666f30acceb5209c8d3f (“elf:
+    rtld_multiple_ref is always true”) removed some code that happened
+    to enable compatibility with programs that do not link against
+    libc.so.  Such programs cannot call dlopen or any dynamic linker
+    functions (except __tls_get_addr), so this is not really useful.
+    Still ld.so should not crash with a null-pointer dereference
+    or undefined symbol reference in these cases.
+    
+    In the main relocation loop, call _dl_relocate_object unconditionally
+    because it already checks if the object has been relocated.
+    
+    If libc.so was loaded, self-relocate ld.so against it and call
+    __rtld_mutex_init and __rtld_malloc_init_real to activate the full
+    implementations.  Those are available only if libc.so is there,
+    so skip these initialization steps if libc.so is absent.  Without
+    libc.so, the global scope can be completely empty.  This can cause
+    ld.so self-relocation to fail because if it uses symbol-based
+    relocations, which is why the second ld.so self-relocation is not
+    performed if libc.so is missing.
+    
+    The previous concern regarding GOT updates through self-relocation
+    no longer applies because function pointers are updated
+    explicitly through __rtld_mutex_init and __rtld_malloc_init_real,
+    and not through relocation.  However, the second ld.so self-relocation
+    is still delayed, in case there are other symbols being used.
+    
+    Fixes commit 8f8dd904c4a2207699bb666f30acceb5209c8d3f (“elf:
+    rtld_multiple_ref is always true”).
+    
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+Conflicts:
+	elf/Makefile (fixup context)
+	elf/rtld.c (
+	  - Patch off due to prelink code
+	  - "elf: Move _dl_rtld_map, _dl_rtld_audit_state out of GL" not
+	    ported downstream
+	)
+
+diff --git a/elf/Makefile b/elf/Makefile
+index 0c8e0d794bac640f..d30f7f67e73a646e 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -2905,3 +2905,20 @@ tst-rtld-no-malloc-audit-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
+ 
+ # Any shared object should do.
+ tst-rtld-no-malloc-preload-ENV = LD_PRELOAD=$(objpfx)tst-auditmod1.so
++
++# These rules link and run the special elf/tst-nolink-libc-* tests if
++# a port adds them to the tests variables.  Neither test variant is
++# linked against libc.so, but tst-nolink-libc-1 is linked against
++# ld.so.  The test is always run directly, not under the dynamic
++# linker.
++CFLAGS-tst-nolink-libc.c += $(no-stack-protector)
++$(objpfx)tst-nolink-libc-1: $(objpfx)tst-nolink-libc.o $(objpfx)ld.so
++	$(LINK.o) -nostdlib -nostartfiles -o $@ $< \
++	  -Wl,--dynamic-linker=$(objpfx)ld.so,--no-as-needed $(objpfx)ld.so
++$(objpfx)tst-nolink-libc-1.out: $(objpfx)tst-nolink-libc-1 $(objpfx)ld.so
++	$< > $@ 2>&1; $(evaluate-test)
++$(objpfx)tst-nolink-libc-2: $(objpfx)tst-nolink-libc.o
++	$(LINK.o) -nostdlib -nostartfiles -o $@ $< \
++	  -Wl,--dynamic-linker=$(objpfx)ld.so
++$(objpfx)tst-nolink-libc-2.out: $(objpfx)tst-nolink-libc-2 $(objpfx)ld.so
++	$< > $@ 2>&1; $(evaluate-test)
+diff --git a/elf/rtld.c b/elf/rtld.c
+index 3436dd918e699080..d3d9e6b904ac78fd 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -2410,25 +2410,25 @@ dl_main (const ElfW(Phdr) *phdr,
+     }
+   else
+     {
+-      /* Now we have all the objects loaded.  Relocate them all except for
+-	 the dynamic linker itself.  We do this in reverse order so that copy
+-	 relocs of earlier objects overwrite the data written by later
+-	 objects.  We do not re-relocate the dynamic linker itself in this
+-	 loop because that could result in the GOT entries for functions we
+-	 call being changed, and that would break us.  It is safe to relocate
+-	 the dynamic linker out of order because it has no copy relocations.
+-	 Likewise for libc, which is relocated early to ensure that IFUNC
+-	 resolvers in libc work.  */
++      /* Now we have all the objects loaded.  */
+ 
+       int consider_profiling = GLRO(dl_profile) != NULL;
+ 
+       /* If we are profiling we also must do lazy reloaction.  */
+       GLRO(dl_lazy) |= consider_profiling;
+ 
++      /* If libc.so has been loaded, relocate it early, after the dynamic
++         loader itself.  The initial self-relocation of ld.so should be
++         sufficient for IFUNC resolvers in libc.so.  */
+       if (GL(dl_ns)[LM_ID_BASE].libc_map != NULL)
+-	_dl_relocate_object (GL(dl_ns)[LM_ID_BASE].libc_map,
+-			     GL(dl_ns)[LM_ID_BASE].libc_map->l_scope,
+-			     GLRO(dl_lazy) ? RTLD_LAZY : 0, consider_profiling);
++	{
++	  RTLD_TIMING_VAR (start);
++	  rtld_timer_start (&start);
++	  _dl_relocate_object (GL(dl_ns)[LM_ID_BASE].libc_map,
++			       GL(dl_ns)[LM_ID_BASE].libc_map->l_scope,
++			       GLRO(dl_lazy) ? RTLD_LAZY : 0, consider_profiling);
++	  rtld_timer_accum (&relocate_time, start);
++	}
+ 
+       RTLD_TIMING_VAR (start);
+       rtld_timer_start (&start);
+@@ -2450,9 +2450,8 @@ dl_main (const ElfW(Phdr) *phdr,
+ 	  /* Also allocated with the fake malloc().  */
+ 	  l->l_free_initfini = 0;
+ 
+-	  if (l != &GL(dl_rtld_map))
+-	    _dl_relocate_object (l, l->l_scope, GLRO(dl_lazy) ? RTLD_LAZY : 0,
+-				 consider_profiling);
++	  _dl_relocate_object (l, l->l_scope, GLRO(dl_lazy) ? RTLD_LAZY : 0,
++			       consider_profiling);
+ 
+ 	  /* Add object to slot information data if necessasy.  */
+ 	  if (l->l_tls_blocksize != 0 && __rtld_tls_init_tp_called)
+@@ -2495,25 +2494,22 @@ dl_main (const ElfW(Phdr) *phdr,
+ 
+   if (! prelinked)
+     {
+-      /* Likewise for the locking implementation.  */
+-      __rtld_mutex_init ();
+-
+-      /* Re-relocate ourselves with user-controlled symbol definitions.  */
+-
+-      RTLD_TIMING_VAR (start);
+-      rtld_timer_start (&start);
+-
+-      _dl_relocate_object_no_relro (&GL(dl_rtld_map), main_map->l_scope, 0, 0);
+-
+-      /* The malloc implementation has been relocated, so resolving
+-         its symbols (and potentially calling IFUNC resolvers) is safe
+-         at this point.  */
+-      __rtld_malloc_init_real (main_map);
++      /* If libc.so was loaded, relocate ld.so against it.  Complete ld.so
++	 initialization with mutex symbols from libc.so and malloc symbols
++	 from the global scope.  */
++      if (GL(dl_ns)[LM_ID_BASE].libc_map != NULL)
++	{
++	  RTLD_TIMING_VAR (start);
++	  rtld_timer_start (&start);
++	  _dl_relocate_object_no_relro (&GL(dl_rtld_map), main_map->l_scope, 0, 0);
++	  rtld_timer_accum (&relocate_time, start);
+ 
+-      if (GL(dl_rtld_map).l_relro_size != 0)
+-        _dl_protect_relro (&GL(dl_rtld_map));
++	  __rtld_mutex_init ();
++	  __rtld_malloc_init_real (main_map);
++	}
+ 
+-      rtld_timer_accum (&relocate_time, start);
++      /* All ld.so initialization is complete.  Apply RELRO.  */
++      _dl_protect_relro (&GL(dl_rtld_map));
+     }
+ 
+   /* Relocation is complete.  Perform early libc initialization.  This
+diff --git a/sysdeps/unix/sysv/linux/Makefile b/sysdeps/unix/sysv/linux/Makefile
+index 460ba54a8afcc515..94eb2665b27371a4 100644
+--- a/sysdeps/unix/sysv/linux/Makefile
++++ b/sysdeps/unix/sysv/linux/Makefile
+@@ -393,7 +393,15 @@ libof-lddlibc4 = lddlibc4
+ others += pldd
+ install-bin += pldd
+ $(objpfx)pldd: $(objpfx)xmalloc.o
++
++test-internal-extras += tst-nolink-libc
++ifeq ($(run-built-tests),yes)
++tests-special += \
++  $(objpfx)tst-nolink-libc-1.out \
++  $(objpfx)tst-nolink-libc-2.out \
++  # tests-special
+ endif
++endif # $(subdir) == elf
+ 
+ ifeq ($(subdir),rt)
+ CFLAGS-mq_send.c += -fexceptions
+diff --git a/sysdeps/unix/sysv/linux/arm/Makefile b/sysdeps/unix/sysv/linux/arm/Makefile
+index 32db854cbd6bdfd6..ab7ced85408ee515 100644
+--- a/sysdeps/unix/sysv/linux/arm/Makefile
++++ b/sysdeps/unix/sysv/linux/arm/Makefile
+@@ -1,5 +1,8 @@
+ ifeq ($(subdir),elf)
+ sysdep-rtld-routines += aeabi_read_tp libc-do-syscall
++# The test uses INTERNAL_SYSCALL_CALL.  In thumb mode, this uses
++# an undefined reference to __libc_do_syscall.
++CFLAGS-tst-nolink-libc.c += -marm
+ endif
+ 
+ ifeq ($(subdir),misc)
+diff --git a/sysdeps/unix/sysv/linux/tst-nolink-libc.c b/sysdeps/unix/sysv/linux/tst-nolink-libc.c
+new file mode 100644
+index 0000000000000000..817f37784b4080f9
+--- /dev/null
++++ b/sysdeps/unix/sysv/linux/tst-nolink-libc.c
+@@ -0,0 +1,25 @@
++/* Test program not linked against libc.so and not using any glibc functions.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <sysdep.h>
++
++void
++_start (void)
++{
++  INTERNAL_SYSCALL_CALL (exit_group, 0);
++}

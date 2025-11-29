@@ -1,0 +1,72 @@
+From 634908732d300cc014368c95023e64dc8260759d Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 14 Feb 2023 04:27:52 +0900
+Subject: [PATCH] time-util: shorten code a bit
+
+No functional change, just refactoring.
+
+(cherry picked from commit 1d2c42c5dc765c57b4fba6b7c629093aa20685a8)
+
+Related: RHEL-110954
+---
+ src/basic/time-util.c | 25 +++++++++----------------
+ 1 file changed, 9 insertions(+), 16 deletions(-)
+
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index ba5e17bd9d..6e1b34b025 100644
+--- a/src/basic/time-util.c
++++ b/src/basic/time-util.c
+@@ -633,8 +633,9 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+         const char *k, *utc = NULL, *tzn = NULL;
+         struct tm tm, copy;
+         time_t x;
+-        usec_t usec, x_usec, plus = 0, minus = 0;
++        usec_t usec, plus = 0, minus = 0;
+         int r, weekday = -1, dst = -1;
++        unsigned fractional = 0;
+ 
+         /* Allowed syntaxes:
+          *
+@@ -750,7 +751,6 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+         }
+ 
+         x = (time_t) (usec / USEC_PER_SEC);
+-        x_usec = 0;
+ 
+         if (!localtime_or_gmtime_r(&x, &tm, utc))
+                 return -EINVAL;
+@@ -859,19 +859,12 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+         return -EINVAL;
+ 
+ parse_usec:
+-        {
+-                unsigned add;
+-
+-                k++;
+-                r = parse_fractional_part_u(&k, 6, &add);
+-                if (r < 0)
+-                        return -EINVAL;
+-
+-                if (*k)
+-                        return -EINVAL;
+-
+-                x_usec = add;
+-        }
++        k++;
++        r = parse_fractional_part_u(&k, 6, &fractional);
++        if (r < 0)
++                return -EINVAL;
++        if (*k != '\0')
++                return -EINVAL;
+ 
+ from_tm:
+         if (weekday >= 0 && tm.tm_wday != weekday)
+@@ -881,7 +874,7 @@ from_tm:
+         if (x < 0)
+                 return -EINVAL;
+ 
+-        usec = usec_add(x * USEC_PER_SEC, x_usec);
++        usec = usec_add(x * USEC_PER_SEC, fractional);
+ 
+ finish:
+         usec = usec_add(usec, plus);

@@ -1,0 +1,89 @@
+commit b11db301e162480d1812937ab0410dc7585f423c
+Author: Joe Simmons-Talbott <josimmon@redhat.com>
+Date:   Tue Apr 4 09:57:46 2023 -0400
+
+    stdlib: Add testcases for labs(). (BZ #30263)
+    
+    Test minimum and maximum long values, zero, and part of the range
+    of long values.  Use '-fno-builtin' to ensure we are testing the
+    implementation.
+    
+    Reviewed-by: Wilco Dijkstra  <Wilco.Dijkstra@arm.com>
+
+diff --git a/stdlib/Makefile b/stdlib/Makefile
+index 9eb6e1b6ee1df080..2bc09c76ffea39e4 100644
+--- a/stdlib/Makefile
++++ b/stdlib/Makefile
+@@ -106,6 +106,7 @@ tests := \
+   tst-getenv-thread \
+   tst-getenv-unsetenv \
+   tst-getrandom \
++  tst-labs \
+   tst-limits \
+   tst-makecontext \
+   tst-makecontext-align \
+@@ -176,6 +177,7 @@ LDFLAGS-test-dlclose-exit-race = $(LDFLAGS-rdynamic)
+ LDLIBS-test-dlclose-exit-race-helper.so = $(libsupport) $(shared-thread-library)
+ 
+ CFLAGS-tst-abs.c += -fno-builtin
++CFLAGS-tst-labs.c += -fno-builtin
+ 
+ ifeq ($(have-cxx-thread_local),yes)
+ CFLAGS-tst-quick_exit.o = -std=c++11
+diff --git a/stdlib/tst-labs.c b/stdlib/tst-labs.c
+new file mode 100644
+index 0000000000000000..92b456745ac1bb2d
+--- /dev/null
++++ b/stdlib/tst-labs.c
+@@ -0,0 +1,51 @@
++/* Basic tests for labs.
++   Copyright (C) 2023 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <limits.h>
++#include <stdlib.h>
++
++#include <support/check.h>
++
++#define LARGE_PRIME 49999
++
++static int do_test (void)
++{
++  long i;
++
++  TEST_COMPARE(labs(LONG_MAX), LONG_MAX);
++  TEST_COMPARE(labs(LONG_MIN + 1), LONG_MAX);
++  TEST_COMPARE(labs(-1), 1);
++  TEST_COMPARE(labs(0), 0);
++  TEST_COMPARE(labs(1), 1);
++
++  for (i = LONG_MIN + 1; i < LONG_MIN + INT_MAX; i += LARGE_PRIME)
++    TEST_COMPARE(labs(i), -i);
++
++  for (i = LONG_MAX - INT_MAX; i < LONG_MAX - LARGE_PRIME; i += LARGE_PRIME)
++    TEST_COMPARE(labs(i), i);
++
++  for (i = INT_MIN + 1; i < 0; i += LARGE_PRIME)
++    TEST_COMPARE(labs(i), -i);
++
++  for (i = 0; i < INT_MAX; i += LARGE_PRIME)
++    TEST_COMPARE(labs(i), i);
++
++  return EXIT_SUCCESS;
++}
++
++#include <support/test-driver.c>

@@ -1,0 +1,1111 @@
+From bdbc77b131043cba3e6db511f09cc59a1872f809 Mon Sep 17 00:00:00 2001
+From: "Richard W.M. Jones" <rjones@redhat.com>
+Date: Sat, 29 Mar 2025 11:46:52 +0000
+Subject: [PATCH] copy: Add --blkhash option
+
+This option calculates the blkhash (similar to checksum) of the file
+as it is copied.  Blkhash is described here:
+
+  https://gitlab.com/nirs/blkhash
+
+and in more detail in this paper:
+
+  Soffer, N. and Waisbard, E. (2024). An Efficient Hash Function
+  Construction for Sparse Data. In Proceedings of the 21st
+  International Conference on Security and Cryptography - SECRYPT;
+  ISBN 978-989-758-709-2; ISSN 2184-7711, SciTePress, pages
+  698-703. DOI: 10.5220/0012764500003767.
+
+Thanks: Nir Soffer
+(cherry picked from commit c6ed852f71fb25e1de8093631c5cfc1c7135d571)
+---
+ copy/Makefile.am              |  12 +
+ copy/blkhash.c                | 490 ++++++++++++++++++++++++++++++++++
+ copy/copy-blkhash-known.sh    |  83 ++++++
+ copy/copy-blkhash-pattern.sh  |  49 ++++
+ copy/copy-blkhash-randfile.sh |  45 ++++
+ copy/main.c                   |  81 +++++-
+ copy/multi-thread-copying.c   |  12 +-
+ copy/nbdcopy.h                |  12 +
+ copy/nbdcopy.pod              |  55 +++-
+ copy/synch-copying.c          |   3 +
+ 10 files changed, 836 insertions(+), 6 deletions(-)
+ create mode 100644 copy/blkhash.c
+ create mode 100755 copy/copy-blkhash-known.sh
+ create mode 100755 copy/copy-blkhash-pattern.sh
+ create mode 100755 copy/copy-blkhash-randfile.sh
+
+diff --git a/copy/Makefile.am b/copy/Makefile.am
+index c42accab..403f98ba 100644
+--- a/copy/Makefile.am
++++ b/copy/Makefile.am
+@@ -18,6 +18,9 @@
+ include $(top_srcdir)/subdir-rules.mk
+ 
+ EXTRA_DIST = \
++	copy-blkhash-known.sh \
++	copy-blkhash-pattern.sh \
++	copy-blkhash-randfile.sh \
+ 	copy-block-to-nbd.sh \
+ 	copy-file-to-file.sh \
+ 	copy-file-to-nbd.sh \
+@@ -65,6 +68,7 @@ TESTS =
+ 
+ nbdcopy_SOURCES = \
+ 	nbdcopy.h \
++	blkhash.c \
+ 	file-ops.c \
+ 	main.c \
+ 	multi-thread-copying.c \
+@@ -82,8 +86,10 @@ nbdcopy_CPPFLAGS = \
+ nbdcopy_CFLAGS = \
+ 	$(WARNINGS_CFLAGS) \
+ 	$(PTHREAD_CFLAGS) \
++	$(GNUTLS_CFLAGS) \
+ 	$(NULL)
+ nbdcopy_LDADD = \
++	$(GNUTLS_LIBS) \
+ 	$(PTHREAD_LIBS) \
+ 	$(top_builddir)/common/utils/libutils.la \
+ 	$(top_builddir)/lib/libnbd.la \
+@@ -150,6 +156,12 @@ TESTS += \
+ endif
+ 
+ if HAVE_GNUTLS
++TESTS += \
++	copy-blkhash-known.sh \
++	copy-blkhash-pattern.sh \
++	copy-blkhash-randfile.sh \
++	$(NULL)
++
+ if HAVE_PSKTOOL
+ TESTS += copy-tls.sh
+ endif
+diff --git a/copy/blkhash.c b/copy/blkhash.c
+new file mode 100644
+index 00000000..622d8a39
+--- /dev/null
++++ b/copy/blkhash.c
+@@ -0,0 +1,490 @@
++/* NBD client library in userspace.
++ * Copyright Red Hat
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++#include <config.h>
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include <inttypes.h>
++#include <assert.h>
++#include <pthread.h>
++
++#ifdef HAVE_GNUTLS
++#include <gnutls/gnutls.h>
++#include <gnutls/crypto.h>
++#endif
++
++#include <libnbd.h>
++
++#include "byte-swapping.h"
++#include "ispowerof2.h"
++#include "iszero.h"
++#include "minmax.h"
++#include "rounding.h"
++#include "vector.h"
++
++#include "nbdcopy.h"
++
++#ifdef HAVE_GNUTLS
++
++/* We will have one of these structs per blkhash block. */
++struct block {
++  /* unknown => We haven't seen this block yet.  'ptr' is NULL.
++   *
++   * zero => The block is all zeroes.  'ptr' is NULL.
++   *
++   * data => The block is all data, and we have seen the whole block,
++   * and the hash has been computed.  'ptr' points to the computed
++   * hash.  'n' is unused.
++   *
++   * incomplete => Part of the block was seen.  'ptr' points to the
++   * data block, waiting to be completed.  'n' is the number of bytes
++   * seen so far.  We will compute the hash and turn this into a
++   * 'data' or 'zero' block, either when we have seen all bytes of
++   * this block, or at the end.
++   *
++   * Note that this code assumes that we are called exactly once for a
++   * range in the disk image.
++   */
++  enum { block_unknown = 0, block_zero, block_data, block_incomplete } type;
++  void *ptr;
++  size_t n;
++};
++
++DEFINE_VECTOR_TYPE(blocks, struct block);
++static blocks block_vec;
++
++static void
++free_struct_block (struct block b)
++{
++  free (b.ptr);
++}
++
++/* Since nbdcopy is multi-threaded, we need to use locks to protect
++ * access to shared resources.  But also because computing digests is
++ * very compute intensive, we must allow those to run in parallel as
++ * much as possible.  Therefore the locking is carefully chosen to
++ * protect critical resources while allowing (most) hashing to happen
++ * in parallel.
++ *
++ * 'bv_lock' protects access to 'block_vec', and is needed whenever
++ * the vector might be extended.
++ *
++ * It's safe to hash complete blocks without acquiring any lock (since
++ * we should only be called once per complete block).  However
++ * 'incomplete_lock' must be acquired whenever we deal with incomplete
++ * blocks as we might be called in parallel for those.
++ */
++static pthread_mutex_t bv_lock = PTHREAD_MUTEX_INITIALIZER;
++static pthread_mutex_t incomplete_lock = PTHREAD_MUTEX_INITIALIZER;
++
++/* Length of the digests of this algorithm in bytes. */
++static size_t alg_len;
++
++void
++init_blkhash (void)
++{
++  if (blkhash_alg == GNUTLS_DIG_UNKNOWN) return;
++
++  assert (is_power_of_2 (blkhash_size));
++
++  alg_len = gnutls_hash_get_len (blkhash_alg);
++
++  /* If we know the source size in advance, reserve the block vector.
++   * We don't always know this (src->size == -1), eg. if reading from
++   * a pipe.  If the size is exactly zero we don't need to reserve
++   * anything.
++   */
++  if (src->size > 0) {
++    if (blocks_reserve_exactly (&block_vec,
++                                DIV_ROUND_UP (src->size, blkhash_size)) == -1) {
++      perror ("nbdcopy: realloc");
++      exit (EXIT_FAILURE);
++    }
++  }
++}
++
++/* Single block update functions. */
++static struct block
++get_block (uint64_t blknum)
++{
++  struct block b;
++
++  pthread_mutex_lock (&bv_lock);
++
++  /* Grow the underlying storage if needed. */
++  if (block_vec.cap <= blknum) {
++    if (blocks_reserve (&block_vec, blknum - block_vec.cap + 1) == -1) {
++      perror ("nbdcopy: realloc");
++      exit (EXIT_FAILURE);
++    }
++  }
++
++  /* Initialize new blocks if needed. */
++  if (block_vec.len <= blknum) {
++    size_t i;
++    for (i = block_vec.len; i <= blknum; ++i) {
++      block_vec.ptr[i].type = block_unknown;
++      block_vec.ptr[i].ptr = NULL;
++      block_vec.ptr[i].n = 0;
++    }
++    block_vec.len = blknum+1;
++  }
++
++  b = block_vec.ptr[blknum];
++
++  pthread_mutex_unlock (&bv_lock);
++
++  return b;
++}
++
++static void
++put_block (uint64_t blknum, struct block b)
++{
++  pthread_mutex_lock (&bv_lock);
++  block_vec.ptr[blknum] = b;
++  pthread_mutex_unlock (&bv_lock);
++}
++
++/* Compute the hash of a single block of data and return it.  This is
++ * normally a full block of size blkhash_size, but may be a smaller
++ * block at the end of the file.
++ */
++static void *
++compute_one_block_hash (const void *buf, size_t len)
++{
++  gnutls_hash_hd_t dig;
++  int r;
++  void *digest;
++
++  /* Create the digest handle. */
++  r = gnutls_hash_init (&dig, blkhash_alg);
++  if (r < 0) {
++    fprintf (stderr, "nbdcopy: gnutls_hash_init: %s\n", gnutls_strerror (r));
++    exit (EXIT_FAILURE);
++  }
++
++  /* Allocate space for the result. */
++  digest = malloc (alg_len);
++  if (digest == NULL) {
++    perror ("nbdcopy: malloc");
++    exit (EXIT_FAILURE);
++  }
++
++  r = gnutls_hash (dig, buf, len);
++  if (r < 0) {
++    fprintf (stderr, "nbdcopy: gnutls_hash: %s\n", gnutls_strerror (r));
++    exit (EXIT_FAILURE);
++  }
++
++  gnutls_hash_deinit (dig, digest);
++  return digest; /* caller must free */
++}
++
++/* We have received a complete block.  Compute the hash for this
++ * block.  If buf == NULL, sets the block to zero.  Note this function
++ * assumes we can only be called once per complete block, so locking
++ * is unnecessary (apart from inside the calls to get/put_block).
++ */
++static void
++set_complete_block (uint64_t blknum, const char *buf)
++{
++  struct block b = get_block (blknum);
++  void *p;
++
++  /* Assert that we haven't seen this block before. */
++  assert (b.type == block_unknown);
++
++  if (buf) {
++    b.type = block_data;
++
++    /* Compute the hash of the whole block now. */
++    p = compute_one_block_hash (buf, blkhash_size);
++    b.ptr = p;
++  }
++  else {
++    b.type = block_zero;
++    /* Hash is computed for all zero blocks in one go at the end. */
++  }
++
++  put_block (blknum, b);
++}
++
++static void finish_block (struct block *b);
++
++/* We have received a partial block.  Store or update what we have.
++ * If this completes the block, then do what is needed.  If buf ==
++ * NULL, this is a partial zero instead.
++ */
++static void
++set_incomplete_block (uint64_t blknum,
++                      uint64_t blkoffs, uint64_t len,
++                      const char *buf)
++{
++  /* We must acquire the incomplete_lock here, see locking comment above. */
++  pthread_mutex_lock (&incomplete_lock);
++
++  struct block b = get_block (blknum);
++
++  switch (b.type) {
++  case block_data:
++  case block_zero:
++    /* We shouldn't have seen the complete block before. */
++    abort ();
++
++  case block_unknown:
++    /* Allocate the block. */
++    b.ptr = calloc (1, blkhash_size);
++    if (b.ptr == NULL) {
++      perror ("nbdcopy: calloc");
++      exit (EXIT_FAILURE);
++    }
++    b.n = 0;
++    b.type = block_incomplete;
++
++    /*FALLTHROUGH*/
++  case block_incomplete:
++    if (buf)
++      /* Add the partial data to the block. */
++      memcpy ((char *)b.ptr + blkoffs, buf, len);
++    else
++      /* Add the partial zeroes to the block. */
++      memset ((char *)b.ptr + blkoffs, 0, len);
++    b.n += len;
++
++    /* If the block is now complete, finish it off. */
++    if (b.n == blkhash_size)
++      finish_block (&b);
++
++    put_block (blknum, b);
++  }
++
++  pthread_mutex_unlock (&incomplete_lock);
++}
++
++static void
++finish_block (struct block *b)
++{
++  void *p;
++
++  assert (b->type == block_incomplete);
++
++  if (b->n == blkhash_size && is_zero (b->ptr, blkhash_size)) {
++    b->type = block_zero;
++    free (b->ptr);
++    b->ptr = NULL;
++  }
++  else {
++    b->type = block_data;
++    /* Compute the hash of the block. */
++    p = compute_one_block_hash (b->ptr, b->n);
++    free (b->ptr);
++    b->ptr = p;
++  }
++}
++
++/* Called from either synch-copying.c or multi-thread-copying.c to
++ * update the hash with some data (or zero if buf == NULL).
++ */
++void
++update_blkhash (const char *buf, uint64_t offset, size_t len)
++{
++  uint64_t blknum, blkoffs;
++
++  if (blkhash_alg == GNUTLS_DIG_UNKNOWN) return;
++
++  if (verbose) {
++    fprintf (stderr, "blkhash: %s "
++             "[0x%" PRIx64 " - 0x%" PRIx64 "] (length %zu)\n",
++             buf ? "data" : "zero",
++             offset, offset+len, len);
++  }
++
++  /* Iterate over the blocks. */
++  blknum = offset / blkhash_size;
++  blkoffs = offset % blkhash_size;
++
++  /* Unaligned head */
++  if (blkoffs) {
++    uint64_t n = MIN (blkhash_size - blkoffs, len);
++    set_incomplete_block (blknum, blkoffs, n, buf);
++    if (buf) buf += n;
++    len -= n;
++    offset += n;
++    blknum++;
++  }
++
++  /* Aligned body */
++  while (len >= blkhash_size) {
++    set_complete_block (blknum, buf);
++    if (buf) buf += blkhash_size;
++    len -= blkhash_size;
++    offset += blkhash_size;
++    blknum++;
++  }
++
++  /* Unaligned tail */
++  if (len) {
++    set_incomplete_block (blknum, 0, len, buf);
++  }
++}
++
++/* Called after copying to finish and print the resulting blkhash. */
++void
++finish_blkhash (uint64_t total_size)
++{
++  gnutls_hash_hd_t dig;
++  size_t i;
++  struct block *b;
++  void *zero_block;
++  void *zero_digest;
++  int r;
++  const uint64_t total_size_le = htole64 (total_size);
++  unsigned char *final_digest;
++  FILE *fp;
++
++  if (blkhash_alg == GNUTLS_DIG_UNKNOWN) return;
++
++  if (verbose) {
++    fprintf (stderr, "blkhash: total size 0x%" PRIx64 "\n", total_size);
++    fprintf (stderr, "blkhash: number of blocks %zu\n", block_vec.len);
++  }
++
++  /* If the last block is incomplete, finish it. */
++  if (block_vec.len > 0) {
++    b = &block_vec.ptr[block_vec.len-1];
++    if (b->type == block_incomplete)
++      finish_block (b);
++  }
++
++  /* There must be no other unknown or incomplete blocks left. */
++  for (i = 0; i < block_vec.len; ++i) {
++    b = &block_vec.ptr[i];
++    assert (b->type != block_unknown);
++    assert (b->type != block_incomplete);
++  }
++
++  /* Calculate the hash of a zero block. */
++  zero_block = calloc (1, blkhash_size);
++  if (zero_block == NULL) {
++    perror ("nbdcopy: calloc");
++    exit (EXIT_FAILURE);
++  }
++  zero_digest = compute_one_block_hash (zero_block, blkhash_size);
++  free (zero_block);
++
++  /* Now compute the blkhash. */
++  r = gnutls_hash_init (&dig, blkhash_alg);
++  if (r < 0) {
++    fprintf (stderr, "nbdcopy: gnutls_hash_init: %s\n", gnutls_strerror (r));
++    exit (EXIT_FAILURE);
++  }
++
++  for (i = 0; i < block_vec.len; ++i) {
++    b = &block_vec.ptr[i];
++
++    switch (b->type) {
++    case block_unknown:
++    case block_incomplete:
++      abort (); /* see assertion above */
++
++    case block_data:
++      /* Mix in the block digest. */
++      r = gnutls_hash (dig, b->ptr, alg_len);
++      if (r < 0) {
++        fprintf (stderr, "nbdcopy: gnutls_hash: %s\n", gnutls_strerror (r));
++        exit (EXIT_FAILURE);
++      }
++      break;
++
++    case block_zero:
++      /* Block is zero, mix in the zero digest. */
++      r = gnutls_hash (dig, zero_digest, alg_len);
++      if (r < 0) {
++        fprintf (stderr, "nbdcopy: gnutls_hash: %s\n", gnutls_strerror (r));
++        exit (EXIT_FAILURE);
++      }
++      break;
++    }
++  }
++
++  free (zero_digest);
++
++  /* Append the length at the end. */
++  r = gnutls_hash (dig, &total_size_le, sizeof total_size_le);
++  if (r < 0) {
++    fprintf (stderr, "nbdcopy: gnutls_hash: %s\n", gnutls_strerror (r));
++    exit (EXIT_FAILURE);
++  }
++
++  /* Get the final digest. */
++  final_digest = malloc (alg_len);
++  if (final_digest == NULL) {
++    perror ("nbdcopy: malloc");
++    exit (EXIT_FAILURE);
++  }
++
++  gnutls_hash_deinit (dig, final_digest);
++
++  /* Print the final digest. */
++  if (blkhash_file != NULL) {
++    fp = fopen (blkhash_file, "w");
++    if (fp == NULL) {
++      perror (blkhash_file);
++      exit (EXIT_FAILURE);
++    }
++  }
++  else {
++    fp = stdout;
++  }
++  for (i = 0; i < alg_len; ++i)
++    fprintf (fp, "%02x", final_digest[i]);
++  fprintf (fp, "\n");
++  fflush (fp);
++  if (blkhash_file != NULL)
++    fclose (fp);
++
++  free (final_digest);
++
++  /* Free the hashes and vector. */
++  blocks_iter (&block_vec, free_struct_block);
++  blocks_reset (&block_vec);
++}
++
++#else /* !HAVE_GNUTLS */
++
++void
++init_blkhash (void)
++{
++  /* nothing */
++}
++
++void
++update_blkhash (const char *buf, uint64_t offset, size_t len)
++{
++  /* nothing */
++}
++
++void
++finish_blkhash (uint64_t total_size)
++{
++  /* nothing */
++}
++
++#endif /* !HAVE_GNUTLS */
+diff --git a/copy/copy-blkhash-known.sh b/copy/copy-blkhash-known.sh
+new file mode 100755
+index 00000000..ca398eac
+--- /dev/null
++++ b/copy/copy-blkhash-known.sh
+@@ -0,0 +1,83 @@
++#!/usr/bin/env bash
++# nbd client library in userspace
++# Copyright Red Hat
++#
++# This library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2 of the License, or (at your option) any later version.
++#
++# This library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with this library; if not, write to the Free Software
++# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++
++# Test --blkhash option.
++
++. ../tests/functions.sh
++
++set -e
++set -x
++
++requires $NBDKIT --exit-with-parent --version
++requires $NBDKIT --exit-with-parent data --version
++
++hashfile=copy-blkhash-known.hash
++cleanup_fn rm -f $hashfile
++rm -f $hashfile
++
++do_test () {
++    data="$1"
++    hash="$2"
++    expected="$3"
++
++    export hash hashfile
++    $NBDKIT -U - data "$data" \
++            --run 'nbdcopy --blkhash=$hash --blkhash-file=$hashfile \
++                           "$uri" null:'
++    cat $hashfile
++    test "$expected" = "$(cat $hashfile)"
++}
++
++# Instances of the data plugin and the corresponding hash that we
++# previously cross-checked against blkhash's test/blkhash.py
++
++do_test "" \
++        sha256 \
++        af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc
++
++do_test '"hello"' \
++        md5 \
++        f741ac9ce55f5325906bb14e9c05d467
++
++do_test '"hello"' \
++        sha256 \
++        337355feb53a5309d5aba92796223c2c84ffab930e706c01fef573a2722545e6
++
++do_test '"hello"' \
++        sha512 \
++        eca04a593cf12ec4132993da709048e25a2f1be3526e132fb521ec9d41f023ec4018b3fd07b014a33e36bb5fa145b36991f431e62f9e1a93bebea6c9565682c1
++
++do_test '"hello"' \
++        md5/4 \
++        8262896de34125dec173722c920e8bd0
++
++do_test '"hello" @1048576 "goodbye"' \
++        sha256 \
++        61b8f3a8cea76e16eeff7ce27f1b7711c1f1e437f5038cec17773772a4bded28
++
++do_test '"12345678"*512*256' \
++        md5 \
++        84fc21ac2f49ac283ff399378d834d1a
++
++do_test '"12345678"*512*256' \
++        sha256 \
++        cbb388edd25e567b85f504c7b345497f9fb4f6bbf4e39768809184b9f9e678f8
++
++do_test '"12345678"*512*256' \
++        sha512/512k \
++        379f7eb1628058c7abbc4c96941ac972074815ea9ef4aca95eefb2b4f9c29f64023fff8d966e9fddf08d07bdba548e75298917f10268fdf9ba636c2321a2214e
+diff --git a/copy/copy-blkhash-pattern.sh b/copy/copy-blkhash-pattern.sh
+new file mode 100755
+index 00000000..f135f54d
+--- /dev/null
++++ b/copy/copy-blkhash-pattern.sh
+@@ -0,0 +1,49 @@
++#!/usr/bin/env bash
++# nbd client library in userspace
++# Copyright Red Hat
++#
++# This library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2 of the License, or (at your option) any later version.
++#
++# This library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with this library; if not, write to the Free Software
++# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++
++# Test --blkhash option against a large plugin with known content.
++
++. ../tests/functions.sh
++
++set -e
++set -x
++
++requires $NBDKIT --exit-with-parent --version
++requires $NBDKIT --exit-with-parent pattern --version
++
++hashfile_sha256=copy-blkhash-pattern.hash256
++hashfile_sha512=copy-blkhash-pattern.hash512
++cleanup_fn rm -f $hashfile_sha256 $hashfile_sha512
++rm -f $hashfile_sha256 $hashfile_sha512
++
++export hashfile_sha256 hashfile_sha512
++
++expected_sha256=6750a1c3d78e46eaffb0d094624825dea88f0c7098b2424fce776c0748442649
++expected_sha512=aef2905a223b2b9b565374ce9671bcb434fc944b0a108c8b5b98769d830b6c61b9567de177791a092514675c3a3e0740758c6a5a171ae71d844c60315f07e334
++
++$NBDKIT -U - pattern 1G \
++        --run '
++        nbdcopy --blkhash --blkhash-file=$hashfile_sha256 "$uri" null: &&
++        nbdcopy --blkhash=sha512/512k --blkhash-file=$hashfile_sha512 \
++                "$uri" null:
++'
++cat $hashfile_sha256
++test "$expected_sha256" = "$(cat $hashfile_sha256)"
++
++cat $hashfile_sha512
++test "$expected_sha512" = "$(cat $hashfile_sha512)"
+diff --git a/copy/copy-blkhash-randfile.sh b/copy/copy-blkhash-randfile.sh
+new file mode 100755
+index 00000000..029237c4
+--- /dev/null
++++ b/copy/copy-blkhash-randfile.sh
+@@ -0,0 +1,45 @@
++#!/usr/bin/env bash
++# nbd client library in userspace
++# Copyright Red Hat
++#
++# This library is free software; you can redistribute it and/or
++# modify it under the terms of the GNU Lesser General Public
++# License as published by the Free Software Foundation; either
++# version 2 of the License, or (at your option) any later version.
++#
++# This library is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++# Lesser General Public License for more details.
++#
++# You should have received a copy of the GNU Lesser General Public
++# License along with this library; if not, write to the Free Software
++# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++
++# Test --blkhash option.
++
++. ../tests/functions.sh
++
++set -e
++set -x
++
++requires $DD --version
++requires $DD oflag=seek_bytes </dev/null
++requires test -r /dev/urandom
++requires test -r /dev/zero
++
++randfile=copy-blkhash-randfile.img
++cleanup_fn rm -f $randfile
++rm -f $randfile
++
++# Create a random sparse file.  Using a very small block size try to
++# compute the blkhash.  This tests corner cases in blkhash.c.
++touch $randfile
++for i in `seq 1 100`; do
++    $DD if=/dev/urandom of=$randfile ibs=512 count=1 \
++        oflag=seek_bytes seek=$((RANDOM * 9973)) conv=notrunc
++    $DD if=/dev/zero of=$randfile ibs=512 count=1 \
++        oflag=seek_bytes seek=$((RANDOM * 9973)) conv=notrunc
++done
++
++$VG nbdcopy --blkhash=md5/512 $randfile null:
+diff --git a/copy/main.c b/copy/main.c
+index cd7b2fd2..76b09ded 100644
+--- a/copy/main.c
++++ b/copy/main.c
+@@ -32,12 +32,15 @@
+ #include <assert.h>
+ #include <sys/types.h>
+ #include <sys/stat.h>
++#include <pthread.h>
+ 
+ #ifdef HAVE_SYS_IOCTL_H
+ #include <sys/ioctl.h>
+ #endif
+ 
+-#include <pthread.h>
++#ifdef HAVE_GNUTLS
++#include <gnutls/gnutls.h>
++#endif
+ 
+ #include <libnbd.h>
+ 
+@@ -48,6 +51,11 @@
+ #include "nbdcopy.h"
+ 
+ bool allocated;                     /* --allocated flag */
++#ifdef HAVE_GNUTLS                  /* --blkhash */
++gnutls_digest_algorithm_t blkhash_alg = GNUTLS_DIG_UNKNOWN;
++#endif
++unsigned blkhash_size = 65536;
++const char *blkhash_file;           /* --blkhash-file (NULL = stdout) */
+ unsigned connections = 4;           /* --connections */
+ bool target_is_zero;                /* --target-is-zero flag */
+ bool extents = true;                /* ! --no-extents flag */
+@@ -76,7 +84,8 @@ usage (FILE *fp, int exitcode)
+ "\n"
+ "Copy to and from an NBD server:\n"
+ "\n"
+-"    nbdcopy [--allocated] [-C N|--connections=N]\n"
++"    nbdcopy [--allocated] [--blkhash=DIGEST] [--blkhash-file=FILENAME]\n"
++"            [-C N|--connections=N]\n"
+ "            [--destination-is-zero|--target-is-zero] [--flush]\n"
+ "            [--no-extents] [-p|--progress|--progress=FD]\n"
+ "            [--queue-size=N] [--request-size=N] [-R N|--requests=N]\n"
+@@ -113,6 +122,8 @@ main (int argc, char *argv[])
+     LONG_OPTIONS,
+     SHORT_OPTIONS,
+     ALLOCATED_OPTION,
++    BLKHASH_OPTION,
++    BLKHASH_FILE_OPTION,
+     TARGET_IS_ZERO_OPTION,
+     FLUSH_OPTION,
+     NO_EXTENTS_OPTION,
+@@ -125,6 +136,8 @@ main (int argc, char *argv[])
+     { "help",                no_argument,       NULL, HELP_OPTION },
+     { "long-options",        no_argument,       NULL, LONG_OPTIONS },
+     { "allocated",           no_argument,       NULL, ALLOCATED_OPTION },
++    { "blkhash",             optional_argument, NULL, BLKHASH_OPTION },
++    { "blkhash-file",        required_argument, NULL, BLKHASH_FILE_OPTION },
+     { "connections",         required_argument, NULL, 'C' },
+     { "destination-is-zero", no_argument,       NULL, TARGET_IS_ZERO_OPTION },
+     { "flush",               no_argument,       NULL, FLUSH_OPTION },
+@@ -179,6 +192,64 @@ main (int argc, char *argv[])
+       allocated = true;
+       break;
+ 
++    case BLKHASH_OPTION:
++#ifdef HAVE_GNUTLS
++      if (optarg == NULL || optarg[0] == '\0') {
++        blkhash_alg = GNUTLS_DIG_SHA256;
++        blkhash_size = 65536;
++      }
++      else {
++        i = strcspn (optarg, "/");
++        if (i == 3 && strncasecmp (optarg, "md5", i) == 0)
++          blkhash_alg = GNUTLS_DIG_MD5;
++        else if (i == 4 && strncasecmp (optarg, "sha1", i) == 0)
++          blkhash_alg = GNUTLS_DIG_SHA1;
++        else if (i == 6 && strncasecmp (optarg, "sha256", i) == 0)
++          blkhash_alg = GNUTLS_DIG_SHA256;
++        else if (i == 6 && strncasecmp (optarg, "sha512", i) == 0)
++          blkhash_alg = GNUTLS_DIG_SHA512;
++        else {
++          fprintf (stderr, "%s: %s: unknown digest algorithm '%s'\n",
++                   prog, "--blkhash", optarg);
++          exit (EXIT_FAILURE);
++        }
++        if (optarg[i] == '/') {
++          i64 = human_size_parse (&optarg[i+1], &error, &pstr);
++          if (i64 == -1) {
++            fprintf (stderr, "%s: %s: %s: %s\n",
++                     prog, "--blkhash", error, pstr);
++            exit (EXIT_FAILURE);
++          }
++          if (! is_power_of_2 (blkhash_size)) {
++            fprintf (stderr, "%s: %s is not a power of two: %s\n",
++                     prog, "--blkhash", &optarg[i+1]);
++            exit (EXIT_FAILURE);
++          }
++          if (i64 > UINT_MAX) {
++            fprintf (stderr, "%s: %s is too large: %s\n",
++                     prog, "--blkhash", &optarg[i+1]);
++            exit (EXIT_FAILURE);
++          }
++          blkhash_size = i64;
++        }
++      }
++      break;
++#else
++      fprintf (stderr, "%s: %s: option not supported in this build\n",
++               prog, "--blkhash");
++      exit (EXIT_FAILURE);
++#endif
++
++    case BLKHASH_FILE_OPTION:
++#ifdef HAVE_GNUTLS
++      blkhash_file = optarg;
++      break;
++#else
++      fprintf (stderr, "%s: %s: option not supported in this build\n",
++               prog, "--blkhash-file");
++      exit (EXIT_FAILURE);
++#endif
++
+     case TARGET_IS_ZERO_OPTION:
+       target_is_zero = true;
+       break;
+@@ -369,6 +440,9 @@ main (int argc, char *argv[])
+     exit (EXIT_FAILURE);
+   }
+ 
++  /* Initialize the blkhash function (if used). */
++  init_blkhash ();
++
+   /* If multi-conn is not supported, force connections to 1. */
+   if (! src->ops->can_multi_conn (src) || ! dst->ops->can_multi_conn (dst))
+     connections = 1;
+@@ -482,6 +556,9 @@ main (int argc, char *argv[])
+   /* We should always know the total size copied here. */
+   assert (src->size >= 0);
+ 
++  /* Finish and print the blkhash. */
++  finish_blkhash (src->size);
++
+   /* Shut down the source side. */
+   src->ops->close (src);
+ 
+diff --git a/copy/multi-thread-copying.c b/copy/multi-thread-copying.c
+index a75fb265..89588e6e 100644
+--- a/copy/multi-thread-copying.c
++++ b/copy/multi-thread-copying.c
+@@ -265,8 +265,10 @@ worker_thread (void *wp)
+            * THREAD_WORK_SIZE, so there is no danger of overflowing
+            * size_t.
+            */
+-          command = create_command (zeroing_start, offset-zeroing_start,
+-                                    true, w);
++          uint64_t zeroing_len = offset - zeroing_start;
++
++          update_blkhash (NULL, zeroing_start, zeroing_len);
++          command = create_command (zeroing_start, zeroing_len, true, w);
+           fill_dst_range_with_zeroes (command);
+           is_zeroing = false;
+         }
+@@ -297,6 +299,9 @@ worker_thread (void *wp)
+        * THREAD_WORK_SIZE, so there is no danger of overflowing
+        * size_t.
+        */
++      uint64_t zeroing_len = offset - zeroing_start;
++
++      update_blkhash (NULL, zeroing_start, zeroing_len);
+       command = create_command (zeroing_start, offset - zeroing_start,
+                                 true, w);
+       fill_dst_range_with_zeroes (command);
+@@ -505,6 +510,9 @@ finished_read (void *vp, int *error)
+     exit (EXIT_FAILURE);
+   }
+ 
++  update_blkhash (slice_ptr (command->slice), command->offset,
++                  command->slice.len);
++
+   if (allocated || sparse_size == 0) {
+     /* If sparseness detection (see below) is turned off then we write
+      * the whole command.
+diff --git a/copy/nbdcopy.h b/copy/nbdcopy.h
+index e223191c..297978e5 100644
+--- a/copy/nbdcopy.h
++++ b/copy/nbdcopy.h
+@@ -24,6 +24,10 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ 
++#ifdef HAVE_GNUTLS
++#include <gnutls/gnutls.h>
++#endif
++
+ #include <libnbd.h>
+ 
+ #include "vector.h"
+@@ -227,6 +231,11 @@ extern void asynch_notify_read_write_not_supported (struct rw *rw,
+                                                     size_t index);
+ 
+ extern bool allocated;
++#ifdef HAVE_GNUTLS
++extern gnutls_digest_algorithm_t blkhash_alg;
++#endif
++extern unsigned blkhash_size;
++extern const char *blkhash_file;
+ extern unsigned connections;
+ extern bool target_is_zero;
+ extern bool extents;
+@@ -246,5 +255,8 @@ extern const char *prog;
+ extern void progress_bar (off_t pos, int64_t size);
+ extern void synch_copying (void);
+ extern void multi_thread_copying (void);
++extern void init_blkhash (void);
++extern void update_blkhash (const char *buf, uint64_t offset, size_t len);
++extern void finish_blkhash (uint64_t total_size);
+ 
+ #endif /* NBDCOPY_H */
+diff --git a/copy/nbdcopy.pod b/copy/nbdcopy.pod
+index 940e37ad..3efe2b1b 100644
+--- a/copy/nbdcopy.pod
++++ b/copy/nbdcopy.pod
+@@ -4,7 +4,8 @@ nbdcopy - copy to and from an NBD server
+ 
+ =head1 SYNOPSIS
+ 
+- nbdcopy [--allocated] [-C N|--connections=N]
++ nbdcopy [--allocated] [--blkhash=DIGEST] [--blkhash-file=FILE]
++         [-C N|--connections=N]
+          [--destination-is-zero|--target-is-zero] [--flush]
+          [--no-extents] [-p|--progress|--progress=FD]
+          [--queue-size=N] [--request-size=N] [-R N|--requests=N]
+@@ -50,6 +51,11 @@ option this will print a progress bar.
+ 
+ Copy a full disk from one NBD server to another.
+ 
++=head2 nbdcopy nbd://server1 nbd://server2 --blkhash
++
++Copy a full disk from one NBD server to another, computing the blkhash
++(similar to a checksum) of the disk and printing that.
++
+ =head2 nbdcopy -- [ qemu-nbd -r -f qcow2 https://example.com/disk.qcow2 ] -
+ 
+ Run L<qemu-nbd(8)> as a subprocess to open URL
+@@ -106,6 +112,49 @@ I<--no-extents>), or by detecting runs of zeroes (see I<-S>).  If you
+ use I<--allocated> then nbdcopy creates a fully allocated, non-sparse
+ output on the destination.
+ 
++=item B<--blkhash>
++
++=item B<--blkhash=md5>
++
++=item B<--blkhash=md5/>SIZE
++
++=item B<--blkhash=sha1>
++
++=item B<--blkhash=sha1/>SIZE
++
++=item B<--blkhash=sha256>
++
++=item B<--blkhash=sha256/>SIZE
++
++=item B<--blkhash=sha512>
++
++=item B<--blkhash=sha512/>SIZE
++
++Compute the blkhash of the disk image during the copy and print it at
++the end.  Blkhash (L<https://gitlab.com/nirs/blkhash>) is an algorithm
++similar to a checksum except that it can be computed in parallel.
++Note that it is not compatible with programs like L<cksum(1)> or
++L<sha256sum(1)>.  Using this option will make nbdcopy slower.
++
++You can choose the digest function from C<md5>, C<sha1>, C<sha256>
++(recommended), or C<sha512>.  You can also choose the block size, the
++default being C<64k> (recommended).
++
++The I<--blkhash> option without parameters selects sha256/64k.
++
++To compute the blkhash of a file without copying it, you can do:
++
++ nbdcopy --blkhash -- disk.raw null:
++
++or if the format is qcow2:
++
++ nbdcopy --blkhash -- [ qemu-nbd -f qcow2 disk.qcow2 ] null:
++
++=item B<--blkhash-file=>FILE
++
++If I<--blkhash> is selected, choose where to print the blkhash to.
++The default is stdout.
++
+ =item B<-C> N
+ 
+ =item B<--connections=>N
+@@ -306,7 +355,9 @@ L<nbdinfo(1)>,
+ L<nbdsh(1)>,
+ L<nbdublk(1)>,
+ L<nbdkit(1)>,
+-L<qemu-img(1)>.
++L<qemu-img(1)>,
++L<https://gitlab.com/nirs/blkhash>,
++L<blksum(1)>.
+ 
+ =head1 AUTHORS
+ 
+diff --git a/copy/synch-copying.c b/copy/synch-copying.c
+index 200c97f6..4c65c86d 100644
+--- a/copy/synch-copying.c
++++ b/copy/synch-copying.c
+@@ -49,6 +49,7 @@ synch_copying (void)
+     size_t r;
+ 
+     while ((r = src->ops->synch_read (src, buf, request_size, offset)) > 0) {
++      update_blkhash ((const char *) buf, offset, request_size);
+       dst->ops->synch_write (dst, buf, r, offset);
+       offset += r;
+       progress_bar (offset, src->size);
+@@ -82,6 +83,7 @@ synch_copying (void)
+         assert (exts.ptr[i].length <= count);
+ 
+         if (exts.ptr[i].zero) {
++          update_blkhash (NULL, offset, exts.ptr[i].length);
+           if (!dst->ops->synch_zero (dst, offset, exts.ptr[i].length, false) &&
+               !dst->ops->synch_zero (dst, offset, exts.ptr[i].length, true)) {
+             /* If efficient zeroing (punching a hole or allocating
+@@ -103,6 +105,7 @@ synch_copying (void)
+             exit (EXIT_FAILURE);
+           }
+ 
++          update_blkhash ((const char *) buf, offset, r);
+           dst->ops->synch_write (dst, buf, r, offset);
+           offset += r;
+           progress_bar (offset, src->size);
+-- 
+2.47.1
+

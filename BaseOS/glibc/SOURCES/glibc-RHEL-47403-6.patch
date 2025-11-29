@@ -1,0 +1,342 @@
+commit 43db5e2c0672cae7edea7c9685b22317eae25471
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Oct 25 16:50:10 2024 +0200
+
+    elf: Signal RT_CONSISTENT after relocation processing in dlopen (bug 31986)
+    
+    Previously, a la_activity audit event was generated before
+    relocation processing completed.  This does did not match what
+    happened during initial startup in elf/rtld.c (towards the end
+    of dl_main).  It also caused various problems if an auditor
+    tried to open the same shared object again using dlmopen:
+    If it was the directly loaded object, it had a search scope
+    associated with it, so the early exit in dl_open_worker_begin
+    was taken even though the object was unrelocated.  This caused
+    the r_state == RT_CONSISTENT assert to fail.  Avoidance of the
+    assert also depends on reversing the order of r_state update
+    and auditor event (already implemented in a previous commit).
+    
+    At the later point, args->map can be NULL due to failure,
+    so use the assigned namespace ID instead if that is available.
+    
+    Reviewed-by: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+
+Conflicts:
+	elf/Makefile (fixup context)
+
+diff --git a/elf/Makefile b/elf/Makefile
+index dc774b083eda202b..73deb69f5a3c9150 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -404,6 +404,7 @@ tests += \
+   tst-dlmopen1 \
+   tst-dlmopen3 \
+   tst-dlmopen4 \
++  tst-dlopen-auditdup \
+   tst-dlopen-recurse \
+   tst-dlopen-self \
+   tst-dlopen-tlsmodid \
+@@ -783,6 +784,8 @@ modules-names = \
+   tst-dlmopen-twice-mod1 \
+   tst-dlmopen-twice-mod2 \
+   tst-dlmopen1mod \
++  tst-dlopen-auditdup-auditmod \
++  tst-dlopen-auditdupmod \
+   tst-dlopen-recursemod1 \
+   tst-dlopen-recursemod2 \
+   tst-dlopen-sgid-mod \
+@@ -2861,6 +2864,9 @@ tst-dlopen-tlsreinit4-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
+ 
+ $(objpfx)tst-dlopen-recurse.out: $(objpfx)tst-dlopen-recursemod1.so
+ $(objpfx)tst-dlopen-recursemod1.so: $(objpfx)tst-dlopen-recursemod2.so
++tst-dlopen-auditdup-ENV = LD_AUDIT=$(objpfx)tst-dlopen-auditdup-auditmod.so
++$(objpfx)tst-dlopen-auditdup.out: \
++  $(objpfx)tst-dlopen-auditdupmod.so $(objpfx)tst-dlopen-auditdup-auditmod.so
+ 
+ LDFLAGS-tst-hash-collision1-mod.so = -Wl,--hash-style=both
+ $(objpfx)tst-hash-collision1: $(objpfx)tst-hash-collision1-mod.so
+diff --git a/elf/dl-open.c b/elf/dl-open.c
+index 5095ea4f96b6cf49..6ec1ca033bbe7859 100644
+--- a/elf/dl-open.c
++++ b/elf/dl-open.c
+@@ -575,6 +575,14 @@ dl_open_worker_begin (void *a)
+ 	_dl_debug_printf ("opening file=%s [%lu]; direct_opencount=%u\n\n",
+ 			  new->l_name, new->l_ns, new->l_direct_opencount);
+ 
++#ifdef SHARED
++      /* No relocation processing on this execution path.  But
++	 relocation has not been performed for static
++	 position-dependent executables, so disable the assert for
++	 static linking.  */
++      assert (new->l_relocated);
++#endif
++
+       /* If the user requested the object to be in the global
+ 	 namespace but it is not so far, prepare to add it now.  This
+ 	 can raise an exception to do a malloc failure.  */
+@@ -596,10 +604,6 @@ dl_open_worker_begin (void *a)
+       if ((mode & RTLD_GLOBAL) && new->l_global == 0)
+ 	add_to_global_update (new);
+ 
+-      const int r_state __attribute__ ((unused))
+-        = _dl_debug_update (args->nsid)->r_state;
+-      assert (r_state == RT_CONSISTENT);
+-
+       /* Do not return without calling the (supposedly new) map's
+ 	 constructor.  This case occurs if a dependency of a directly
+ 	 opened map has a constructor that calls dlopen again on the
+@@ -638,17 +642,6 @@ dl_open_worker_begin (void *a)
+ #endif
+       }
+ 
+-  /* Notify the debugger all new objects are now ready to go.  */
+-  struct r_debug *r = _dl_debug_update (args->nsid);
+-  r->r_state = RT_CONSISTENT;
+-  _dl_debug_state ();
+-  LIBC_PROBE (map_complete, 3, args->nsid, r, new);
+-
+-#ifdef SHARED
+-  /* Auditing checkpoint: we have added all objects.  */
+-  _dl_audit_activity_nsid (new->l_ns, LA_ACT_CONSISTENT);
+-#endif
+-
+   _dl_open_check (new);
+ 
+   /* Print scope information.  */
+@@ -695,6 +688,7 @@ dl_open_worker_begin (void *a)
+      created dlmopen namespaces.  Do not do this for static dlopen
+      because libc has relocations against ld.so, which may not have
+      been relocated at this point.  */
++  struct r_debug *r = _dl_debug_update (args->nsid);
+ #ifdef SHARED
+   if (GL(dl_ns)[args->nsid].libc_map != NULL)
+     _dl_open_relocate_one_object (args, r, GL(dl_ns)[args->nsid].libc_map,
+@@ -782,6 +776,26 @@ dl_open_worker (void *a)
+ 
+     __rtld_lock_unlock_recursive (GL(dl_load_tls_lock));
+ 
++    /* Auditing checkpoint and debugger signalling.  Do this even on
++       error, so that dlopen exists with consistent state.  */
++    if (args->nsid >= 0 || args->map != NULL)
++      {
++	Lmid_t nsid = args->map != NULL ? args->map->l_ns : args->nsid;
++	struct r_debug *r = _dl_debug_update (nsid);
++#ifdef SHARED
++	bool was_not_consistent  = r->r_state != RT_CONSISTENT;
++#endif
++	r->r_state = RT_CONSISTENT;
++	_dl_debug_state ();
++	LIBC_PROBE (map_complete, 3, nsid, r, new);
++
++#ifdef SHARED
++	if (was_not_consistent)
++	  /* Avoid redudant/recursive signalling.  */
++	  _dl_audit_activity_nsid (nsid, LA_ACT_CONSISTENT);
++#endif
++      }
++
+     if (__glibc_unlikely (ex.errstring != NULL))
+       /* Reraise the error.  */
+       _dl_signal_exception (err, &ex, NULL);
+diff --git a/elf/tst-dlopen-auditdup-auditmod.c b/elf/tst-dlopen-auditdup-auditmod.c
+new file mode 100644
+index 0000000000000000..9b67295e94d03e7a
+--- /dev/null
++++ b/elf/tst-dlopen-auditdup-auditmod.c
+@@ -0,0 +1,100 @@
++/* Auditor that opens again an object that just has been opened.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <dlfcn.h>
++#include <link.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <string.h>
++#include <unistd.h>
++
++unsigned int
++la_version (unsigned int v)
++{
++  return LAV_CURRENT;
++}
++
++static bool trigger_on_la_activity;
++
++unsigned int
++la_objopen (struct link_map *map, Lmid_t lmid, uintptr_t *cookie)
++{
++  printf ("info: la_objopen: \"%s\"\n", map->l_name);
++  if (strstr (map->l_name, "/tst-dlopen-auditdupmod.so") != NULL)
++    trigger_on_la_activity = true;
++  return 0;
++}
++
++void
++la_activity (uintptr_t *cookie, unsigned int flag)
++{
++  static unsigned int calls;
++  ++calls;
++  printf ("info: la_activity: call %u (flag %u)\n", calls, flag);
++  fflush (stdout);
++  if (trigger_on_la_activity)
++    {
++      /* Avoid triggering on the dlmopen call below.  */
++      static bool recursion;
++      if (recursion)
++        return;
++      recursion = true;
++
++      puts ("info: about to dlmopen tst-dlopen-auditdupmod.so");
++      fflush (stdout);
++      void *handle = dlmopen (LM_ID_BASE, "tst-dlopen-auditdupmod.so",
++                              RTLD_NOW);
++      if (handle == NULL)
++        {
++          printf ("error: dlmopen: %s\n", dlerror ());
++          fflush (stdout);
++          _exit (1);
++        }
++
++      /* Check that the constructor has run.  */
++      int *status = dlsym (handle, "auditdupmod_status");
++      if (status == NULL)
++        {
++          printf ("error: dlsym: %s\n", dlerror ());
++          fflush (stdout);
++          _exit (1);
++        }
++      printf ("info: auditdupmod_status == %d\n", *status);
++      if (*status != 1)
++        {
++          puts ("error: auditdupmod_status == 1 expected");
++          fflush (stdout);
++          _exit (1);
++        }
++      /* Checked in the destructor and the main program.  */
++      ++*status;
++      printf ("info: auditdupmod_status == %d\n", *status);
++
++      /* Check that the module has been relocated.  */
++      int **status_address = dlsym (handle, "auditdupmod_status_address");
++      if (status_address == NULL || *status_address != status)
++        {
++          puts ("error: invalid auditdupmod_status address in"
++                " tst-dlopen-auditdupmod.so");
++          fflush (stdout);
++          _exit (1);
++        }
++
++      fflush (stdout);
++    }
++}
+diff --git a/elf/tst-dlopen-auditdup.c b/elf/tst-dlopen-auditdup.c
+new file mode 100644
+index 0000000000000000..d022c58ae3091da1
+--- /dev/null
++++ b/elf/tst-dlopen-auditdup.c
+@@ -0,0 +1,36 @@
++/* Test that recursive dlopen from auditor works (bug 31986).
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <support/check.h>
++#include <support/xdlfcn.h>
++
++static int
++do_test (void)
++{
++  puts ("info: about to dlopen tst-dlopen-auditdupmod.so");
++  fflush (stdout);
++  void *handle = xdlopen ("tst-dlopen-auditdupmod.so", RTLD_NOW);
++  int *status = xdlsym (handle, "auditdupmod_status");
++  printf ("info: auditdupmod_status == %d (from main)\n", *status);
++  TEST_COMPARE (*status, 2);
++  xdlclose (handle);
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/elf/tst-dlopen-auditdupmod.c b/elf/tst-dlopen-auditdupmod.c
+new file mode 100644
+index 0000000000000000..59b7e21daa8212df
+--- /dev/null
++++ b/elf/tst-dlopen-auditdupmod.c
+@@ -0,0 +1,48 @@
++/* Directly opened test module that gets reopened from the auditor.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <support/xdlfcn.h>
++
++int auditdupmod_status;
++
++/* Used to check for successful relocation processing.  */
++int *auditdupmod_status_address = &auditdupmod_status;
++
++static void __attribute__ ((constructor))
++init (void)
++{
++  ++auditdupmod_status;
++  printf ("info: tst-dlopen-auditdupmod.so constructor called (status %d)\n",
++          auditdupmod_status);
++}
++
++static void __attribute__ ((destructor))
++fini (void)
++{
++  /* The tst-dlopen-auditdup-auditmod.so auditor incremented
++     auditdupmod_status.  */
++  printf ("info: tst-dlopen-auditdupmod.so destructor called (status %d)\n",
++          auditdupmod_status);
++  if (auditdupmod_status != 2)
++    {
++      puts ("error: auditdupmod_status == 2 expected");
++      exit (1);
++    }
++}

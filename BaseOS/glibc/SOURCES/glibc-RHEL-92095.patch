@@ -1,0 +1,103 @@
+commit 5324d258427fd11ca0f4f595c94016e568b26d6b
+Author: Joe Simmons-Talbott <josimmon@redhat.com>
+Date:   Wed Jul 5 21:23:28 2023 +0000
+
+    fileops: Don't process ,ccs= as individual mode flags (BZ#18906)
+    
+    In processing the first 7 individual characters of the mode for fopen
+    if ,ccs= is used those characters will be processed as well.  Stop
+    processing individual mode flags once a comma is encountered.  This has
+    the effect of requiring ,ccs= to be the last mode flag in the mode
+    string.  Add a testcase to check that the ,ccs= mode flag is not
+    processed as individual mode flags.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+Conflicts:
+	libio/tst-fopenloc.c (fixup context)
+
+diff --git a/libio/fileops.c b/libio/fileops.c
+index 11303013cb11dbd2..f6a17a99e3020323 100644
+--- a/libio/fileops.c
++++ b/libio/fileops.c
+@@ -282,6 +282,7 @@ _IO_new_file_fopen (FILE *fp, const char *filename, const char *mode,
+       switch (*++mode)
+ 	{
+ 	case '\0':
++	case ',':
+ 	  break;
+ 	case '+':
+ 	  omode = O_RDWR;
+diff --git a/libio/tst-fopenloc.c b/libio/tst-fopenloc.c
+index 6e417e6a673a3662..30606f1e3f4f11bb 100644
+--- a/libio/tst-fopenloc.c
++++ b/libio/tst-fopenloc.c
+@@ -18,6 +18,7 @@
+    <https://www.gnu.org/licenses/>.  */
+ 
+ #include <errno.h>
++#include <fcntl.h>
+ #include <locale.h>
+ #include <mcheck.h>
+ #include <stdio.h>
+@@ -25,6 +26,7 @@
+ #include <string.h>
+ #include <wchar.h>
+ #include <sys/resource.h>
++#include <support/check.h>
+ #include <support/support.h>
+ #include <support/xstdio.h>
+ 
+@@ -49,13 +51,40 @@ do_bz17916 (void)
+   if (fp != NULL)
+     {
+       printf ("unxpected success\n");
++      free (ccs);
++      fclose (fp);
+       return 1;
+     }
++
+   free (ccs);
+ 
+   return 0;
+ }
+ 
++static int
++do_bz18906 (void)
++{
++  /* BZ #18906 -- check processing of ,ccs= as flags case.  */
++
++  const char *ccs = "r,ccs=+ISO-8859-1";
++  size_t retval;
++
++  FILE *fp = fopen (inputfile, ccs);
++  int flags;
++
++  TEST_VERIFY (fp != NULL);
++
++  if (fp != NULL)
++    {
++      flags = fcntl (fileno (fp), F_GETFL);
++      retval = (flags & O_RDWR) | (flags & O_WRONLY);
++      TEST_COMPARE (retval, false);
++      fclose (fp);
++    }
++
++  return EXIT_SUCCESS;
++}
++
+ static int
+ do_test (void)
+ {
+@@ -79,7 +108,10 @@ do_test (void)
+ 
+   xfclose (fp);
+ 
+-  return do_bz17916 ();
++  TEST_COMPARE (do_bz17916 (), 0);
++  TEST_COMPARE (do_bz18906 (), 0);
++
++  return EXIT_SUCCESS;
+ }
+ 
+ #include <support/test-driver.c>

@@ -1,0 +1,207 @@
+From 77d0e22296ac39f8e9036fd838dcea287db21015 Mon Sep 17 00:00:00 2001
+From: licunlong <licunlong1@huawei.com>
+Date: Thu, 15 Jun 2023 16:28:28 +0800
+Subject: [PATCH] sd-bus: make bus_add_match_full accept timeout
+
+(cherry picked from commit bb30e58f644689feaa87d8136d1686b6c3a6f42a)
+
+Related: RHEL-111629
+---
+ src/libsystemd/sd-bus/bus-control.c  | 48 +++++++++++++++++++++-------
+ src/libsystemd/sd-bus/bus-control.h  |  4 +--
+ src/libsystemd/sd-bus/bus-internal.h | 10 ++++++
+ src/libsystemd/sd-bus/sd-bus.c       | 17 ++++++----
+ 4 files changed, 59 insertions(+), 20 deletions(-)
+
+diff --git a/src/libsystemd/sd-bus/bus-control.c b/src/libsystemd/sd-bus/bus-control.c
+index d96b7256a1..762656fa74 100644
+--- a/src/libsystemd/sd-bus/bus-control.c
++++ b/src/libsystemd/sd-bus/bus-control.c
+@@ -803,9 +803,10 @@ _public_ int sd_bus_get_owner_creds(sd_bus *bus, uint64_t mask, sd_bus_creds **r
+ int bus_add_match_internal(
+                 sd_bus *bus,
+                 const char *match,
++                uint64_t timeout_usec,
+                 uint64_t *ret_counter) {
+ 
+-        _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
++        _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL, *reply = NULL;
+         const char *e;
+         int r;
+ 
+@@ -816,16 +817,26 @@ int bus_add_match_internal(
+ 
+         e = append_eavesdrop(bus, match);
+ 
+-        r = sd_bus_call_method(
++        r = sd_bus_message_new_method_call(
+                         bus,
++                        &m,
+                         "org.freedesktop.DBus",
+                         "/org/freedesktop/DBus",
+                         "org.freedesktop.DBus",
+-                        "AddMatch",
++                        "AddMatch");
++        if (r < 0)
++                return r;
++
++        r = sd_bus_message_append(m, "s", e);
++        if (r < 0)
++                return r;
++
++        r = sd_bus_call(
++                        bus,
++                        m,
++                        timeout_usec,
+                         NULL,
+-                        &reply,
+-                        "s",
+-                        e);
++                        &reply);
+         if (r < 0)
+                 return r;
+ 
+@@ -841,9 +852,12 @@ int bus_add_match_internal_async(
+                 sd_bus_slot **ret_slot,
+                 const char *match,
+                 sd_bus_message_handler_t callback,
+-                void *userdata) {
++                void *userdata,
++                uint64_t timeout_usec) {
+ 
++        _cleanup_(sd_bus_message_unrefp) sd_bus_message *m = NULL;
+         const char *e;
++        int r;
+ 
+         assert(bus);
+ 
+@@ -852,17 +866,27 @@ int bus_add_match_internal_async(
+ 
+         e = append_eavesdrop(bus, match);
+ 
+-        return sd_bus_call_method_async(
++        r = sd_bus_message_new_method_call(
+                         bus,
+-                        ret_slot,
++                        &m,
+                         "org.freedesktop.DBus",
+                         "/org/freedesktop/DBus",
+                         "org.freedesktop.DBus",
+-                        "AddMatch",
++                        "AddMatch");
++        if (r < 0)
++                return r;
++
++        r = sd_bus_message_append(m, "s", e);
++        if (r < 0)
++                return r;
++
++        return sd_bus_call_async(
++                        bus,
++                        ret_slot,
++                        m,
+                         callback,
+                         userdata,
+-                        "s",
+-                        e);
++                        timeout_usec);
+ }
+ 
+ int bus_remove_match_internal(
+diff --git a/src/libsystemd/sd-bus/bus-control.h b/src/libsystemd/sd-bus/bus-control.h
+index 8182b9cd63..1cd4fb88d9 100644
+--- a/src/libsystemd/sd-bus/bus-control.h
++++ b/src/libsystemd/sd-bus/bus-control.h
+@@ -3,7 +3,7 @@
+ 
+ #include "sd-bus.h"
+ 
+-int bus_add_match_internal(sd_bus *bus, const char *match, uint64_t *ret_counter);
+-int bus_add_match_internal_async(sd_bus *bus, sd_bus_slot **ret, const char *match, sd_bus_message_handler_t callback, void *userdata);
++int bus_add_match_internal(sd_bus *bus, const char *match, uint64_t timeout_usec, uint64_t *ret_counter);
++int bus_add_match_internal_async(sd_bus *bus, sd_bus_slot **ret, const char *match, sd_bus_message_handler_t callback, void *userdata, uint64_t timeout_usec);
+ 
+ int bus_remove_match_internal(sd_bus *bus, const char *match);
+diff --git a/src/libsystemd/sd-bus/bus-internal.h b/src/libsystemd/sd-bus/bus-internal.h
+index 51673ad1c5..603a53fb10 100644
+--- a/src/libsystemd/sd-bus/bus-internal.h
++++ b/src/libsystemd/sd-bus/bus-internal.h
+@@ -386,6 +386,16 @@ int bus_attach_inotify_event(sd_bus *b);
+ void bus_close_inotify_fd(sd_bus *b);
+ void bus_close_io_fds(sd_bus *b);
+ 
++int bus_add_match_full(
++                sd_bus *bus,
++                sd_bus_slot **slot,
++                bool asynchronous,
++                const char *match,
++                sd_bus_message_handler_t callback,
++                sd_bus_message_handler_t install_callback,
++                void *userdata,
++                uint64_t timeout_usec);
++
+ #define OBJECT_PATH_FOREACH_PREFIX(prefix, path)                        \
+         for (char *_slash = ({ strcpy((prefix), (path)); streq((prefix), "/") ? NULL : strrchr((prefix), '/'); }) ; \
+              _slash && ((_slash[(_slash) == (prefix)] = 0), true);       \
+diff --git a/src/libsystemd/sd-bus/sd-bus.c b/src/libsystemd/sd-bus/sd-bus.c
+index 10efe53a25..b8406f154b 100644
+--- a/src/libsystemd/sd-bus/sd-bus.c
++++ b/src/libsystemd/sd-bus/sd-bus.c
+@@ -3486,14 +3486,15 @@ static int add_match_callback(
+         return r;
+ }
+ 
+-static int bus_add_match_full(
++int bus_add_match_full(
+                 sd_bus *bus,
+                 sd_bus_slot **slot,
+                 bool asynchronous,
+                 const char *match,
+                 sd_bus_message_handler_t callback,
+                 sd_bus_message_handler_t install_callback,
+-                void *userdata) {
++                void *userdata,
++                uint64_t timeout_usec) {
+ 
+         struct bus_match_component *components = NULL;
+         unsigned n_components = 0;
+@@ -3539,7 +3540,8 @@ static int bus_add_match_full(
+                                                                  &s->match_callback.install_slot,
+                                                                  s->match_callback.match_string,
+                                                                  add_match_callback,
+-                                                                 s);
++                                                                 s,
++                                                                 timeout_usec);
+ 
+                                 if (r < 0)
+                                         goto finish;
+@@ -3549,7 +3551,10 @@ static int bus_add_match_full(
+                                  * then make it floating. */
+                                 r = sd_bus_slot_set_floating(s->match_callback.install_slot, true);
+                         } else
+-                                r = bus_add_match_internal(bus, s->match_callback.match_string, &s->match_callback.after);
++                                r = bus_add_match_internal(bus,
++                                                s->match_callback.match_string,
++                                                timeout_usec,
++                                                &s->match_callback.after);
+                         if (r < 0)
+                                 goto finish;
+ 
+@@ -3580,7 +3585,7 @@ _public_ int sd_bus_add_match(
+                 sd_bus_message_handler_t callback,
+                 void *userdata) {
+ 
+-        return bus_add_match_full(bus, slot, false, match, callback, NULL, userdata);
++        return bus_add_match_full(bus, slot, false, match, callback, NULL, userdata, 0);
+ }
+ 
+ _public_ int sd_bus_add_match_async(
+@@ -3591,7 +3596,7 @@ _public_ int sd_bus_add_match_async(
+                 sd_bus_message_handler_t install_callback,
+                 void *userdata) {
+ 
+-        return bus_add_match_full(bus, slot, true, match, callback, install_callback, userdata);
++        return bus_add_match_full(bus, slot, true, match, callback, install_callback, userdata, 0);
+ }
+ 
+ bool bus_pid_changed(sd_bus *bus) {

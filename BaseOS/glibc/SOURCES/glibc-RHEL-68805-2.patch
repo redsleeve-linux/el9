@@ -1,0 +1,71 @@
+commit 04b1eb161fdc8b88876bf78b34d2bb92584aba45
+Author: Siddhesh Poyarekar <siddhesh@sourceware.org>
+Date:   Fri Nov 8 12:33:47 2024 -0500
+
+    support: Add xdup
+    
+    Add xdup as the error-checking version of dup for test cases.
+    
+    Signed-off-by: Siddhesh Poyarekar <siddhesh@sourceware.org>
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff --git a/support/Makefile b/support/Makefile
+index ef90b96bf5f6db5d..d6d03c2ed3af3e6d 100644
+--- a/support/Makefile
++++ b/support/Makefile
+@@ -128,6 +128,7 @@ libsupport-routines = \
+   xcopy_file_range \
+   xdlfcn \
+   xdlmopen \
++  xdup \
+   xdup2 \
+   xfchmod \
+   xfclose \
+diff --git a/support/xdup.c b/support/xdup.c
+new file mode 100644
+index 0000000000000000..1eab317354f1f353
+--- /dev/null
++++ b/support/xdup.c
+@@ -0,0 +1,30 @@
++/* dup with error checking.
++   Copyright The GNU Toolchain Authors.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <support/xunistd.h>
++#include <support/check.h>
++
++int
++xdup (int from)
++{
++  int ret = dup (from);
++  if (ret < 0)
++    FAIL_EXIT1 ("dup (%d): %m", from);
++
++  return ret;
++}
+diff --git a/support/xunistd.h b/support/xunistd.h
+index 94b1e1eb1b1e8253..a4d0d3427204cfe5 100644
+--- a/support/xunistd.h
++++ b/support/xunistd.h
+@@ -35,6 +35,7 @@ pid_t xfork (void);
+ pid_t xwaitpid (pid_t, int *status, int flags);
+ void xpipe (int[2]);
+ void xdup2 (int, int);
++int xdup (int);
+ int xopen (const char *path, int flags, mode_t);
+ void support_check_stat_fd (const char *name, int fd, int result);
+ void support_check_stat_path (const char *name, const char *path, int result);

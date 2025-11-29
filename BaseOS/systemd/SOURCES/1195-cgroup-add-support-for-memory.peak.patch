@@ -1,0 +1,388 @@
+From 6908cae6db2ca758861bd39d2ad0ac28da1b5372 Mon Sep 17 00:00:00 2001
+From: Florian Schmaus <flo@geekplace.eu>
+Date: Mon, 6 Nov 2023 13:15:55 +0100
+Subject: [PATCH] cgroup: add support for memory.peak
+
+Linux's Control Group v2 interfaces exposes memory.peak, which contains the
+"max memory usage recorded for the cgroup and its descendants since the
+creation of the cgroup."
+
+This commit adds a new property "MemoryPeak" for units and makes "systemctl
+show" display this value if it is available.
+
+Fixes #29878.
+
+Signed-off-by: Florian Schmaus <flo@geekplace.eu>
+(cherry picked from commit 6c71db763cb482c30870359dd3d188a6aa23c4da)
+
+Related: RHEL-95797
+---
+ man/org.freedesktop.systemd1.xml | 36 +++++++++++++++++++++
+ src/core/cgroup.c                | 54 ++++++++++++++++++++++++++++++++
+ src/core/cgroup.h                |  1 +
+ src/core/dbus-unit.c             | 24 ++++++++++++++
+ src/core/unit.c                  |  1 +
+ src/core/unit.h                  |  3 ++
+ src/systemctl/systemctl-show.c   | 10 +++++-
+ 7 files changed, 128 insertions(+), 1 deletion(-)
+
+diff --git a/man/org.freedesktop.systemd1.xml b/man/org.freedesktop.systemd1.xml
+index 78781b6ed3..e7b9b0a127 100644
+--- a/man/org.freedesktop.systemd1.xml
++++ b/man/org.freedesktop.systemd1.xml
+@@ -2629,6 +2629,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryCurrent = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
++      readonly t MemoryPeak = ...;
++      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryAvailable = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t CPUUsageNSec = ...;
+@@ -3204,6 +3206,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
+ 
+     <!--property MemoryCurrent is not documented!-->
+ 
++    <!--property MemoryPeak is not documented!-->
++
+     <!--property CPUUsageNSec is not documented!-->
+ 
+     <!--property EffectiveCPUs is not documented!-->
+@@ -3784,6 +3788,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2eservice {
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryCurrent"/>
+ 
++    <variablelist class="dbus-property" generated="True" extra-ref="MemoryPeak"/>
++
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryAvailable"/>
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="CPUUsageNSec"/>
+@@ -4521,6 +4527,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryCurrent = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
++      readonly t MemoryPeak = ...;
++      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryAvailable = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t CPUUsageNSec = ...;
+@@ -5118,6 +5126,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
+ 
+     <!--property MemoryCurrent is not documented!-->
+ 
++    <!--property MemoryPeak is not documented!-->
++
+     <!--property CPUUsageNSec is not documented!-->
+ 
+     <!--property EffectiveCPUs is not documented!-->
+@@ -5690,6 +5700,8 @@ node /org/freedesktop/systemd1/unit/avahi_2ddaemon_2esocket {
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryCurrent"/>
+ 
++    <variablelist class="dbus-property" generated="True" extra-ref="MemoryPeak"/>
++
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryAvailable"/>
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="CPUUsageNSec"/>
+@@ -6316,6 +6328,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryCurrent = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
++      readonly t MemoryPeak = ...;
++      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryAvailable = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t CPUUsageNSec = ...;
+@@ -6841,6 +6855,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
+ 
+     <!--property MemoryCurrent is not documented!-->
+ 
++    <!--property MemoryPeak is not documented!-->
++
+     <!--property CPUUsageNSec is not documented!-->
+ 
+     <!--property EffectiveCPUs is not documented!-->
+@@ -7331,6 +7347,8 @@ node /org/freedesktop/systemd1/unit/home_2emount {
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryCurrent"/>
+ 
++    <variablelist class="dbus-property" generated="True" extra-ref="MemoryPeak"/>
++
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryAvailable"/>
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="CPUUsageNSec"/>
+@@ -8084,6 +8102,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryCurrent = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
++      readonly t MemoryPeak = ...;
++      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryAvailable = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t CPUUsageNSec = ...;
+@@ -8595,6 +8615,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
+ 
+     <!--property MemoryCurrent is not documented!-->
+ 
++    <!--property MemoryPeak is not documented!-->
++
+     <!--property CPUUsageNSec is not documented!-->
+ 
+     <!--property EffectiveCPUs is not documented!-->
+@@ -9071,6 +9093,8 @@ node /org/freedesktop/systemd1/unit/dev_2dsda3_2eswap {
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryCurrent"/>
+ 
++    <variablelist class="dbus-property" generated="True" extra-ref="MemoryPeak"/>
++
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryAvailable"/>
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="CPUUsageNSec"/>
+@@ -9683,6 +9707,8 @@ node /org/freedesktop/systemd1/unit/system_2eslice {
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryCurrent = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
++      readonly t MemoryPeak = ...;
++      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryAvailable = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t CPUUsageNSec = ...;
+@@ -9836,6 +9862,8 @@ node /org/freedesktop/systemd1/unit/system_2eslice {
+ 
+     <!--property MemoryCurrent is not documented!-->
+ 
++    <!--property MemoryPeak is not documented!-->
++
+     <!--property CPUUsageNSec is not documented!-->
+ 
+     <!--property EffectiveCPUs is not documented!-->
+@@ -9992,6 +10020,8 @@ node /org/freedesktop/systemd1/unit/system_2eslice {
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryCurrent"/>
+ 
++    <variablelist class="dbus-property" generated="True" extra-ref="MemoryPeak"/>
++
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryAvailable"/>
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="CPUUsageNSec"/>
+@@ -10174,6 +10204,8 @@ node /org/freedesktop/systemd1/unit/session_2d1_2escope {
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryCurrent = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
++      readonly t MemoryPeak = ...;
++      @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t MemoryAvailable = ...;
+       @org.freedesktop.DBus.Property.EmitsChangedSignal("false")
+       readonly t CPUUsageNSec = ...;
+@@ -10347,6 +10379,8 @@ node /org/freedesktop/systemd1/unit/session_2d1_2escope {
+ 
+     <!--property MemoryCurrent is not documented!-->
+ 
++    <!--property MemoryPeak is not documented!-->
++
+     <!--property CPUUsageNSec is not documented!-->
+ 
+     <!--property EffectiveCPUs is not documented!-->
+@@ -10533,6 +10567,8 @@ node /org/freedesktop/systemd1/unit/session_2d1_2escope {
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryCurrent"/>
+ 
++    <variablelist class="dbus-property" generated="True" extra-ref="MemoryPeak"/>
++
+     <variablelist class="dbus-property" generated="True" extra-ref="MemoryAvailable"/>
+ 
+     <variablelist class="dbus-property" generated="True" extra-ref="CPUUsageNSec"/>
+diff --git a/src/core/cgroup.c b/src/core/cgroup.c
+index 7d6b1119be..7a1aed3874 100644
+--- a/src/core/cgroup.c
++++ b/src/core/cgroup.c
+@@ -3716,6 +3716,60 @@ int unit_get_memory_current(Unit *u, uint64_t *ret) {
+         return cg_get_attribute_as_uint64("memory", u->cgroup_path, r > 0 ? "memory.current" : "memory.usage_in_bytes", ret);
+ }
+ 
++static int unit_get_memory_peak_raw(Unit *u, uint64_t *ret) {
++        int r;
++
++        assert(u);
++        assert(ret);
++
++        if (!u->cgroup_path)
++                return -ENODATA;
++
++        /* The root cgroup doesn't expose this information. */
++        if (unit_has_host_root_cgroup(u))
++                return -ENODATA;
++
++        if ((u->cgroup_realized_mask & CGROUP_MASK_MEMORY) == 0)
++                return -ENODATA;
++
++        r = cg_all_unified();
++        if (r < 0)
++                return r;
++        if (!r)
++                return -ENODATA;
++
++        return cg_get_attribute_as_uint64("memory", u->cgroup_path, "memory.peak", ret);
++}
++
++int unit_get_memory_peak(Unit *u, uint64_t *ret) {
++        uint64_t bytes;
++        int r;
++
++        assert(u);
++        assert(ret);
++
++        if (!UNIT_CGROUP_BOOL(u, memory_accounting))
++                return -ENODATA;
++
++        r = unit_get_memory_peak_raw(u, &bytes);
++        if (r == -ENODATA && u->memory_peak_last != UINT64_MAX) {
++                /* If we can't get the memory peak anymore (because the cgroup was already removed, for example),
++                 * use our cached value. */
++
++                if (ret)
++                        *ret = u->memory_peak_last;
++                return 0;
++        }
++        if (r < 0)
++                return r;
++
++        u->memory_peak_last = bytes;
++        if (ret)
++                *ret = bytes;
++
++        return 0;
++}
++
+ int unit_get_tasks_current(Unit *u, uint64_t *ret) {
+         assert(u);
+         assert(ret);
+diff --git a/src/core/cgroup.h b/src/core/cgroup.h
+index 4413eeaaa0..314b723cfd 100644
+--- a/src/core/cgroup.h
++++ b/src/core/cgroup.h
+@@ -292,6 +292,7 @@ int unit_watch_all_pids(Unit *u);
+ int unit_synthesize_cgroup_empty_event(Unit *u);
+ 
+ int unit_get_memory_current(Unit *u, uint64_t *ret);
++int unit_get_memory_peak(Unit *u, uint64_t *ret);
+ int unit_get_memory_available(Unit *u, uint64_t *ret);
+ int unit_get_tasks_current(Unit *u, uint64_t *ret);
+ int unit_get_cpu_usage(Unit *u, nsec_t *ret);
+diff --git a/src/core/dbus-unit.c b/src/core/dbus-unit.c
+index 9d3c3be4e9..22a29ba0cb 100644
+--- a/src/core/dbus-unit.c
++++ b/src/core/dbus-unit.c
+@@ -1072,6 +1072,29 @@ static int property_get_current_memory(
+         return sd_bus_message_append(reply, "t", sz);
+ }
+ 
++static int property_get_peak_memory(
++                sd_bus *bus,
++                const char *path,
++                const char *interface,
++                const char *property,
++                sd_bus_message *reply,
++                void *userdata,
++                sd_bus_error *error) {
++
++        uint64_t sz = UINT64_MAX;
++        Unit *u = ASSERT_PTR(userdata);
++        int r;
++
++        assert(bus);
++        assert(reply);
++
++        r = unit_get_memory_peak(u, &sz);
++        if (r < 0 && r != -ENODATA)
++                log_unit_warning_errno(u, r, "Failed to get memory.peak attribute: %m");
++
++        return sd_bus_message_append(reply, "t", sz);
++}
++
+ static int property_get_available_memory(
+                 sd_bus *bus,
+                 const char *path,
+@@ -1537,6 +1560,7 @@ const sd_bus_vtable bus_unit_cgroup_vtable[] = {
+         SD_BUS_PROPERTY("ControlGroup", "s", property_get_cgroup, 0, 0),
+         SD_BUS_PROPERTY("ControlGroupId", "t", NULL, offsetof(Unit, cgroup_id), 0),
+         SD_BUS_PROPERTY("MemoryCurrent", "t", property_get_current_memory, 0, 0),
++        SD_BUS_PROPERTY("MemoryPeak", "t", property_get_peak_memory, 0, 0),
+         SD_BUS_PROPERTY("MemoryAvailable", "t", property_get_available_memory, 0, 0),
+         SD_BUS_PROPERTY("CPUUsageNSec", "t", property_get_cpu_usage, 0, 0),
+         SD_BUS_PROPERTY("EffectiveCPUs", "ay", property_get_cpuset_cpus, 0, 0),
+diff --git a/src/core/unit.c b/src/core/unit.c
+index d98ecf4367..0f60fe061c 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -111,6 +111,7 @@ Unit* unit_new(Manager *m, size_t size) {
+         u->ref_uid = UID_INVALID;
+         u->ref_gid = GID_INVALID;
+         u->cpu_usage_last = NSEC_INFINITY;
++        u->memory_peak_last = UINT64_MAX;
+         u->cgroup_invalidated_mask |= CGROUP_MASK_BPF_FIREWALL;
+         u->failure_action_exit_status = u->success_action_exit_status = -1;
+ 
+diff --git a/src/core/unit.h b/src/core/unit.h
+index e79b5322b4..4bb85b55be 100644
+--- a/src/core/unit.h
++++ b/src/core/unit.h
+@@ -360,6 +360,9 @@ typedef struct Unit {
+         nsec_t cpu_usage_base;
+         nsec_t cpu_usage_last; /* the most recently read value */
+ 
++        /* Most recently read value of memory.peak */
++        uint64_t memory_peak_last;
++
+         /* The current counter of OOM kills initiated by systemd-oomd */
+         uint64_t managed_oom_kill_last;
+ 
+diff --git a/src/systemctl/systemctl-show.c b/src/systemctl/systemctl-show.c
+index 24c7d564b8..03d53bc13c 100644
+--- a/src/systemctl/systemctl-show.c
++++ b/src/systemctl/systemctl-show.c
+@@ -245,6 +245,7 @@ typedef struct UnitStatusInfo {
+ 
+         /* CGroup */
+         uint64_t memory_current;
++        uint64_t memory_peak;
+         uint64_t memory_min;
+         uint64_t memory_low;
+         uint64_t memory_high;
+@@ -697,7 +698,8 @@ static void print_status_info(
+         if (i->memory_current != UINT64_MAX) {
+                 printf("     Memory: %s", FORMAT_BYTES(i->memory_current));
+ 
+-                if (i->memory_min > 0 || i->memory_low > 0 ||
++                if (i->memory_peak != CGROUP_LIMIT_MAX ||
++                    i->memory_min > 0 || i->memory_low > 0 ||
+                     i->memory_high != CGROUP_LIMIT_MAX || i->memory_max != CGROUP_LIMIT_MAX ||
+                     i->memory_swap_max != CGROUP_LIMIT_MAX ||
+                     i->memory_available != CGROUP_LIMIT_MAX ||
+@@ -733,6 +735,10 @@ static void print_status_info(
+                                 printf("%savailable: %s", prefix, FORMAT_BYTES(i->memory_available));
+                                 prefix = " ";
+                         }
++                        if (i->memory_peak != CGROUP_LIMIT_MAX) {
++                                printf("%speak: %s", prefix, FORMAT_BYTES(i->memory_peak));
++                                prefix = " ";
++                        }
+                         printf(")");
+                 }
+                 printf("\n");
+@@ -1927,6 +1933,7 @@ static int show_one(
+                 { "Where",                          "s",               NULL,           offsetof(UnitStatusInfo, where)                             },
+                 { "What",                           "s",               NULL,           offsetof(UnitStatusInfo, what)                              },
+                 { "MemoryCurrent",                  "t",               NULL,           offsetof(UnitStatusInfo, memory_current)                    },
++                { "MemoryPeak",                     "t",               NULL,           offsetof(UnitStatusInfo, memory_peak)                       },
+                 { "MemoryAvailable",                "t",               NULL,           offsetof(UnitStatusInfo, memory_available)                  },
+                 { "DefaultMemoryMin",               "t",               NULL,           offsetof(UnitStatusInfo, default_memory_min)                },
+                 { "DefaultMemoryLow",               "t",               NULL,           offsetof(UnitStatusInfo, default_memory_low)                },
+@@ -1970,6 +1977,7 @@ static int show_one(
+                 .memory_max = CGROUP_LIMIT_MAX,
+                 .memory_swap_max = CGROUP_LIMIT_MAX,
+                 .memory_limit = UINT64_MAX,
++                .memory_peak = CGROUP_LIMIT_MAX,
+                 .memory_available = CGROUP_LIMIT_MAX,
+                 .cpu_usage_nsec = UINT64_MAX,
+                 .tasks_current = UINT64_MAX,

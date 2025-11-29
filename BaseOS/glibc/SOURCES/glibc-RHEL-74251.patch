@@ -1,0 +1,285 @@
+commit 46d31980943d8be2f421c1e3276b265c7552636e
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Mar 7 17:37:50 2025 +0100
+
+    elf: Fix handling of symbol versions which hash to zero (bug 29190)
+    
+    This was found through code inspection.  No application impact is
+    known.
+    
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+Conflicts:
+	elf/Makefile (fixup context)
+
+diff --git a/elf/Makefile b/elf/Makefile
+index a28ea58551ffd1d7..ba11f3a8b81e7218 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -488,6 +488,7 @@ tests += \
+   tst-unique2 \
+   tst-unwind-ctor \
+   tst-unwind-main \
++  tst-version-hash-zero \
+   unload3 \
+   unload4 \
+   unload5 \
+@@ -927,6 +928,9 @@ modules-names = \
+   tst-unique2mod1 \
+   tst-unique2mod2 \
+   tst-unwind-ctor-lib \
++  tst-version-hash-zero-linkmod \
++  tst-version-hash-zero-mod \
++  tst-version-hash-zero-refmod \
+   unload2dep \
+   unload2mod \
+   unload3mod1 \
+@@ -3014,3 +3018,20 @@ $(objpfx)tst-sprof-basic.out: tst-sprof-basic.sh $(objpfx)tst-sprof-basic
+ 		 '$(run-program-env)' > $@; \
+ 	$(evaluate-test)
+ generated += tst-sprof-mod.so.profile
++
++$(objpfx)tst-version-hash-zero.out: \
++  $(objpfx)tst-version-hash-zero-mod.so \
++  $(objpfx)tst-version-hash-zero-refmod.so
++LDFLAGS-tst-version-hash-zero-mod.so = \
++  -Wl,--version-script=tst-version-hash-zero-mod.map
++# The run-time test module tst-version-hash-zero-refmod.so is linked
++# to a stub module, tst-version-hash-zero-linkmod.so, to produce an
++# expected relocation error.
++$(objpfx)tst-version-hash-zero-refmod.so: \
++  $(objpfx)tst-version-hash-zero-linkmod.so
++LDFLAGS-tst-version-hash-zero-linkmod.so = \
++  -Wl,--version-script=tst-version-hash-zero-linkmod.map \
++  -Wl,--soname=tst-version-hash-zero-mod.so
++$(objpfx)tst-version-hash-zero-refmod.so: \
++  $(objpfx)tst-version-hash-zero-linkmod.so
++tst-version-hash-zero-refmod.so-no-z-defs = yes
+diff --git a/elf/dl-lookup.c b/elf/dl-lookup.c
+index 94ae2d0c46696118..4c882bdd173a835d 100644
+--- a/elf/dl-lookup.c
++++ b/elf/dl-lookup.c
+@@ -112,12 +112,22 @@ check_match (const char *const undef_name,
+ 	  /* We can match the version information or use the
+ 	     default one if it is not hidden.  */
+ 	  ElfW(Half) ndx = verstab[symidx] & 0x7fff;
+-	  if ((map->l_versions[ndx].hash != version->hash
+-	       || strcmp (map->l_versions[ndx].name, version->name))
+-	      && (version->hidden || map->l_versions[ndx].hash
+-		  || (verstab[symidx] & 0x8000)))
+-	    /* It's not the version we want.  */
+-	    return NULL;
++	  if (map->l_versions[ndx].hash == version->hash
++	      && strcmp (map->l_versions[ndx].name, version->name) == 0)
++	    /* This is an exact version match.  Return the symbol below.  */
++	    ;
++	  else
++	    {
++	      if (!version->hidden
++		  && map->l_versions[ndx].name[0] == '\0'
++		  && (verstab[symidx] & 0x8000) == 0
++		  && (*num_versions)++ == 0)
++		/* This is the global default version.  Store it as a
++		   fallback match.  */
++		*versioned_sym = sym;
++
++	      return NULL;
++	    }
+ 	}
+     }
+   else
+diff --git a/elf/dl-version.c b/elf/dl-version.c
+index 914955c2a832e573..982229c32c50d470 100644
+--- a/elf/dl-version.c
++++ b/elf/dl-version.c
+@@ -351,6 +351,13 @@ _dl_check_map_versions (struct link_map *map, int verbose, int trace_mode)
+ 	      ent = (ElfW(Verdef) *) ((char *) ent + ent->vd_next);
+ 	    }
+ 	}
++
++      /* The empty string has ELF hash zero.  This avoids a NULL check
++	 before the version string comparison in check_match in
++	 dl-lookup.c.  */
++      for (unsigned int i = 0; i < map->l_nversions; ++i)
++	if (map->l_versions[i].name == NULL)
++	  map->l_versions[i].name = "";
+     }
+ 
+   return result;
+diff --git a/elf/tst-version-hash-zero-linkmod.c b/elf/tst-version-hash-zero-linkmod.c
+new file mode 100644
+index 0000000000000000..15e2506d0111bc7e
+--- /dev/null
++++ b/elf/tst-version-hash-zero-linkmod.c
+@@ -0,0 +1,22 @@
++/* Stub module for linking tst-version-hash-zero-refmod.so.
++   Copyright (C) 2025  Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; see the file COPYING.LIB.  If
++   not, see <https://www.gnu.org/licenses/>.  */
++
++/* The version script assigns a different symbol version for the stub
++   module.  Loading the module with the incorrect version is expected
++   to fail.  */
++#include "tst-version-hash-zero-mod.c"
+diff --git a/elf/tst-version-hash-zero-linkmod.map b/elf/tst-version-hash-zero-linkmod.map
+new file mode 100644
+index 0000000000000000..2dba7c22d7ea7d09
+--- /dev/null
++++ b/elf/tst-version-hash-zero-linkmod.map
+@@ -0,0 +1,7 @@
++Base {
++  local: *;
++};
++
++OTHER_VERSION {
++  global: global_variable;
++} Base;
+diff --git a/elf/tst-version-hash-zero-mod.c b/elf/tst-version-hash-zero-mod.c
+new file mode 100644
+index 0000000000000000..ac6b0dc4a57b5775
+--- /dev/null
++++ b/elf/tst-version-hash-zero-mod.c
+@@ -0,0 +1,20 @@
++/* Test module with a zero version symbol hash.
++   Copyright (C) 2025  Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; see the file COPYING.LIB.  If
++   not, see <https://www.gnu.org/licenses/>.  */
++
++/* The symbol version is assigned by version script.  */
++int global_variable;
+diff --git a/elf/tst-version-hash-zero-mod.map b/elf/tst-version-hash-zero-mod.map
+new file mode 100644
+index 0000000000000000..41eaff79147a8fcd
+--- /dev/null
++++ b/elf/tst-version-hash-zero-mod.map
+@@ -0,0 +1,13 @@
++Base {
++  local: *;
++};
++
++/* Define the version so that tst-version-hash-zero-refmod.so passes
++   the initial symbol version check.  */
++OTHER_VERSION {
++} Base;
++
++/* This version string hashes to zero.  */
++PPPPPPPPPPPP {
++  global: global_variable;
++} Base;
+diff --git a/elf/tst-version-hash-zero-refmod.c b/elf/tst-version-hash-zero-refmod.c
+new file mode 100644
+index 0000000000000000..cd8b3dcef5b82012
+--- /dev/null
++++ b/elf/tst-version-hash-zero-refmod.c
+@@ -0,0 +1,23 @@
++/* Test module that triggers a relocation failure in tst-version-hash-zero.
++   Copyright (C) 2025  Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; see the file COPYING.LIB.  If
++   not, see <https://www.gnu.org/licenses/>.  */
++
++/* This is bound to global_variable@@OTHER_VERSION via
++   tst-version-hash-zero-linkmod.so, but at run time, only
++   global_variable@PPPPPPPPPPPP exists.  */
++extern int global_variable;
++int *pointer_variable = &global_variable;
+diff --git a/elf/tst-version-hash-zero.c b/elf/tst-version-hash-zero.c
+new file mode 100644
+index 0000000000000000..66a0db4f51fa0e10
+--- /dev/null
++++ b/elf/tst-version-hash-zero.c
+@@ -0,0 +1,56 @@
++/* Symbols with version hash zero should not match any version (bug 29190).
++   Copyright (C) 2025  Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public License as
++   published by the Free Software Foundation; either version 2.1 of the
++   License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; see the file COPYING.LIB.  If
++   not, see <https://www.gnu.org/licenses/>.  */
++
++#include <support/check.h>
++#include <support/xdlfcn.h>
++#include <stddef.h>
++#include <string.h>
++
++static int
++do_test (void)
++{
++  void *handle = xdlopen ("tst-version-hash-zero-mod.so", RTLD_NOW);
++
++  /* This used to crash because some struct r_found_version entries
++     with hash zero did not have valid version strings.  */
++  TEST_VERIFY (xdlvsym (handle, "global_variable", "PPPPPPPPPPPP") != NULL);
++
++  /* Consistency check.  */
++  TEST_VERIFY (xdlsym (handle, "global_variable")
++               == xdlvsym (handle, "global_variable", "PPPPPPPPPPPP"));
++
++  /* This symbol version is supposed to be missing.  */
++  TEST_VERIFY (dlvsym (handle, "global_variable", "OTHER_VERSION") == NULL);
++
++  /* tst-version-hash-zero-refmod.so references
++     global_variable@@OTHER_VERSION and is expected to fail to load.
++     dlvsym sets the hidden flag during lookup.  Relocation does not,
++     so this exercises a different failure case.  */
++  TEST_VERIFY_EXIT (dlopen ("tst-version-hash-zero-refmod.so", RTLD_NOW)
++                    == NULL);
++  const char *message = dlerror ();
++  if (strstr (message,
++              ": undefined symbol: global_variable, version OTHER_VERSION")
++      == NULL)
++    FAIL_EXIT1 ("unexpected dlopen failure: %s", message);
++
++  xdlclose (handle);
++  return 0;
++}
++
++#include <support/test-driver.c>

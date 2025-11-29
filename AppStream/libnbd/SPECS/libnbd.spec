@@ -21,7 +21,7 @@
 
 Name:           libnbd
 Version:        1.20.3
-Release:        1%{?dist}.redsleeve
+Release:        4%{?dist}
 Summary:        NBD client library in userspace
 
 License:        LGPL-2.0-or-later AND BSD-3-Clause
@@ -46,6 +46,13 @@ Patch0002:     0002-lib-Don-t-overwrite-error-in-nbd_opt_-go-info.patch
 Patch0003:     0003-generator-Restore-assignment-to-local-err.patch
 Patch0004:     0004-generator-states-newstyle.c-Quote-untrusted-string-f.patch
 Patch0005:     0005-generator-states-newstyle.c-Don-t-sign-extend-escape.patch
+Patch0006:     0006-copy-Set-the-total-size-in-bytes-copied.patch
+Patch0007:     0007-copy-Add-blkhash-option.patch
+Patch0008:     0008-copy-Fix-crash-when-blkhash-size-is-not-a-power-of-2.patch
+Patch0009:     0009-copy-Define-block_type-outside-of-block-struct.patch
+Patch0010:     0010-copy-Shrink-struct-block.patch
+Patch0011:     0011-copy-Enable-zero-optimization-for-allocated-extents.patch
+Patch0012:     0012-copy-Fix-corrupted-hash-on-incomplete-read.patch
 
 %if 0%{verify_tarball_signature}
 BuildRequires:  gnupg2
@@ -101,7 +108,7 @@ BuildRequires:  util-linux
 # nbdkit for i686.  These are only needed for the test suite so make
 # them optional.  This reduces our test exposure on 32 bit platforms,
 # although there is still Fedora/armv7 and some upstream testing.
-%ifnarch %{ix86} %{arm}
+%ifnarch %{ix86}
 BuildRequires:  qemu-img
 BuildRequires:  nbdkit
 BuildRequires:  nbdkit-data-plugin
@@ -390,8 +397,9 @@ make %{?_smp_mflags} check || {
 
 
 %changelog
-* Mon Jun 09 2025 Jacco Ligthart <jacco@redsleeve.org> - 1.20.3-1.redsleeve
-- fixed builddeps for arm
+* Tue Apr 15 2025 Richard W.M. Jones <rjones@redhat.com> - 1.20.3-4
+- Add nbdcopy --blkhash option
+  resolves: RHEL-85509
 
 * Sat Sep 28 2024 Richard W.M. Jones <rjones@redhat.com> - 1.20.3-1
 - Rebase to libnbd 1.20.3

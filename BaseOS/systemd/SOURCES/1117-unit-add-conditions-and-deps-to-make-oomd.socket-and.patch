@@ -1,0 +1,34 @@
+From 03b9b0ad5e5b678ba108e8e7b72e773be51a19a7 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Fri, 19 May 2023 04:47:34 +0900
+Subject: [PATCH] unit: add conditions and deps to make oomd.socket and
+ .service consistent
+
+Fixes #27690.
+
+(cherry picked from commit d0e3ae838f5417c7cda1cc32d944a32f55af2e96)
+
+Resolves: RHEL-90417
+---
+ units/systemd-oomd.socket | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/units/systemd-oomd.socket b/units/systemd-oomd.socket
+index 47cd0e7555..70eb6b7bc3 100644
+--- a/units/systemd-oomd.socket
++++ b/units/systemd-oomd.socket
+@@ -11,7 +11,13 @@
+ Description=Userspace Out-Of-Memory (OOM) Killer Socket
+ Documentation=man:systemd-oomd.service(8)
+ DefaultDependencies=no
+-Before=sockets.target
++Before=sockets.target shutdown.target
++Conflicts=shutdown.target
++ConditionControlGroupController=v2
++ConditionControlGroupController=memory
++ConditionPathExists=/proc/pressure/cpu
++ConditionPathExists=/proc/pressure/io
++ConditionPathExists=/proc/pressure/memory
+ 
+ [Socket]
+ ListenStream=/run/systemd/oom/io.system.ManagedOOM

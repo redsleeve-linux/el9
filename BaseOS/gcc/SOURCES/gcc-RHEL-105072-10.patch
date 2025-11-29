@@ -1,0 +1,51 @@
+commit 94ccaf62c378c3737f7e4b6a80e1160157119171
+Author: Thomas Neumann <tneumann@users.sourceforge.net>
+Date:   Mon Sep 19 18:10:02 2022 +0200
+
+    Avoid depending on destructor order
+    
+    In some scenarios (e.g., when mixing gcc and clang code), it can
+    happen that frames are deregistered after the lookup structure
+    has already been destroyed. That in itself would be fine, but
+    it triggers an assert in __deregister_frame_info_bases that
+    expects to find the frame.
+    
+    To avoid that, we now remember that the btree as already been
+    destroyed and disable the assert in that case.
+    
+    libgcc/ChangeLog:
+    
+            * unwind-dw2-fde.c: (release_register_frames) Remember
+            when the btree has been destroyed.
+            (__deregister_frame_info_bases) Disable the assert when
+            shutting down.
+
+diff --git a/libgcc/unwind-dw2-fde.c b/libgcc/unwind-dw2-fde.c
+index f38efd3c09efc3e9..b0d07ccd53b30f4c 100644
+--- a/libgcc/unwind-dw2-fde.c
++++ b/libgcc/unwind-dw2-fde.c
+@@ -48,6 +48,7 @@ typedef __UINTPTR_TYPE__ uintptr_type;
+ #include "unwind-dw2-btree.h"
+ 
+ static struct btree registered_frames;
++static bool in_shutdown;
+ 
+ static void
+ release_registered_frames (void) __attribute__ ((destructor (110)));
+@@ -57,6 +58,7 @@ release_registered_frames (void)
+   /* Release the b-tree and all frames. Frame releases that happen later are
+    * silently ignored */
+   btree_destroy (&registered_frames);
++  in_shutdown = true;
+ }
+ 
+ static void
+@@ -282,7 +284,7 @@ __deregister_frame_info_bases (const void *begin)
+   __gthread_mutex_unlock (&object_mutex);
+ #endif
+ 
+-  gcc_assert (ob);
++  gcc_assert (in_shutdown || ob);
+   return (void *) ob;
+ }
+ 

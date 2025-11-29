@@ -48,6 +48,7 @@ script_path="$1"
 shift
 
 # libc.so.6 always uses this name, so it is simpler to locate.
+# This can result in multiple paths, hence the loop below.
 libc_path=`find "$sysroot_path" -name libc.so.6`
 
 

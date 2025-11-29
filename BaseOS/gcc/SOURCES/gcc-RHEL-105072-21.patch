@@ -1,0 +1,31 @@
+commit 5cf60b6ba111f4169305c7832b063b000e9ec36a
+Author: Thomas Neumann <tneumann@users.sourceforge.net>
+Date:   Tue May 2 16:21:09 2023 +0200
+
+    release the sorted FDE array when deregistering a frame [PR109685]
+    
+    The atomic fastpath bypasses the code that releases the sort
+    array which was lazily allocated during unwinding. We now
+    check after deregistering if there is an array to free.
+    
+    libgcc/ChangeLog:
+            PR libgcc/109685
+            * unwind-dw2-fde.c: Free sort array in atomic fast path.
+
+diff --git a/libgcc/unwind-dw2-fde.c b/libgcc/unwind-dw2-fde.c
+index 9b0c229efa5427a9..0fd2fc54aa651350 100644
+--- a/libgcc/unwind-dw2-fde.c
++++ b/libgcc/unwind-dw2-fde.c
+@@ -241,6 +241,12 @@ __deregister_frame_info_bases (const void *begin)
+   // And remove
+   ob = btree_remove (&registered_frames, range[0]);
+   bool empty_table = (range[1] - range[0]) == 0;
++
++  // Deallocate the sort array if any.
++  if (ob && ob->s.b.sorted)
++    {
++      free (ob->u.sort);
++    }
+ #else
+   init_object_mutex_once ();
+   __gthread_mutex_lock (&object_mutex);

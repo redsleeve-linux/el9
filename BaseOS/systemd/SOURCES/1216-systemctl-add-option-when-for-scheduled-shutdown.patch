@@ -1,0 +1,262 @@
+From 83f2c59faf0ba979b27824821096dd322336ef2f Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Sun, 5 Mar 2023 23:27:44 +0800
+Subject: [PATCH] systemctl: add option --when for scheduled shutdown
+
+Pass an empty string or "cancel" will cancel the action.
+Pass "show" will show the scheduled actions.
+
+Replaces #17258
+
+(cherry picked from commit 1433e1f998465b7acf472c73d58c14e7e2eb3f13)
+
+Resolves: RHEL-110954
+---
+ man/systemctl.xml                       | 41 ++++++++++++++-----------
+ src/systemctl/systemctl-logind.c        | 26 ++++++++++------
+ src/systemctl/systemctl-start-special.c | 33 +++++++++++++-------
+ src/systemctl/systemctl.c               | 28 +++++++++++++++++
+ 4 files changed, 89 insertions(+), 39 deletions(-)
+
+diff --git a/man/systemctl.xml b/man/systemctl.xml
+index 1df0b158bd..cea6192224 100644
+--- a/man/systemctl.xml
++++ b/man/systemctl.xml
+@@ -1448,6 +1448,9 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
+             <option>--force</option> is specified twice the halt operation is executed by <command>systemctl</command>
+             itself, and the system manager is not contacted. This means the command should succeed even when the system
+             manager has crashed.</para>
++
++            <para>If combined with <option>--when=</option>, shutdown will be scheduled after the given timestamp.
++            And <option>--when=cancel</option> will cancel the shutdown.</para>
+           </listitem>
+         </varlistentry>
+         <varlistentry>
+@@ -1459,13 +1462,8 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
+             users. This command is asynchronous; it will return after the power-off operation is enqueued, without
+             waiting for it to complete.</para>
+ 
+-            <para>If combined with <option>--force</option>, shutdown of all running services is skipped, however all
+-            processes are killed and all file systems are unmounted or mounted read-only, immediately followed by the
+-            powering off. If <option>--force</option> is specified twice, the operation is immediately executed without
+-            terminating any processes or unmounting any file systems. This may result in data loss. Note that when
+-            <option>--force</option> is specified twice the power-off operation is executed by
+-            <command>systemctl</command> itself, and the system manager is not contacted. This means the command should
+-            succeed even when the system manager has crashed.</para>
++            <para>This command honors <option>--force</option> and <option>--when=</option> in a similar way
++            as <command>halt</command>.</para>
+           </listitem>
+         </varlistentry>
+         <varlistentry>
+@@ -1479,14 +1477,6 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
+             users. This command is asynchronous; it will return after the reboot operation is enqueued,
+             without waiting for it to complete.</para>
+ 
+-            <para>If combined with <option>--force</option>, shutdown of all running services is skipped, however all
+-            processes are killed and all file systems are unmounted or mounted read-only, immediately followed by the
+-            reboot. If <option>--force</option> is specified twice, the operation is immediately executed without
+-            terminating any processes or unmounting any file systems. This may result in data loss. Note that when
+-            <option>--force</option> is specified twice the reboot operation is executed by
+-            <command>systemctl</command> itself, and the system manager is not contacted. This means the command should
+-            succeed even when the system manager has crashed.</para>
+-
+             <para>If the switch <option>--reboot-argument=</option> is given, it will be passed as the optional
+             argument to the <citerefentry><refentrytitle>reboot</refentrytitle><manvolnum>2</manvolnum></citerefentry>
+             system call.</para>
+@@ -1494,6 +1484,9 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
+             <para>Options <option>--boot-loader-entry=</option>, <option>--boot-loader-menu=</option>, and
+             <option>--firmware-setup</option> can be used to select what to do <emphasis>after</emphasis> the
+             reboot. See the descriptions of those options for details.</para>
++
++            <para>This command honors <option>--force</option> and <option>--when=</option> in a similar way
++            as <command>halt</command>.</para>
+           </listitem>
+         </varlistentry>
+ 
+@@ -1506,9 +1499,8 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
+             asynchronous; it will return after the reboot operation is enqueued, without waiting for it to
+             complete.</para>
+ 
+-            <para>If combined with <option>--force</option>, shutdown of all running services is skipped, however all
+-            processes are killed and all file systems are unmounted or mounted read-only, immediately followed by the
+-            reboot.</para>
++            <para>This command honors <option>--force</option> and <option>--when=</option> in a similar way
++            as <command>halt</command>.</para>
+           </listitem>
+         </varlistentry>
+ 
+@@ -2420,6 +2412,19 @@ Jan 12 10:46:45 example.com bluetoothd[8900]: gatt-time-server: Input/output err
+         <listitem><para>When used with <command>bind</command>, creates a read-only bind mount.</para></listitem>
+       </varlistentry>
+ 
++      <varlistentry>
++        <term><option>--when=</option></term>
++
++        <listitem>
++          <para>When used with <command>halt</command>, <command>poweroff</command>, <command>reboot</command>
++          or <command>kexec</command>, schedule the action to be performed at the given timestamp,
++          which should adhere to the syntax documented in <citerefentry
++          project='man-pages'><refentrytitle>systemd.time</refentrytitle><manvolnum>7</manvolnum></citerefentry>
++          section "PARSING TIMESTAMPS". Specially, if <literal>show</literal> is given, the currently scheduled
++          action will be shown, which can be canceled by passing an empty string or <literal>cancel</literal>.</para>
++        </listitem>
++      </varlistentry>
++
+       <xi:include href="user-system-options.xml" xpointer="host" />
+       <xi:include href="user-system-options.xml" xpointer="machine" />
+ 
+diff --git a/src/systemctl/systemctl-logind.c b/src/systemctl/systemctl-logind.c
+index 068f54e18b..fd8ca09de8 100644
+--- a/src/systemctl/systemctl-logind.c
++++ b/src/systemctl/systemctl-logind.c
+@@ -356,7 +356,7 @@ int logind_show_shutdown(void) {
+         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+         _cleanup_(sd_bus_message_unrefp) sd_bus_message *reply = NULL;
+         sd_bus *bus;
+-        const char *action = NULL;
++        const char *action, *pretty_action;
+         uint64_t elapse;
+         int r;
+ 
+@@ -376,17 +376,23 @@ int logind_show_shutdown(void) {
+                 return log_error_errno(SYNTHETIC_ERRNO(ENODATA), "No scheduled shutdown.");
+ 
+         if (STR_IN_SET(action, "halt", "poweroff", "exit"))
+-                action = "Shutdown";
++                pretty_action = "Shutdown";
+         else if (streq(action, "kexec"))
+-                action = "Reboot via kexec";
++                pretty_action = "Reboot via kexec";
+         else if (streq(action, "reboot"))
+-                action = "Reboot";
+-
+-        /* If we don't recognize the action string, we'll show it as-is */
+-
+-        log_info("%s scheduled for %s, use 'shutdown -c' to cancel.",
+-                 action,
+-                 FORMAT_TIMESTAMP_STYLE(elapse, arg_timestamp_style));
++                pretty_action = "Reboot";
++        else /* If we don't recognize the action string, we'll show it as-is */
++                pretty_action = action;
++
++        if (arg_action == ACTION_SYSTEMCTL)
++                log_info("%s scheduled for %s, use 'systemctl %s --when=cancel' to cancel.",
++                         pretty_action,
++                         FORMAT_TIMESTAMP_STYLE(elapse, arg_timestamp_style),
++                         action);
++        else
++                log_info("%s scheduled for %s, use 'shutdown -c' to cancel.",
++                         pretty_action,
++                         FORMAT_TIMESTAMP_STYLE(elapse, arg_timestamp_style));
+ 
+         return 0;
+ #else
+diff --git a/src/systemctl/systemctl-start-special.c b/src/systemctl/systemctl-start-special.c
+index 9363764cd7..4dee3028b0 100644
+--- a/src/systemctl/systemctl-start-special.c
++++ b/src/systemctl/systemctl-start-special.c
+@@ -208,22 +208,33 @@ int verb_start_special(int argc, char *argv[], void *userdata) {
+                            ACTION_POWEROFF,
+                            ACTION_REBOOT,
+                            ACTION_KEXEC,
+-                           ACTION_HALT,
+-                           ACTION_SUSPEND,
+-                           ACTION_HIBERNATE,
+-                           ACTION_HYBRID_SLEEP,
+-                           ACTION_SUSPEND_THEN_HIBERNATE)) {
+-
+-                        r = logind_reboot(a);
+-                        if (r >= 0)
+-                                return r;
+-                        if (IN_SET(r, -EACCES, -EOPNOTSUPP, -EINPROGRESS))
+-                                /* Requested operation requires auth, is not supported or already in progress */
++                           ACTION_HALT)) {
++
++                        if (arg_when == 0)
++                                r = logind_reboot(a);
++                        else if (arg_when != USEC_INFINITY)
++                                r = logind_schedule_shutdown(a);
++                        else /* arg_when == USEC_INFINITY */
++                                r = logind_cancel_shutdown();
++                        if (r >= 0 || IN_SET(r, -EACCES, -EOPNOTSUPP, -EINPROGRESS))
++                                /* The latter indicates that the requested operation requires auth,
++                                 * is not supported or already in progress, in which cases we ignore the error. */
+                                 return r;
+ 
+                         /* On all other errors, try low-level operation. In order to minimize the difference
+                          * between operation with and without logind, we explicitly enable non-blocking mode
+                          * for this, as logind's shutdown operations are always non-blocking. */
++                        arg_no_block = true;
++
++                } else if (IN_SET(a,
++                                  ACTION_SUSPEND,
++                                  ACTION_HIBERNATE,
++                                  ACTION_HYBRID_SLEEP,
++                                  ACTION_SUSPEND_THEN_HIBERNATE)) {
++
++                        r = logind_reboot(a);
++                        if (r >= 0 || IN_SET(r, -EACCES, -EOPNOTSUPP, -EINPROGRESS))
++                                return r;
+ 
+                         arg_no_block = true;
+ 
+diff --git a/src/systemctl/systemctl.c b/src/systemctl/systemctl.c
+index 883a5b75f4..9dfde28426 100644
+--- a/src/systemctl/systemctl.c
++++ b/src/systemctl/systemctl.c
+@@ -313,6 +313,8 @@ static int systemctl_help(void) {
+                "     --read-only         Create read-only bind mount\n"
+                "     --mkdir             Create directory before mounting, if missing\n"
+                "     --marked            Restart/reload previously marked units\n"
++               "     --when=TIME         Schedule halt/power-off/reboot/kexec action after\n"
++               "                         a certain timestamp\n"
+                "\nSee the %2$s for details.\n",
+                program_invocation_short_name,
+                link,
+@@ -435,6 +437,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
+                 ARG_MKDIR,
+                 ARG_MARKED,
+                 ARG_NO_WARN,
++                ARG_WHEN,
+         };
+ 
+         static const struct option options[] = {
+@@ -497,6 +500,7 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
+                 { "read-only",           no_argument,       NULL, ARG_READ_ONLY           },
+                 { "mkdir",               no_argument,       NULL, ARG_MKDIR               },
+                 { "marked",              no_argument,       NULL, ARG_MARKED              },
++                { "when",                required_argument, NULL, ARG_WHEN                },
+                 {}
+         };
+ 
+@@ -933,6 +937,30 @@ static int systemctl_parse_argv(int argc, char *argv[]) {
+                         arg_no_warn = true;
+                         break;
+ 
++                case ARG_WHEN:
++                        if (streq(optarg, "show")) {
++                                r = logind_show_shutdown();
++                                if (r < 0 && r != -ENODATA)
++                                        return r;
++
++                                return 0;
++                        }
++
++                        if (STR_IN_SET(optarg, "", "cancel")) {
++                                arg_when = USEC_INFINITY;
++                                break;
++                        }
++
++                        r = parse_timestamp(optarg, &arg_when);
++                        if (r < 0)
++                                return log_error_errno(r, "Failed to parse --when= argument '%s': %m", optarg);
++
++                        if (!timestamp_is_set(arg_when))
++                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
++                                                       "Invalid timestamp '%s' specified for --when=.", optarg);
++
++                        break;
++
+                 case '.':
+                         /* Output an error mimicking getopt, and print a hint afterwards */
+                         log_error("%s: invalid option -- '.'", program_invocation_name);

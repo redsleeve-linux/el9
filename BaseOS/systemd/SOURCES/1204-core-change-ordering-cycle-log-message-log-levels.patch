@@ -1,0 +1,41 @@
+From 637b4c312f2dfbf2fadf6829550502359d195678 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Wed, 18 Jun 2025 11:48:39 +0200
+Subject: [PATCH] core: change ordering cycle log message log levels
+
+Let's downgrade the log message about our attempts to deal with an
+ordering cycle to warning, because this is a "positive" thing, we try to
+improve an earlier error.
+
+OTOH increase the log level when we first log about the cycle to error,
+since that highlights the actual problem.
+
+(cherry picked from commit fe458ad68e2813823c381c4010bad201f5e2c2be)
+
+Related: RHEL-100353
+---
+ src/core/transaction.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/transaction.c b/src/core/transaction.c
+index 2d4c48b82a..2dd3c1bac3 100644
+--- a/src/core/transaction.c
++++ b/src/core/transaction.c
+@@ -409,7 +409,7 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
+ 
+                 /* logging for j not k here to provide a consistent narrative */
+                 if (cycle_path_text)
+-                        log_struct(LOG_WARNING,
++                        log_struct(LOG_ERR,
+                                    LOG_UNIT_MESSAGE(j->unit, "%s", cycle_path_text),
+                                    LOG_MESSAGE_ID(SD_MESSAGE_UNIT_ORDERING_CYCLE_STR),
+                                    LOG_ITEM("%s", strna(unit_ids)));
+@@ -417,7 +417,7 @@ static int transaction_verify_order_one(Transaction *tr, Job *j, Job *from, unsi
+                 if (delete) {
+                         const char *status;
+                         /* logging for j not k here to provide a consistent narrative */
+-                        log_struct(LOG_ERR,
++                        log_struct(LOG_WARNING,
+                                    LOG_UNIT_MESSAGE(j->unit,
+                                                     "Job %s/%s deleted to break ordering cycle starting with %s/%s",
+                                                     delete->unit->id, job_type_to_string(delete->type),

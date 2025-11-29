@@ -1,0 +1,47 @@
+From 66f38176c44a379f6ffdef619f7d83095469a77a Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 14 Feb 2023 04:27:27 +0900
+Subject: [PATCH] time-util: use usec_add() and usec_sub_unsigned()
+
+And move the check with USEC_TIMESTAMP_FORMATTABLE_MAX at the end,
+as usec_add() can handle overflow correctly.
+
+(cherry picked from commit db43717e982e1361eee4bdcd92167d6c47eb627c)
+
+Related: RHEL-110954
+---
+ src/basic/time-util.c | 17 +++++++----------
+ 1 file changed, 7 insertions(+), 10 deletions(-)
+
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index 047dad0fec..ba5e17bd9d 100644
+--- a/src/basic/time-util.c
++++ b/src/basic/time-util.c
+@@ -881,20 +881,17 @@ from_tm:
+         if (x < 0)
+                 return -EINVAL;
+ 
+-        usec = (usec_t) x * USEC_PER_SEC + x_usec;
+-        if (usec > USEC_TIMESTAMP_FORMATTABLE_MAX)
+-                return -EINVAL;
++        usec = usec_add(x * USEC_PER_SEC, x_usec);
+ 
+ finish:
+-        if (usec + plus < usec) /* overflow? */
+-                return -EINVAL;
+-        usec += plus;
+-        if (usec > USEC_TIMESTAMP_FORMATTABLE_MAX)
++        usec = usec_add(usec, plus);
++
++        if (usec < minus)
+                 return -EINVAL;
+ 
+-        if (usec >= minus)
+-                usec -= minus;
+-        else
++        usec = usec_sub_unsigned(usec, minus);
++
++        if (usec > USEC_TIMESTAMP_FORMATTABLE_MAX)
+                 return -EINVAL;
+ 
+         if (ret)

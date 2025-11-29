@@ -1,0 +1,33 @@
+Downstream patch only.
+
+Revert changes made to elf/dl-readonly-area.c compared to
+ed6a68bac7cd056abda9008019c71b167f0362dc since `_dl_find_object` has
+been backported.
+
+Note: `_dl_find_object` isn't directly made available internally
+downstream, we can use `__dl_find_object_internal` instead.
+
+diff --git a/elf/dl-readonly-area.c b/elf/dl-readonly-area.c
+index 570b99b11527db13..3b39eed06a379ce3 100644
+--- a/elf/dl-readonly-area.c
++++ b/elf/dl-readonly-area.c
+@@ -40,16 +40,11 @@ check_relro (const struct link_map *l, uintptr_t start, uintptr_t end)
+ enum dl_readonly_area_error_type
+ _dl_readonly_area (const void *ptr, size_t size)
+ {
+-  /* Protect against concurrent loads and unloads.  */
+-  __rtld_lock_lock_recursive (GL(dl_load_lock));
+-
+-  const struct link_map *l = _dl_find_dso_for_object ((ElfW(Addr)) ptr);
+-
+-  __rtld_lock_unlock_recursive (GL(dl_load_lock));
+-
+-  if (l == NULL)
++  struct dl_find_object dlfo;
++  if (__dl_find_object_internal ((void *)ptr, &dlfo) != 0)
+     return dl_readonly_area_not_found;
+ 
++  const struct link_map *l = dlfo.dlfo_link_map;
+   uintptr_t ptr_start = (uintptr_t) ptr;
+   uintptr_t ptr_end = ptr_start + size;
+ 

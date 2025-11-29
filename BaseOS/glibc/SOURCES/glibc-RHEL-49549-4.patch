@@ -1,0 +1,102 @@
+commit ed2b8d3a866eb37e069f6a71bdf10421cd4c5e54
+Author: Adam Sampson <ats@offog.org>
+Date:   Mon May 6 18:16:32 2024 +0100
+
+    ldconfig: Move endswithn into a new header file
+    
+    is_gdb_python_file is doing a similar test, so it can use this helper
+    function as well.
+    
+    Signed-off-by: Adam Sampson <ats@offog.org>
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff --git a/elf/endswith.h b/elf/endswith.h
+new file mode 100644
+index 0000000000000000..c6430c48be0c1071
+--- /dev/null
++++ b/elf/endswith.h
+@@ -0,0 +1,33 @@
++/* Copyright (C) 2023-2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   This program is free software; you can redistribute it and/or modify
++   it under the terms of the GNU General Public License as published
++   by the Free Software Foundation; version 2 of the License, or
++   (at your option) any later version.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program; if not, see <https://www.gnu.org/licenses/>.  */
++
++#ifndef _ENDSWITH_H
++#define _ENDSWITH_H
++
++#include <string.h>
++
++/* Return true if the N bytes at NAME end with with the characters in
++   the string SUFFIX.  (NAME[N + 1] does not have to be a null byte.)
++   Expected to be called with a string literal for SUFFIX.  */
++static inline bool
++endswithn (const char *name, size_t n, const char *suffix)
++{
++  return (n >= strlen (suffix)
++	  && memcmp (name + n - strlen (suffix), suffix,
++		     strlen (suffix)) == 0);
++}
++
++#endif /* _ENDSWITH_H */
+diff --git a/elf/ldconfig.c b/elf/ldconfig.c
+index 4a96c409994d96c8..185c8115ae6b4060 100644
+--- a/elf/ldconfig.c
++++ b/elf/ldconfig.c
+@@ -41,6 +41,7 @@
+ #include <libgen.h>
+ 
+ #include <ldconfig.h>
++#include <endswith.h>
+ #include <dl-cache.h>
+ #include <dl-hwcaps.h>
+ #include <dl-is_dso.h>
+@@ -778,17 +779,6 @@ struct dlib_entry
+   struct dlib_entry *next;
+ };
+ 
+-/* Return true if the N bytes at NAME end with with the characters in
+-   the string SUFFIX.  (NAME[N + 1] does not have to be a null byte.)
+-   Expected to be called with a string literal for SUFFIX.  */
+-static inline bool
+-endswithn (const char *name, size_t n, const char *suffix)
+-{
+-  return (n >= strlen (suffix)
+-	  && memcmp (name + n - strlen (suffix), suffix,
+-		     strlen (suffix)) == 0);
+-}
+-
+ /* Skip some temporary DSO files.  These files may be partially written
+    and lead to ldconfig crashes when examined.  */
+ static bool
+diff --git a/elf/readlib.c b/elf/readlib.c
+index 8901de2684835653..2701535e3f24a201 100644
+--- a/elf/readlib.c
++++ b/elf/readlib.c
+@@ -35,6 +35,7 @@
+ #include <gnu/lib-names.h>
+ 
+ #include <ldconfig.h>
++#include <endswith.h>
+ 
+ #define Elf32_CLASS ELFCLASS32
+ #define Elf64_CLASS ELFCLASS64
+@@ -68,7 +69,7 @@ static bool
+ is_gdb_python_file (const char *name)
+ {
+   size_t len = strlen (name);
+-  return len > 7 && strcmp (name + len - 7, "-gdb.py") == 0;
++  return endswithn (name, len, "-gdb.py");
+ }
+ 
+ /* Returns 0 if everything is ok, != 0 in case of error.  */

@@ -1,0 +1,203 @@
+commit c1560f3f75c0e892b5522c16f91b4e303f677094
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Wed Nov 6 10:33:44 2024 +0100
+
+    elf: Switch to main malloc after final ld.so self-relocation
+    
+    Before commit ee1ada1bdb8074de6e1bdc956ab19aef7b6a7872
+    ("elf: Rework exception handling in the dynamic loader
+    [BZ #25486]"), the previous order called the main calloc
+    to allocate a shadow GOT/PLT array for auditing support.
+    This happened before libc.so.6 ELF constructors were run, so
+    a user malloc could run without libc.so.6 having been
+    initialized fully.  One observable effect was that
+    environ was NULL at this point.
+    
+    It does not seem to be possible at present to trigger such
+    an allocation, but it seems more robust to delay switching
+    to main malloc after ld.so self-relocation is complete.
+    The elf/tst-rtld-no-malloc-audit test case fails with a
+    2.34-era glibc that does not have this fix.
+    
+    Reviewed-by: DJ Delorie <dj@redhat.com>
+
+Conflicts:
+	elf/Makefile (fixup context)
+	elf/rtld.c (Align change with glibc-RHEL-48820-1)
+
+diff --git a/elf/Makefile b/elf/Makefile
+index 41adea8d1c6d13ca..0c8e0d794bac640f 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -439,6 +439,9 @@ tests += \
+   tst-recursive-tls \
+   tst-relsort1 \
+   tst-ro-dynamic \
++  tst-rtld-no-malloc \
++  tst-rtld-no-malloc-audit \
++  tst-rtld-no-malloc-preload \
+   tst-rtld-run-static \
+   tst-single_threaded \
+   tst-single_threaded-pthread \
+@@ -2896,3 +2899,9 @@ tst-tls22-mod2.so-no-z-defs = yes
+ tst-tls22-mod2-gnu2.so-no-z-defs = yes
+ 
+ $(objpfx)tst-dlopen-sgid.out: $(objpfx)tst-dlopen-sgid-mod.so
++
++# Reuse an audit module which provides ample debug logging.
++tst-rtld-no-malloc-audit-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
++
++# Any shared object should do.
++tst-rtld-no-malloc-preload-ENV = LD_PRELOAD=$(objpfx)tst-auditmod1.so
+diff --git a/elf/dl-support.c b/elf/dl-support.c
+index 1fea55c443505890..00abc2d8056c78b0 100644
+--- a/elf/dl-support.c
++++ b/elf/dl-support.c
+@@ -353,8 +353,7 @@ _dl_non_dynamic_init (void)
+ 	}
+ 
+   /* Setup relro on the binary itself.  */
+-  if (_dl_main_map.l_relro_size != 0)
+-    _dl_protect_relro (&_dl_main_map);
++  _dl_protect_relro (&_dl_main_map);
+ }
+ 
+ #ifdef DL_SYSINFO_IMPLEMENTATION
+diff --git a/elf/rtld.c b/elf/rtld.c
+index 711bb77d70da6563..3436dd918e699080 100644
+--- a/elf/rtld.c
++++ b/elf/rtld.c
+@@ -2495,26 +2495,23 @@ dl_main (const ElfW(Phdr) *phdr,
+ 
+   if (! prelinked)
+     {
+-      /* Re-relocate ourselves with user-controlled symbol definitions.
+-
+-	 We must do this after TLS initialization in case after this
+-	 re-relocation, we might call a user-supplied function
+-	 (e.g. calloc from _dl_relocate_object) that uses TLS data.  */
+-
+-      /* The malloc implementation has been relocated, so resolving
+-	 its symbols (and potentially calling IFUNC resolvers) is safe
+-	 at this point.  */
+-      __rtld_malloc_init_real (main_map);
+-
+       /* Likewise for the locking implementation.  */
+       __rtld_mutex_init ();
+ 
++      /* Re-relocate ourselves with user-controlled symbol definitions.  */
++
+       RTLD_TIMING_VAR (start);
+       rtld_timer_start (&start);
+ 
+-      /* Mark the link map as not yet relocated again.  */
+-      GL(dl_rtld_map).l_relocated = 0;
+-      _dl_relocate_object (&GL(dl_rtld_map), main_map->l_scope, 0, 0);
++      _dl_relocate_object_no_relro (&GL(dl_rtld_map), main_map->l_scope, 0, 0);
++
++      /* The malloc implementation has been relocated, so resolving
++         its symbols (and potentially calling IFUNC resolvers) is safe
++         at this point.  */
++      __rtld_malloc_init_real (main_map);
++
++      if (GL(dl_rtld_map).l_relro_size != 0)
++        _dl_protect_relro (&GL(dl_rtld_map));
+ 
+       rtld_timer_accum (&relocate_time, start);
+     }
+diff --git a/elf/tst-rtld-no-malloc-audit.c b/elf/tst-rtld-no-malloc-audit.c
+new file mode 100644
+index 0000000000000000..a028377ad1fea027
+--- /dev/null
++++ b/elf/tst-rtld-no-malloc-audit.c
+@@ -0,0 +1 @@
++#include "tst-rtld-no-malloc.c"
+diff --git a/elf/tst-rtld-no-malloc-preload.c b/elf/tst-rtld-no-malloc-preload.c
+new file mode 100644
+index 0000000000000000..a028377ad1fea027
+--- /dev/null
++++ b/elf/tst-rtld-no-malloc-preload.c
+@@ -0,0 +1 @@
++#include "tst-rtld-no-malloc.c"
+diff --git a/elf/tst-rtld-no-malloc.c b/elf/tst-rtld-no-malloc.c
+new file mode 100644
+index 0000000000000000..5f24d4bd72c4af0c
+--- /dev/null
++++ b/elf/tst-rtld-no-malloc.c
+@@ -0,0 +1,76 @@
++/* Test that program loading does not call malloc.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++
++#include <string.h>
++#include <unistd.h>
++
++static void
++print (const char *s)
++{
++  const char *end = s + strlen (s);
++  while (s < end)
++    {
++      ssize_t ret = write (STDOUT_FILENO, s, end - s);
++      if (ret <= 0)
++        _exit (2);
++      s += ret;
++    }
++}
++
++static void __attribute__ ((noreturn))
++unexpected_call (const char *function)
++{
++  print ("error: unexpected call to ");
++  print (function);
++  print ("\n");
++  _exit (1);
++}
++
++/* These are the malloc functions implement in elf/dl-minimal.c.  */
++
++void
++free (void *ignored)
++{
++  unexpected_call ("free");
++}
++
++void *
++calloc (size_t ignored1, size_t ignored2)
++{
++  unexpected_call ("calloc");
++}
++
++void *
++malloc (size_t ignored)
++{
++  unexpected_call ("malloc");
++}
++
++void *
++realloc (void *ignored1, size_t ignored2)
++{
++  unexpected_call ("realloc");
++}
++
++int
++main (void)
++{
++  /* Do not use the test wrapper, to avoid spurious malloc calls from it.  */
++  return 0;
++}

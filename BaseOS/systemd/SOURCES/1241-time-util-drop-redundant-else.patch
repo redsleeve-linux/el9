@@ -1,0 +1,54 @@
+From c8e89ba084dd8c8984d546599a4f77f8d23436cd Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 14 Feb 2023 03:43:58 +0900
+Subject: [PATCH] time-util: drop redundant else
+
+(cherry picked from commit 17d1ebfc43c3b971d20ff2806acc634ee153eef6)
+
+Related: RHEL-110954
+---
+ src/basic/time-util.c | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index ac28dc9be6..c5b91fde66 100644
+--- a/src/basic/time-util.c
++++ b/src/basic/time-util.c
+@@ -664,21 +664,23 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+                 if (streq(t, "now"))
+                         goto finish;
+ 
+-                else if (t[0] == '+') {
++                if (t[0] == '+') {
+                         r = parse_sec(t+1, &plus);
+                         if (r < 0)
+                                 return r;
+ 
+                         goto finish;
++                }
+ 
+-                } else if (t[0] == '-') {
++                if (t[0] == '-') {
+                         r = parse_sec(t+1, &minus);
+                         if (r < 0)
+                                 return r;
+ 
+                         goto finish;
++                }
+ 
+-                } else if ((k = endswith(t, " ago"))) {
++                if ((k = endswith(t, " ago"))) {
+                         t = strndupa_safe(t, k - t);
+ 
+                         r = parse_sec(t, &minus);
+@@ -686,8 +688,9 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+                                 return r;
+ 
+                         goto finish;
++                }
+ 
+-                } else if ((k = endswith(t, " left"))) {
++                if ((k = endswith(t, " left"))) {
+                         t = strndupa_safe(t, k - t);
+ 
+                         r = parse_sec(t, &plus);

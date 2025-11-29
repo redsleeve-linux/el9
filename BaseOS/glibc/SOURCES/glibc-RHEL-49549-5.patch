@@ -1,0 +1,76 @@
+commit 4a50fdf8b2c1106b50cd9056b4c6f3a72cdeed5f
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Tue Sep 3 17:52:47 2024 +0200
+
+    elf: Update DSO list, write audit log to elf/tst-audit23.out
+    
+    After commit 1d5024f4f052c12e404d42d3b5bfe9c3e9fd27c4
+    ("support: Build with exceptions and asynchronous unwind tables
+    [BZ #30587]"), libgcc_s is expected to show up in the DSO
+    list on 32-bit Arm.  Do not update max_objs because vdso is not
+    tracked (and which is the reason why the test currently passes
+    even with libgcc_s present).
+    
+    Also write the log output from the auditor to standard output,
+    for easier test debugging.
+    
+    Reviewed-by: Adhemerval Zanella  <adhemerval.zanella@linaro.org>
+
+diff --git a/elf/tst-audit23.c b/elf/tst-audit23.c
+index 4904cf1340a97ee1..6ac1f20af60a2ebb 100644
+--- a/elf/tst-audit23.c
++++ b/elf/tst-audit23.c
+@@ -85,13 +85,28 @@ do_test (int argc, char *argv[])
+     = support_capture_subprogram (spargv[0], spargv);
+   support_capture_subprocess_check (&result, "tst-audit22", 0, sc_allow_stderr);
+ 
++  {
++    FILE *fp = fmemopen (result.err.buffer, result.err.length, "r");
++    TEST_VERIFY (fp != NULL);
++    unsigned int line = 0;
++    char *buffer = NULL;
++    size_t buffer_length = 0;
++    puts ("info: *** audit log start ***");
++    while (xgetline (&buffer, &buffer_length, fp))
++      printf ("%6u\t%s", ++line, buffer);
++    puts ("info: *** audit log end ***");
++    free (buffer);
++    xfclose (fp);
++  }
++
+   /* The expected la_objopen/la_objclose:
+      1. executable
+      2. loader
+      3. libc.so
+-     4. tst-audit23mod.so
+-     5. libc.so (LM_ID_NEWLM).
+-     6. vdso (optional and ignored).  */
++     4. libgcc_s.so (one some architectures, for libsupport)
++     5. tst-audit23mod.so
++     6. libc.so (LM_ID_NEWLM).
++        vdso (optional and ignored).  */
+   enum { max_objs = 6 };
+   struct la_obj_t
+   {
+@@ -115,8 +130,10 @@ do_test (int argc, char *argv[])
+   TEST_VERIFY (out != NULL);
+   char *buffer = NULL;
+   size_t buffer_length = 0;
++  unsigned int line = 0;
+   while (xgetline (&buffer, &buffer_length, out))
+     {
++      ++line;
+       if (startswith (buffer, "la_activity: "))
+ 	{
+ 	  uintptr_t cookie;
+@@ -174,8 +191,8 @@ do_test (int argc, char *argv[])
+ 	  if (is_vdso (lname))
+ 	    continue;
+ 	  if (nobjs == max_objs)
+-	    FAIL_EXIT1 ("non expected la_objopen: %s %"PRIxPTR" %ld",
+-			lname, laddr, lmid);
++	    FAIL_EXIT1 ("(line %u) non expected la_objopen: %s %"PRIxPTR" %ld",
++			line, lname, laddr, lmid);
+ 	  objs[nobjs].lname = lname;
+ 	  objs[nobjs].laddr = laddr;
+ 	  objs[nobjs].lmid = lmid;

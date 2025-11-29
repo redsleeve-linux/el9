@@ -1,0 +1,82 @@
+From ca17098a803ab2aa72a12237a383d649db973ba7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Sun, 26 Nov 2023 20:58:43 +0100
+Subject: [PATCH] test-time-util: suppress timestamp conversion failures for
+ Africa/Khartoum timezone
+
+Our timestamp conversion roundtrip test was failing. But I think that this
+is not our bug:
+
+$ TZ='Africa/Khartoum' date --date='@1509482094'
+Tue Oct 31 23:34:54 EAT 2017
+$ TZ='Africa/Khartoum' date --date='Tue Oct 31 23:34:54 EAT 2017' +%s
+1509485694
+$ TZ='Africa/Khartoum' date --date='@1509485694'
+Tue Oct 31 23:34:54 CAT 2017
+$ echo $[1509485694 - 1509482094]
+3600
+
+This is essentially the same as what happens in our test. After a round-trip, we
+end up one hour ahead.
+
+> For 1509482094632752, from the change log of tzdata:
+>
+> Release 2017c - 2017-10-20 14:49:34 -0700
+>
+>  Changes to future timestamps
+>    Sudan will switch from +03 to +02 on 2017-11-01.
+
+Fixes https://github.com/systemd/systemd/issues/28472.
+
+(cherry picked from commit 78b95ccad864e1f993fe0776841dd8f39856581b)
+
+Related: RHEL-110954
+---
+ src/test/test-time-util.c | 22 ++++++++++++++++++----
+ 1 file changed, 18 insertions(+), 4 deletions(-)
+
+diff --git a/src/test/test-time-util.c b/src/test/test-time-util.c
+index 775e6bb84a..2550ffdba2 100644
+--- a/src/test/test-time-util.c
++++ b/src/test/test-time-util.c
+@@ -382,7 +382,7 @@ TEST(format_timestamp) {
+ }
+ 
+ static void test_format_timestamp_impl(usec_t x) {
+-        bool success;
++        bool success, override;
+         const char *xx, *yy;
+         usec_t y;
+ 
+@@ -393,14 +393,28 @@ static void test_format_timestamp_impl(usec_t x) {
+         assert_se(yy);
+ 
+         success = (x / USEC_PER_SEC == y / USEC_PER_SEC) && streq(xx, yy);
+-        log_full(success ? LOG_DEBUG : LOG_ERR, "@" USEC_FMT " → %s → @" USEC_FMT " → %s", x, xx, y, yy);
+-        assert_se(x / USEC_PER_SEC == y / USEC_PER_SEC);
+-        assert_se(streq(xx, yy));
++        /* Workaround for https://github.com/systemd/systemd/issues/28472 */
++        override = !success &&
++                   (STRPTR_IN_SET(tzname[0], "CAT", "EAT") ||
++                    STRPTR_IN_SET(tzname[1], "CAT", "EAT")) &&
++                   DIV_ROUND_UP(y - x, USEC_PER_SEC) == 3600; /* 1 hour, ignore fractional second */
++        log_full(success ? LOG_DEBUG : override ? LOG_WARNING : LOG_ERR,
++                 "@" USEC_FMT " → %s → @" USEC_FMT " → %s%s",
++                 x, xx, y, yy,
++                 override ? ", ignoring." : "");
++        if (!override) {
++                assert_se(x / USEC_PER_SEC == y / USEC_PER_SEC);
++                assert_se(streq(xx, yy));
++        }
+ }
+ 
+ static void test_format_timestamp_loop(void) {
+         test_format_timestamp_impl(USEC_PER_SEC);
+ 
++        /* Two cases which trigger https://github.com/systemd/systemd/issues/28472 */
++        test_format_timestamp_impl(1504938962980066);
++        test_format_timestamp_impl(1509482094632752);
++
+         for (unsigned i = 0; i < TRIAL; i++) {
+                 usec_t x;
+ 

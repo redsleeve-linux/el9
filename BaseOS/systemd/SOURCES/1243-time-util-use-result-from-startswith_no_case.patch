@@ -1,0 +1,49 @@
+From a5bec1b4303dcc62be2cf58c1fb86e043011ee55 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Tue, 14 Feb 2023 04:14:24 +0900
+Subject: [PATCH] time-util: use result from startswith_no_case()
+
+No functional change, just refactoring.
+
+(cherry picked from commit f2ecfd8bc1e6d09173e9f98c5ac1b19b755a3c25)
+
+Related: RHEL-110954
+---
+ src/basic/time-util.c | 14 ++++----------
+ 1 file changed, 4 insertions(+), 10 deletions(-)
+
+diff --git a/src/basic/time-util.c b/src/basic/time-util.c
+index 64cdcea594..047dad0fec 100644
+--- a/src/basic/time-util.c
++++ b/src/basic/time-util.c
+@@ -635,7 +635,6 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+         time_t x;
+         usec_t usec, x_usec, plus = 0, minus = 0;
+         int r, weekday = -1, dst = -1;
+-        size_t i;
+ 
+         /* Allowed syntaxes:
+          *
+@@ -775,18 +774,13 @@ static int parse_timestamp_impl(const char *t, usec_t *ret, bool with_tz) {
+                 goto from_tm;
+         }
+ 
+-        for (i = 0; i < ELEMENTSOF(day_nr); i++) {
+-                size_t skip;
+-
+-                if (!startswith_no_case(t, day_nr[i].name))
+-                        continue;
+-
+-                skip = strlen(day_nr[i].name);
+-                if (t[skip] != ' ')
++        for (size_t i = 0; i < ELEMENTSOF(day_nr); i++) {
++                k = startswith_no_case(t, day_nr[i].name);
++                if (!k || *k != ' ')
+                         continue;
+ 
+                 weekday = day_nr[i].nr;
+-                t += skip + 1;
++                t = k + 1;
+                 break;
+         }
+ 

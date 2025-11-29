@@ -1,0 +1,35 @@
+Downstream-only patch correcting the GLIBC_PRIVATE ABI preservation
+change in glibc-RHEL-93320-19.patch.
+
+This patch adds a symbol alias that supplies the expect external
+name _dl_find_object within libc.a, where the forwarder in
+elf/libc-dl_find_object.c no longer exists after the changes
+in glibc-RHEL-93320-19.patch.  It also brings back the
+tst-dl_find_object-static static linking test.
+
+diff --git a/elf/Makefile b/elf/Makefile
+index ba11f3a8b81e7218..7b75afda32bcd579 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -281,6 +281,7 @@ tests-static-normal := \
+   # tests-static-normal
+ 
+ tests-static-internal := \
++  tst-dl_find_object-static \
+   tst-ptrguard1-static \
+   tst-stackguard1-static \
+   tst-tls1-static \
+diff --git a/elf/dl-find_object.c b/elf/dl-find_object.c
+index 99797580066cdce8..62a8a61f6b6032cf 100644
+--- a/elf/dl-find_object.c
++++ b/elf/dl-find_object.c
+@@ -464,6 +464,9 @@ __dl_find_object_internal (void *pc1, struct dl_find_object *result)
+     } /* Transaction retry loop.  */
+ }
+ rtld_hidden_def (__dl_find_object_internal)
++#ifndef SHARED
++strong_alias (__dl_find_object_internal, _dl_find_object)
++#endif
+ 
+ /* _dlfo_process_initial is called twice.  First to compute the array
+    sizes from the initial loaded mappings.  Second to fill in the

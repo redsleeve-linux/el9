@@ -1,0 +1,51 @@
+commit 38e88d41f50d844f1404172657ef7e8372014ef6
+Author: Thomas Neumann <tneumann@users.sourceforge.net>
+Date:   Wed May 10 12:33:49 2023 +0200
+
+    fix radix sort on 32bit platforms [PR109670]
+    
+    The radix sort uses two buffers, a1 for input and a2 for output.
+    After every digit the role of the two buffers is swapped.
+    When terminating the sort early the code made sure the output
+    was in a2.  However, when we run out of bits, as can happen on
+    32bit platforms, the sorted result was in a1, as we had just
+    swapped a1 and a2.
+    This patch fixes the problem by unconditionally having a1 as
+    output after every loop iteration.
+    
+    This bug manifested itself only on 32bit platforms and even then
+    only in some circumstances, as it needs frames where a swap
+    is required due to differences in the top-most byte, which is
+    affected by ASLR. The new logic was validated by exhaustive
+    search over 32bit input values.
+    
+    libgcc/ChangeLog:
+            PR libgcc/109670
+            * unwind-dw2-fde.c: Fix radix sort buffer management.
+
+diff --git a/libgcc/unwind-dw2-fde.c b/libgcc/unwind-dw2-fde.c
+index 0fd2fc54aa651350..41b8c2e9380bc45b 100644
+--- a/libgcc/unwind-dw2-fde.c
++++ b/libgcc/unwind-dw2-fde.c
+@@ -634,8 +634,6 @@ fde_radixsort (struct object *ob, fde_extractor_t fde_extractor,
+       // Stop if we are already sorted.
+       if (!violations)
+ 	{
+-	  // The sorted data is in a1 now.
+-	  a2 = a1;
+ 	  break;
+ 	}
+ 
+@@ -670,9 +668,9 @@ fde_radixsort (struct object *ob, fde_extractor_t fde_extractor,
+ #undef FANOUT
+ #undef FANOUTBITS
+ 
+-  // The data is in a2 now, move in place if needed.
+-  if (a2 != v1->array)
+-    memcpy (v1->array, a2, sizeof (const fde *) * n);
++  // The data is in a1 now, move in place if needed.
++  if (a1 != v1->array)
++    memcpy (v1->array, a1, sizeof (const fde *) * n);
+ }
+ 
+ static inline void

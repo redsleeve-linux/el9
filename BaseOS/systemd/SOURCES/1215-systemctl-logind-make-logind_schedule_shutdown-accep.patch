@@ -1,0 +1,70 @@
+From 3e641f30f6ad6990d06bd677aabffdc47ef6e200 Mon Sep 17 00:00:00 2001
+From: Mike Yuan <me@yhndnzj.com>
+Date: Sun, 5 Mar 2023 23:11:48 +0800
+Subject: [PATCH] systemctl: logind: make logind_schedule_shutdown accept
+ action as param
+
+(cherry picked from commit 92b00e867844948bdf559758739343c4308570c0)
+
+Related: RHEL-110954
+---
+ src/systemctl/systemctl-compat-halt.c | 2 +-
+ src/systemctl/systemctl-logind.c      | 8 +++++---
+ src/systemctl/systemctl-logind.h      | 2 +-
+ 3 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/src/systemctl/systemctl-compat-halt.c b/src/systemctl/systemctl-compat-halt.c
+index 8a0e4e6294..b9164c27ab 100644
+--- a/src/systemctl/systemctl-compat-halt.c
++++ b/src/systemctl/systemctl-compat-halt.c
+@@ -149,7 +149,7 @@ int halt_main(void) {
+         if (arg_force == 0) {
+                 /* always try logind first */
+                 if (arg_when > 0)
+-                        r = logind_schedule_shutdown();
++                        r = logind_schedule_shutdown(arg_action);
+                 else {
+                         r = logind_check_inhibitors(arg_action);
+                         if (r < 0)
+diff --git a/src/systemctl/systemctl-logind.c b/src/systemctl/systemctl-logind.c
+index f910fe6675..068f54e18b 100644
+--- a/src/systemctl/systemctl-logind.c
++++ b/src/systemctl/systemctl-logind.c
+@@ -291,19 +291,21 @@ int prepare_boot_loader_entry(void) {
+ #endif
+ }
+ 
+-int logind_schedule_shutdown(void) {
+-
++int logind_schedule_shutdown(enum action a) {
+ #if ENABLE_LOGIND
+         _cleanup_(sd_bus_error_free) sd_bus_error error = SD_BUS_ERROR_NULL;
+         const char *action;
+         sd_bus *bus;
+         int r;
+ 
++        assert(a >= 0);
++        assert(a < _ACTION_MAX);
++
+         r = acquire_bus(BUS_FULL, &bus);
+         if (r < 0)
+                 return r;
+ 
+-        action = action_table[arg_action].verb;
++        action = action_table[a].verb;
+         if (!action)
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Scheduling not supported for this action.");
+ 
+diff --git a/src/systemctl/systemctl-logind.h b/src/systemctl/systemctl-logind.h
+index 925f4559c1..516f74952f 100644
+--- a/src/systemctl/systemctl-logind.h
++++ b/src/systemctl/systemctl-logind.h
+@@ -10,7 +10,7 @@ int prepare_firmware_setup(void);
+ int prepare_boot_loader_menu(void);
+ int prepare_boot_loader_entry(void);
+ 
+-int logind_schedule_shutdown(void);
++int logind_schedule_shutdown(enum action a);
+ int logind_cancel_shutdown(void);
+ int logind_show_shutdown(void);
+ 

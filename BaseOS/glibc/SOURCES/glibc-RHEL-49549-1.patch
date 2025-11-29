@@ -1,0 +1,55 @@
+commit 152f863926e77c6f9c9a8b8779c8084eb844ec44
+Author: Andreas Schwab <schwab@suse.de>
+Date:   Thu Mar 23 16:18:50 2023 +0100
+
+    _dl_map_object_from_fd: Remove unnecessary debugger notification in error path
+    
+    After commit ed3ce71f5c ("elf: Move la_activity (LA_ACT_ADD) after
+    _dl_add_to_namespace_list() (BZ #28062)") it is no longer necessary to
+    reset the debugger state in the error case, since the debugger
+    notification only happens after no more errors can occur.
+
+diff --git a/elf/dl-load.c b/elf/dl-load.c
+index 5b0734c816b351f0..98a91d40b74cb76b 100644
+--- a/elf/dl-load.c
++++ b/elf/dl-load.c
+@@ -950,8 +950,6 @@ _dl_map_object_from_fd (const char *name, const char *origname, int fd,
+   /* Initialize to keep the compiler happy.  */
+   const char *errstring = NULL;
+   int errval = 0;
+-  struct r_debug *r = _dl_debug_update (nsid);
+-  bool make_consistent = false;
+ 
+   /* Get file information.  To match the kernel behavior, do not fill
+      in this information for the executable in case of an explicit
+@@ -983,14 +981,6 @@ _dl_map_object_from_fd (const char *name, const char *origname, int fd,
+ 	    free ((void *) l->l_phdr);
+ 	  free (l);
+ 	  free (realname);
+-
+-	  if (make_consistent && r != NULL)
+-	    {
+-	      r->r_state = RT_CONSISTENT;
+-	      _dl_debug_state ();
+-	      LIBC_PROBE (map_failed, 2, nsid, r);
+-	    }
+-
+ 	  _dl_signal_error (errval, name, NULL, errstring);
+ 	}
+ 
+@@ -1476,6 +1466,7 @@ cannot enable executable stack as shared object requires");
+   _dl_add_to_namespace_list (l, nsid);
+ 
+   /* Signal that we are going to add new objects.  */
++  struct r_debug *r = _dl_debug_update (nsid);
+   if (r->r_state == RT_CONSISTENT)
+     {
+ #ifdef SHARED
+@@ -1492,7 +1483,6 @@ cannot enable executable stack as shared object requires");
+       r->r_state = RT_ADD;
+       _dl_debug_state ();
+       LIBC_PROBE (map_start, 2, nsid, r);
+-      make_consistent = true;
+     }
+   else
+     assert (r->r_state == RT_ADD);

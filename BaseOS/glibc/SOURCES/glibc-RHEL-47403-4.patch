@@ -1,0 +1,275 @@
+commit 9897ced8e78db5d813166a7ccccfd5a42c69ef20
+Author: Florian Weimer <fweimer@redhat.com>
+Date:   Fri Oct 25 16:50:10 2024 +0200
+
+    elf: Run constructors on cyclic recursive dlopen (bug 31986)
+    
+    This is conceptually similar to the reported bug, but does not
+    depend on auditing.  The fix is simple: just complete execution
+    of the constructors.  This exposed the fact that the link map
+    for statically linked executables does not have l_init_called
+    set, even though constructors have run.
+    
+    Reviewed-by: Adhemerval Zanella <adhemerval.zanella@linaro.org>
+
+Conflicts:
+	elf/Makefile (fix local test re-ordering)
+
+diff --git a/elf/Makefile b/elf/Makefile
+index b074cc29664b3e20..dc774b083eda202b 100644
+--- a/elf/Makefile
++++ b/elf/Makefile
+@@ -398,12 +398,15 @@ tests += \
+   tst-dl-is_dso \
+   tst-dlclose-lazy \
+   tst-dlmodcount \
+-  tst-dlmopen1 \
+-  tst-dlmopen3 \
+-  tst-dlmopen4 \
+   tst-dlmopen-dlerror \
+   tst-dlmopen-gethostbyname \
+   tst-dlmopen-twice \
++  tst-dlmopen1 \
++  tst-dlmopen3 \
++  tst-dlmopen4 \
++  tst-dlopen-recurse \
++  tst-dlopen-self \
++  tst-dlopen-tlsmodid \
+   tst-dlopen-tlsreinit1 \
+   tst-dlopen-tlsreinit2 \
+   tst-dlopen-tlsreinit3 \
+@@ -411,8 +414,6 @@ tests += \
+   tst-dlopenfail \
+   tst-dlopenfail-2 \
+   tst-dlopenrpath \
+-  tst-dlopen-self \
+-  tst-dlopen-tlsmodid \
+   tst-dlsym-error \
+   tst-filterobj \
+   tst-filterobj-dlopen \
+@@ -775,13 +776,15 @@ modules-names = \
+   tst-deep1mod1 \
+   tst-deep1mod2 \
+   tst-deep1mod3 \
+-  tst-dlmopen1mod \
+   tst-dlclose-lazy-mod1 \
+   tst-dlclose-lazy-mod2 \
+   tst-dlmopen-dlerror-mod \
+   tst-dlmopen-gethostbyname-mod \
+   tst-dlmopen-twice-mod1 \
+   tst-dlmopen-twice-mod2 \
++  tst-dlmopen1mod \
++  tst-dlopen-recursemod1 \
++  tst-dlopen-recursemod2 \
+   tst-dlopen-sgid-mod \
+   tst-dlopen-tlsreinitmod1 \
+   tst-dlopen-tlsreinitmod2 \
+@@ -2856,6 +2859,9 @@ tst-dlopen-tlsreinit3-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
+ $(objpfx)tst-dlopen-tlsreinit4.out: $(objpfx)tst-auditmod1.so
+ tst-dlopen-tlsreinit4-ENV = LD_AUDIT=$(objpfx)tst-auditmod1.so
+ 
++$(objpfx)tst-dlopen-recurse.out: $(objpfx)tst-dlopen-recursemod1.so
++$(objpfx)tst-dlopen-recursemod1.so: $(objpfx)tst-dlopen-recursemod2.so
++
+ LDFLAGS-tst-hash-collision1-mod.so = -Wl,--hash-style=both
+ $(objpfx)tst-hash-collision1: $(objpfx)tst-hash-collision1-mod.so
+ LDFLAGS-tst-hash-collision1-mod-gnu.so = -Wl,--hash-style=gnu
+diff --git a/elf/dl-open.c b/elf/dl-open.c
+index 0d2b4cd4785a226a..0b0bfb8acda28caa 100644
+--- a/elf/dl-open.c
++++ b/elf/dl-open.c
+@@ -600,6 +600,14 @@ dl_open_worker_begin (void *a)
+         = _dl_debug_update (args->nsid)->r_state;
+       assert (r_state == RT_CONSISTENT);
+ 
++      /* Do not return without calling the (supposedly new) map's
++	 constructor.  This case occurs if a dependency of a directly
++	 opened map has a constructor that calls dlopen again on the
++	 initially opened map.  The new map is initialized last, so
++	 checking only it is enough.  */
++      if (!new->l_init_called)
++	_dl_catch_exception (NULL, call_dl_init, args);
++
+       return;
+     }
+ 
+diff --git a/elf/dl-support.c b/elf/dl-support.c
+index 00abc2d8056c78b0..f4dc9c61a2637f8b 100644
+--- a/elf/dl-support.c
++++ b/elf/dl-support.c
+@@ -103,6 +103,7 @@ static struct link_map _dl_main_map =
+     .l_used = 1,
+     .l_tls_offset = NO_TLS_OFFSET,
+     .l_serial = 1,
++    .l_init_called = 1,
+   };
+ 
+ /* Namespace information.  */
+diff --git a/elf/tst-dlopen-recurse.c b/elf/tst-dlopen-recurse.c
+new file mode 100644
+index 0000000000000000..c7fb379d373c6e77
+--- /dev/null
++++ b/elf/tst-dlopen-recurse.c
+@@ -0,0 +1,34 @@
++/* Test that recursive dlopen runs constructors before return (bug 31986).
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <support/check.h>
++#include <support/xdlfcn.h>
++
++static int
++do_test (void)
++{
++  void *handle = xdlopen ("tst-dlopen-recursemod1.so", RTLD_NOW);
++  int *status = dlsym (handle, "recursemod1_status");
++  printf ("info: recursemod1_status == %d (from main)\n", *status);
++  TEST_COMPARE (*status, 2);
++  xdlclose (handle);
++  return 0;
++}
++
++#include <support/test-driver.c>
+diff --git a/elf/tst-dlopen-recursemod1.c b/elf/tst-dlopen-recursemod1.c
+new file mode 100644
+index 0000000000000000..5e0cc0eb8c32d6d4
+--- /dev/null
++++ b/elf/tst-dlopen-recursemod1.c
+@@ -0,0 +1,50 @@
++/* Directly opened test module that gets recursively opened again.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <support/xdlfcn.h>
++
++int recursemod1_status;
++
++/* Force linking against st-dlopen-recursemod2.so.  Also allows
++   checking for relocation.  */
++extern int recursemod2_status;
++int *force_recursemod2_reference = &recursemod2_status;
++
++static void __attribute__ ((constructor))
++init (void)
++{
++  ++recursemod1_status;
++  printf ("info: tst-dlopen-recursemod1.so constructor called (status %d)\n",
++          recursemod1_status);
++}
++
++static void __attribute__ ((destructor))
++fini (void)
++{
++  /* The recursemod1_status variable was incremented in the
++     tst-dlopen-recursemod2.so constructor.  */
++  printf ("info: tst-dlopen-recursemod1.so destructor called (status %d)\n",
++          recursemod1_status);
++  if (recursemod1_status != 2)
++    {
++      puts ("error: recursemod1_status == 2 expected");
++      exit (1);
++    }
++}
+diff --git a/elf/tst-dlopen-recursemod2.c b/elf/tst-dlopen-recursemod2.c
+new file mode 100644
+index 0000000000000000..edd2f2526b877810
+--- /dev/null
++++ b/elf/tst-dlopen-recursemod2.c
+@@ -0,0 +1,66 @@
++/* Indirectly opened module that recursively opens the directly opened module.
++   Copyright (C) 2024 Free Software Foundation, Inc.
++   This file is part of the GNU C Library.
++
++   The GNU C Library is free software; you can redistribute it and/or
++   modify it under the terms of the GNU Lesser General Public
++   License as published by the Free Software Foundation; either
++   version 2.1 of the License, or (at your option) any later version.
++
++   The GNU C Library is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with the GNU C Library; if not, see
++   <https://www.gnu.org/licenses/>.  */
++
++#include <dlfcn.h>
++#include <stdio.h>
++#include <stdlib.h>
++
++int recursemod2_status;
++
++static void __attribute__ ((constructor))
++init (void)
++{
++  ++recursemod2_status;
++  printf ("info: tst-dlopen-recursemod2.so constructor called (status %d)\n",
++          recursemod2_status);
++  void *handle = dlopen ("tst-dlopen-recursemod1.so", RTLD_NOW);
++  if (handle == NULL)
++    {
++      printf ("error: dlopen: %s\n", dlerror ());
++      exit (1);
++    }
++  int *status = dlsym (handle, "recursemod1_status");
++  if (status == NULL)
++    {
++      printf ("error: dlsym: %s\n", dlerror ());
++      exit (1);
++    }
++  printf ("info: recursemod1_status == %d\n", *status);
++  if (*status != 1)
++    {
++      puts ("error: recursemod1_status == 1 expected");
++      exit (1);
++    }
++  ++*status;
++  printf ("info: recursemod1_status == %d\n", *status);
++
++  int **mod2_status = dlsym (handle, "force_recursemod2_reference");
++  if (mod2_status == NULL || *mod2_status != &recursemod2_status)
++    {
++      puts ("error: invalid recursemod2_status address in"
++            " tst-dlopen-recursemod1.so");
++      exit (1);
++    }
++}
++
++static void __attribute__ ((destructor))
++fini (void)
++{
++  printf  ("info: tst-dlopen-recursemod2.so destructor called (status %d)\n",
++           recursemod2_status);
++}
