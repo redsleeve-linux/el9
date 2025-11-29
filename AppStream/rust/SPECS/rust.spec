@@ -1,6 +1,6 @@
 Name:           rust
 Version:        1.84.1
-Release:        1%{?dist}
+Release:        1%{?dist}.redsleeve
 Summary:        The Rust Programming Language
 License:        (Apache-2.0 OR MIT) AND (Artistic-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unicode-DFS-2016)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -8,7 +8,7 @@ URL:            https://www.rust-lang.org
 
 # Only x86_64, i686, and aarch64 are Tier 1 platforms at this time.
 # https://doc.rust-lang.org/nightly/rustc/platform-support.html
-%global rust_arches x86_64 i686 aarch64 ppc64le s390x
+%global rust_arches x86_64 i686 aarch64 ppc64le s390x armv6hl
 ExclusiveArch:  %{rust_arches}
 
 # To bootstrap from scratch, set the channel and date from src/stage0.json
@@ -158,6 +158,9 @@ Patch100:       rustc-1.84.0-disable-libssh2.patch
   if arch == "armv7hl" then
     arch = "armv7"
     abi = abi.."eabihf"
+  elseif arch == "armv6hl" then
+    arch = "arm"
+    abi = "gnueabihf"
   elseif arch == "ppc64le" then
     arch = "powerpc64le"
   elseif arch == "riscv64" then
@@ -814,7 +817,7 @@ end}
 # clang_resource_dir is not defined for compat builds.
 %define profiler /usr/lib/clang/%{llvm_compat_version}/lib/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
 %else
-%define profiler %{clang_resource_dir}/lib/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
+%define profiler %{clang_resource_dir}/lib/%{_arch}-redhat-linux-gnueabihf/libclang_rt.profile.a
 %endif
 test -r "%{profiler}"
 
@@ -1162,6 +1165,9 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 
 
 %changelog
+* Mon Jun 09 2025 Jacco Ligthart <jacco@redsleeve.org> - 1.84.1-1.redsleeve
+- added armv6 to rust_arches
+
 * Tue Feb 04 2025 Josh Stone <jistone@redhat.com> - 1.84.1-1
 - Update to 1.84.1
 

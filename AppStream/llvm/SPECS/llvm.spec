@@ -12,7 +12,7 @@
 #endregion version
 
 # Components enabled if supported by target architecture:
-%define gold_arches %{ix86} x86_64 aarch64 %{power64} s390x
+%define gold_arches %{ix86} x86_64 aarch64 %{power64} s390x %{arm}
 %ifarch %{gold_arches}
   %bcond_without gold
 %else
@@ -74,7 +74,7 @@
 %endif
 
 # Disable LTO on x86 and riscv in order to reduce memory consumption.
-%ifarch %ix86 riscv64
+%ifarch %ix86 riscv64 %{arm}
 %bcond_with lto_build
 %else
 %bcond_without lto_build
@@ -152,7 +152,11 @@
 %global _dwz_low_mem_die_limit_s390x 1
 %global _dwz_max_die_limit_s390x 1000000
 
+%ifarch %{arm}
+%global llvm_triple armv6l-redhat-linux-gnueabihf
+%else
 %global llvm_triple %{_target_platform}
+%endif
 
 # https://fedoraproject.org/wiki/Changes/PythonSafePath#Opting_out
 # Don't add -P to Python shebangs
@@ -226,7 +230,7 @@
 #region main package
 Name:		%{pkg_name_llvm}
 Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
-Release:	2%{?dist}
+Release:	2%{?dist}.redsleeve
 Summary:	The Low Level Virtual Machine
 
 License:	Apache-2.0 WITH LLVM-exception OR NCSA
@@ -335,6 +339,8 @@ Patch1801: 18-99273.patch
 # https://github.com/llvm/llvm-project/pull/114907
 Patch1802: 0001-profile-Use-base-vaddr-for-__llvm_write_binary_ids-n.patch
 Patch1903: 0001-profile-Use-base-vaddr-for-__llvm_write_binary_ids-n.patch
+
+Patch100:           100-armv6-add-llc-gcc-triplet-translation.diff
 
 %if 0%{?rhel} == 8
 %global python3_pkgversion 3.12
@@ -1052,7 +1058,7 @@ execution profile gathered by sampling profiler, such as Linux `perf` tool.
 # TODO(kkleine): In clang we had this %ifarch s390 s390x aarch64 %ix86 ppc64le
 # Decrease debuginfo verbosity to reduce memory consumption during final library linking.
 %global reduce_debuginfo 0
-%ifarch %ix86
+%ifarch %ix86 %{arm}
 %global reduce_debuginfo 1
 %endif
 %if 0%{?rhel} == 8
@@ -1083,7 +1089,9 @@ execution profile gathered by sampling profiler, such as Linux `perf` tool.
 %global runtimes %{runtimes};libcxx;libcxxabi;libunwind
 %endif
 
+%ifarch %{arm}
 %global cfg_file_content --gcc-triple=%{_target_cpu}-redhat-linux
+%endif
 
 # We want to use DWARF-5 on all snapshot builds.
 %if %{without snapshot_build} && %{defined rhel} && 0%{?rhel} < 10
@@ -1091,7 +1099,11 @@ execution profile gathered by sampling profiler, such as Linux `perf` tool.
 %endif
 
 %if %{defined gts_version}
+%ifarch %{arm}
+%global cfg_file_content %{cfg_file_content} --gcc-install-dir=/opt/rh/gcc-toolset-%{gts_version}/root/%{_exec_prefix}/lib/gcc/%{_target_cpu}-redhat-linux-gnueabi/%{gts_version}
+%else
 %global cfg_file_content %{cfg_file_content} --gcc-install-dir=/opt/rh/gcc-toolset-%{gts_version}/root/%{_exec_prefix}/lib/gcc/%{_target_cpu}-redhat-linux/%{gts_version}
+%endif
 %endif
 
 # Already use the new clang config file for the current build. This ensures
@@ -1111,7 +1123,7 @@ export ASMFLAGS="%{build_cflags}"
 
 # Disable dwz on aarch64, because it takes a huge amount of time to decide not to optimize things.
 # This is copied from clang.
-%ifarch aarch64
+%ifarch aarch64 %{arm}
 %define _find_debuginfo_dwz_opts %{nil}
 %endif
 
@@ -1592,7 +1604,11 @@ echo "%%clang%{maj_ver}_resource_dir %%{_prefix}/lib/clang/%{maj_ver}" >> %{buil
 
 # Install config file for clang
 %if %{maj_ver} >=18
+%ifnarch armv6hl
 %global cfg_file_content --gcc-triple=%{_target_cpu}-redhat-linux
+%else
+%global cfg_file_content --gcc-triple=%{_target_cpu}-redhat-linux-gnueabi
+%endif
 
 # We want to use DWARF-5 on all snapshot builds.
 %if %{without snapshot_build} && %{defined rhel} && 0%{?rhel} < 10
@@ -1600,12 +1616,21 @@ echo "%%clang%{maj_ver}_resource_dir %%{_prefix}/lib/clang/%{maj_ver}" >> %{buil
 %endif
 
 %if %{defined gts_version}
+%ifnarch armv6hl
 %global cfg_file_content %{cfg_file_content} --gcc-install-dir=/opt/rh/gcc-toolset-%{gts_version}/root/%{_exec_prefix}/lib/gcc/%{_target_cpu}-redhat-linux/%{gts_version}
+%else
+%global cfg_file_content %{cfg_file_content} --gcc-install-dir=/opt/rh/gcc-toolset-%{gts_version}/root/%{_exec_prefix}/lib/gcc/%{_target_cpu}-redhat-linux-gnueabi/%{gts_version}
+%endif
 %endif
 
 mkdir -p %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/
+%ifnarch armv6hl
 echo " %{cfg_file_content}" >> %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/%{_target_platform}-clang.cfg
 echo " %{cfg_file_content}" >> %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/%{_target_platform}-clang++.cfg
+%else
+echo " %{cfg_file_content}" >> %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/armv6l-redhat-linux-gnueabihf-clang.cfg
+echo " %{cfg_file_content}" >> %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/armv6l-redhat-linux-gnueabihf-clang++.cfg
+%endif
 %ifarch x86_64
 # On x86_64, install an additional set of config files so -m32 works.
 echo " %{cfg_file_content}" >> %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/i386-redhat-linux-gnu-clang.cfg
@@ -1637,6 +1662,13 @@ ln -s %{compiler_rt_triple} %{buildroot}%{_prefix}/lib/clang/%{maj_ver}/lib/%{ll
 %endif
 %endif
 
+%ifarch armv6hl
+%global compiler_rt_triple arm-redhat-linux-gnueabihf
+%if "%{llvm_triple}" != "%{compiler_rt_triple}"
+ln -s %{compiler_rt_triple} %{buildroot}%{_prefix}/lib/clang/%{maj_ver}/lib/%{llvm_triple}
+%endif
+%endif
+
 #endregion COMPILER-RT installation
 
 #region OPENMP installation
@@ -1650,7 +1682,7 @@ rm -rf %{buildroot}/%{install_datadir}/gdb
 # chmod go+w %{buildroot}/%{_datarootdir}/gdb/python/ompd/ompdModule.so
 # chmod +w %{buildroot}/%{_datarootdir}/gdb/python/ompd/ompdModule.so
 
-%ifnarch %{ix86}
+%ifnarch %{ix86} %{arm}
 # Remove files that we don't package, yet.
 %if %{maj_ver} >= 20
 rm %{buildroot}%{install_bindir}/llvm-offload-device-info
@@ -2582,8 +2614,8 @@ fi
 %{install_bindir}/clang++-%{maj_ver}
 %{install_bindir}/clang-cl
 %{install_bindir}/clang-cpp
-%{_sysconfdir}/%{pkg_name_clang}/%{_target_platform}-clang.cfg
-%{_sysconfdir}/%{pkg_name_clang}/%{_target_platform}-clang++.cfg
+%{_sysconfdir}/%{pkg_name_clang}/*-clang.cfg
+%{_sysconfdir}/%{pkg_name_clang}/*-clang++.cfg
 %ifarch x86_64
 %{_sysconfdir}/%{pkg_name_clang}/i386-redhat-linux-gnu-clang.cfg
 %{_sysconfdir}/%{pkg_name_clang}/i386-redhat-linux-gnu-clang++.cfg
@@ -2818,9 +2850,9 @@ fi
 %files -n %{pkg_name_libomp}
 %license openmp/LICENSE.TXT
 %{install_libdir}/libomp.so
+%ifnarch %{ix86} %{arm}
 %{install_libdir}/libompd.so
 %{install_libdir}/libarcher.so
-%ifnarch %{ix86}
 # libomptarget is not supported on 32-bit systems.
 # s390x does not support the offloading plugins.
 %{install_libdir}/libomptarget.so.%{so_suffix}
@@ -2833,11 +2865,11 @@ fi
 %license openmp/LICENSE.TXT
 %{_prefix}/lib/clang/%{maj_ver}/include/omp.h
 %{_prefix}/lib/clang/%{maj_ver}/include/ompx.h
+%{install_libdir}/cmake/openmp/
+%ifnarch %{ix86} %{arm}
 %{_prefix}/lib/clang/%{maj_ver}/include/omp-tools.h
 %{_prefix}/lib/clang/%{maj_ver}/include/ompt.h
 %{_prefix}/lib/clang/%{maj_ver}/include/ompt-multiplex.h
-%{install_libdir}/cmake/openmp/
-%ifnarch %{ix86}
 # libomptarget is not supported on 32-bit systems.
 # s390x does not support the offloading plugins.
 %{install_libdir}/libomptarget.devicertl.a
@@ -3055,6 +3087,9 @@ fi
 
 #region changelog
 %changelog
+* Sat Jun 07 2025 Jacco Ligthart <jacco@redsleeve.org> - 19.1.7-2.redsleeve
+- changed llvm_triple for armv6
+
 * Thu Feb 06 2025 Konrad Kleine <kkleine@redhat.com> - 19.1.7-2
 - Remove llvm 18 compat lib
 

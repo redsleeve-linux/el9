@@ -152,7 +152,7 @@ BuildRequires: scl-utils-build
 Summary: GCC version %{gcc_major}
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}.1%{?dist}
+Release: %{gcc_release}.1%{?dist}.redsleeve
 # License notes for some of the less obvious ones:
 #   gcc/doc/cppinternals.texi: Linux-man-pages-copyleft-2-para
 #   isl: MIT, BSD-2-Clause
@@ -361,6 +361,9 @@ Patch3015: 0018-Use-CXX11-ABI.patch
 Patch3017: 0020-more-fixes.patch
 Patch3018: 0021-libstdc++-disable-tests.patch
 
+Patch10000: gcc6-decimal-rtti-arm.patch
+Patch10001: gcc14-nonshared-arm.patch
+
 %if 0%{?rhel} == 9
 %global nonsharedver 110
 %endif
@@ -377,6 +380,9 @@ Patch3018: 0021-libstdc++-disable-tests.patch
 %if 0%{?scl:1}
 %global _gnu %{nil}
 %else
+%global _gnu -gnueabi
+%endif
+%ifarch %{arm}
 %global _gnu -gnueabi
 %endif
 %ifarch sparcv9
@@ -724,6 +730,11 @@ touch -r isl-0.24/m4/ax_prog_cxx_for_build.m4 isl-0.24/m4/ax_prog_cc_for_build.m
 %patch -P3017 -p1 -b .dts-test-17~
 %patch -P3018 -p1 -b .dts-test-18~
 
+%ifarch %{arm}
+%patch10000 -p1
+%patch10001 -p1
+%endif
+
 find gcc/testsuite -name \*.pr96939~ | xargs rm -f
 
 echo 'Red Hat %{version}-%{gcc_release}' > gcc/DEV-PHASE
@@ -998,6 +1009,9 @@ CONFIGURE_OPTS="\
 %endif
 %endif
 	--enable-decimal-float \
+%endif
+%ifarch armv6hl
+	--with-arch=armv6 --with-float=hard --with-fpu=vfp \
 %endif
 %ifarch armv7hl
 	--with-tune=generic-armv7-a --with-arch=armv7-a \
@@ -2796,6 +2810,9 @@ fi
 %endif
 
 %changelog
+* Sun Sep 28 2025 Jacco Ligthart <jacco@redsleeve.org> 14.2.1-7.1.redsleeve
+- patched for armv6
+
 * Fri Feb  7 2025 Marek Polacek <polacek@redhat.com> 14.2.1-7.1
 - disable jQuery use, don't ship jquery.js (CVE-2020-11023, RHEL-78387)
 

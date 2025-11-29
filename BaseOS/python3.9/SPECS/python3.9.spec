@@ -17,8 +17,12 @@ URL: https://www.python.org/
 #global prerel ...
 %global upstream_version %{general_version}%{?prerel}
 Version: %{general_version}%{?prerel:~%{prerel}}
-Release: 2%{?dist}.2
+Release: 2%{?dist}.2.redsleeve
 License: Python
+
+%ifarch armv6hl
+%define _gnu "-gnueabihf"
+%endif
 
 
 # ==================================
@@ -1060,10 +1064,10 @@ InstallPython() {
 %endif # with gdb_hooks
 
   # Rename the -devel script that differs on different arches to arch specific name
-  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
-  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
-    %{buildroot}%{_bindir}/python${LDVersion}-config
-    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
+#  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
+#  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
+#    %{buildroot}%{_bindir}/python${LDVersion}-config
+#    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
 
   # Make python3-devel multilib-ready
   mv %{buildroot}%{_includedir}/python${LDVersion}/pyconfig.h \
@@ -1248,7 +1252,7 @@ ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python
 ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python%{pybasever}
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python-config
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-config
-ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
+#ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
 # There were also executables with %%{LDVERSION_optimized} in RHEL 8,
 # but since Python 3.8 %%{LDVERSION_optimized} == %%{pybasever}.
 # We list both in the %%files section to assert this.
@@ -1256,7 +1260,7 @@ ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python-debug
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}
 ln -s %{_bindir}/python%{LDVERSION_debug}-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-config
-ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
+#ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
 %endif
 %endif
 
@@ -1640,7 +1644,7 @@ CheckPython optimized
 
 %{_bindir}/python%{pybasever}-config
 %{_bindir}/python%{LDVERSION_optimized}-config
-%{_bindir}/python%{LDVERSION_optimized}-*-config
+#%{_bindir}/python%{LDVERSION_optimized}-*-config
 %{_libdir}/libpython%{LDVERSION_optimized}.so
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}.pc
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}-embed.pc
@@ -1651,8 +1655,8 @@ CheckPython optimized
 %{_libexecdir}/platform-python-config
 %{_libexecdir}/platform-python%{pybasever}-config
 %{_libexecdir}/platform-python%{LDVERSION_optimized}-config
-%{_libexecdir}/platform-python%{pybasever}-*-config
-%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
+#%{_libexecdir}/platform-python%{pybasever}-*-config
+#%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
 %endif
 
 
@@ -1812,7 +1816,7 @@ CheckPython optimized
 %{pylibdir}/config-%{LDVERSION_debug}-%{platform_triplet}
 %{_includedir}/python%{LDVERSION_debug}
 %{_bindir}/python%{LDVERSION_debug}-config
-%{_bindir}/python%{LDVERSION_debug}-*-config
+#%{_bindir}/python%{LDVERSION_debug}-*-config
 %{_libdir}/libpython%{LDVERSION_debug}.so
 %{_libdir}/libpython%{LDVERSION_debug}.so.%{py_SOVERSION}
 %{_libdir}/pkgconfig/python-%{LDVERSION_debug}.pc
@@ -1822,7 +1826,7 @@ CheckPython optimized
 %{_libexecdir}/platform-python-debug
 %{_libexecdir}/platform-python%{LDVERSION_debug}
 %{_libexecdir}/platform-python%{LDVERSION_debug}-config
-%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
+#%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
 %endif
 
 # Analog of the -tools subpackage's files:
@@ -1863,6 +1867,9 @@ CheckPython optimized
 # ======================================================
 
 %changelog
+* Sun Sep 21 2025 Jacco Ligthart <jacco@redsleeve.org> - 3.9.21-2.2.redsleeve
+- three minor changes for armv6
+
 * Tue Aug 19 2025 Lumír Balhar <lbalhar@redhat.com> - 3.9.21-2.2
 - Security fix for CVE-2025-8194
 Resolves: RHEL-106375

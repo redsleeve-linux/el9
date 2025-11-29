@@ -1,26 +1,36 @@
-From 0ae6c85f6f81a0c2bdef1cf25d43a4db34e95398 Mon Sep 17 00:00:00 2001
+From 5d8d1e2e21e32519d8716d423d41c299d0445492 Mon Sep 17 00:00:00 2001
 From: Jacco Ligthart <jacco@redsleeve.org>
-Date: Sun, 19 Jan 2025 13:20:20 +0100
+Date: Sat, 29 Nov 2025 17:18:52 +0100
 Subject: [PATCH] changed llvm_triple for armv6
 
 ---
- SPECS/llvm.spec | 21 ++++++++++++++++-----
- 1 file changed, 16 insertions(+), 5 deletions(-)
+ ...armv6-add-llc-gcc-triplet-translation.diff | 10 ++++
+ SPECS/llvm.spec                               | 57 +++++++++++++++----
+ 2 files changed, 56 insertions(+), 11 deletions(-)
+ create mode 100755 SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff
 
+diff --git a/SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff b/SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff
+new file mode 100755
+index 0000000..12ffc9a
+--- /dev/null
++++ b/SOURCES/100-armv6-add-llc-gcc-triplet-translation.diff
+@@ -0,0 +1,10 @@
++--- a/clang/lib/Driver/ToolChains/Gnu.cpp	2024-12-30 00:38:04.157102471 +0100
+++++ b/clang/lib/Driver/ToolChains/Gnu.cpp	2024-12-30 00:49:46.296960756 +0100
++@@ -2461,6 +2461,7 @@
++   static const char *const ARMTriples[] = {"arm-linux-gnueabi"};
++   static const char *const ARMHFTriples[] = {"arm-linux-gnueabihf",
++                                              "armv7hl-redhat-linux-gnueabi",
+++                                             "armv6hl-redhat-linux-gnueabihf",
++                                              "armv6hl-suse-linux-gnueabi",
++                                              "armv7hl-suse-linux-gnueabi"};
++   static const char *const ARMebLibDirs[] = {"/lib"};
 diff --git a/SPECS/llvm.spec b/SPECS/llvm.spec
-index 4a4ed09..60a6730 100644
+index ec6271d..724a8d7 100644
 --- a/SPECS/llvm.spec
 +++ b/SPECS/llvm.spec
-@@ -1,3 +1,7 @@
-+# Workaround for
-+# Cannot handle 8-byte build ID
-+%define debug_package %{nil}
-+
- %bcond_with snapshot_build
- 
- %if %{with snapshot_build}
-@@ -16,7 +20,7 @@
- %global gts_version 13
+@@ -12,7 +12,7 @@
+ #endregion version
  
  # Components enabled if supported by target architecture:
 -%define gold_arches %{ix86} x86_64 aarch64 %{power64} s390x
@@ -28,16 +38,16 @@ index 4a4ed09..60a6730 100644
  %ifarch %{gold_arches}
    %bcond_without gold
  %else
-@@ -27,7 +31,7 @@
- %bcond_with bundle_compat_lib
- %bcond_without check
+@@ -74,7 +74,7 @@
+ %endif
  
+ # Disable LTO on x86 and riscv in order to reduce memory consumption.
 -%ifarch %ix86 riscv64
 +%ifarch %ix86 riscv64 %{arm}
- # Disable LTO on x86 in order to reduce memory consumption
  %bcond_with lto_build
- %elif %{with snapshot_build}
-@@ -92,7 +96,11 @@
+ %else
+ %bcond_without lto_build
+@@ -152,7 +152,11 @@
  %global _dwz_low_mem_die_limit_s390x 1
  %global _dwz_max_die_limit_s390x 1000000
  
@@ -49,43 +59,168 @@ index 4a4ed09..60a6730 100644
  
  # https://fedoraproject.org/wiki/Changes/PythonSafePath#Opting_out
  # Don't add -P to Python shebangs
-@@ -101,7 +109,7 @@
- 
- Name:		%{pkg_name}
+@@ -226,7 +230,7 @@
+ #region main package
+ Name:		%{pkg_name_llvm}
  Version:	%{maj_ver}.%{min_ver}.%{patch_ver}%{?rc_ver:~rc%{rc_ver}}%{?llvm_snapshot_version_suffix:~%{llvm_snapshot_version_suffix}}
--Release:	3%{?dist}
-+Release:	3%{?dist}.redsleeve
+-Release:	2%{?dist}
++Release:	2%{?dist}.redsleeve
  Summary:	The Low Level Virtual Machine
  
  License:	Apache-2.0 WITH LLVM-exception OR NCSA
-@@ -297,7 +305,7 @@ mv %{third_party_srcdir} third-party
- %global _lto_cflags %nil
+@@ -336,6 +340,8 @@ Patch1801: 18-99273.patch
+ Patch1802: 0001-profile-Use-base-vaddr-for-__llvm_write_binary_ids-n.patch
+ Patch1903: 0001-profile-Use-base-vaddr-for-__llvm_write_binary_ids-n.patch
+ 
++Patch100:           100-armv6-add-llc-gcc-triplet-translation.diff
++
+ %if 0%{?rhel} == 8
+ %global python3_pkgversion 3.12
+ %global __python3 /usr/bin/python3.12
+@@ -1052,7 +1058,7 @@ execution profile gathered by sampling profiler, such as Linux `perf` tool.
+ # TODO(kkleine): In clang we had this %ifarch s390 s390x aarch64 %ix86 ppc64le
+ # Decrease debuginfo verbosity to reduce memory consumption during final library linking.
+ %global reduce_debuginfo 0
+-%ifarch %ix86
++%ifarch %ix86 %{arm}
+ %global reduce_debuginfo 1
+ %endif
+ %if 0%{?rhel} == 8
+@@ -1083,7 +1089,9 @@ execution profile gathered by sampling profiler, such as Linux `perf` tool.
+ %global runtimes %{runtimes};libcxx;libcxxabi;libunwind
  %endif
  
--%ifarch s390 s390x %ix86 riscv64
-+%ifarch s390 s390x %ix86 riscv64 %{arm}
- # Decrease debuginfo verbosity to reduce memory consumption during final library linking
- %global optflags %(echo %{optflags} | sed 's/-g /-g1 /')
- %endif
-@@ -312,7 +320,7 @@ export ASMFLAGS="%{build_cflags}"
- 	-DLLVM_PARALLEL_LINK_JOBS=1 \
- 	-DCMAKE_BUILD_TYPE=RelWithDebInfo \
- 	-DCMAKE_SKIP_RPATH:BOOL=ON \
--%ifarch s390 %ix86 riscv64
-+%ifarch s390 %ix86 riscv64 %{arm}
- 	-DCMAKE_C_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
- 	-DCMAKE_CXX_FLAGS_RELWITHDEBINFO="%{optflags} -DNDEBUG" \
- %endif
-@@ -658,6 +666,9 @@ fi
- %license LICENSE.TXT
++%ifarch %{arm}
+ %global cfg_file_content --gcc-triple=%{_target_cpu}-redhat-linux
++%endif
  
+ # We want to use DWARF-5 on all snapshot builds.
+ %if %{without snapshot_build} && %{defined rhel} && 0%{?rhel} < 10
+@@ -1091,8 +1099,12 @@ execution profile gathered by sampling profiler, such as Linux `perf` tool.
+ %endif
+ 
+ %if %{defined gts_version}
++%ifarch %{arm}
++%global cfg_file_content %{cfg_file_content} --gcc-install-dir=/opt/rh/gcc-toolset-%{gts_version}/root/%{_exec_prefix}/lib/gcc/%{_target_cpu}-redhat-linux-gnueabi/%{gts_version}
++%else
+ %global cfg_file_content %{cfg_file_content} --gcc-install-dir=/opt/rh/gcc-toolset-%{gts_version}/root/%{_exec_prefix}/lib/gcc/%{_target_cpu}-redhat-linux/%{gts_version}
+ %endif
++%endif
+ 
+ # Already use the new clang config file for the current build. This ensures
+ # consistency between the runtimes and non-runtimes builds and makes sure that
+@@ -1111,7 +1123,7 @@ export ASMFLAGS="%{build_cflags}"
+ 
+ # Disable dwz on aarch64, because it takes a huge amount of time to decide not to optimize things.
+ # This is copied from clang.
+-%ifarch aarch64
++%ifarch aarch64 %{arm}
+ %define _find_debuginfo_dwz_opts %{nil}
+ %endif
+ 
+@@ -1592,7 +1604,11 @@ echo "%%clang%{maj_ver}_resource_dir %%{_prefix}/lib/clang/%{maj_ver}" >> %{buil
+ 
+ # Install config file for clang
+ %if %{maj_ver} >=18
++%ifnarch armv6hl
+ %global cfg_file_content --gcc-triple=%{_target_cpu}-redhat-linux
++%else
++%global cfg_file_content --gcc-triple=%{_target_cpu}-redhat-linux-gnueabi
++%endif
+ 
+ # We want to use DWARF-5 on all snapshot builds.
+ %if %{without snapshot_build} && %{defined rhel} && 0%{?rhel} < 10
+@@ -1600,12 +1616,21 @@ echo "%%clang%{maj_ver}_resource_dir %%{_prefix}/lib/clang/%{maj_ver}" >> %{buil
+ %endif
+ 
+ %if %{defined gts_version}
++%ifnarch armv6hl
+ %global cfg_file_content %{cfg_file_content} --gcc-install-dir=/opt/rh/gcc-toolset-%{gts_version}/root/%{_exec_prefix}/lib/gcc/%{_target_cpu}-redhat-linux/%{gts_version}
++%else
++%global cfg_file_content %{cfg_file_content} --gcc-install-dir=/opt/rh/gcc-toolset-%{gts_version}/root/%{_exec_prefix}/lib/gcc/%{_target_cpu}-redhat-linux-gnueabi/%{gts_version}
++%endif
+ %endif
+ 
+ mkdir -p %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/
++%ifnarch armv6hl
+ echo " %{cfg_file_content}" >> %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/%{_target_platform}-clang.cfg
+ echo " %{cfg_file_content}" >> %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/%{_target_platform}-clang++.cfg
++%else
++echo " %{cfg_file_content}" >> %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/armv6l-redhat-linux-gnueabihf-clang.cfg
++echo " %{cfg_file_content}" >> %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/armv6l-redhat-linux-gnueabihf-clang++.cfg
++%endif
+ %ifarch x86_64
+ # On x86_64, install an additional set of config files so -m32 works.
+ echo " %{cfg_file_content}" >> %{buildroot}%{_sysconfdir}/%{pkg_name_clang}/i386-redhat-linux-gnu-clang.cfg
+@@ -1637,6 +1662,13 @@ ln -s %{compiler_rt_triple} %{buildroot}%{_prefix}/lib/clang/%{maj_ver}/lib/%{ll
+ %endif
+ %endif
+ 
++%ifarch armv6hl
++%global compiler_rt_triple arm-redhat-linux-gnueabihf
++%if "%{llvm_triple}" != "%{compiler_rt_triple}"
++ln -s %{compiler_rt_triple} %{buildroot}%{_prefix}/lib/clang/%{maj_ver}/lib/%{llvm_triple}
++%endif
++%endif
++
+ #endregion COMPILER-RT installation
+ 
+ #region OPENMP installation
+@@ -1650,7 +1682,7 @@ rm -rf %{buildroot}/%{install_datadir}/gdb
+ # chmod go+w %{buildroot}/%{_datarootdir}/gdb/python/ompd/ompdModule.so
+ # chmod +w %{buildroot}/%{_datarootdir}/gdb/python/ompd/ompdModule.so
+ 
+-%ifnarch %{ix86}
++%ifnarch %{ix86} %{arm}
+ # Remove files that we don't package, yet.
+ %if %{maj_ver} >= 20
+ rm %{buildroot}%{install_bindir}/llvm-offload-device-info
+@@ -2582,8 +2614,8 @@ fi
+ %{install_bindir}/clang++-%{maj_ver}
+ %{install_bindir}/clang-cl
+ %{install_bindir}/clang-cpp
+-%{_sysconfdir}/%{pkg_name_clang}/%{_target_platform}-clang.cfg
+-%{_sysconfdir}/%{pkg_name_clang}/%{_target_platform}-clang++.cfg
++%{_sysconfdir}/%{pkg_name_clang}/*-clang.cfg
++%{_sysconfdir}/%{pkg_name_clang}/*-clang++.cfg
+ %ifarch x86_64
+ %{_sysconfdir}/%{pkg_name_clang}/i386-redhat-linux-gnu-clang.cfg
+ %{_sysconfdir}/%{pkg_name_clang}/i386-redhat-linux-gnu-clang++.cfg
+@@ -2818,9 +2850,9 @@ fi
+ %files -n %{pkg_name_libomp}
+ %license openmp/LICENSE.TXT
+ %{install_libdir}/libomp.so
++%ifnarch %{ix86} %{arm}
+ %{install_libdir}/libompd.so
+ %{install_libdir}/libarcher.so
+-%ifnarch %{ix86}
+ # libomptarget is not supported on 32-bit systems.
+ # s390x does not support the offloading plugins.
+ %{install_libdir}/libomptarget.so.%{so_suffix}
+@@ -2833,11 +2865,11 @@ fi
+ %license openmp/LICENSE.TXT
+ %{_prefix}/lib/clang/%{maj_ver}/include/omp.h
+ %{_prefix}/lib/clang/%{maj_ver}/include/ompx.h
++%{install_libdir}/cmake/openmp/
++%ifnarch %{ix86} %{arm}
+ %{_prefix}/lib/clang/%{maj_ver}/include/omp-tools.h
+ %{_prefix}/lib/clang/%{maj_ver}/include/ompt.h
+ %{_prefix}/lib/clang/%{maj_ver}/include/ompt-multiplex.h
+-%{install_libdir}/cmake/openmp/
+-%ifnarch %{ix86}
+ # libomptarget is not supported on 32-bit systems.
+ # s390x does not support the offloading plugins.
+ %{install_libdir}/libomptarget.devicertl.a
+@@ -3055,6 +3087,9 @@ fi
+ 
+ #region changelog
  %changelog
-+* Tue Nov 26 2024 Jacco Ligthart <jacco@redsleeve.org> - 18.1.0-3.redsleeve
++* Sat Jun 07 2025 Jacco Ligthart <jacco@redsleeve.org> - 19.1.7-2.redsleeve
 +- changed llvm_triple for armv6
 +
- * Thu Aug 15 2024 Konrad Kleine <kkleine@redhat.com> - 18.1.8-3
- - Workaround for GFX11.5 export priority (RHEL-49517)
+ * Thu Feb 06 2025 Konrad Kleine <kkleine@redhat.com> - 19.1.7-2
+ - Remove llvm 18 compat lib
  
 -- 
-2.43.5
+2.47.3
 

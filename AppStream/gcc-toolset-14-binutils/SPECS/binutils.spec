@@ -9,7 +9,7 @@ BuildRequires: scl-utils-build
 Summary: A GNU collection of binary utilities
 Name: %{?scl_prefix}binutils
 Version: 2.41
-Release: 4%{?dist}.1
+Release: 4%{?dist}.1.redsleeve
 License: GPL-3.0-or-later AND (GPL-3.0-or-later WITH Bison-exception-2.2) AND (LGPL-2.0-or-later WITH GCC-exception-2.0) AND BSD-3-Clause AND GFDL-1.3-or-later AND GPL-2.0-or-later AND LGPL-2.1-or-later AND LGPL-2.0-or-later
 URL: https://sourceware.org/binutils
 
@@ -354,6 +354,8 @@ Patch98: binutils-PPC64-LD-ASSERT.patch
 # Purpose:  Suppress the x86 linker's p_align-1 tests due to kernel bug on CentOS-10
 # Lifetime: TEMPORARY
 Patch99: binutils-suppress-ld-align-tests.patch
+
+Patch1000: binutils-armv6.patch
 
 #----------------------------------------------------------------------------
 
@@ -1503,6 +1505,9 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
+* Sat Oct 4  2025 Jacco Ligthart <jacco@redsleeve.org> 2.41-4.1.redsleeve
+- minor adjustments for armv6
+
 * Mon Feb 24 2025 Nick Clifton  <nickc@redhat.com> - 2.41-4.1
 - Fix assertion failure in ppc64 ld due to compiler miscompilation.  (RHEL-83791)
 

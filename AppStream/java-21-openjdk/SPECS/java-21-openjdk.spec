@@ -56,6 +56,9 @@
 # LTO for a passing build. This really needs to be looked at.
 %define _lto_cflags %{nil}
 
+%global debug_package %{nil}
+
+
 # note: parametrized macros are order-sensitive (unlike not-parametrized) even with normal macros
 # also necessary when passing it as parameter to other macros. If not macro, then it is considered a switch
 # see the difference between global and define:
@@ -1289,11 +1292,11 @@ Provides: java-%{origin}-src%{?1} = %{epoch}:%{version}-%{release}
 %global pkgnameroot java-%{featurever}-%{origin}-portable%{?pkgos:-%{pkgos}}
 
 # Define the architectures on which we build
-ExclusiveArch: %{aarch64} %{ppc64le} s390x x86_64
+ExclusiveArch: %{aarch64} %{ppc64le} s390x x86_64 %{arm}
 
 Name: java-%{javaver}-%{origin}
 Version: %{newjavaver}.%{buildver}
-Release: %{?eaprefix}%{rpmrelease}%{?extraver}%{?dist}
+Release: %{?eaprefix}%{rpmrelease}%{?extraver}%{?dist}.redsleeve
 # Equivalent for the portable build
 %global prelease %{?eaprefix}%{portablerelease}%{?extraver}
 # java-1.5.0-ibm from jpackage.org set Epoch to 1 for unknown reasons
@@ -2567,6 +2570,9 @@ cjc.mainProgram(args)
 %endif
 
 %changelog
+* Fri Oct 03 2025 Jacco Ligthart <jacco@redsleve.org> - 21.0.8.0.9-1.redsleeve
+- add %{arm} to ExclusiveArch
+
 * Wed Jul 16 2025 Release Engineering <releng@rockylinux.org> - 21.0.8.0.9-1
 - Build for Rocky Linux %{rocky} using our own portable
 
