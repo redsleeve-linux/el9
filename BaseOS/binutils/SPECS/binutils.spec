@@ -2,7 +2,7 @@
 Summary: A GNU collection of binary utilities
 Name: binutils%{?_with_debug:-debug}
 Version: 2.35.2
-Release: 67%{?dist}.redsleeve
+Release: 67%{?dist}.1
 License: GPLv3+
 URL: https://sourceware.org/binutils
 
@@ -533,6 +533,11 @@ Patch105: binutils-AArch64-missing-assembler-tests-12.patch
 # Lifetime: Fixed in 2.46
 Patch106: binutils-execstack-error-tests.patch
 
+# Purpose:  Stops a potential illegal memory access when linking a corrupt
+#            input file.  PR 33457
+# Lifetime: Fixed in 2.46
+Patch107: binutils-CVE-2025-11083.patch
+
 #----------------------------------------------------------------------------
 
 Provides: bundled(libiberty)
@@ -598,7 +603,6 @@ Requires(post): coreutils
 BuildRequires: elfutils-debuginfod-client-devel
 %endif
 
-Patch1000: binutils-armv6.patch
 #----------------------------------------------------------------------------
 
 %description
@@ -1393,8 +1397,8 @@ exit 0
 
 #----------------------------------------------------------------------------
 %changelog
-* Sat Nov 29 2025 Jacco Ligthart <jacco@redsleeve.org> 2.35.2-67.redsleeve
-- minor adjustments for armv6
+* Mon Nov 24 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-67.1
+- Fix a potential illegal memory access when linking a corrupt input file.  (RHEL-126883)
 
 * Tue Aug 19 2025 Nick Clifton  <nickc@redhat.com> - 2.35.2-67
 - Adds tests for the linker's --error-execstack and --error-rwx-segments command line options.  (RHEL-109970)
