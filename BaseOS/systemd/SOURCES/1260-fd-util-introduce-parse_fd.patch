@@ -1,0 +1,54 @@
+From 9cf24f219925df6e449eb0838af6e309d84cbb0c Mon Sep 17 00:00:00 2001
+From: David Tardon <dtardon@redhat.com>
+Date: Fri, 5 May 2023 08:09:14 +0200
+Subject: [PATCH] fd-util: introduce parse_fd()
+
+It's a simple wrapper for safe_atoi() that returns error if the parsed
+fd is < 0 .
+
+(cherry picked from commit b8f83d7f0c35dca6ca3a23c42215d566e2815ca5)
+
+Related: RHEL-104138
+---
+ src/basic/parse-util.c | 15 +++++++++++++++
+ src/basic/parse-util.h |  1 +
+ 2 files changed, 16 insertions(+)
+
+diff --git a/src/basic/parse-util.c b/src/basic/parse-util.c
+index 3b3efb0ab8..4161211c49 100644
+--- a/src/basic/parse-util.c
++++ b/src/basic/parse-util.c
+@@ -313,6 +313,21 @@ int parse_errno(const char *t) {
+         return e;
+ }
+ 
++int parse_fd(const char *t) {
++        int r, fd;
++
++        assert(t);
++
++        r = safe_atoi(t, &fd);
++        if (r < 0)
++                return r;
++
++        if (fd < 0)
++                return -ERANGE;
++
++        return fd;
++}
++
+ static const char *mangle_base(const char *s, unsigned *base) {
+         const char *k;
+ 
+diff --git a/src/basic/parse-util.h b/src/basic/parse-util.h
+index 8d8d52327b..5c012d702a 100644
+--- a/src/basic/parse-util.h
++++ b/src/basic/parse-util.h
+@@ -20,6 +20,7 @@ int parse_mtu(int family, const char *s, uint32_t *ret);
+ int parse_size(const char *t, uint64_t base, uint64_t *size);
+ int parse_range(const char *t, unsigned *lower, unsigned *upper);
+ int parse_errno(const char *t);
++int parse_fd(const char *t);
+ 
+ #define SAFE_ATO_REFUSE_PLUS_MINUS (1U << 30)
+ #define SAFE_ATO_REFUSE_LEADING_ZERO (1U << 29)

@@ -1,0 +1,34 @@
+From 6ae4c19c78b0daac097b4a7d88566f95daa9e60b Mon Sep 17 00:00:00 2001
+From: Michal Sekletar <msekleta@redhat.com>
+Date: Fri, 24 Oct 2025 12:55:20 +0200
+Subject: [PATCH] coredump: handle ENOBUFS and EMSGSIZE the same way
+
+Depending on the runtime configuration, e.g. sysctls
+net.core.wmem_default= and net.core.rmem_default and on the actual
+message size, sendmsg() can fail also with ENOBUFS. E.g. alloc_skb()
+failure caused by net.core.[rw]mem_default=64MiB and huge fdinfo list
+from process that has 90k opened FDs.
+
+We should handle this case in the same way as EMSGSIZE and drop part of
+the message.
+
+(cherry picked from commit 28e62e684b631f928f1d857b04f45f0d34441675)
+
+Resolves: RHEL-126114
+---
+ src/coredump/coredump.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/coredump/coredump.c b/src/coredump/coredump.c
+index e0aac3c8d0..28dabf017b 100644
+--- a/src/coredump/coredump.c
++++ b/src/coredump/coredump.c
+@@ -1273,7 +1273,7 @@ static int send_iovec(const struct iovec_wrapper *iovw, int input_fd, int mntns_
+                         if (sendmsg(fd, &mh, MSG_NOSIGNAL) >= 0)
+                                 break;
+ 
+-                        if (errno == EMSGSIZE && mh.msg_iov[0].iov_len > 0) {
++                        if (IN_SET(errno, EMSGSIZE, ENOBUFS) && mh.msg_iov[0].iov_len > 0) {
+                                 /* This field didn't fit? That's a pity. Given that this is
+                                  * just metadata, let's truncate the field at half, and try
+                                  * again. We append three dots, in order to show that this is

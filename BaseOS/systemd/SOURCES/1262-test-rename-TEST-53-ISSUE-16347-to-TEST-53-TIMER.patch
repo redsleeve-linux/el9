@@ -1,0 +1,99 @@
+From 1e97dc426766eef1590d9054952aa0d7d5882b79 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Tue, 23 Sep 2025 14:28:33 +0200
+Subject: [PATCH] test: rename TEST-53-ISSUE-16347 to TEST-53-TIMER
+
+And split the existing test into a separate subtest.
+
+(cherry picked from commit 953c347fb6f293acbd6da009646bfc071b68ddd7)
+
+Related: RHEL-127022
+---
+ .../Makefile                                  |  0
+ .../test.sh                                   |  0
+ test/units/testsuite-53.issue-16347.sh        | 27 ++++++++++++++++++
+ test/units/testsuite-53.sh                    | 28 +++----------------
+ 4 files changed, 31 insertions(+), 24 deletions(-)
+ rename test/{TEST-53-ISSUE-16347 => TEST-53-TIMER}/Makefile (100%)
+ rename test/{TEST-53-ISSUE-16347 => TEST-53-TIMER}/test.sh (100%)
+ create mode 100755 test/units/testsuite-53.issue-16347.sh
+
+diff --git a/test/TEST-53-ISSUE-16347/Makefile b/test/TEST-53-TIMER/Makefile
+similarity index 100%
+rename from test/TEST-53-ISSUE-16347/Makefile
+rename to test/TEST-53-TIMER/Makefile
+diff --git a/test/TEST-53-ISSUE-16347/test.sh b/test/TEST-53-TIMER/test.sh
+similarity index 100%
+rename from test/TEST-53-ISSUE-16347/test.sh
+rename to test/TEST-53-TIMER/test.sh
+diff --git a/test/units/testsuite-53.issue-16347.sh b/test/units/testsuite-53.issue-16347.sh
+new file mode 100755
+index 0000000000..8b266145cd
+--- /dev/null
++++ b/test/units/testsuite-53.issue-16347.sh
+@@ -0,0 +1,27 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++set -eux
++set -o pipefail
++
++# Reset host date to current time, 3 days in the past.
++date -s "-3 days"
++trap 'date -s "+3 days"' EXIT
++
++# Run a timer for every 15 minutes.
++systemd-run --unit test-timer --on-calendar "*:0/15:0" true
++
++next_elapsed=$(systemctl show test-timer.timer -p NextElapseUSecRealtime --value)
++next_elapsed=$(date -d "${next_elapsed}" +%s)
++now=$(date +%s)
++time_delta=$((next_elapsed - now))
++
++# Check that the timer will elapse in less than 20 minutes.
++if [[ "$time_delta" -lt 0 || "$time_delta" -gt 1200 ]]; then
++    echo 'Timer elapse outside of the expected 20 minute window.'
++    echo "  next_elapsed=${next_elapsed}"
++    echo "  now=${now}"
++    echo "  time_delta=${time_delta}"
++    echo
++
++    exit 1
++fi
+diff --git a/test/units/testsuite-53.sh b/test/units/testsuite-53.sh
+index 84cd66129d..9c2a033aa9 100755
+--- a/test/units/testsuite-53.sh
++++ b/test/units/testsuite-53.sh
+@@ -3,29 +3,9 @@
+ set -eux
+ set -o pipefail
+ 
+-: >/failed
++# shellcheck source=test/units/test-control.sh
++. "$(dirname "$0")"/test-control.sh
+ 
+-# Reset host date to current time, 3 days in the past.
+-date -s "-3 days"
++run_subtests
+ 
+-# Run a timer for every 15 minutes.
+-systemd-run --unit test-timer --on-calendar "*:0/15:0" true
+-
+-next_elapsed=$(systemctl show test-timer.timer -p NextElapseUSecRealtime --value)
+-next_elapsed=$(date -d "${next_elapsed}" +%s)
+-now=$(date +%s)
+-time_delta=$((next_elapsed - now))
+-
+-# Check that the timer will elapse in less than 20 minutes.
+-((0 < time_delta && time_delta < 1200)) || {
+-    echo 'Timer elapse outside of the expected 20 minute window.'
+-    echo "  next_elapsed=${next_elapsed}"
+-    echo "  now=${now}"
+-    echo "  time_delta=${time_delta}"
+-    echo ''
+-} >>/failed
+-
+-if test ! -s /failed ; then
+-    rm -f /failed
+-    touch /testok
+-fi
++touch /testok

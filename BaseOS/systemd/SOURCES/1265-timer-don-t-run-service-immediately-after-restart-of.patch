@@ -1,0 +1,29 @@
+From 7dc588429e48ba6017fd75f6a266288768230025 Mon Sep 17 00:00:00 2001
+From: Lukas Nykryn <lnykryn@redhat.com>
+Date: Tue, 9 Sep 2025 15:24:22 +0200
+Subject: [PATCH] timer: don't run service immediately after restart of a timer
+
+When a timer is restarted, don't reset the last_trigger field.
+This prevents the timer from triggering immediately.
+
+Fixes: #31231
+(cherry picked from commit 3fc44a0f68412b649e16f12ff2f97a36c615457d)
+
+Resolves: RHEL-127022
+---
+ src/core/timer.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/src/core/timer.c b/src/core/timer.c
+index 60e8fea79f..2eadca4f1a 100644
+--- a/src/core/timer.c
++++ b/src/core/timer.c
+@@ -635,8 +635,6 @@ static int timer_start(Unit *u) {
+         if (r < 0)
+                 return r;
+ 
+-        t->last_trigger = DUAL_TIMESTAMP_NULL;
+-
+         /* Reenable all timers that depend on unit activation time */
+         LIST_FOREACH(value, v, t->values)
+                 if (v->base == TIMER_ACTIVE)

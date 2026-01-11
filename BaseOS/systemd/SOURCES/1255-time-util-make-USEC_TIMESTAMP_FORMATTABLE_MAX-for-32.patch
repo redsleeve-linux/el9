@@ -1,0 +1,74 @@
+From a8ef307f05961e142b99cbbdda8855a24a44d4a1 Mon Sep 17 00:00:00 2001
+From: Yu Watanabe <watanabe.yu+github@gmail.com>
+Date: Sun, 12 Mar 2023 20:57:16 +0900
+Subject: [PATCH] time-util: make USEC_TIMESTAMP_FORMATTABLE_MAX for 32bit
+ system off by one day
+
+As the same reason why we take one day off for 64bit case.
+
+This also makes both upper bounds always defined for testing.
+
+(cherry picked from commit bd5770da76ee157d3b31323ed2d22f5d9082bb36)
+
+Related: RHEL-118294
+---
+ src/basic/time-util.h     | 14 +++++++++-----
+ src/test/test-date.c      |  4 ++--
+ src/test/test-time-util.c |  2 +-
+ 3 files changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/src/basic/time-util.h b/src/basic/time-util.h
+index 9d44cac747..7f8bda0948 100644
+--- a/src/basic/time-util.h
++++ b/src/basic/time-util.h
+@@ -200,13 +200,17 @@ static inline usec_t usec_sub_signed(usec_t timestamp, int64_t delta) {
+         return usec_sub_unsigned(timestamp, (usec_t) delta);
+ }
+ 
++/* The last second we can format is 31. Dec 9999, 1s before midnight, because otherwise we'd enter 5 digit
++ * year territory. However, since we want to stay away from this in all timezones we take one day off. */
++#define USEC_TIMESTAMP_FORMATTABLE_MAX_64BIT ((usec_t) 253402214399000000) /* Thu 9999-12-30 23:59:59 UTC */
++/* With a 32bit time_t we can't go beyond 2038...
++ * We parse timestamp with RFC-822/ISO 8601 (e.g. +06, or -03:00) as UTC, hence the upper bound must be off
++ * by USEC_PER_DAY. See parse_timestamp() for more details. */
++#define USEC_TIMESTAMP_FORMATTABLE_MAX_32BIT (((usec_t) INT32_MAX) * USEC_PER_SEC - USEC_PER_DAY)
+ #if SIZEOF_TIME_T == 8
+-  /* The last second we can format is 31. Dec 9999, 1s before midnight, because otherwise we'd enter 5 digit
+-   * year territory. However, since we want to stay away from this in all timezones we take one day off. */
+-#  define USEC_TIMESTAMP_FORMATTABLE_MAX ((usec_t) 253402214399000000)
++#  define USEC_TIMESTAMP_FORMATTABLE_MAX USEC_TIMESTAMP_FORMATTABLE_MAX_64BIT
+ #elif SIZEOF_TIME_T == 4
+-/* With a 32bit time_t we can't go beyond 2038... */
+-#  define USEC_TIMESTAMP_FORMATTABLE_MAX ((usec_t) 2147483647000000)
++#  define USEC_TIMESTAMP_FORMATTABLE_MAX USEC_TIMESTAMP_FORMATTABLE_MAX_32BIT
+ #else
+ #  error "Yuck, time_t is neither 4 nor 8 bytes wide?"
+ #endif
+diff --git a/src/test/test-date.c b/src/test/test-date.c
+index cc11bd999e..ef316eeca7 100644
+--- a/src/test/test-date.c
++++ b/src/test/test-date.c
+@@ -104,8 +104,8 @@ int main(int argc, char *argv[]) {
+         test_should_fail("9999-12-31 00:00:00 UTC");
+         test_should_fail("10000-01-01 00:00:00 UTC");
+ #elif SIZEOF_TIME_T == 4
+-        test_should_pass("2038-01-19 03:14:07 UTC");
+-        test_should_fail("2038-01-19 03:14:08 UTC");
++        test_should_pass("2038-01-18 03:14:07 UTC");
++        test_should_fail("2038-01-18 03:14:08 UTC");
+ #endif
+ 
+         return 0;
+diff --git a/src/test/test-time-util.c b/src/test/test-time-util.c
+index 21b05a3010..71ef5906ba 100644
+--- a/src/test/test-time-util.c
++++ b/src/test/test-time-util.c
+@@ -550,7 +550,7 @@ TEST(format_timestamp_utc) {
+         test_format_timestamp_utc_one(USEC_TIMESTAMP_FORMATTABLE_MAX, "Thu 9999-12-30 23:59:59 UTC");
+         test_format_timestamp_utc_one(USEC_TIMESTAMP_FORMATTABLE_MAX + 1, "--- XXXX-XX-XX XX:XX:XX");
+ #elif SIZEOF_TIME_T == 4
+-        test_format_timestamp_utc_one(USEC_TIMESTAMP_FORMATTABLE_MAX, "Tue 2038-01-19 03:14:07 UTC");
++        test_format_timestamp_utc_one(USEC_TIMESTAMP_FORMATTABLE_MAX, "Mon 2038-01-18 03:14:07 UTC");
+         test_format_timestamp_utc_one(USEC_TIMESTAMP_FORMATTABLE_MAX + 1, "--- XXXX-XX-XX XX:XX:XX");
+ #endif
+ 

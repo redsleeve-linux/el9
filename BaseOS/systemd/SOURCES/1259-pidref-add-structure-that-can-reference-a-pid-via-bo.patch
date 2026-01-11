@@ -1,0 +1,230 @@
+From c762a9a8764f8c6ce6640579ae8cf04f80360d16 Mon Sep 17 00:00:00 2001
+From: Lennart Poettering <lennart@poettering.net>
+Date: Sat, 9 Sep 2023 09:29:27 +0200
+Subject: [PATCH] pidref: add structure that can reference a pid via both pidfd
+ and pid_t
+
+Let's start with the conversion of PID 1 to pidfds. Let's add a simple
+structure with just two fields that can be used to maintain a reference
+to arbitrary processes via both pid_t and pidfd.
+
+This is an embeddable struct, to keep it in line with where we
+previously used a pid_t directly to track a process.
+
+Of course, since this might contain an fd on systems where we have pidfd
+this structure has a proper lifecycle.
+
+(Note that this is quite different from sd_event_add_child() event
+source objects as that one is only for child processes and collects
+process results, while this infra is much simpler and more generic and
+can be used to reference any process, anywhere in the tree.)
+
+(cherry picked from commit 3bda3f17fa84557eeb28fa7c330cbd3a3f876d47)
+
+Related: RHEL-104138
+---
+ src/basic/meson.build |   1 +
+ src/basic/pidref.c    | 145 ++++++++++++++++++++++++++++++++++++++++++
+ src/basic/pidref.h    |  29 +++++++++
+ 3 files changed, 175 insertions(+)
+ create mode 100644 src/basic/pidref.c
+ create mode 100644 src/basic/pidref.h
+
+diff --git a/src/basic/meson.build b/src/basic/meson.build
+index 11053a5ecd..b8b4213c70 100644
+--- a/src/basic/meson.build
++++ b/src/basic/meson.build
+@@ -182,6 +182,7 @@ basic_sources = files(
+         'path-util.h',
+         'percent-util.c',
+         'percent-util.h',
++        'pidref.c',
+         'prioq.c',
+         'prioq.h',
+         'proc-cmdline.c',
+diff --git a/src/basic/pidref.c b/src/basic/pidref.c
+new file mode 100644
+index 0000000000..f41460938c
+--- /dev/null
++++ b/src/basic/pidref.c
+@@ -0,0 +1,145 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++
++#include "errno-util.h"
++#include "fd-util.h"
++#include "missing_syscall.h"
++#include "parse-util.h"
++#include "pidref.h"
++#include "process-util.h"
++
++int pidref_set_pid(PidRef *pidref, pid_t pid) {
++        int fd;
++
++        assert(pidref);
++
++        if (pid < 0)
++                return -ESRCH;
++        if (pid == 0)
++                pid = getpid_cached();
++
++        fd = pidfd_open(pid, 0);
++        if (fd < 0) {
++                /* Graceful fallback in case the kernel doesn't support pidfds or is out of fds */
++                if (!ERRNO_IS_NOT_SUPPORTED(errno) && !ERRNO_IS_PRIVILEGE(errno) && !ERRNO_IS_RESOURCE(errno))
++                        return -errno;
++
++                fd = -EBADF;
++        }
++
++        *pidref = (PidRef) {
++                .fd = fd,
++                .pid = pid,
++        };
++
++        return 0;
++}
++
++int pidref_set_pidstr(PidRef *pidref, const char *pid) {
++        pid_t nr;
++        int r;
++
++        assert(pidref);
++
++        r = parse_pid(pid, &nr);
++        if (r < 0)
++                return r;
++
++        return pidref_set_pid(pidref, nr);
++}
++
++int pidref_set_pidfd(PidRef *pidref, int fd) {
++        int r;
++
++        assert(pidref);
++
++        if (fd < 0)
++                return -EBADF;
++
++        int fd_copy = fcntl(fd, F_DUPFD_CLOEXEC, 3);
++        if (fd_copy < 0) {
++                pid_t pid;
++
++                if (!ERRNO_IS_RESOURCE(errno))
++                        return -errno;
++
++                /* Graceful fallback if we are out of fds */
++                r = pidfd_get_pid(fd, &pid);
++                if (r < 0)
++                        return r;
++
++                *pidref = (PidRef) {
++                        .fd = -EBADF,
++                        .pid = pid,
++                };
++
++                return 0;
++        }
++
++        return pidref_set_pidfd_consume(pidref, fd_copy);
++}
++
++int pidref_set_pidfd_take(PidRef *pidref, int fd) {
++        pid_t pid;
++        int r;
++
++        assert(pidref);
++
++        if (fd < 0)
++                return -EBADF;
++
++        r = pidfd_get_pid(fd, &pid);
++        if (r < 0)
++                return r;
++
++        *pidref = (PidRef) {
++                .fd = fd,
++                .pid = pid,
++        };
++
++        return 0;
++}
++
++int pidref_set_pidfd_consume(PidRef *pidref, int fd) {
++        int r;
++
++        r = pidref_set_pidfd_take(pidref, fd);
++        if (r < 0)
++                safe_close(fd);
++
++        return r;
++}
++
++void pidref_done(PidRef *pidref) {
++        assert(pidref);
++
++        *pidref = (PidRef) {
++                .fd = safe_close(pidref->fd),
++        };
++}
++
++int pidref_kill(PidRef *pidref, int sig) {
++
++        if (!pidref)
++                return -ESRCH;
++
++        if (pidref->fd >= 0)
++                return RET_NERRNO(pidfd_send_signal(pidref->fd, sig, NULL, 0));
++
++        if (pidref->pid > 0)
++                return RET_NERRNO(kill(pidref->pid, sig));
++
++        return -ESRCH;
++}
++
++int pidref_kill_and_sigcont(PidRef *pidref, int sig) {
++        int r;
++
++        r = pidref_kill(pidref, sig);
++        if (r < 0)
++                return r;
++
++        if (!IN_SET(sig, SIGCONT, SIGKILL))
++                (void) pidref_kill(pidref, SIGCONT);
++
++        return 0;
++}
+diff --git a/src/basic/pidref.h b/src/basic/pidref.h
+new file mode 100644
+index 0000000000..2411e510f1
+--- /dev/null
++++ b/src/basic/pidref.h
+@@ -0,0 +1,29 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later */
++#pragma once
++
++#include "macro.h"
++
++/* An embeddable structure carrying a reference to a process. Supposed to be used when tracking processes continously. */
++typedef struct PidRef {
++        pid_t pid; /* always valid */
++        int fd;    /* only valid if pidfd are available in the kernel, and we manage to get an fd */
++} PidRef;
++
++#define PIDREF_NULL (PidRef) { .fd = -EBADF }
++
++static inline bool pidref_is_set(const PidRef *pidref) {
++        return pidref && pidref->pid > 0;
++}
++
++int pidref_set_pid(PidRef *pidref, pid_t pid);
++int pidref_set_pidstr(PidRef *pidref, const char *pid);
++int pidref_set_pidfd(PidRef *pidref, int fd);
++int pidref_set_pidfd_take(PidRef *pidref, int fd); /* takes ownership of the passed pidfd on success*/
++int pidref_set_pidfd_consume(PidRef *pidref, int fd); /* takes ownership of the passed pidfd in both success and failure */
++
++void pidref_done(PidRef *pidref);
++
++int pidref_kill(PidRef *pidref, int sig);
++int pidref_kill_and_sigcont(PidRef *pidref, int sig);
++
++#define TAKE_PIDREF(p) TAKE_GENERIC((p), PidRef, PIDREF_NULL)

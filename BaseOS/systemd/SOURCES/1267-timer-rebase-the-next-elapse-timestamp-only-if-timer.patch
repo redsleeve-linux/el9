@@ -1,0 +1,131 @@
+From e71140d217b3a2a75a52b488da39568d6ea942bd Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Mon, 13 Oct 2025 17:36:55 +0200
+Subject: [PATCH] timer: rebase the next elapse timestamp only if timer didn't
+ already run
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The test added in f4c3c107d9be4e922a080fc292ed3889c4e0f4a5 uncovered a
+corner case while recalculating the next elapse timestamp of a timer unit
+that uses RandomizedDelaySec= during deserialization.
+
+If the scheduled time (without RandomizedDelaySec=) already elapsed,
+systemd "rebases" the next elapse timestamp to the time when systemd
+first started, to make the RandomizedDelaySec= feature work even at
+boot. However, since it was done unconditionally, it always overrode the
+next elapse timestamp, which could then cause the final next elapse
+timestamp to fall out of the expected window.
+
+With a couple of additional debug logs one of the test fail looks like
+this:
+
+[  132.129815] TEST-53-TIMER.sh[384]: + : 'Next elapse timestamp after daemon-reload, try #328'
+[  132.129815] TEST-53-TIMER.sh[384]: + systemctl daemon-reload
+[  132.136352] systemd[1]: Reload requested from client PID 16399 ('systemctl') (unit TEST-53-TIMER.service)...
+[  132.136636] systemd[1]: Reloading...
+[  132.446160] systemd[1]: Rebasing next elapse timestamp
+[  132.446168] systemd[1]: v->next_elapse: Tue 2025-10-14 00:10:00 CEST
+[  132.446170] systemd[1]: rebased: Tue 2025-10-14 00:10:56 CEST
+[  132.446172] systemd[1]: v->next_elapse after rebase: Tue 2025-10-14 00:10:56 CEST
+[  132.447361] systemd[1]: Reloading finished in 310 ms.
+[  132.484041] TEST-53-TIMER.sh[384]: + check_elapse_timestamp
+[  132.484041] TEST-53-TIMER.sh[384]: + systemctl status timer-RandomizedDelaySec-16377.timer
+[  132.533657] TEST-53-TIMER.sh[16440]: ● timer-RandomizedDelaySec-16377.timer
+[  132.533657] TEST-53-TIMER.sh[16440]:      Loaded: loaded (/run/systemd/system/timer-RandomizedDelaySec-16377.timer; static)
+[  132.533657] TEST-53-TIMER.sh[16440]:      Active: active (waiting) since Mon 2025-10-13 23:00:00 CEST; 1h 13min ago
+[  132.533657] TEST-53-TIMER.sh[16440]:  Invocation: 5555d4f060114a5493ff228013830d17
+[  132.533657] TEST-53-TIMER.sh[16440]:     Trigger: Tue 2025-10-14 22:10:04 CEST; 21h left
+[  132.533657] TEST-53-TIMER.sh[16440]:    Triggers: ● timer-RandomizedDelaySec-16377.service
+[  132.533657] TEST-53-TIMER.sh[16440]: Oct 14 00:13:07 H systemd[1]: timer-RandomizedDelaySec-16377.timer: Changed dead -> waiting
+[  132.533657] TEST-53-TIMER.sh[16440]: Oct 14 00:13:07 H systemd[1]: timer-RandomizedDelaySec-16377.timer: Adding 15h 35min 1.230173s random time.
+[  132.533657] TEST-53-TIMER.sh[16440]: Oct 14 00:13:07 H systemd[1]: timer-RandomizedDelaySec-16377.timer: Realtime timer elapses at Tue 2025-10-14 15:45:58 CEST.
+[  132.533657] TEST-53-TIMER.sh[16440]: Oct 14 00:13:07 H systemd[1]: timer-RandomizedDelaySec-16377.timer: Changed dead -> waiting
+[  132.533657] TEST-53-TIMER.sh[16440]: Oct 14 00:13:08 H systemd[1]: timer-RandomizedDelaySec-16377.timer: Adding 16h 29min 44.084409s random time.
+[  132.533657] TEST-53-TIMER.sh[16440]: Oct 14 00:13:08 H systemd[1]: timer-RandomizedDelaySec-16377.timer: Realtime timer elapses at Tue 2025-10-14 16:40:41 CEST.
+[  132.533657] TEST-53-TIMER.sh[16440]: Oct 14 00:13:08 H systemd[1]: timer-RandomizedDelaySec-16377.timer: Changed dead -> waiting
+[  132.533657] TEST-53-TIMER.sh[16440]: Oct 14 00:13:08 H systemd[1]: timer-RandomizedDelaySec-16377.timer: Adding 21h 59min 7.955828s random time.
+[  132.533657] TEST-53-TIMER.sh[16440]: Oct 14 00:13:08 H systemd[1]: timer-RandomizedDelaySec-16377.timer: Realtime timer elapses at Tue 2025-10-14 22:10:04 CEST.
+[  132.533657] TEST-53-TIMER.sh[16440]: Oct 14 00:13:08 H systemd[1]: timer-RandomizedDelaySec-16377.timer: Changed dead -> waiting
+[  132.535386] TEST-53-TIMER.sh[384]: + systemctl show -p InactiveExitTimestamp timer-RandomizedDelaySec-16377.timer
+[  132.537727] TEST-53-TIMER.sh[16442]: InactiveExitTimestamp=Mon 2025-10-13 23:00:00 CEST
+[  132.540317] TEST-53-TIMER.sh[16444]: ++ systemctl show -P NextElapseUSecRealtime timer-RandomizedDelaySec-16377.timer
+[  132.547745] TEST-53-TIMER.sh[384]: + NEXT_ELAPSE_REALTIME='Tue 2025-10-14 22:10:04 CEST'
+[  132.548020] TEST-53-TIMER.sh[16445]: ++ date '--date=Tue 2025-10-14 22:10:04 CEST' +%s
+[  132.550218] TEST-53-TIMER.sh[384]: + NEXT_ELAPSE_REALTIME_S=1760472604
+[  132.550218] TEST-53-TIMER.sh[384]: + : 'Next elapse timestamp should be Tue 2025-10-14 00:10:00 CEST <= Tue 2025-10-14 22:10:04 CEST <= Tue 2025-10-14 22:10:00 CEST'
+[  132.550218] TEST-53-TIMER.sh[384]: + assert_ge 1760472604 1760393400
+[  132.550555] TEST-53-TIMER.sh[16446]: + set +ex
+[  132.550702] TEST-53-TIMER.sh[384]: + assert_le 1760472604 1760472600
+[  132.550832] TEST-53-TIMER.sh[16447]: + set +ex
+[  132.551091] TEST-53-TIMER.sh[16447]: FAIL: '1760472604' > '1760472600'
+
+Here the original next elapse timestamp was Tue 2025-10-14 00:10:00 CEST
+as expected, but it was overridden by the rebased timestamp:
+Tue 2025-10-14 00:10:56 CEST. And when a new randomized delay was added
+to it (21h 59min 7.955828s) the final next elapse timestamp fell out of
+the expected window, i.e. Tue 2025-10-14 00:10:00 (scheduled time) <
+Tue 2025-10-14 22:10:04 CEST (rebased elapse timestamp + randomized
+delay) < Tue 2025-10-14 22:10:00 CEST (scheduled time + maximum from
+RandomizedDelaySec=, i.e. 22h).
+
+By limiting the timestamp rebase only the case where the unit hasn't
+already run should prevent this from happening during daemon-reload.
+
+(cherry picked from commit bdb8e584f4509de0daebbe2357d23156160c3a90)
+
+Related: RHEL-127022
+---
+ src/core/timer.c | 25 +++++++++++++++----------
+ 1 file changed, 15 insertions(+), 10 deletions(-)
+
+diff --git a/src/core/timer.c b/src/core/timer.c
+index 2eadca4f1a..4b0266bc68 100644
+--- a/src/core/timer.c
++++ b/src/core/timer.c
+@@ -392,7 +392,8 @@ static void timer_enter_waiting(Timer *t, bool time_change) {
+                         continue;
+ 
+                 if (v->base == TIMER_CALENDAR) {
+-                        usec_t b, rebased;
++                        bool rebase_after_boot_time = false;
++                        usec_t b;
+ 
+                         /* If we know the last time this was
+                          * triggered, schedule the job based relative
+@@ -403,21 +404,25 @@ static void timer_enter_waiting(Timer *t, bool time_change) {
+                                 b = t->last_trigger.realtime;
+                         else if (dual_timestamp_is_set(&UNIT(t)->inactive_exit_timestamp))
+                                 b = UNIT(t)->inactive_exit_timestamp.realtime;
+-                        else
++                        else {
+                                 b = ts.realtime;
++                                rebase_after_boot_time = true;
++                        }
+ 
+                         r = calendar_spec_next_usec(v->calendar_spec, b, &v->next_elapse);
+                         if (r < 0)
+                                 continue;
+ 
+-                        /* To make the delay due to RandomizedDelaySec= work even at boot, if the scheduled
+-                         * time has already passed, set the time when systemd first started as the scheduled
+-                         * time. Note that we base this on the monotonic timestamp of the boot, not the
+-                         * realtime one, since the wallclock might have been off during boot. */
+-                        rebased = map_clock_usec(UNIT(t)->manager->timestamps[MANAGER_TIMESTAMP_USERSPACE].monotonic,
+-                                                 CLOCK_MONOTONIC, CLOCK_REALTIME);
+-                        if (v->next_elapse < rebased)
+-                                v->next_elapse = rebased;
++                        if (rebase_after_boot_time) {
++                                /* To make the delay due to RandomizedDelaySec= work even at boot, if the scheduled
++                                 * time has already passed, set the time when systemd first started as the scheduled
++                                 * time. Note that we base this on the monotonic timestamp of the boot, not the
++                                 * realtime one, since the wallclock might have been off during boot. */
++                                usec_t rebased = map_clock_usec(UNIT(t)->manager->timestamps[MANAGER_TIMESTAMP_USERSPACE].monotonic,
++                                                         CLOCK_MONOTONIC, CLOCK_REALTIME);
++                                if (v->next_elapse < rebased)
++                                        v->next_elapse = rebased;
++                        }
+ 
+                         if (!found_realtime)
+                                 t->next_elapse_realtime = v->next_elapse;

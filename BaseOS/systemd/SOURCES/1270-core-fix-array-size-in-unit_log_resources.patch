@@ -1,0 +1,36 @@
+From ca32ed0b2451453eaff579d08f9e188f9c79ab0c Mon Sep 17 00:00:00 2001
+From: Florian Schmaus <flo@geekplace.eu>
+Date: Thu, 9 Nov 2023 08:59:59 +0100
+Subject: [PATCH] core: fix array size in unit_log_resources()
+
+In 0531bded79dc ("core: include peak memory in unit_log_resources()") new log
+messages where added, however the size of the according arrays to hold the
+messages was not adjusted.
+
+Fixes: 0531bded79dc ("core: include peak memory in unit_log_resources()")
+(cherry picked from commit 893028523469b3ec459388428ddc466942cdaf4d)
+
+Resolves: RHEL-132120
+---
+ src/core/unit.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/core/unit.c b/src/core/unit.c
+index 9e349402ff..3e04b12951 100644
+--- a/src/core/unit.c
++++ b/src/core/unit.c
+@@ -2233,12 +2233,12 @@ static int raise_level(int log_level, bool condition_info, bool condition_notice
+ }
+ 
+ static int unit_log_resources(Unit *u) {
+-        struct iovec iovec[1 + _CGROUP_IP_ACCOUNTING_METRIC_MAX + _CGROUP_IO_ACCOUNTING_METRIC_MAX + 4];
++        struct iovec iovec[1 + 1 + _CGROUP_IP_ACCOUNTING_METRIC_MAX + _CGROUP_IO_ACCOUNTING_METRIC_MAX + 4];
+         bool any_traffic = false, have_ip_accounting = false, any_io = false, have_io_accounting = false;
+         _cleanup_free_ char *igress = NULL, *egress = NULL, *rr = NULL, *wr = NULL;
+         int log_level = LOG_DEBUG; /* May be raised if resources consumed over a threshold */
+         size_t n_message_parts = 0, n_iovec = 0;
+-        char* message_parts[1 + 2 + 2 + 1], *t;
++        char* message_parts[1 + 1 + 2 + 2 + 1], *t;
+         nsec_t nsec = NSEC_INFINITY;
+         uint64_t memory_peak = UINT64_MAX;
+         int r;

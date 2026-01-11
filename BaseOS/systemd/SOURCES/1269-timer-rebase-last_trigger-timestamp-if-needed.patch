@@ -1,0 +1,143 @@
+From 6c05a35ce4d03cf25220de5e950970ef23417415 Mon Sep 17 00:00:00 2001
+From: Frantisek Sumsal <frantisek@sumsal.cz>
+Date: Wed, 19 Nov 2025 14:44:13 +0100
+Subject: [PATCH] timer: rebase last_trigger timestamp if needed
+
+After bdb8e584f4509de0daebbe2357d23156160c3a90 we stopped rebasing the
+next elapse timestamp unconditionally and the only case where we'd do
+that was when both last trigger and last inactive timestamps were empty.
+This covered timer units during boot just fine, since they would have
+neither of those timestamps set. However, persistent timers
+(Persistent=yes) store their last trigger timestamp on a persistent
+storage and load it back after reboot, so the rebasing was skipped in
+this case.
+
+To mitigate this, check the last_trigger timestamp is older than the
+current machine boot - if so, that means that it came from a stamp file
+of a persistent timer unit and we need to rebase it to make
+RandomizedDelaySec= work properly.
+
+Follow-up for bdb8e584f4509de0daebbe2357d23156160c3a90.
+
+(cherry picked from commit 3605b3ba87833a9919bfde05952a7d9de10499a2)
+
+Related: RHEL-127022
+---
+ src/core/timer.c                              | 15 +++--
+ ...tsuite-53.RandomizedDelaySec-persistent.sh | 67 +++++++++++++++++++
+ 2 files changed, 78 insertions(+), 4 deletions(-)
+ create mode 100755 test/units/testsuite-53.RandomizedDelaySec-persistent.sh
+
+diff --git a/src/core/timer.c b/src/core/timer.c
+index 4b0266bc68..8fb79bc0cb 100644
+--- a/src/core/timer.c
++++ b/src/core/timer.c
+@@ -394,15 +394,23 @@ static void timer_enter_waiting(Timer *t, bool time_change) {
+                 if (v->base == TIMER_CALENDAR) {
+                         bool rebase_after_boot_time = false;
+                         usec_t b;
++                        usec_t boot_monotonic = UNIT(t)->manager->timestamps[MANAGER_TIMESTAMP_USERSPACE].monotonic;
+ 
+                         /* If we know the last time this was
+                          * triggered, schedule the job based relative
+                          * to that. If we don't, just start from
+                          * the activation time. */
+ 
+-                        if (dual_timestamp_is_set(&t->last_trigger))
++                        if (dual_timestamp_is_set(&t->last_trigger)) {
+                                 b = t->last_trigger.realtime;
+-                        else if (dual_timestamp_is_set(&UNIT(t)->inactive_exit_timestamp))
++
++                                /* Check if the last_trigger timestamp is older than the current machine
++                                 * boot. If so, this means the timestamp came from a stamp file of a
++                                 * persistent timer and we need to rebase it to make RandomizedDelaySec=
++                                 * work (see below). */
++                                if (t->last_trigger.monotonic < boot_monotonic)
++                                        rebase_after_boot_time = true;
++                        } else if (dual_timestamp_is_set(&UNIT(t)->inactive_exit_timestamp))
+                                 b = UNIT(t)->inactive_exit_timestamp.realtime;
+                         else {
+                                 b = ts.realtime;
+@@ -418,8 +426,7 @@ static void timer_enter_waiting(Timer *t, bool time_change) {
+                                  * time has already passed, set the time when systemd first started as the scheduled
+                                  * time. Note that we base this on the monotonic timestamp of the boot, not the
+                                  * realtime one, since the wallclock might have been off during boot. */
+-                                usec_t rebased = map_clock_usec(UNIT(t)->manager->timestamps[MANAGER_TIMESTAMP_USERSPACE].monotonic,
+-                                                         CLOCK_MONOTONIC, CLOCK_REALTIME);
++                                usec_t rebased = map_clock_usec(boot_monotonic, CLOCK_MONOTONIC, CLOCK_REALTIME);
+                                 if (v->next_elapse < rebased)
+                                         v->next_elapse = rebased;
+                         }
+diff --git a/test/units/testsuite-53.RandomizedDelaySec-persistent.sh b/test/units/testsuite-53.RandomizedDelaySec-persistent.sh
+new file mode 100755
+index 0000000000..af22daecc7
+--- /dev/null
++++ b/test/units/testsuite-53.RandomizedDelaySec-persistent.sh
+@@ -0,0 +1,67 @@
++#!/usr/bin/env bash
++# SPDX-License-Identifier: LGPL-2.1-or-later
++#
++# Persistent timers (i.e. timers with Persitent=yes) save their last trigger timestamp to a persistent
++# storage (a stamp file), which is loaded during subsequent boots. As mentioned in the man page, such timers
++# should be still affected by RandomizedDelaySec= during boot even if they already elapsed and would be then
++# triggered immediately.
++#
++# This behavior was, however, broken by [0], which stopped rebasing the to-be next elapse timestamps
++# unconditionally and left that only for timers that have neither last trigger nor inactive exit timestamps
++# set, since rebasing is needed only during boot. This holds for regular timers during boot, but not for
++# persistent ones, since the last trigger timestamp is loaded from a persistent storage.
++#
++# Provides coverage for:
++#   - https://github.com/systemd/systemd/issues/39739
++#
++# [0] bdb8e584f4509de0daebbe2357d23156160c3a90
++#
++set -eux
++set -o pipefail
++
++# shellcheck source=test/units/test-control.sh
++. "$(dirname "$0")"/util.sh
++
++UNIT_NAME="timer-RandomizedDelaySec-persistent-$RANDOM"
++STAMP_FILE="/var/lib/systemd/timers/stamp-$UNIT_NAME.timer"
++
++# Setup
++cat >"/run/systemd/system/$UNIT_NAME.timer" <<EOF
++[Timer]
++OnCalendar=daily
++Persistent=true
++RandomizedDelaySec=12h
++EOF
++
++cat >"/run/systemd/system/$UNIT_NAME.service" <<\EOF
++[Service]
++ExecStart=echo "Service ran at $(date)"
++EOF
++
++systemctl daemon-reload
++
++# Create timer's state file with an old-enough timestamp (~2 days ago), so it'd definitely elapse if the next
++# elapse timestamp wouldn't get rebased
++mkdir -p "$(dirname "$STAMP_FILE")"
++touch -d "2 days ago" "$STAMP_FILE"
++stat "$STAMP_FILE"
++SAVED_LAST_TRIGGER_S="$(stat --format="%Y" "$STAMP_FILE")"
++
++# Start the timer and verify that its last trigger timestamp didn't change
++#
++# The last trigger timestamp should get rebased before it gets used as a base for the next elapse timestamp
++# (since it pre-dates the machine boot time). This should then add a RandomizedDelaySec= to the rebased
++# timestamp and the timer unit should not get triggered immediately after starting.
++systemctl start "$UNIT_NAME.timer"
++systemctl status "$UNIT_NAME.timer"
++
++TIMER_LAST_TRIGGER="$(systemctl show --property=LastTriggerUSec --value "$UNIT_NAME.timer")"
++TIMER_LAST_TRIGGER_S="$(date --date="$TIMER_LAST_TRIGGER" "+%s")"
++: "The timer should not be triggered immediately, hence the last trigger timestamp should not change"
++assert_eq "$SAVED_LAST_TRIGGER_S" "$TIMER_LAST_TRIGGER_S"
++
++# Cleanup
++systemctl stop "$UNIT_NAME".{timer,service}
++systemctl clean --what=state "$UNIT_NAME.timer"
++rm -f "/run/systemd/system/$UNIT_NAME".{timer,service}
++systemctl daemon-reload

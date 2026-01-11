@@ -1,0 +1,167 @@
+From a8c056f2847f080e8ceb5d43fe0d36b5c5ee8655 Mon Sep 17 00:00:00 2001
+From: Ondrej Kozina <okozina@redhat.com>
+Date: Wed, 31 Jan 2024 13:11:21 +0100
+Subject: [PATCH] cryptsetup: Add optional support for linking volume key in
+ keyring.
+
+cryptsetup 2.7.0 adds feature to link effective volume key in custom
+kernel keyring during device activation. It can be used later to pass
+linked volume key to other services.
+
+For example: kdump enabled systems installed on LUKS2 device.
+This feature allows it to store volume key linked in a kernel keyring
+to the kdump reserved memory and reuse it to reactivate LUKS2 device
+in case of kernel crash.
+
+(cherry picked from commit c5daf14c88ba44cefabe052de93a29d28b6b0175)
+
+Resolves: RHEL-118294
+---
+ man/crypttab.xml            | 21 ++++++++++++
+ meson.build                 |  3 +-
+ src/cryptsetup/cryptsetup.c | 65 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 88 insertions(+), 1 deletion(-)
+
+diff --git a/man/crypttab.xml b/man/crypttab.xml
+index 1dd9bb1bb6..bd49e025fa 100644
+--- a/man/crypttab.xml
++++ b/man/crypttab.xml
+@@ -239,6 +239,27 @@
+         </para></listitem>
+       </varlistentry>
+ 
++      <varlistentry>
++        <term><option>link-volume-key=</option></term>
++
++        <listitem><para>Specifies the kernel keyring and key description
++        (see <citerefentry project='man-pages'><refentrytitle>keyrings</refentrytitle><manvolnum>7</manvolnum></citerefentry>)
++        where LUKS2 volume key gets linked during device activation. The kernel keyring
++        description and key description must be separated by <literal>::</literal>.</para>
++
++        <para>The kernel keyring part can be a string description or a predefined
++        kernel keyring prefixed with <literal>@</literal> (e.g.: to use <literal>@s</literal> session or
++        <literal>@u</literal> user keyring directly). The type prefix text in the kernel keyring description
++        is not required. The specified kernel keyring must already exist at the time of device activation.</para>
++
++        <para>The key part is a string description optionally prefixed by a <literal>%key_type:</literal>.
++        If no type is specified, the <literal>user</literal> type key is linked by default. See
++        <citerefentry project='man-pages'><refentrytitle>keyctl</refentrytitle><manvolnum>1</manvolnum></citerefentry>
++        for more information on key descriptions (KEY IDENTIFIERS section).</para>
++
++        <para>Note that the linked volume key is not cleaned up automatically when the device is detached.</para></listitem>
++      </varlistentry>
++
+       <varlistentry>
+         <term><option>luks</option></term>
+ 
+diff --git a/meson.build b/meson.build
+index cbde702211..684324c6d7 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1316,7 +1316,8 @@ if want_libcryptsetup != 'false' and not skip_deps
+ 
+         foreach ident : ['crypt_set_metadata_size',
+                          'crypt_activate_by_signed_key',
+-                         'crypt_token_max']
++                         'crypt_token_max',
++                         'crypt_set_keyring_to_link']
+                 have_ident = have and cc.has_function(
+                         ident,
+                         prefix : '#include <libcryptsetup.h>',
+diff --git a/src/cryptsetup/cryptsetup.c b/src/cryptsetup/cryptsetup.c
+index 3f2cab1e41..f9130e2568 100644
+--- a/src/cryptsetup/cryptsetup.c
++++ b/src/cryptsetup/cryptsetup.c
+@@ -101,6 +101,9 @@ static bool arg_headless = false;
+ static usec_t arg_token_timeout_usec = 30*USEC_PER_SEC;
+ static unsigned arg_tpm2_measure_pcr = UINT_MAX; /* This and the following field is about measuring the unlocked volume key to the local TPM */
+ static char **arg_tpm2_measure_banks = NULL;
++static char *arg_link_keyring = NULL;
++static char *arg_link_key_type = NULL;
++static char *arg_link_key_description = NULL;
+ 
+ STATIC_DESTRUCTOR_REGISTER(arg_cipher, freep);
+ STATIC_DESTRUCTOR_REGISTER(arg_hash, freep);
+@@ -113,6 +116,9 @@ STATIC_DESTRUCTOR_REGISTER(arg_fido2_rp_id, freep);
+ STATIC_DESTRUCTOR_REGISTER(arg_tpm2_device, freep);
+ STATIC_DESTRUCTOR_REGISTER(arg_tpm2_signature, freep);
+ STATIC_DESTRUCTOR_REGISTER(arg_tpm2_measure_banks, strv_freep);
++STATIC_DESTRUCTOR_REGISTER(arg_link_keyring, freep);
++STATIC_DESTRUCTOR_REGISTER(arg_link_key_type, freep);
++STATIC_DESTRUCTOR_REGISTER(arg_link_key_description, freep);
+ 
+ static const char* const passphrase_type_table[_PASSPHRASE_TYPE_MAX] = {
+         [PASSPHRASE_REGULAR] = "passphrase",
+@@ -486,6 +492,56 @@ static int parse_one_option(const char *option) {
+                 if (r < 0)
+                         log_warning_errno(r, "Failed to parse %s, ignoring: %m", option);
+ 
++        } else if ((val = startswith(option, "link-volume-key="))) {
++#ifdef HAVE_CRYPT_SET_KEYRING_TO_LINK
++                const char *sep, *c;
++                _cleanup_free_ char *keyring = NULL, *key_type = NULL, *key_description = NULL;
++
++                /* Stick with cryptsetup --link-vk-to-keyring format
++                 * <keyring_description>::%<key_type>:<key_description>,
++                 * where %<key_type> is optional and defaults to 'user'.
++                 */
++                if (!(sep = strstr(val, "::")))
++                        return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to parse link-volume-key= option value: %m");
++
++                /* cryptsetup (cli) supports <keyring_description> passed in various formats:
++                 * - well-known keyrings prefixed with '@' (@u user, @s session, etc)
++                 * - text descriptions prefixed with "%:" or "%keyring:".
++                 * - text desription with no prefix.
++                 * - numeric keyring id (ignored in current patch set). */
++                if (*val == '@' || *val == '%')
++                        keyring = strndup(val, sep - val);
++                else
++                        /* add type prefix if missing (crypt_set_keyring_to_link() expects it) */
++                        keyring = strnappend("%:", val, sep - val);
++                if (!keyring)
++                        return log_oom();
++
++                sep += 2;
++
++                /* %<key_type> is optional (and defaults to 'user') */
++                if (*sep == '%') {
++                        /* must be separated by colon */
++                        if (!(c = strchr(sep, ':')))
++                                return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "Failed to parse link-volume-key= option value: %m");
++
++                        key_type = strndup(sep + 1, c - sep - 1);
++                        if (!key_type)
++                                return log_oom();
++
++                        sep = c + 1;
++                }
++
++                key_description = strdup(sep);
++                if (!key_description)
++                        return log_oom();
++
++                free_and_replace(arg_link_keyring, keyring);
++                free_and_replace(arg_link_key_type, key_type);
++                free_and_replace(arg_link_key_description, key_description);
++#else
++                log_error("Build lacks libcryptsetup support for linking volume keys in user specified kernel keyrings upon device activation, ignoring: %s", option);
++#endif
+         } else if (!streq(option, "x-initrd.attach"))
+                 log_warning("Encountered unknown /etc/crypttab option '%s', ignoring.", option);
+ 
+@@ -2207,6 +2263,15 @@ static int run(int argc, char *argv[]) {
+                         if (r < 0)
+                                 return log_error_errno(r, "Failed to load LUKS superblock on device %s: %m", crypt_get_device_name(cd));
+ 
++/* since cryptsetup 2.7.0 (Jan 2024) */
++#if HAVE_CRYPT_SET_KEYRING_TO_LINK
++                        if (arg_link_key_description) {
++                                r = crypt_set_keyring_to_link(cd, arg_link_key_description, NULL, arg_link_key_type, arg_link_keyring);
++                                if (r < 0)
++                                        log_warning_errno(r, "Failed to set keyring or key description to link volume key in, ignoring: %m");
++                        }
++#endif
++
+                         if (arg_header) {
+                                 r = crypt_set_data_device(cd, source);
+                                 if (r < 0)

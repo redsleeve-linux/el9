@@ -1,0 +1,122 @@
+From de05f30a12a0f1ce03dc21a29a606c70e42d1de4 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Zbigniew=20J=C4=99drzejewski-Szmek?= <zbyszek@in.waw.pl>
+Date: Tue, 29 Apr 2025 14:47:59 +0200
+Subject: [PATCH] coredump: restore compatibility with older patterns
+
+This was broken in f45b8015513d38ee5f7cc361db9c5b88c9aae704. Unfortunately
+the review does not talk about backward compatibility at all. There are
+two places where it matters:
+- During upgrades, the replacement of kernel.core_pattern is asynchronous.
+  For example, during rpm upgrades, it would be updated a post-transaction
+  file trigger. In other scenarios, the update might only happen after
+  reboot. We have a potentially long window where the old pattern is in
+  place. We need to capture coredumps during upgrades too.
+- With --backtrace. The interface of --backtrace, in hindsight, is not
+  great. But there are users of --backtrace which were written to use
+  a specific set of arguments, and we can't just break compatiblity.
+  One example is systemd-coredump-python, but there are also reports of
+  users using --backtrace to generate coredump logs.
+
+Thus, we require the original set of args, and will use the additional args if
+found.
+
+A test is added to verify that --backtrace works with and without the optional
+args.
+
+(cherry picked from commit ded0aac389e647d35bce7ec4a48e718d77c0435b)
+
+Related: RHEL-104138
+---
+ src/coredump/coredump.c             | 23 +++++++++++++++--------
+ test/units/testsuite-74.coredump.sh | 18 +++++++++++-------
+ 2 files changed, 26 insertions(+), 15 deletions(-)
+
+diff --git a/src/coredump/coredump.c b/src/coredump/coredump.c
+index b24f4c8cc3..458857ffb2 100644
+--- a/src/coredump/coredump.c
++++ b/src/coredump/coredump.c
+@@ -94,8 +94,12 @@ enum {
+         META_ARGV_SIGNAL,       /* %s: number of signal causing dump */
+         META_ARGV_TIMESTAMP,    /* %t: time of dump, expressed as seconds since the Epoch (we expand this to µs granularity) */
+         META_ARGV_RLIMIT,       /* %c: core file size soft resource limit */
+-        META_ARGV_HOSTNAME,     /* %h: hostname */
++        _META_ARGV_REQUIRED,
++        /* The fields below were added to kernel/core_pattern at later points, so they might be missing. */
++        META_ARGV_HOSTNAME = _META_ARGV_REQUIRED,  /* %h: hostname */
+         _META_ARGV_MAX,
++        /* If new fields are added, they should be added here, to maintain compatibility
++         * with callers which don't know about the new fields. */
+ 
+         /* The following indexes are cached for a couple of special fields we use (and
+          * thereby need to be retrieved quickly) for naming coredump files, and attaching
+@@ -106,7 +110,7 @@ enum {
+         _META_MANDATORY_MAX,
+ 
+         /* The rest are similar to the previous ones except that we won't fail if one of
+-         * them is missing. */
++         * them is missing in a message sent over the socket. */
+ 
+         META_EXE = _META_MANDATORY_MAX,
+         META_UNIT,
+@@ -1068,7 +1072,7 @@ static int save_context(Context *context, const struct iovec_wrapper *iovw) {
+         }
+ 
+         /* The basic fields from argv[] should always be there, refuse early if not */
+-        for (int i = 0; i < _META_ARGV_MAX; i++)
++        for (int i = 0; i < _META_ARGV_REQUIRED; i++)
+                 if (!context->meta[i])
+                         return log_error_errno(SYNTHETIC_ERRNO(EINVAL), "A required (%s) has not been sent, aborting.", meta_field_names[i]);
+ 
+@@ -1286,14 +1290,17 @@ static int gather_pid_metadata_from_argv(
+         char *t;
+ 
+         /* We gather all metadata that were passed via argv[] into an array of iovecs that
+-         * we'll forward to the socket unit */
++         * we'll forward to the socket unit.
++         *
++         * We require at least _META_ARGV_REQUIRED args, but will accept more.
++         * We know how to parse _META_ARGV_MAX args. The rest will be ignored. */
+ 
+-        if (argc < _META_ARGV_MAX)
++        if (argc < _META_ARGV_REQUIRED)
+                 return log_error_errno(SYNTHETIC_ERRNO(EINVAL),
+-                                       "Not enough arguments passed by the kernel (%i, expected %i).",
+-                                       argc, _META_ARGV_MAX);
++                                       "Not enough arguments passed by the kernel (%i, expected between %i and %i).",
++                                       argc, _META_ARGV_REQUIRED, _META_ARGV_MAX);
+ 
+-        for (int i = 0; i < _META_ARGV_MAX; i++) {
++        for (int i = 0; i < MIN(argc, _META_ARGV_MAX); i++) {
+ 
+                 t = argv[i];
+ 
+diff --git a/test/units/testsuite-74.coredump.sh b/test/units/testsuite-74.coredump.sh
+index 1093cad8a9..0163131096 100755
+--- a/test/units/testsuite-74.coredump.sh
++++ b/test/units/testsuite-74.coredump.sh
+@@ -218,14 +218,18 @@ rm -f /tmp/core.{output,redirected}
+ (! "${UNPRIV_CMD[@]}" coredumpctl dump "$CORE_TEST_BIN" >/dev/null)
+ 
+ # --backtrace mode
+-# Pass one of the existing journal coredump records to systemd-coredump and
+-# use our PID as the source to make matching the coredump later easier
+-# systemd-coredump args: PID UID GID SIGNUM TIMESTAMP CORE_SOFT_RLIMIT HOSTNAME
++# Pass one of the existing journal coredump records to systemd-coredump.
++# Use our PID as the source to be able to create a PIDFD and to make matching easier.
++# systemd-coredump args: PID UID GID SIGNUM TIMESTAMP CORE_SOFT_RLIMIT [HOSTNAME]
+ journalctl -b -n 1 --output=export --output-fields=MESSAGE,COREDUMP COREDUMP_EXE="/usr/bin/test-dump" |
+-    /usr/lib/systemd/systemd-coredump --backtrace $$ 0 0 6 1679509994 12345 mymachine
+-# Wait a bit for the coredump to get processed
+-timeout 30 bash -c "while [[ \$(coredumpctl list -q --no-legend $$ | wc -l) -eq 0 ]]; do sleep 1; done"
+-coredumpctl info "$$"
++    /usr/lib/systemd/systemd-coredump --backtrace $$ 0 0 6 1679509900 12345
++journalctl -b -n 1 --output=export --output-fields=MESSAGE,COREDUMP COREDUMP_EXE="/usr/bin/test-dump" |
++    /usr/lib/systemd/systemd-coredump --backtrace $$ 0 0 6 1679509901 12345 mymachine
++# Wait a bit for the coredumps to get processed
++timeout 30 bash -c "while [[ \$(coredumpctl list -q --no-legend $$ | wc -l) -lt 2 ]]; do sleep 1; done"
++coredumpctl info $$
++coredumpctl info COREDUMP_TIMESTAMP=1679509900000000
++coredumpctl info COREDUMP_TIMESTAMP=1679509901000000
+ coredumpctl info COREDUMP_HOSTNAME="mymachine"
+ 
+ # This used to cause a stack overflow

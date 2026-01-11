@@ -21,7 +21,7 @@
 Name: systemd
 Url: https://systemd.io
 Version: 252
-Release: 55%{?dist}.2.redsleeve
+Release: 55%{?dist}.7.rocky.0.1
 # For a breakdown of the licensing, see README
 License: LGPLv2+ and MIT and GPLv2+
 Summary: System and Service Manager
@@ -1333,8 +1333,26 @@ Patch1247: 1247-time-util-drop-unnecessary-assignment-of-timezone-na.patch
 Patch1248: 1248-time-util-make-parse_timestamp-use-the-RFC-822-ISO-8.patch
 Patch1249: 1249-time-util-fix-typo.patch
 Patch1250: 1250-ci-bump-the-tools-tree-to-F42.patch
-
-Patch2000: arm32-patch-for-disable-service.patch
+Patch1251: 1251-cryptsetup-Add-optional-support-for-linking-volume-k.patch
+Patch1252: 1252-cryptsetup-fix-typo.patch
+Patch1253: 1253-cryptsetup-HAVE_CRYPT_SET_KEYRING_TO_LINK-is-always-.patch
+Patch1254: 1254-basic-add-PIDFS-magic-31709.patch
+Patch1255: 1255-time-util-make-USEC_TIMESTAMP_FORMATTABLE_MAX-for-32.patch
+Patch1256: 1256-coredump-make-check-that-all-argv-meta-data-fields-a.patch
+Patch1257: 1257-coredump-restore-compatibility-with-older-patterns.patch
+Patch1258: 1258-coredump-use-d-in-kernel-core-pattern.patch
+Patch1259: 1259-pidref-add-structure-that-can-reference-a-pid-via-bo.patch
+Patch1260: 1260-fd-util-introduce-parse_fd.patch
+Patch1261: 1261-coredump-add-support-for-new-F-PIDFD-specifier.patch
+Patch1262: 1262-test-rename-TEST-53-ISSUE-16347-to-TEST-53-TIMER.patch
+Patch1263: 1263-test-restarting-elapsed-timer-shouldn-t-trigger-the-.patch
+Patch1264: 1264-test-check-the-next-elapse-timer-timestamp-after-des.patch
+Patch1265: 1265-timer-don-t-run-service-immediately-after-restart-of.patch
+Patch1266: 1266-test-store-and-compare-just-the-property-value.patch
+Patch1267: 1267-timer-rebase-the-next-elapse-timestamp-only-if-timer.patch
+Patch1268: 1268-coredump-handle-ENOBUFS-and-EMSGSIZE-the-same-way.patch
+Patch1269: 1269-timer-rebase-last_trigger-timestamp-if-needed.patch
+Patch1270: 1270-core-fix-array-size-in-unit_log_resources.patch
 
 # Downstream-only patches (9000–9999)
 
@@ -1392,7 +1410,7 @@ BuildRequires: libseccomp-devel
 BuildRequires: meson >= 0.43
 BuildRequires: gettext
 # We use RUNNING_ON_VALGRIND in tests, so the headers need to be available
-#BuildRequires: valgrind-devel
+BuildRequires: valgrind-devel
 BuildRequires: pkgconfig(bash-completion)
 BuildRequires: pkgconfig(tss2-esys)
 BuildRequires: pkgconfig(tss2-rc)
@@ -2212,13 +2230,37 @@ systemd-hwdb update &>/dev/null || :
 %{_prefix}/lib/dracut/modules.d/70rhel-net-naming-sysattrs/*
 
 %changelog
-* Sat Nov 29 2025 Jacco Ligthart <jacco@redsleeve.org> - 252-55.2.redsleeve
-- removed valgrind
-- added a patch from upstream to be able to disable services.
-
-* Tue Nov 11 2025 Release Engineering <releng@rockylinux.org> - 252-55.rocky.0.1
+* Wed Dec 03 2025 Release Engineering <releng@rockylinux.org> - 252-55.rocky.0.1
 - Set support URL to the wiki
 - Set sbat mail to security@rockylinux.org
+
+* Mon Dec 01 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-55.7
+- core: fix array size in unit_log_resources() (RHEL-132120)
+
+* Mon Nov 24 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-55.6
+- timer: rebase last_trigger timestamp if needed (RHEL-127022)
+
+* Tue Nov 18 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-55.5
+- test: rename TEST-53-ISSUE-16347 to TEST-53-TIMER (RHEL-127022)
+- test: restarting elapsed timer shouldn't trigger the corresponding service (RHEL-127022)
+- test: check the next elapse timer timestamp after deserialization (RHEL-127022)
+- timer: don't run service immediately after restart of a timer (RHEL-127022)
+- test: store and compare just the property value (RHEL-127022)
+- timer: rebase the next elapse timestamp only if timer didn't already run (RHEL-127022)
+- coredump: handle ENOBUFS and EMSGSIZE the same way (RHEL-126114)
+
+* Thu Nov 06 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-55.4
+- cryptsetup: Add optional support for linking volume key in keyring. (RHEL-118294)
+- cryptsetup: fix typo (RHEL-118294)
+- cryptsetup: HAVE_CRYPT_SET_KEYRING_TO_LINK is always defined (RHEL-118294)
+- basic: add PIDFS magic (#31709) (RHEL-118294)
+- time-util: make USEC_TIMESTAMP_FORMATTABLE_MAX for 32bit system off by one day (RHEL-118294)
+- coredump: make check that all argv[] meta data fields are passed strict (RHEL-104138)
+- coredump: restore compatibility with older patterns (RHEL-104138)
+- coredump: use %d in kernel core pattern (RHEL-104138)
+- pidref: add structure that can reference a pid via both pidfd and pid_t (RHEL-104138)
+- fd-util: introduce parse_fd() (RHEL-104138)
+- coredump: add support for new %F PIDFD specifier (RHEL-104138)
 
 * Fri Sep 12 2025 systemd maintenance team <systemd-maint@redhat.com> - 252-55.2
 - Revert "test-time-util: disable failing tests" (RHEL-110954)
