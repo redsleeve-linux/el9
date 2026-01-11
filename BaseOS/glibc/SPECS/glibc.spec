@@ -158,7 +158,7 @@ Summary: The GNU libc libraries
 Name: glibc
 %{lua:dofile(rpm.expand([[%_sourcedir/patch-git.lua]]))}
 Version: %{lua:patchgit.version()}
-Release: %{lua:patchgit.release()}
+Release: %{lua:patchgit.release()}.redsleeve
 
 # In general, GPLv2+ is used by programs, LGPLv2+ is used for
 # libraries.
@@ -228,6 +228,11 @@ Source20: ld-so-abi-x86_64.baseline
 %global glibc_has_libnldbl 0
 %global glibc_has_libmvec 0
 %endif
+%ifarch armv6hl
+%global glibc_ldso /lib/ld-linux-armhf.so.3
+%global glibc_has_libnldbl 0
+%global glibc_has_libmvec 0
+%endif
 %ifarch ppc
 %global glibc_ldso /lib/ld.so.1
 %global glibc_has_libnldbl 1
@@ -275,6 +280,8 @@ Source20: ld-so-abi-x86_64.baseline
 %global glibc_has_libnldbl 0
 %global glibc_has_libmvec 0
 %endif
+
+Source1000: glibc-arm-dl-tunables.list
 
 ######################################################################
 # Activate the wrapper script for debuginfo generation, by rewriting
@@ -1594,6 +1601,10 @@ distribution build enviroment. Regular users can install both 32-bit and
 %prep
 %autosetup -n %{glibcsrcdir} -p1
 
+%ifarch %{arm}
+cp %{SOURCE1000} sysdeps/unix/sysv/linux/arm/dl-tunables.list
+%endif
+
 ##############################################################################
 # %%prep - Additional prep required...
 ##############################################################################
@@ -2810,6 +2821,9 @@ update_gconv_modules_cache ()
 %endif
 
 %changelog
+* Sat Nov 29 2025 Jacco Ligthart <jacco@redsleeve.org> - 2.34-231.2.redsleeve
+- add dl-tunables.list for arm
+
 %{lua:patchgit.changelog()}
 * Tue Sep 30 2025 DJ Delorie <dj@redhat.com> - 2.34-231.1
 - nss: Group merge does not react to ERANGE during merge (RHEL-114262)
