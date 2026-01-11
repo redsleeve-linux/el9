@@ -118,7 +118,7 @@ Summary: The Linux kernel
 %global signmodules 1
 
 # Compress modules only for architectures that build modules
-%ifarch noarch %{arm}
+%ifarch noarch
 %global zipmodules 0
 %else
 %global zipmodules 1
@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 611.9.1
+%define pkgrelease 611.16.1
 %define kversion 5
-%define tarfile_release 5.14.0-611.9.1.el9_7
+%define tarfile_release 5.14.0-611.16.1.el9_7
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 611.9.1%{?buildid}%{?dist}
+%define specrelease 611.16.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-611.9.1.el9_7
+%define kabiversion 5.14.0-611.16.1.el9_7
 
 #
 # End of genspec.sh variables
@@ -504,7 +504,7 @@ Summary: The Linux kernel
 %define kernel_mflags KALLSYMS_EXTRA_PASS=1
 # we only build headers/perf/tools on the base arm arches
 # just like we used to only build them on i386 for x86
-%ifnarch armv7hl armv6hl
+%ifnarch armv7hl
 %define with_headers 0
 %define with_cross_headers 0
 %endif
@@ -518,11 +518,6 @@ Summary: The Linux kernel
 %define hdrarch arm64
 %define make_target vmlinuz.efi
 %define kernel_image arch/arm64/boot/vmlinuz.efi
-%endif
-
-%ifarch %{arm}
-%define asmarch arm
-%define hdrarch arm
 %endif
 
 # Should make listnewconfig fail if there's config options
@@ -604,7 +599,7 @@ Name: kernel
 License: ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-2-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR CDDL-1.0) AND ((GPL-2.0-only WITH Linux-syscall-note) OR Linux-OpenIB) AND ((GPL-2.0-only WITH Linux-syscall-note) OR MIT) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR MIT) AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSD-3-Clause-Clear AND GFDL-1.1-no-invariants-or-later AND GPL-1.0-or-later AND (GPL-1.0-or-later OR BSD-3-Clause) AND (GPL-1.0-or-later WITH Linux-syscall-note) AND GPL-2.0-only AND (GPL-2.0-only OR Apache-2.0) AND (GPL-2.0-only OR BSD-2-Clause) AND (GPL-2.0-only OR BSD-3-Clause) AND (GPL-2.0-only OR CDDL-1.0) AND (GPL-2.0-only OR GFDL-1.1-no-invariants-or-later) AND (GPL-2.0-only OR GFDL-1.2-no-invariants-only) AND (GPL-2.0-only WITH Linux-syscall-note) AND GPL-2.0-or-later AND (GPL-2.0-or-later OR BSD-2-Clause) AND (GPL-2.0-or-later OR BSD-3-Clause) AND (GPL-2.0-or-later OR CC-BY-4.0) AND (GPL-2.0-or-later WITH GCC-exception-2.0) AND (GPL-2.0-or-later WITH Linux-syscall-note) AND ISC AND LGPL-2.0-or-later AND (LGPL-2.0-or-later OR BSD-2-Clause) AND (LGPL-2.0-or-later WITH Linux-syscall-note) AND LGPL-2.1-only AND (LGPL-2.1-only OR BSD-2-Clause) AND (LGPL-2.1-only WITH Linux-syscall-note) AND LGPL-2.1-or-later AND (LGPL-2.1-or-later WITH Linux-syscall-note) AND (Linux-OpenIB OR GPL-2.0-only) AND (Linux-OpenIB OR GPL-2.0-only OR BSD-2-Clause) AND Linux-man-pages-copyleft AND MIT AND (MIT OR GPL-2.0-only) AND (MIT OR GPL-2.0-or-later) AND (MIT OR LGPL-2.1-only) AND (MPL-1.1 OR GPL-2.0-only) AND (X11 OR GPL-2.0-only) AND (X11 OR GPL-2.0-or-later) AND Zlib AND (copyleft-next-0.3.1 OR GPL-2.0-or-later)
 URL: https://www.kernel.org/
 Version: %{specversion}
-Release: %{pkg_release}.redsleeve
+Release: %{pkg_release}
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
 # SET %%nobuildarches (ABOVE) INSTEAD
 %if 0%{?fedora}
@@ -628,7 +623,7 @@ BuildRequires: kmod, bash, coreutils, tar, git-core, which
 BuildRequires: bzip2, xz, findutils, gzip, m4, perl-interpreter, perl-Carp, perl-devel, perl-generators, make, diffutils, gawk, %compression
 BuildRequires: gcc, binutils, redhat-rpm-config, hmaccalc, bison, flex, gcc-c++
 BuildRequires: net-tools, hostname, bc, elfutils-devel
-#BuildRequires: dwarves
+BuildRequires: dwarves
 BuildRequires: python3-devel
 BuildRequires: gcc-plugin-devel
 BuildRequires: kernel-rpm-macros >= 185-9
@@ -794,7 +789,19 @@ Source2: kernel.changelog
 %define secureboot_ca_0 %{_datadir}/pki/sb-certs/secureboot-ca-%{_arch}.cer
 %define secureboot_key_0 %{_datadir}/pki/sb-certs/secureboot-kernel-%{_arch}.cer
 
+%if 0%{?centos}
 %define pesign_name_0 rockybootsigningcert
+%else
+%ifarch x86_64 aarch64
+%define pesign_name_0 rockybootsigningcert
+%endif
+%ifarch s390x
+%define pesign_name_0 rockybootsigningcert
+%endif
+%ifarch ppc64le
+%define pesign_name_0 rockybootsigningcert
+%endif
+%endif
 
 # signkernel
 %endif
@@ -898,6 +905,7 @@ Source115: rocky-nvidiagpuoot101-aarch64.x509
 %endif
 
 %define ima_signing_cert %{SOURCE103}
+
 %define ima_cert_name ima.cer
 
 Source150: dracut-virt.conf
@@ -1099,10 +1107,10 @@ This package provides debug information for the libperf package.
 %package -n kernel-tools
 Summary: Assortment of tools for the Linux kernel
 %ifarch %{cpupowerarchs}
-Provides: cpupowerutils = 1:009-0.6.p1
+Provides:  cpupowerutils = 1:009-0.6.p1
 Obsoletes: cpupowerutils < 1:009-0.6.p1
-Provides: cpufreq-utils = 1:009-0.6.p1
-Provides: cpufrequtils = 1:009-0.6.p1
+Provides:  cpufreq-utils = 1:009-0.6.p1
+Provides:  cpufrequtils = 1:009-0.6.p1
 Obsoletes: cpufreq-utils < 1:009-0.6.p1
 Obsoletes: cpufrequtils < 1:009-0.6.p1
 Obsoletes: cpuspeed < 1:1.5-16
@@ -1123,7 +1131,7 @@ from the kernel source.
 Summary: Assortment of tools for the Linux kernel
 Requires: kernel-tools = %{version}-%{release}
 %ifarch %{cpupowerarchs}
-Provides: cpupowerutils-devel = 1:009-0.6.p1
+Provides:  cpupowerutils-devel = 1:009-0.6.p1
 Obsoletes: cpupowerutils-devel < 1:009-0.6.p1
 %endif
 Requires: kernel-tools-libs = %{version}-%{release}
@@ -1202,8 +1210,8 @@ Summary: gcov graph and source files for coverage data collection.\
 Summary: The Rocky Linux kernel ABI symbol stablelists
 AutoReqProv: no
 %description -n kernel-abi-stablelists
-The kABI package contains information pertaining to the Rocky
-Linux kernel ABI, including lists of kernel symbols that are needed by
+The kABI package contains information pertaining to the Rocky Linux
+kernel ABI, including lists of kernel symbols that are needed by
 external Linux kernel modules, and a yum plugin to aid enforcement.
 
 %if %{with_kabidw_base}
@@ -1212,8 +1220,8 @@ Summary: The baseline dataset for kABI verification using DWARF data
 Group: System Environment/Kernel
 AutoReqProv: no
 %description kernel-kabidw-base-internal
-The package contains data describing the current ABI of the Rocky
-Linux kernel, suitable for the kabi-dw tool.
+The package contains data describing the current ABI of the Rocky Linux
+kernel, suitable for the kabi-dw tool.
 %endif
 
 #
@@ -1651,6 +1659,7 @@ ApplyOptionalPatch patch-%{patchversion}-redhat.patch
 %endif
 
 ApplyOptionalPatch linux-kernel-test.patch
+ApplyOptionalPatch 1000-debrand-some-messages.patch
 ApplyOptionalPatch 1000-debrand-some-messages.patch
 
 # END OF PATCH APPLICATIONS
@@ -2617,7 +2626,7 @@ BuildKernel %make_target %kernel_image %{_use_vdso} rt-64k
 BuildKernel %make_target %kernel_image %{_use_vdso}
 %endif
 
-%ifnarch noarch i686 %{arm}
+%ifnarch noarch i686
 %if !%{with_debug} && !%{with_zfcpdump} && !%{with_pae} && !%{with_up} && !%{with_arm64_64k} && !%{with_realtime} && !%{with_realtime_arm64_64k}
 # If only building the user space tools, then initialize the build environment
 # and some variables so that the various userspace tools can be built.
@@ -3700,12 +3709,96 @@ fi
 #
 #
 %changelog
-* Sat Nov 29 2025 Jacco Ligthart <jacco@redsleeve.org> 5.14.0-611.9.1.redsleeve
-- added flags for armv6
+* Mon Dec 29 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-611.16.1
+- Replace sbat with Rocky Linux sbat (label)
+- Change bug tracker URL (label)
+- Ensure appended release in sbat is removed
 
-* Mon Nov 24 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-611.9.1
-- Porting to Rocky Linux 9, debranding and Rocky branding
-- Ensure aarch64 kernel is not compressed
+* Sun Dec 07 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.16.1.el9_7]
+- CVE-2025-38499 kernel: clone_private_mnt(): make sure that caller has CAP_SYS_ADMIN in the right userns (Abhi Das) [RHEL-129261] {CVE-2025-38499}
+- tls: wait for pending async decryptions if tls_strp_msg_hold fails (CKI Backport Bot) [RHEL-128860] {CVE-2025-40176}
+
+* Thu Dec 04 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.15.1.el9_7]
+- nbd: override creds to kernel when calling sock_{send,recv}msg() (Ming Lei) [RHEL-123845]
+- scsi: lpfc: avoid crashing in lpfc_nlp_get() if lpfc_nodelist was freed (Ewan D. Milne) [RHEL-127982]
+- scsi: lpfc: Fix reusing an ndlp that is marked NLP_DROPPED during FLOGI (Ewan D. Milne) [RHEL-127982]
+- crypto: ccp - Always pass in an error pointer to __sev_platform_shutdown_locked() (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Fix SNP panic notifier unregistration (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Fix dereferencing uninitialized error pointer (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Fix __sev_snp_shutdown_locked (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Move SEV/SNP Platform initialization to KVM (Lenny Szubowicz) [RHEL-70006]
+- KVM: SVM: Add support to initialize SEV/SNP functionality in KVM (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Add new SEV/SNP platform shutdown API (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Register SNP panic notifier only if SNP is enabled (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Reset TMR size at SNP Shutdown (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Ensure implicit SEV/SNP init and shutdown in ioctls (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Move dev_info/err messages for SEV/SNP init and shutdown (Lenny Szubowicz) [RHEL-70006]
+- crypto: ccp - Abort doing SEV INIT if SNP INIT fails (Lenny Szubowicz) [RHEL-70006]
+
+* Tue Dec 02 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.14.1.el9_7]
+- iommufd: Fix race during abort for file descriptors (Eder Zulian) [RHEL-123786] {CVE-2025-39966}
+
+* Sat Nov 29 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.13.1.el9_7]
+- can: j1939: add missing calls in NETDEV_UNREGISTER notification handler (CKI Backport Bot) [RHEL-124105] {CVE-2025-39925}
+- can: j1939: implement NETDEV_UNREGISTER notification handler (CKI Backport Bot) [RHEL-124105] {CVE-2025-39925}
+
+* Thu Nov 27 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.12.1.el9_7]
+- x86/hyperv: Fix kdump on Azure CVMs (Li Tian) [RHEL-129776]
+- net/mlx5: fs, fix UAF in flow counter release (Michal Schmidt) [RHEL-124428] {CVE-2025-39979}
+- octeon_ep: Validate the VF ID (Kamal Heib) [RHEL-117604]
+- dpll: zl3073x: fix kernel-doc name and missing parameter in fw.c (Ivan Vecera) [RHEL-116162]
+- dpll: zl3073x: Fix output pin registration (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Increase maximum size of flash utility (Ivan Vecera) [RHEL-116162]
+- dpll: zl3073x: Fix double free in zl3073x_devlink_flash_update() (Ivan Vecera) [RHEL-116162]
+- dpll: zl3073x: Implement devlink flash callback (Ivan Vecera) [RHEL-116162]
+- dpll: zl3073x: Add firmware loading functionality (Ivan Vecera) [RHEL-116162]
+- dpll: zl3073x: Add low-level flash functions (Ivan Vecera) [RHEL-116162]
+- dpll: zl3073x: Add functions to access hardware registers (Ivan Vecera) [RHEL-116162]
+- dpll: zl3073x: Handle missing or corrupted flash configuration (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Refactor DPLL initialization (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: ZL3073X_I2C and ZL3073X_SPI should depend on NET (Ivan Vecera) [RHEL-113083]
+- dpll: Make ZL3073X invisible (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Fix build failure (Ivan Vecera) [RHEL-113083]
+- redhat/configs: enable CONFIG_ZL3073X* (Ivan Vecera) [RHEL-113083]
+- redhat/configs: enable CONFIG_I2C_MUX_PCA954x on x86 (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Add support to get fractional frequency offset (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Add support to adjust phase (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Implement phase offset monitor feature (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Add support to get phase offset on connected input pin (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Add support to get/set esync on pins (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Add support to get/set frequency on pins (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Implement input pin state setting in automatic mode (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Add support to get/set priority on input pins (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Implement input pin selection in manual mode (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Register DPLL devices and pins (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Read DPLL types and pin properties from system firmware (Ivan Vecera) [RHEL-113083]
+- dpll: zl3073x: Fetch invariants during probe (Ivan Vecera) [RHEL-113083]
+- dpll: Add basic Microchip ZL3073x support (Ivan Vecera) [RHEL-113083]
+- spi: Introduce spi_get_device_match_data() helper (Ivan Vecera) [RHEL-113083]
+- dt-bindings: dpll: Add support for Microchip Azurite chip family (Ivan Vecera) [RHEL-113083]
+- dt-bindings: dpll: Add DPLL device and pin (Ivan Vecera) [RHEL-113083]
+
+* Tue Nov 25 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.11.1.el9_7]
+- tcp: Don't call reqsk_fastopen_remove() in tcp_conn_request(). (Antoine Tenart) [RHEL-120668]
+- tcp: Clear tcp_sk(sk)->fastopen_rsk in tcp_disconnect(). (Antoine Tenart) [RHEL-120668] {CVE-2025-39955}
+- Bluetooth: MGMT: fix crash in set_mesh_sync and set_mesh_complete (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix sparse errors (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix possible UAFs (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: hci_sync: fix set_local_name race condition (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: MGMT: set_mesh: update LE scan interval and window (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: MGMT: Protect mgmt_pending list with its own lock (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- Bluetooth: MGMT: Fix UAF on mgmt_remove_adv_monitor_complete (CKI Backport Bot) [RHEL-122892] {CVE-2025-39981}
+- wifi: mt76: free pending offchannel tx frames on wcid cleanup (Jose Ignacio Tornos Martinez) [RHEL-123064]
+- wifi: mt76: do not add non-sta wcid entries to the poll list (Jose Ignacio Tornos Martinez) [RHEL-123064]
+- wifi: mt76: fix linked list corruption (Jose Ignacio Tornos Martinez) [RHEL-123064] {CVE-2025-39918}
+
+* Thu Nov 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.10.1.el9_7]
+- ice: ice_adapter: release xa entry on adapter allocation failure (CKI Backport Bot) [RHEL-128469] {CVE-2025-40185}
+- iommu/vt-d: Disallow dirty tracking if incoherent page walk (Eder Zulian) [RHEL-125478] {CVE-2025-40058}
+- e1000e: fix heap overflow in e1000_set_eeprom (Corinna Vinschen) [RHEL-123111] {CVE-2025-39898}
+- nfsd: handle get_client_locked() failure in nfsd4_setclientid_confirm() (CKI Backport Bot) [RHEL-125604] {CVE-2025-38724}
+- wifi: cfg80211: fix use-after-free in cmp_bss() (CKI Backport Bot) [RHEL-122874] {CVE-2025-39864}
+- platform/x86/intel: power-domains: Use topology_logical_package_id() for package ID (Jay Shin) [RHEL-116680]
 
 * Sat Nov 15 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.9.1.el9_7]
 - NFSv4: handle ERR_GRACE on delegation recalls (Olga Kornievskaia) [RHEL-124651]
