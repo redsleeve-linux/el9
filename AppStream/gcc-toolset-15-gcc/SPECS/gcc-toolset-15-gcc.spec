@@ -1,27 +1,45 @@
-%{?scl_package:%global scl gcc-toolset-14}
-%global scl_prefix gcc-toolset-14-
+%if 0%{?rhel} < 10
+%global have_scl_utils 1
+%else
+%global have_scl_utils 0
+%endif
+%global gts_ver 15
+%{?scl_package:%global scl gcc-toolset-%{gts_ver}}
+%global scl_prefix gcc-toolset-%{gts_ver}-
+%if %have_scl_utils
 BuildRequires: scl-utils-build
+%else
+BuildRequires: gcc-toolset-%{gts_ver}-devel
+%endif
 %global __python /usr/bin/python3
 %{?scl:%global __strip %%{_scl_root}/usr/bin/strip}
 %{?scl:%global __objdump %%{_scl_root}/usr/bin/objdump}
 %{?scl:%scl_package gcc}
-%global DATE 20250110
-%global gitrev e525669e462dd777a1af9932fe9188937acdeb69
-%global gcc_version 14.2.1
-%global gcc_major 14
+%global DATE 20250521
+%global gitrev b9def1721b12cae307c1a1ebc49030fce6531dfa
+%global gcc_version 15.1.1
+%global gcc_major 15
 # Note, gcc_release must be integer, if you want to add suffixes to
 # %%{release}, append them after %%{gcc_release} on Release: line.
-%global gcc_release 12
+%global gcc_release 2
 %global nvptx_tools_gitrev 87ce9dc5999e5fca2e1d3478a30888d9864c9804
-%global newlib_cygwin_gitrev d45261f62a15f8abd94a1031020b9a9f455e4eed
+%global newlib_cygwin_gitrev d35cc82b5ec15bb8a5fe0fe11e183d1887992e99
 %global isl_version 0.24
 %global mpc_version 1.0.3
 %global mpfr_version 3.1.4
 %global gmp_version 6.1.0
 %global doxygen_version 1.8.0
 %global _unpackaged_files_terminate_build 0
+%if 0%{?fedora:1}
+%global _performance_build 1
+# Hardening slows the compiler way too much.
+%undefine _hardened_build
+%endif
+%undefine _auto_set_build_flags
+%if 0%{?fedora} > 27 || 0%{?rhel} > 7
 # Until annobin is fixed (#1519165).
 %undefine _annotated_build
+%endif
 # Strip will fail on nvptx-none *.a archives and the brp-* scripts will
 # fail randomly depending on what is stripped last.
 %if 0%{?__brp_strip_static_archive:1}
@@ -41,6 +59,7 @@ BuildRequires: scl-utils-build
 %global build_go 0
 %global build_d 0
 %global build_m2 0
+%global build_cobol 0
 %else
 %ifarch %{ix86} x86_64 ia64 ppc %{power64} alpha s390x %{arm} aarch64 riscv64
 %global build_ada 0
@@ -63,12 +82,12 @@ BuildRequires: scl-utils-build
 %else
 %global build_m2 0
 %endif
+%ifarch x86_64 aarch64
+%global build_cobol 0
+%else
+%global build_cobol 0
 %endif
-# Only so that rpmbuild doesn't complain on Fedora.
-%if 0%{?fedora} > 18
-%global build_libquadmath 0
 %endif
-%global build_libitm 0
 %ifarch %{ix86} x86_64 ia64 ppc64le
 %global build_libquadmath 1
 %else
@@ -152,7 +171,7 @@ BuildRequires: scl-utils-build
 Summary: GCC version %{gcc_major}
 Name: %{?scl_prefix}gcc
 Version: %{gcc_version}
-Release: %{gcc_release}%{?dist}.redsleeve
+Release: %{gcc_release}.4%{?dist}.redsleeve
 # License notes for some of the less obvious ones:
 #   gcc/doc/cppinternals.texi: Linux-man-pages-copyleft-2-para
 #   isl: MIT, BSD-2-Clause
@@ -183,7 +202,7 @@ Source1: https://gcc.gnu.org/pub/gcc/infrastructure/isl-%{isl_version}.tar.bz2
 Source4: nvptx-tools-%{nvptx_tools_gitrev}.tar.xz
 # The source for nvptx-newlib package was pulled from upstream's vcs.  Use the
 # following commands to generate the tarball:
-# git clone git://sourceware.org/git/newlib-cygwin.git newlib-cygwin-dir.tmp
+# git clone https://sourceware.org/git/newlib-cygwin.git newlib-cygwin-dir.tmp
 # git --git-dir=newlib-cygwin-dir.tmp/.git archive --prefix=newlib-cygwin-%%{newlib_cygwin_gitrev}/ %%{newlib_cygwin_gitrev} ":(exclude)newlib/libc/sys/linux/include/rpc/*.[hx]" | xz -9e > newlib-cygwin-%%{newlib_cygwin_gitrev}.tar.xz
 # rm -rf newlib-cygwin-dir.tmp
 Source5: newlib-cygwin-%{newlib_cygwin_gitrev}.tar.xz
@@ -203,7 +222,8 @@ URL: http://gcc.gnu.org
 # Need binutils which support -plugin
 # Need binutils which support .loc view >= 2.30
 # Need binutils which support --generate-missing-build-notes=yes >= 2.31
-BuildRequires: %{?scl_prefix}binutils >= 2.31
+# Need binutils which support .base64 >= 2.43
+BuildRequires: %{?scl_prefix}binutils >= 2.43
 # For VTA guality testing
 %if 0%{?rhel} >= 9
 BuildRequires: gdb >= 7.4.50
@@ -231,10 +251,12 @@ BuildRequires: libzstd-devel
 BuildRequires: glibc >= 2.3.90-35
 %endif
 %ifarch %{multilib_64_archs}
-BuildRequires: (glibc32 or glibc-devel(%{__isa_name}-32))
+# Ensure glibc{,-devel} is installed for both multilib arches
+%if 0%{?rhel} < 10
+BuildRequires: /lib/libc.so.6 /usr/lib/libc.so /lib64/libc.so.6 /usr/lib64/libc.so
+%else
+BuildRequires: /usr/lib/libc.so /usr/lib64/libc.so
 %endif
-%ifarch sparcv9 ppc
-BuildRequires: (glibc64 or glibc-devel(%{__isa_name}-64))
 %endif
 %ifarch ia64
 BuildRequires: libunwind >= 0.98
@@ -255,7 +277,8 @@ BuildRequires: libunwind >= 0.98
 # Need binutils that support -plugin
 # Need binutils that support .loc view >= 2.30
 # Need binutils which support --generate-missing-build-notes=yes >= 2.31
-Requires: %{?scl_prefix}binutils >= 2.22.52.0.1
+# Need binutils that support .base64 >= 2.43
+Requires: %{?scl_prefix}binutils >= 2.43
 # Make sure gdb will understand DW_FORM_strp
 Conflicts: gdb < 5.1-2
 Requires: glibc-devel >= 2.2.90-12
@@ -277,7 +300,9 @@ Requires: libgcc >= 4.1.2-43
 Requires: libgomp >= 4.4.4-13
 # lto-wrapper invokes make
 Requires: make
+%if %have_scl_utils
 %{?scl:Requires:%scl_runtime}
+%endif
 AutoReq: true
 # Various libraries are imported.  #1859893 asks us to list them all.
 Provides: bundled(libiberty)
@@ -323,27 +348,26 @@ Provides: liblto_plugin.so.0
 %global oformat OUTPUT_FORMAT(elf64-littleaarch64)
 %endif
 
-Patch0: gcc14-hack.patch
-Patch2: gcc14-sparc-config-detection.patch
-Patch3: gcc14-libgomp-omp_h-multilib.patch
-Patch4: gcc14-libtool-no-rpath.patch
-Patch5: gcc14-isl-dl.patch
-Patch6: gcc14-isl-dl2.patch
-Patch7: gcc14-libstdc++-docs.patch
-Patch8: gcc14-no-add-needed.patch
-Patch9: gcc14-Wno-format-security.patch
-Patch10: gcc14-rh1574936.patch
-Patch11: gcc14-d-shared-libphobos.patch
-Patch12: gcc14-pr101523.patch
-Patch13: gcc14-pr118509.patch
+Patch0: gcc15-hack.patch
+Patch2: gcc15-sparc-config-detection.patch
+Patch3: gcc15-libgomp-omp_h-multilib.patch
+Patch4: gcc15-libtool-no-rpath.patch
+Patch5: gcc15-isl-dl.patch
+Patch6: gcc15-isl-dl2.patch
+Patch7: gcc15-libstdc++-docs.patch
+Patch8: gcc15-no-add-needed.patch
+Patch9: gcc15-Wno-format-security.patch
+Patch10: gcc15-rh1574936.patch
+Patch11: gcc15-d-shared-libphobos.patch
+Patch12: gcc15-pr119006.patch
 
 Patch50: isl-rh2155127.patch
 
-Patch100: gcc14-fortran-fdec-duplicates.patch
+Patch100: gcc15-fortran-fdec-duplicates.patch
 
-Patch1000: gcc14-libstdc++-compat.patch
-Patch1001: gcc14-libgfortran-compat.patch
-
+Patch1000: gcc15-libstdc++-compat.patch
+Patch1001: gcc15-libgfortran-compat.patch
+Patch1002: gcc15-nvptx-offload.patch
 
 Patch3000: 0001-basic_string-reserve-n-semantics-are-not-available-i.patch
 Patch3001: 0004-operator-istream-char-N-eofbit-fixes-are-not-availab.patch
@@ -358,19 +382,17 @@ Patch3010: 0014-Conditionalize-tests-for-PR-libstdc-98466-on-__LIBST.patch
 Patch3011: 0015-Conditionalize-test-for-PR-libstdc-87135-on-__LIBSTD.patch
 Patch3012: 0016-Conditionalize-test-for-hashtable-bucket-sizes-on-__.patch
 Patch3013: 0017-Conditionalize-test-for-PR-libstdc-71181-on-__LIBSTD.patch
-Patch3014: gcc14-dg-ice-fixes.patch
+Patch3014: gcc15-dg-ice-fixes.patch
 Patch3015: 0018-Use-CXX11-ABI.patch
 Patch3017: 0020-more-fixes.patch
 Patch3018: 0021-libstdc++-disable-tests.patch
 
-Patch4000: gcc14-RHEL-90244.patch
-Patch4001: gcc14-pr118892-1.patch
-Patch4002: gcc14-pr118892-2.patch
-Patch4003: gcc14-pr118892-3.patch
-
 Patch10000: gcc6-decimal-rtti-arm.patch
-Patch10001: gcc14-nonshared-arm.patch
+Patch10001: gcc15-nonshared-arm.patch
 
+%if 0%{?rhel} == 10
+%global nonsharedver 140
+%endif
 %if 0%{?rhel} == 9
 %global nonsharedver 110
 %endif
@@ -589,7 +611,11 @@ which is used for -fsanitize=address instrumented programs.
 
 %package -n %{?scl_prefix}libasan-devel
 Summary: The Address Sanitizer static library
+%if 0%{?rhel} < 10
 Requires: libasan8%{_isa} >= 12.1.1
+%else
+Requires: libasan%{_isa} >= 14.2.1
+%endif
 Obsoletes: libasan5 <= 8.3.1
 
 %description -n %{?scl_prefix}libasan-devel
@@ -604,7 +630,7 @@ which is used for -fsanitize=hwaddress instrumented programs.
 
 %package -n %{?scl_prefix}libhwasan-devel
 Summary: The Hardware-assisted Address Sanitizer static library
-Requires: libhwasan >= 13.1.1
+Requires: libhwasan >= 14.2.1
 
 %description -n %{?scl_prefix}libhwasan-devel
 This package contains Hardware-assisted Address Sanitizer static runtime
@@ -619,7 +645,11 @@ which is used for -fsanitize=thread instrumented programs.
 
 %package -n %{?scl_prefix}libtsan-devel
 Summary: The Thread Sanitizer static library
+%if 0%{?rhel} < 10
 Requires: libtsan2%{_isa} >= 12.1.1
+%else
+Requires: libtsan%{_isa} >= 14.2.1
+%endif
 
 %description -n %{?scl_prefix}libtsan-devel
 This package contains Thread Sanitizer static runtime library.
@@ -670,6 +700,9 @@ to NVidia PTX capable devices if available.
 %package -n %{?scl_prefix}gcc-plugin-annobin
 Summary: The annobin plugin for gcc, built by the installed version of gcc
 Requires: %{?scl_prefix}gcc = %{version}-%{release}
+%if 0%{?rhel} <= 8
+BuildRequires: %{?scl_prefix}annobin-plugin-gcc
+%endif
 BuildRequires: rpm-devel, binutils-devel, xz
 
 %description -n %{?scl_prefix}gcc-plugin-annobin
@@ -695,8 +728,7 @@ so that there cannot be any synchronization problems.
 %patch -P9 -p0 -b .Wno-format-security~
 %patch -P10 -p0 -b .rh1574936~
 %patch -P11 -p0 -b .d-shared-libphobos~
-%patch -P12 -p1 -b .pr101523~
-%patch -P13 -p0 -b .pr118509~
+%patch -P12 -p0 -b .pr119006~
 
 %patch -P100 -p1 -b .fortran-fdec-duplicates~
 
@@ -712,6 +744,7 @@ rm -f gcc/testsuite/g++.dg/tsan/pthread_cond_clockwait.C
 
 %patch -P1000 -p0 -b .libstdc++-compat~
 %patch -P1001 -p0 -b .libgfortran-compat~
+%patch -P1002 -p0 -b .nvptx-compat~
 
 %if %{build_isl}
 %patch -P50 -p0 -b .isl-rh2155127~
@@ -737,12 +770,6 @@ touch -r isl-0.24/m4/ax_prog_cxx_for_build.m4 isl-0.24/m4/ax_prog_cc_for_build.m
 %patch -P3017 -p1 -b .dts-test-17~
 %patch -P3018 -p1 -b .dts-test-18~
 
-# Bugfix backports.
-%patch -P4000 -p1 -b .RHEL-90244~
-%patch -P4001 -p1 -b .RHEL-pr118892-1~
-%patch -P4002 -p1 -b .RHEL-pr118892-2~
-%patch -P4003 -p1 -b .RHEL-pr118892-3~
-
 %ifarch %{arm}
 %patch10000 -p1
 %patch10001 -p1
@@ -760,7 +787,6 @@ sed -i 's/\(version for most targets is \)5 /\14 /' gcc/doc/invoke.texi
 
 cp -a libstdc++-v3/config/cpu/i{4,3}86/atomicity.h
 cp -a libstdc++-v3/config/cpu/i{4,3}86/opt
-echo 'TM_H += $(srcdir)/config/rs6000/rs6000-modes.h' >> gcc/config/rs6000/t-rs6000
 
 ./contrib/gcc_update --touch
 
@@ -810,6 +836,13 @@ sed -i '/^GENERATE_TREEVIEW/s/YES/NO/' libstdc++-v3/doc/doxygen/user.cfg.in
 
 # Undo the broken autoconf change in recent Fedora versions
 export CONFIG_SITE=NONE
+
+%if 0%{?rhel} == 10
+# Work around https://issues.redhat.com/browse/RHEL-49348
+%ifarch ppc64le
+export GLIBC_TUNABLES=glibc.cpu.hwcaps=-arch_3_1
+%endif
+%endif
 
 CC=gcc
 CXX=g++
@@ -910,6 +943,13 @@ cd ../..
 %{?scl:PATH=%{_bindir}${PATH:+:${PATH}}}
 %endif
 
+offloadtgts=
+%if %{build_offload_nvptx}
+offloadtgts=nvptx-none
+%endif
+%if %{build_offload_amdgcn}
+offloadtgts=${offloadtgts:+${offloadtgts},}amdgcn-amdhsa
+%endif
 # We're going to use the old long double format (double double) until RHEL10.
 # Only -static-lib{stdc++,gfortran}/libgcc would work with IEEE double.
 # Upstream also uses the old long double format, but Fedora uses the new
@@ -939,12 +979,16 @@ CONFIGURE_OPTS="\
 %else
 	--without-isl \
 %endif
-%if %{build_offload_nvptx}
-	--enable-offload-targets=nvptx-none \
-	--without-cuda-driver --enable-offload-defaulted \
+%if %{build_offload_nvptx} || %{build_offload_amdgcn}
+	--enable-offload-targets=$offloadtgts --enable-offload-defaulted \
 %endif
+%if %{build_offload_nvptx}
+	--without-cuda-driver \
+%endif
+%if 0%{?fedora} >= 21 || 0%{?rhel} >= 7
 %if %{attr_ifunc}
 	--enable-gnu-indirect-function \
+%endif
 %endif
 %ifarch %{arm}
 	--disable-sjlj-exceptions \
@@ -956,7 +1000,11 @@ CONFIGURE_OPTS="\
 	--with-long-double-128 \
 %endif
 %ifarch ppc64le
+%if 0%{?rhel} < 10
 	--with-long-double-format=ibm \
+%else
+	--with-long-double-format=ieee \
+%endif
 %endif
 %ifarch sparc
 	--disable-linux-futex \
@@ -972,7 +1020,11 @@ CONFIGURE_OPTS="\
 %endif
 %ifarch ppc64le
 %if 0%{?rhel} >= 9
+%if 0%{?rhel} >= 10
+	--with-cpu-32=power9 --with-tune-32=power10 --with-cpu-64=power9 --with-tune-64=power10 \
+%else
 	--with-cpu-32=power9 --with-tune-32=power9 --with-cpu-64=power9 --with-tune-64=power9 \
+%endif
 %else
 	--with-cpu-32=power8 --with-tune-32=power8 --with-cpu-64=power8 --with-tune-64=power8 \
 %endif
@@ -981,9 +1033,7 @@ CONFIGURE_OPTS="\
 	--build=%{gcc_target_platform} --target=%{gcc_target_platform} --with-cpu=default32
 %endif
 %ifarch %{ix86} x86_64
-%if 0%{?rhel} >= 8
 	--enable-cet \
-%endif
 	--with-tune=generic \
 %endif
 %ifarch %{ix86}
@@ -991,7 +1041,11 @@ CONFIGURE_OPTS="\
 %endif
 %ifarch x86_64
 %if 0%{?rhel} > 8
+%if 0%{?rhel} > 9
+	--with-arch_64=x86-64-v3 \
+%else
 	--with-arch_64=x86-64-v2 \
+%endif
 %endif
 	--with-arch_32=x86-64 \
 %endif
@@ -999,10 +1053,14 @@ CONFIGURE_OPTS="\
 %if 0%{?rhel} >= 7
 %if 0%{?rhel} > 7
 %if 0%{?rhel} > 8
-%if 0%{?rhel} >= 9
+%if 0%{?rhel} >= 10
+       --with-arch=z14 --with-tune=z16 \
+%else
+%if 0%{?rhel} == 9
 	--with-arch=z14 --with-tune=z15 \
 %else
 	--with-arch=z13 --with-tune=arch13 \
+%endif
 %endif
 %else
 	--with-arch=z13 --with-tune=z14 \
@@ -1047,6 +1105,9 @@ CONFIGURE_OPTS="\
 	--with-build-config=bootstrap-lto --enable-link-serialization=1 \
 %endif
 %endif
+%if 0%{?rhel:1}
+	--enable-host-pie --enable-host-bind-now \
+%endif
 	"
 
 CC="$CC" CXX="$CXX" CFLAGS="$OPT_FLAGS" \
@@ -1075,7 +1136,7 @@ CC="$CC" CXX="$CXX" CFLAGS="$OPT_FLAGS" \
 		  | sed 's/ -Wformat-security / -Wformat -Wformat-security /'`" \
 	XCFLAGS="$OPT_FLAGS" TCFLAGS="$OPT_FLAGS" \
 	../../configure --disable-bootstrap --enable-host-shared \
-	--enable-languages=jit $CONFIGURE_OPTS
+	--enable-languages=jit --enable-libgdiagnostics $CONFIGURE_OPTS
 make %{?_smp_mflags} BOOT_CFLAGS="$OPT_FLAGS" all-gcc
 cp -a gcc/libgccjit.so* ../gcc/
 cd ../gcc/
@@ -1141,7 +1202,11 @@ find rpm.doc -name \*ChangeLog\* | xargs bzip2 -9
 %if %{build_annobin_plugin}
 mkdir annobin-plugin
 cd annobin-plugin
+%if 0%{?rhel} <= 8
+tar xf %{_scl_root}/%{_usrsrc}/annobin/latest-annobin.tar.xz
+%else
 tar xf %{_usrsrc}/annobin/latest-annobin.tar.xz
+%endif
 cd annobin*
 touch aclocal.m4 configure Makefile.in */configure */config.h.in */Makefile.in
 ANNOBIN_FLAGS=../../obj-%{gcc_target_platform}/%{gcc_target_platform}/libstdc++-v3/scripts/testsuite_flags
@@ -1203,6 +1268,7 @@ cd obj-offload-nvptx-none
 make prefix=%{buildroot}%{_prefix} mandir=%{buildroot}%{_mandir} \
   infodir=%{buildroot}%{_infodir} install
 rm -rf %{buildroot}%{_prefix}/libexec/gcc/nvptx-none/%{gcc_major}/install-tools
+rm -rf %{buildroot}%{_prefix}/libexec/gcc/nvptx-none/%{gcc_major}/g++-mapper-server
 rm -rf %{buildroot}%{_prefix}/libexec/gcc/%{gcc_target_platform}/%{gcc_major}/accel/nvptx-none/{install-tools,plugin,cc1,cc1plus,f951}
 rm -rf %{buildroot}%{_infodir} %{buildroot}%{_mandir}/man7 %{buildroot}%{_prefix}/share/locale
 rm -rf %{buildroot}%{_prefix}/lib/gcc/nvptx-none/%{gcc_major}/{install-tools,plugin}
@@ -1438,6 +1504,15 @@ INPUT ( %{_prefix}/%{_lib}/libgccjit.so.0 )' > $FULLPATH/libgccjit.so
 cp -a ../gcc/jit/libgccjit*.h $FULLPATH/include/
 /usr/bin/install -c -m 644 objlibgccjit/gcc/doc/libgccjit.info %{buildroot}/%{_infodir}/
 gzip -9 %{buildroot}/%{_infodir}/libgccjit.info
+
+rm -f $FULLEPATH/libgdiagnostics.so
+cp -a objlibgccjit/gcc/libgdiagnostics.so* %{buildroot}%{_prefix}/%{_lib}/
+cp -a ../gcc/libgdiagnostics*.h %{buildroot}%{_prefix}/include/
+cp -a objlibgccjit/gcc/sarif-replay %{buildroot}%{_prefix}/bin/
+
+sed -e 's,\.\./include/,../../../../include/,' \
+  %{buildroot}%{_prefix}/%{_lib}/libstdc++.modules.json \
+  > $FULLPATH/libstdc++.modules.json
 
 pushd $FULLPATH
 echo '/* GNU ld script */
@@ -1923,6 +1998,13 @@ cp -a %{_builddir}/gcc-%{version}-%{DATE}/annobin-plugin/annobin*/gcc-plugin/.li
 pushd $FULLPATH/plugin/
 ln -sf gts-gcc-annobin.so.0.0.0 gts-gcc-annobin.so.0
 ln -sf gts-gcc-annobin.so.0.0.0 gts-gcc-annobin.so
+# On RHEL9 and later there is no GTS annobin from GTS15 onwards.
+%if 0%{?rhel} > 8
+ln -sf gts-gcc-annobin.so.0.0.0 annobin.so
+ln -sf gts-gcc-annobin.so.0.0.0 gcc-annobin.so
+ln -sf gts-gcc-annobin.so.0.0.0 annobin.so.0.0.0
+ln -sf gts-gcc-annobin.so.0.0.0 gcc-annobin.so.0.0.0
+%endif
 popd
 %endif
 
@@ -2163,9 +2245,7 @@ fi
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/xsaveintrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/xsaveoptintrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx512cdintrin.h
-%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx512erintrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx512fintrin.h
-%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx512pfintrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/shaintrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/mm_malloc.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/mm3dnow.h
@@ -2187,8 +2267,6 @@ fi
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/xsavesintrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/clzerointrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/pkuintrin.h
-%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx5124fmapsintrin.h
-%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx5124vnniwintrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx512vpopcntdqintrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/sgxintrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/gfniintrin.h
@@ -2239,6 +2317,23 @@ fi
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/sm3intrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/sm4intrin.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/usermsrintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/amxavx512intrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/amxfp8intrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/amxmovrsintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/amxtf32intrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/amxtransposeintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2-512bf16intrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2-512convertintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2-512mediaintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2-512minmaxintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2-512satcvtintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2bf16intrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2convertintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2copyintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2mediaintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2minmaxintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/avx10_2satcvtintrin.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/movrsintrin.h
 %endif
 %ifarch ia64
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/ia64intrin.h
@@ -2283,6 +2378,10 @@ fi
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/arm_fp16.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/arm_bf16.h
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/arm_sve.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/arm_sme.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/arm_neon_sve_bridge.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/arm_private_fp8.h
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/arm_private_neon_types.h
 %endif
 %ifarch sparc sparcv9 sparc64
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/include/visintrin.h
@@ -2443,6 +2542,12 @@ fi
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin/gts-gcc-annobin.so
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin/gts-gcc-annobin.so.0
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin/gts-gcc-annobin.so.0.0.0
+%if 0%{?rhel} > 8
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin/annobin.so
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin/gcc-annobin.so
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin/annobin.so.0.0.0
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/plugin/gcc-annobin.so.0.0.0
+%endif
 %endif
 
 %files c++
@@ -2495,6 +2600,7 @@ fi
 %dir %{_prefix}/lib/gcc
 %dir %{_prefix}/lib/gcc/%{gcc_target_platform}
 %dir %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}
+%{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/libstdc++.modules.json
 %ifarch sparcv9 ppc
 %dir %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/lib32
 %{_prefix}/lib/gcc/%{gcc_target_platform}/%{gcc_major}/lib32/libstdc++.a
@@ -2648,8 +2754,11 @@ fi
 %endif
 
 %if %{build_libasan}
+# RHEL 10 system gcc has libasan.so.8.
+%if 0%{?rhel} < 10
 %files -n libasan8
 %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/%{_lib}/libasan.so.8*
+%endif
 
 %files -n %{?scl_prefix}libasan-devel
 %dir %{_prefix}/lib/gcc
@@ -2694,8 +2803,11 @@ fi
 %endif
 
 %if %{build_libtsan}
+# RHEL 10 system gcc has libtsan.so.2.
+%if 0%{?rhel} < 10
 %files -n libtsan2
 %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/%{_lib}/libtsan.so.2*
+%endif
 
 %files -n %{?scl_prefix}libtsan-devel
 %dir %{_prefix}/lib/gcc
@@ -2710,8 +2822,11 @@ fi
 %endif
 
 %if %{build_libhwasan}
+# RHEL 10 system gcc has libhwasan.so.0.
+%if 0%{?rhel} < 10
 %files -n libhwasan
 %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/%{_lib}/libhwasan.so.0*
+%endif
 
 %files -n %{?scl_prefix}libhwasan-devel
 %dir %{_prefix}/lib/gcc
@@ -2726,14 +2841,9 @@ fi
 %endif
 
 %if %{build_liblsan}
-# Use the system liblsan.
-%if 0%{?rhel} < 8
-%files -n liblsan
-%{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/%{_lib}/liblsan.so.0*
-%else
+# Use the system liblsan, except for s390x on RHEL 8+9.
+%if 0%{?rhel} < 10
 %ifarch s390x
-# Except that on s390x we don't have the system liblsan, because we
-# only enabled LSan in GCC 12.  ??? Ugly duplication.
 %files -n liblsan
 %{?scl:%{_root_prefix}}%{!?scl:%{_prefix}}/%{_lib}/liblsan.so.0*
 %endif
@@ -2816,552 +2926,49 @@ fi
 %endif
 
 %changelog
-* Sat Nov 29 2025 Jacco Ligthart <jacco@redsleeve.org> 14.2.1-12.redsleeve
+* Tue Jan 20 2026 Jacco Ligthart <jacco@redsleeve.org> 15.1.1-2.4.redsleeve
 - patched for armv6
 
-* Thu Sep  4 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-12
-- Fix glibc32 dependency (RHEL-112209)
+* Mon Jun 16 2025 Marek Polacek <polacek@redhat.com> 15.1.1-2.4
+- ship libstdc++.modules.json (RHEL-97095)
 
-* Wed Aug 27 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-11
-- Fix ICE in rebuild_jump_labels on aarch64-linux-gnu (RHEL-106790)
-
-* Wed May 28 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-10
-- Put the libstdc++ AS_NEEDED in the right places (RHEL-84679)
-
-* Thu May 22 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-9
+* Thu Jun 12 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 15.1.1-2.3
 - Add AS_NEEDED libstdc++.so.6 when only needed through libstdc++_nonshared
-  (RHEL-84679)
-
-* Thu May 22 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-8
-- libstdc++: Fix -Warray-bounds warning in std::vector<bool> (RHEL-90244)
-
-* Fri Feb  7 2025 Marek Polacek <polacek@redhat.com> 14.2.1-7.1
-- disable jQuery use, don't ship jquery.js (CVE-2020-11023, RHEL-78387)
-
-* Wed Jan 22 2025 Marek Polacek <polacek@redhat.com> 14.2.1-7
-- update from releases/gcc-14 branch (RHEL-74061)
-  - PRs ada/113036, ada/113868, ada/115917, ada/117328, ada/117996,
-	analyzer/115724, c/117641, c/117745, c/117802, c++/100358, c++/101463,
-	c++/102594, c++/109859, c++/113108, c++/114854, c++/115008,
-	c++/115430, c++/115657, c++/116108, c++/116634, c++/117158,
-	c++/117317, c++/117614, c++/117615, c++/117792, c++/117825,
-	c++/117845, c++/117880, c++/117925, c++/117985, c++/118060,
-	c++/118069, driver/117942, fortran/84674, fortran/84869,
-	fortran/105054, fortran/109105, fortran/109345, fortran/115070,
-	fortran/115348, fortran/116388, fortran/117730, fortran/117763,
-	fortran/117774, fortran/117791, fortran/117797, fortran/117819,
-	fortran/117820, fortran/117843, fortran/117897, libgomp/117851,
-	libstdc++/89624, libstdc++/106212, libstdc++/106676, libstdc++/108236,
-	libstdc++/109517, libstdc++/109976, libstdc++/112349,
-	libstdc++/112641, libstdc++/117520, libstdc++/117560,
-	libstdc++/117822, libstdc++/117962, libstdc++/117966,
-	libstdc++/118035, libstdc++/118093, middle-end/43374,
-	middle-end/102674, middle-end/116997, middle-end/117433,
-	middle-end/117458, middle-end/117459, middle-end/117847,
-	middle-end/118024, modula2/114529, modula2/115003, modula2/115057,
-	modula2/115164, modula2/115276, modula2/115328, modula2/115536,
-	modula2/115540, modula2/115804, modula2/115823, modula2/115957,
-	modula2/116048, modula2/116181, modula2/116378, modula2/116557,
-	modula2/116918, modula2/117120, modula2/117371, modula2/117555,
-	modula2/117660, modula2/117904, modula2/117948, other/116603,
-	preprocessor/117118, rtl-optimization/113994, rtl-optimization/116799,
-	rtl-optimization/117095, sanitizer/117960, target/64242,
-	target/114801, target/114942, target/116371, target/116629,
-	target/116999, target/117045, target/117105, target/117304,
-	target/117357, target/117408, target/117418, target/117443,
-	target/117500, target/117525, target/117562, target/117564,
-	target/117642, target/117659, target/117675, target/117744,
-	target/117926, testsuite/103298, testsuite/109360,
-	tree-optimization/94589, tree-optimization/112376,
-	tree-optimization/116463, tree-optimization/117142,
-	tree-optimization/117254, tree-optimization/117307,
-	tree-optimization/117333, tree-optimization/117398,
-	tree-optimization/117417, tree-optimization/117439,
-	tree-optimization/117574, tree-optimization/117594,
-	tree-optimization/117612, tree-optimization/117912
-- fix up -freport-bug default (#2330362, RHEL-70192)
-- revert -mearly-ldp-fusion and -mlate-ldp-fusion default to enabled on
-  aarch64 to match upstream (RHEL-74059)
-- consider TARGET_EXPR invariant like SAVE_EXPR (PR c++/118509)
-- have gfortran require install-info (RHEL-62417)
-
-* Thu Aug 22 2024 Marek Polacek <polacek@redhat.com> 14.2.1-1.2
-- bump NVR (RHEL-53492)
-
-* Tue Aug 13 2024 Marek Polacek <polacek@redhat.com> 14.2.1-1.1
-- do not hide _ZSt21ios_base_library_initv
-
-* Fri Aug  9 2024 Marek Polacek <polacek@redhat.com> 14.2.1-1
-- update from releases/gcc-14 branch
-  - GCC 14.2 release
-  - PRs analyzer/114899, c++/99241, c++/99242, c++/104981, c++/106760,
-	c++/111890, c++/115165, c++/115476, c++/115550, c++/115561,
-	c++/115583, c++/115623, c++/115754, c++/115783, c++/115865,
-	c++/115897, c++/115900, c++/115986, fortran/59104, fortran/84006,
-	fortran/93635, fortran/98534, fortran/99798, fortran/100027,
-	fortran/103115, fortran/103312, fortran/113363, fortran/115700,
-	ipa/111613, ipa/113291, ipa/113787, ipa/114207, ipa/115033,
-	ipa/115277, ipa/116055, libstdc++/113376, libstdc++/114387,
-	libstdc++/115399, libstdc++/115482, libstdc++/115522,
-	libstdc++/115585, libstdc++/115807, libstdc++/115854,
-	libstdc++/116070, middle-end/115527, middle-end/115836,
-	middle-end/115887, pch/115312, rtl-optimization/115049,
-	rtl-optimization/115565, target/87376, target/88236, target/97367,
-	target/98762, target/105090, target/113715, target/114759,
-	target/114890, target/114936, target/114988, target/115068,
-	target/115153, target/115188, target/115351, target/115389,
-	target/115456, target/115457, target/115459, target/115475,
-	target/115526, target/115554, target/115562, target/115591,
-	target/115611, target/115691, target/115725, target/115726,
-	target/115752, target/115763, target/115840, target/115872,
-	target/115978, target/115981, target/115988, target/116035,
-	testsuite/115826, testsuite/116061, tree-optimization/113673,
-	tree-optimization/115382, tree-optimization/115646,
-	tree-optimization/115669, tree-optimization/115694,
-	tree-optimization/115701, tree-optimization/115723,
-	tree-optimization/115841, tree-optimization/115843,
-	tree-optimization/115867, tree-optimization/115868,
-	tree-optimization/116034, tree-optimization/116057
-
-* Tue Jul 23 2024 Marek Polacek <polacek@redhat.com> 14.1.1-7
-- update to GCC 14 (RHEL-30412)
-
-* Fri Jul 12 2024 Marek Polacek <polacek@redhat.com> 13.3.1-2.1
-- fix wrong RTL patterns for vector merge high/low word on LE (RHEL-45191)
-
-* Tue Jun 11 2024 Marek Polacek <polacek@redhat.com> 13.3.1-2
-- update from releases/gcc-13 branch
-  - PRs ada/114398, ada/114708, c/114493, c++/111529, c++/113598,
-	fortran/110415, fortran/114827, fortran/115150, libstdc++/114940,
-	libstdc++/115269, middle-end/108789, rtl-optimization/114902,
-	rtl-optimization/115092, target/113281, target/113719, target/115297,
-	target/115317, target/115324, tree-optimization/115192,
-	tree-optimization/115307, tree-optimization/115337
-- fix a shell condition (RHEL-40722)
-- backport a fix for modes_1.f90 (RHEL-40234)
-- fix up pointer types to may_alias structures (PR c/114493, RHEL-39736)
-
-* Mon Jun  3 2024 Marek Polacek <polacek@redhat.com> 13.3.1-1
-- update from releases/gcc-13 branch
-  - GCC 13.3 release
-  - PRs analyzer/104042, analyzer/108171, analyzer/109251, analyzer/109577,
-	analyzer/110014, analyzer/110112, analyzer/110700, analyzer/110882,
-	analyzer/111289, analyzer/112790, analyzer/112889, analyzer/112969,
-	analyzer/113253, analyzer/113333, analyzer/114408, analyzer/114473,
-	bootstrap/106472, bootstrap/114369, c/112571, c/114780, c++/89224,
-	c++/97990, c++/100667, c++/103825, c++/110006, c++/111284, c++/112769,
-	c++/113141, c++/113966, c++/114303, c++/114377, c++/114537,
-	c++/114561, c++/114562, c++/114572, c++/114580, c++/114634,
-	c++/114691, c++/114709, debug/112718, driver/111700, fortran/36337,
-	fortran/50410, fortran/55978, fortran/89462, fortran/93678,
-	fortran/95374, fortran/101135, fortran/102003, fortran/103707,
-	fortran/103715, fortran/103716, fortran/104352, fortran/106987,
-	fortran/106999, fortran/107426, fortran/110987, fortran/112407,
-	fortran/113799, fortran/113866, fortran/113885, fortran/113956,
-	fortran/114001, fortran/114474, fortran/114535, fortran/114739,
-	fortran/114825, fortran/115039, gcov-profile/114115,
-	gcov-profile/114715, ipa/92606, ipa/108007, ipa/111571, ipa/112616,
-	ipa/113359, ipa/113907, ipa/113964, jit/110466, libgcc/111731,
-	libquadmath/114533, libstdc++/66146, libstdc++/93672,
-	libstdc++/104606, libstdc++/107800, libstdc++/108976,
-	libstdc++/110050, libstdc++/110054, libstdc++/113841,
-	libstdc++/114147, libstdc++/114316, libstdc++/114359,
-	libstdc++/114367, libstdc++/114401, libstdc++/114750,
-	libstdc++/114803, libstdc++/114863, libstdc++/115063, lto/114655,
-	middle-end/110027, middle-end/111151, middle-end/111632,
-	middle-end/111683, middle-end/112684, middle-end/112732,
-	middle-end/113396, middle-end/113622, middle-end/114070,
-	middle-end/114348, middle-end/114552, middle-end/114599,
-	middle-end/114734, middle-end/114753, middle-end/114907,
-	rtl-optimization/54052, rtl-optimization/114415,
-	rtl-optimization/114768, rtl-optimization/114924, sanitizer/97696,
-	sanitizer/114687, sanitizer/114743, sanitizer/114956,
-	sanitizer/115172, target/88309, target/101865, target/105522,
-	target/110621, target/111234, target/111600, target/111610,
-	target/111822, target/112397, target/113095, target/113233,
-	target/113950, target/114049, target/114130, target/114160,
-	target/114172, target/114175, target/114272, target/114747,
-	target/114752, target/114794, target/114837, target/114848,
-	target/114981, testsuite/111066, testsuite/112297, testsuite/114034,
-	testsuite/114036, testsuite/114662, tree-optimization/91838,
-	tree-optimization/109925, tree-optimization/110838,
-	tree-optimization/111009, tree-optimization/111268,
-	tree-optimization/111407, tree-optimization/111736,
-	tree-optimization/111882, tree-optimization/112281,
-	tree-optimization/112303, tree-optimization/112793,
-	tree-optimization/112961, tree-optimization/112991,
-	tree-optimization/113552, tree-optimization/113630,
-	tree-optimization/113670, tree-optimization/113831,
-	tree-optimization/113910, tree-optimization/114027,
-	tree-optimization/114115, tree-optimization/114121,
-	tree-optimization/114203, tree-optimization/114231,
-	tree-optimization/114246, tree-optimization/114375,
-	tree-optimization/114396, tree-optimization/114485,
-	tree-optimization/114566, tree-optimization/114672,
-	tree-optimization/114733, tree-optimization/114736,
-	tree-optimization/114749, tree-optimization/114787,
-	tree-optimization/114799, tree-optimization/114876,
-	tree-optimization/114965, tree-optimization/115143,
-	tree-optimization/115152, tree-optimization/115154
-- add --without-clang-plugin --without-llvm-plugin to annobin configure
-  options
-
-* Mon Dec 11 2023 Marek Polacek <polacek@redhat.com> 13.2.1-6.2
-- use the system dir in --with-libstdcxx-zoneinfo (RHEL-20522)
-
-* Mon Dec 11 2023 Marek Polacek <polacek@redhat.com> 13.2.1-6.1
-- add f95 (RHEL-17656)
-
-* Wed Dec  6 2023 Marek Polacek <polacek@redhat.com> 13.2.1-6
-- update from releases/gcc-13 branch
-  - PRs c++/33799, c++/102191, c++/111703, c++/112269, c++/112301, c++/112633,
-	c/112339, fortran/111880, fortran/112764, libgomp/111413,
-	libstdc++/112348, libstdc++/112491, libstdc++/112607,
-	middle-end/111497, target/53372, target/110411, target/111408,
-	target/111815, target/111828, target/112672, tree-optimization/111137,
-	tree-optimization/111465, tree-optimization/111967,
-	tree-optimization/112496
-- add -fno-stack-protector to aarch64 tests (RHEL-16940)
-
-* Mon Nov 13 2023 Marek Polacek <polacek@redhat.com> 13.2.1-5
-- update from releases/gcc-13 branch
-  - PRs c++/89038, c/111884, d/110712, d/112270, fortran/67740, fortran/97245,
-	fortran/111837, fortran/112316, libbacktrace/111315,
-	libbacktrace/112263, libstdc++/110944, libstdc++/111172,
-	libstdc++/111936, libstdc++/112089, libstdc++/112314,
-	middle-end/111253, middle-end/111818, modula2/111756, modula2/112110,
-	target/101177, target/110170, target/111001, target/111366,
-	target/111367, target/111380, target/111935, target/112443,
-	tree-optimization/111397, tree-optimization/111445,
-	tree-optimization/111489, tree-optimization/111583,
-	tree-optimization/111614, tree-optimization/111622,
-	tree-optimization/111694, tree-optimization/111764,
-	tree-optimization/111820, tree-optimization/111833,
-	tree-optimization/111917
-  - fix aarch64 RA ICE (#2241139, PR target/111528)
-- fix ia32 doubleword rotates (#2238781, PR target/110792)
-
-* Thu Nov  9 2023 Marek Polacek <polacek@redhat.com> 13.2.1-4
-- update from releases/gcc-13 branch
-  - PRs ada/110488, ada/111434, c++/99631, c++/111471, c++/111485, c++/111493,
-	c++/111512, fortran/68155, fortran/92586, fortran/111674,
-	libstdc++/108046, libstdc++/111050, libstdc++/111102,
-	libstdc++/111511, middle-end/111699, modula2/111510, target/111121,
-	target/111411, tree-optimization/110315, tree-optimization/110386,
-	tree-optimization/111331, tree-optimization/111519
-
-* Thu Jul  6 2023 Marek Polacek <polacek@redhat.com> 13.1.1-4.3
-- fix utf-1.C with -gdwarf-4 (#2217506)
-
-* Tue Jun 27 2023 Marek Polacek <polacek@redhat.com> 13.1.1-4.2
-- fix switch to -gdwarf-4 on RHEL 8 (#2217938)
-- apply some testsuite fixes (#2217506)
-
-* Tue Jun 20 2023 Marek Polacek <polacek@redhat.com> 13.1.1-4.1
-- don't require libgccjit-docs (#2216334)
-
-* Thu Jun 15 2023 Marek Polacek <polacek@redhat.com> 13.1.1-4
-- update from releases/gcc-13 branch (#2188499)
-  - PRs bootstrap/110085, c++/109871, fortran/100607, libgcc/109670,
-	libgcc/109685, libstdc++/108178, libstdc++/109261, libstdc++/109758,
-	libstdc++/109822, libstdc++/109949, libstdc++/110139,
-	middle-end/110200, target/82931, target/92729, target/104327,
-	target/105753, target/106907, target/109547, target/109650,
-	target/109800, target/109939, target/109954, target/110036,
-	target/110044, target/110088, target/110108, target/110227,
-	tree-optimization/109505, tree-optimization/110165,
-	tree-optimization/110166
-
-* Fri May 19 2023 Jakub Jelinek <jakub@redhat.com> 13.1.1-3
-- update from releases/gcc-13 branch
-  - PRs c++/80488, c++/83258, c++/97700, c++/103807, c++/109651, c++/109745,
-	c++/109761, c++/109774, c++/109868, c++/109884, fortran/109641,
-	fortran/109846, libstdc++/109816, libstdc++/109883, target/104338,
-	target/109697
-
-* Thu May 11 2023 Jakub Jelinek <jakub@redhat.com> 13.1.1-2
-- update from releases/gcc-13 branch
-  - PRs c++/91618, c++/96604, c++/109506, c++/109640, c++/109642, c++/109666,
-	c++/109671, c++/109756, c/107682, c/109409, c/109412, debug/109676,
-	fortran/109622, libffi/109447, libgomp/108098, libstdc++/40380,
-	libstdc++/109694, libstdc++/109703, rtl-optimization/109585,
-	target/108758, target/109069, target/109535, target/109661,
-	target/109762, tree-optimization/109573, tree-optimization/109609,
-	tree-optimization/109724, tree-optimization/109778
-
-* Thu Apr 27 2023 Marek Polacek <polacek@redhat.com> 13.1.1-1
-- update from releases/gcc-13 branch (#2188499)
-  - GCC 13.1 release
-  - PRs c/107041, target/109566
-- remove libcc1
-
-* Fri Feb 10 2023 Marek Polacek <polacek@redhat.com> 12.2.1-7.4
-- avoid fma_chain for -march=alderlake and sapphirerapids (#2168919)
-
-* Wed Jan 25 2023 Marek Polacek <polacek@redhat.com> 12.2.1-7.3
-- provide libexec/ symlinks on all RHELs (#2164262)
-
-* Wed Jan 11 2023 Marek Polacek <polacek@redhat.com> 12.2.1-7.2
-- build libisl.so with -g (#2154936)
-
-* Tue Dec 20 2022 Marek Polacek <polacek@redhat.com> 12.2.1-6.1
-- apply an ISL patch (#2154936)
-
-* Wed Dec 14 2022 Nick Clifton <nickc@redhat.com> 12.2.1-6
-- Fixed run-time requirement for annobin plugin.  (#2151927)
-
-* Tue Dec 13 2022 Nick Clifton <nickc@redhat.com> 12.2.1-5
-- Build the annobin plugin.  Call it gts-gcc-annobin.so.  (#2151927)
-
-* Wed Nov 30 2022 Marek Polacek <polacek@redhat.com> 12.2.1-4
-- update from releases/gcc-12 branch (#2110583)
-- fix up std::from_chars behavior in rounding modes other than FE_TONEAREST
-  (PR libstdc++/107468)
-
-* Wed Nov 30 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.4
-- fix pr86731-fwrapv-longlong.c (#2134379)
-
-* Wed Nov 30 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.3
-- add -static-libquadmath (#2131082)
-
-* Fri Jul  8 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.2
-- recognize PLUS and XOR forms of rldimi (PR target/105991, #2095789)
-
-* Fri Jul  8 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3.1
-- always ship liblsan on s390x (#2104824)
-
-* Wed Jul  6 2022 Marek Polacek <polacek@redhat.com> 12.1.1-3
-- update from releases/gcc-12 branch
-  - PRs c++/49387, c++/102307, c++/102651, c++/104470, c++/105491, c++/105589,
-	c++/105623, c++/105652, c++/105655, c++/105725, c++/105734,
-	c++/105756, c++/105761, c++/105779, c++/105795, c++/105852,
-	c++/105871, c++/105885, c++/105908, c++/105925, c++/105931,
-	c++/105964, c++/106001, c/105635, d/105544, fortran/105230,
-	gcov-profile/105535, ipa/100413, ipa/105600, ipa/105639, ipa/105739,
-	libgomp/105745, libgomp/106045, libstdc++/104731, libstdc++/105284,
-	libstdc++/105671, libstdc++/105681, middle-end/105537,
-	middle-end/105604, middle-end/105711, middle-end/105951,
-	middle-end/105998, middle-end/106030, other/105527,
-	preprocessor/105732, rtl-optimization/105455, rtl-optimization/105559,
-	rtl-optimization/105577, sanitizer/105714, sanitizer/105729,
-	target/101891, target/104871, target/105162, target/105209,
-	target/105292, target/105472, target/105556, target/105599,
-	target/105854, target/105879, target/105953, target/105960,
-	target/105970, target/105981, target/106096, tree-optimization/103116,
-	tree-optimization/105431, tree-optimization/105458,
-	tree-optimization/105528, tree-optimization/105562,
-	tree-optimization/105618, tree-optimization/105726,
-	tree-optimization/105736, tree-optimization/105786,
-	tree-optimization/105940
-- enable tsan and lsan on s390x (#2101610)
-- fix up libtsan on s390x
-- fix nvptx build (PRs bootstrap/105551, target/105938)
-
-* Tue Jun 28 2022 Marek Polacek <polacek@redhat.com> 12.1.1-1.6
-- ship lto-dump (#2101835)
-
-* Fri Jun 24 2022 Marek Polacek <polacek@redhat.com> 12.1.1-1.5
-- use gcc-toolset-12-binutils
-
-* Wed Jun 22 2022 Marek Polacek <polacek@redhat.com> 12.1.1-1.4
-- don't provide g++/fortran (CS-1145)
-
-* Fri Jun 17 2022 Marek Polacek <polacek@redhat.com> 12.1.1-1.3
-- require system binutils
-
-* Wed Jun  1 2022 Marek Polacek <polacek@redhat.com> 12.1.1-1.2
-- don't skip testing on s390x
-
-* Tue May 31 2022 Marek Polacek <polacek@redhat.com> 12.1.1-1.1
-- use GTS 12 binutils
-- add missing headers (#2091572)
-
-* Mon May 16 2022 Marek Polacek <polacek@redhat.com> 12.1.1-1
-- update to GCC 12 (#2077276)
-
-* Wed Feb  2 2022 Marek Polacek <polacek@redhat.com> 11.2.1-9.1
-- avoid overly-greedy match in dejagnu regexp (#2049712)
-
-* Fri Jan 28 2022 Marek Polacek <polacek@redhat.com> 11.2.1-9
-- update from releases/gcc-11-branch (#2047286)
-  - PRs fortran/104127, fortran/104212, fortran/104227, target/101529
-- fix up va-opt-6.c testcase
-
-* Fri Jan 28 2022 Marek Polacek <polacek@redhat.com> 11.2.1-8
-- update from releases/gcc-11-branch (#2047286)
-  - PRs ada/103538, analyzer/101962, bootstrap/103688, c++/85846, c++/95009,
-	c++/98394, c++/99911, c++/100493, c++/101715, c++/102229, c++/102933,
-	c++/103012, c++/103198, c++/103480, c++/103703, c++/103714,
-	c++/103758, c++/103783, c++/103831, c++/103912, c++/104055, c/97548,
-	c/101289, c/101537, c/103587, c/103881, d/103604, debug/103838,
-	debug/103874, fortran/67804, fortran/83079, fortran/101329,
-	fortran/101762, fortran/102332, fortran/102717, fortran/102787,
-	fortran/103411, fortran/103412, fortran/103418, fortran/103473,
-	fortran/103505, fortran/103588, fortran/103591, fortran/103606,
-	fortran/103607, fortran/103609, fortran/103610, fortran/103692,
-	fortran/103717, fortran/103718, fortran/103719, fortran/103776,
-	fortran/103777, fortran/103778, fortran/103782, fortran/103789,
-	ipa/101354, jit/103562, libfortran/103634, libstdc++/100017,
-	libstdc++/102994, libstdc++/103453, libstdc++/103501,
-	libstdc++/103549, libstdc++/103877, libstdc++/103919,
-	middle-end/101751, middle-end/102860, middle-end/103813, objc/103639,
-	preprocessor/89971, preprocessor/102432, rtl-optimization/102478,
-	rtl-optimization/103837, rtl-optimization/103860,
-	rtl-optimization/103908, sanitizer/102911, target/102347,
-	target/103465, target/103661, target/104172, target/104188,
-	tree-optimization/101615, tree-optimization/103523,
-	tree-optimization/103603, tree-optimization/103995
-
-* Wed Jan  5 2022 Marek Polacek <polacek@redhat.com> 11.2.1-7.2
-- fix dg-ice tests (#2037072)
-
-* Fri Dec 10 2021 Marek Polacek <polacek@redhat.com> 11.2.1-7.1
-- update Intel Tremont tuning patches (#2014276)
-- backport Intel Alderlake tuning (#2023553)
-
-* Tue Dec  7 2021 Marek Polacek <polacek@redhat.com> 11.2.1-7
-- update from releases/gcc-11-branch (#1996862)
-  - PRs ada/100486, c++/70796, c++/92746, c++/93286, c++/94490, c++/102642,
-	c++/102786, debug/101378, debug/103046, debug/103315, fortran/87711,
-	fortran/87851, fortran/97896, fortran/99061, fortran/99348,
-	fortran/102521, fortran/102685, fortran/102715, fortran/102745,
-	fortran/102816, fortran/102817, fortran/102917, fortran/103137,
-	fortran/103138, fortran/103392, gcov-profile/100520, ipa/102714,
-	ipa/102762, ipa/103052, ipa/103246, ipa/103267, libstdc++/96416,
-	libstdc++/98421, libstdc++/100117, libstdc++/100153, libstdc++/100748,
-	libstdc++/101571, libstdc++/101608, libstdc++/102894,
-	libstdc++/103022, libstdc++/103086, libstdc++/103133,
-	libstdc++/103240, libstdc++/103381, middle-end/64888,
-	middle-end/101480, middle-end/102431, middle-end/102518,
-	middle-end/103059, middle-end/103181, middle-end/103248,
-	middle-end/103384, preprocessor/103130, rtl-optimization/102356,
-	rtl-optimization/102842, target/101985, target/102976, target/102991,
-	target/103205, target/103274, target/103275, testsuite/102690,
-	tree-optimization/100393, tree-optimization/102139,
-	tree-optimization/102505, tree-optimization/102572,
-	tree-optimization/102788, tree-optimization/102789,
-	tree-optimization/102798, tree-optimization/102970,
-	tree-optimization/103192, tree-optimization/103204,
-	tree-optimization/103237, tree-optimization/103255,
-	tree-optimization/103435
-- fix up #__VA_OPT__ handling (PR preprocessor/103415)
-
-* Wed Nov 17 2021 Marek Polacek <polacek@redhat.com> 11.2.1-6.3
-- backport Intel Tremont tuning (#2014276)
-
-* Wed Nov 17 2021 Marek Polacek <polacek@redhat.com> 11.2.1-6.2
-- drop -Wbidirectional patch, use newer -Wbidi-chars (#2017820)
-
-* Fri Oct 29 2021 Marek Polacek <polacek@redhat.com> 11.2.1-6.1
-- add -Wbidirectional patch (#2017820)
-
-* Tue Oct 26 2021 Marek Polacek <polacek@redhat.com> 11.2.1-6
-- update from releases/gcc-11-branch (#1996862)
-  - PRs target/100208, target/100316, target/102761
-- build target shared libraries with -Wl,-z,relro,-z,now
-- add mwaitintrin.h on x86 (#2013860)
-- improve generated code with extern thread_local constinit vars
-  with trivial dtors
-- add support for C++20 #__VA_OPT__
-- apply DTS-specific testsuite patches (#1996085)
-
-* Tue Aug 17 2021 Marek Polacek <polacek@redhat.com> 11.2.1-1.1
-- add .hidden for _ZNSt10filesystem9_Dir_base7advanceEbRSt10error_code
-
-* Wed Jul 28 2021 Marek Polacek <polacek@redhat.com> 11.2.1-1
-- update from releases/gcc-11-branch (#1986838)
-  - GCC 11.2 release
-  - PRs middle-end/101586, rtl-optimization/101562
-
-* Thu Jul  1 2021 Marek Polacek <polacek@redhat.com> 11.1.1-6.1
-- require gcc-toolset-11-binutils at runtime (#1978081)
-
-* Wed Jun 23 2021 Marek Polacek <polacek@redhat.com> 11.1.1-6
-- update from Fedora gcc 11.1.1-6 (#1946782)
-  - PRs c++/100876, c++/100879, c++/101106, c/100619, c/100783, fortran/95501,
-   fortran/95502, fortran/100283, fortran/101123, inline-asm/100785,
-   libstdc++/91488, libstdc++/95833, libstdc++/100806, libstdc++/100940,
-   middle-end/100250, middle-end/100307, middle-end/100574,
-   middle-end/100684, middle-end/100732, middle-end/100876,
-   middle-end/101062, middle-end/101167, target/99842, target/99939,
-   target/100310, target/100777, target/100856, target/100871,
-   target/101016
-
-* Mon Jun 21 2021 Marek Polacek <polacek@redhat.com> 11.1.1-5
-- update from Fedora gcc 11.1.1-5 (#1946782)
-- default to -gdwarf-4 (#1974402)
-
-* Wed Jun  2 2021 Marek Polacek <polacek@redhat.com> 11.1.1-3
-- update from Fedora gcc 11.1.1-3 (#1946782)
-
-* Tue May 25 2021 Marek Polacek <polacek@redhat.com> 11.1.1-2.1
-- use gcc-toolset-11-binutils
-
-* Tue May 25 2021 Marek Polacek <polacek@redhat.com> 11.1.1-2
-- update from Fedora gcc 11.1.1-2
-- fix up mausezahn miscompilation (PR tree-optimization/100566)
-- fix build with removed linux/cyclades.h header (PR sanitizer/100379)
-- add a few Provides: bundled (#1859893)
-
-* Tue May 11 2021 Marek Polacek <polacek@redhat.com> 11.1.1-1
-- update to GCC 11 (#1946782)
-
-* Mon Apr 26 2021 Marek Polacek <polacek@redhat.com> 10.3.1-1
-- update from Fedora gcc 10.3.1-1 (#1929382)
-- drop gcc10-pr97060.patch
-- use --enable-cet
-- ship gcc-accel-nvptx-none-lto-dump
-- backport PR96939 fixes
-
-* Tue Mar 16 2021 Marek Polacek <polacek@redhat.com> 10.2.1-8.2
-- actually use libgfortran_nonshared.a (#1929375)
-- have libasan-devel require libasan6 (#1939638)
-
-* Mon Nov 16 2020 Marek Polacek <polacek@redhat.com> 10.2.1-8.1
-- apply fix for -flto=auto with missing make (#1896093, PR lto/97524)
-
-* Thu Nov 12 2020 Marek Polacek <polacek@redhat.com> 10.2.1-8
-- update from Fedora gcc 10.2.1-8 (#1878887)
-- emit DW_AT_declaration on declaration-only DIEs (#1897272, PR debug/97060)
-- add BuildRequires: make and Requires: make, the latter for -flto reasons
-
-* Tue Nov 03 2020 Marek Polacek <polacek@redhat.com> 10.2.1-7.1
-- adjust some libstdc++_nonshared.a symbol
-
-* Tue Nov 03 2020 Marek Polacek <polacek@redhat.com> 10.2.1-7
-- update from Fedora gcc 10.2.1-7 (#1878887)
-
-* Mon Aug 17 2020 Marek Polacek <polacek@redhat.com> 10.2.1-2.1
-- re-apply Fortran patches
-
-* Tue Aug  4 2020 Marek Polacek <polacek@redhat.com> 10.2.1-2
-- update from Fedora gcc 10.2.1-2
-- emit debug info for C/C++ external function declarations used in the TU
-  (PR debug/96383)
-- discard SHN_UNDEF global symbols from LTO debuginfo (PR lto/96385)
-- strip also -flto=auto from optflags
-
-* Sun Aug  2 2020 Marek Polacek <polacek@redhat.com> 10.2.1-1.2
-- avoid stack overflow in std::vector (PR libstdc++/94540, #1859670)
-- adjust some libstdc++_nonshared.a symbols
-- apply gcc10-libgfortran-compat-2.patch
-
-* Fri Jul 31 2020 Marek Polacek <polacek@redhat.com> 10.2.1-1.1
-- hide various symbols in libstdc++_nonshared.a
-
-* Mon Jul 27 2020 Marek Polacek <polacek@redhat.com> 10.2.1-1
-- GCC 10.2 release
-- add symlink to liblto_plugin.so in /usr/lib/bfd-plugins
-- disable -flto in %%{optflags}, lto bootstrap will be enabled the GCC way
-  later
-- require MPFR Library version 3.1.0 (or later)
-
-* Mon Jun 15 2020 Marek Polacek <polacek@redhat.com> 10.1.1-1.1
-- correct instructions for creation of newlib tarball, filter out sun-rpc
-  licensed code that is never used during the package build
-
-* Wed May 20 2020 Marek Polacek <polacek@redhat.com> 10.1.1-1
-- update to GCC 10.1.0 release
-
-* Wed May 20 2020 Marek Polacek <polacek@redhat.com> 9.2.1-2.2
-- new package
+  (RHEL-94866)
+
+* Fri Jun  6 2025 Marek Polacek <polacek@redhat.com> 15.1.1-2.2
+- configure with --enable-host-pie --enable-host-bind-now (RHEL-95564)
+
+* Wed Jun  4 2025 Marek Polacek <polacek@redhat.com> 15.1.1-2.1
+- re-enable annobin-plugin and offload-nvptx
+
+* Wed May 21 2025 Marek Polacek <polacek@redhat.com> 15.1.1-2
+- update from releases/gcc-15 branch
+  - PRs ada/112958, ada/120104, c/120057, c++/119863, c++/119864, c++/119938,
+   c++/119939, c++/119981, c++/119996, c++/120012, c++/120013,
+   c++/120023, c++/120125, c++/120161, c++/120350, fortran/102891,
+   fortran/102900, fortran/119928, fortran/119986, fortran/120049,
+   fortran/120107, fortran/120139, fortran/120163, fortran/120179,
+   fortran/120191, ipa/119852, ipa/119973, ipa/120006, ipa/120146,
+   libfortran/120152, libfortran/120153, libfortran/120158,
+   libfortran/120196, libstdc++/118260, libstdc++/119427,
+   libstdc++/119714, libstdc++/120029, libstdc++/120114,
+   libstdc++/120159, libstdc++/120187, libstdc++/120190,
+   libstdc++/120198, libstdc++/120293, modula2/115276, modula2/119914,
+   modula2/119915, modula2/120117, modula2/120188, preprocessor/116047,
+   preprocessor/120061, target/119610, testsuite/119909,
+   tree-optimization/111873, tree-optimization/119712,
+   tree-optimization/120043, tree-optimization/120048,
+   tree-optimization/120074, tree-optimization/120089,
+   tree-optimization/120143, tree-optimization/120211
+
+* Mon May 19 2025 Marek Polacek <polacek@redhat.com> 15.1.1-1
+- update from releases/gcc-15 branch
+  - GCC 15.1 release
+  - PRs fortran/119836, target/119327, target/119873, tree-optimization/118407
+
+* Mon May 12 2025 Siddhesh Poyarekar <siddhesh@redhat.com> 14.2.1-7.2
+- Fix GTS version in package name.
+
+* Mon Apr 14 2025 Marek Polacek <polacek@redhat.com> 14.2.1-7.1
+- new package (RHEL-81741)

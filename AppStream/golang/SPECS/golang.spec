@@ -29,7 +29,7 @@
 # Define GOROOT macros
 %global goroot          %{_prefix}/lib/%{name}
 %global gopath          %{_datadir}/gocode
-%global golang_arches   x86_64 aarch64 ppc64le s390x
+%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
 %global golibdir        %{_libdir}/%{name}
 
 # Golang build options.
@@ -56,7 +56,7 @@
 %endif
 
 # Controls what ever we fail on failed tests
-%ifarch x86_64 %{arm} ppc64le s390x
+%ifarch x86_64 %{arm} ppc64le s390x aarch64
 %global fail_on_tests 1
 %else
 %global fail_on_tests 0
@@ -93,16 +93,16 @@
 %endif
 
 %global go_api 1.25
-%global go_version 1.25.3
+%global go_version 1.25.9
 %global version %{go_version}
-%global pkg_release 1
+%global pkg_release 2
 
 # LLVM compiler-rt version for race detector
-%global llvm_compiler_rt_version 18.1.8
+#global llvm_compiler_rt_version 18.1.8
 
 Name:           golang
-Version:        %{version}
-Release:        1%{?dist}
+Version:	%{version}
+Release:        1%{?dist}.redsleeve
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD and Public Domain
@@ -117,7 +117,7 @@ Source0:        https://github.com/golang/go/archive/refs/tags/go%{version}.tar.
 Source1:	https://github.com/golang-fips/go/archive/refs/tags/go%{version}-%{pkg_release}-openssl-fips.tar.gz
 # make possible to override default traceback level at build time by setting build tag rpm_crashtraceback
 Source2:        fedora.go
-Source3: 	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{llvm_compiler_rt_version}/compiler-rt-%{llvm_compiler_rt_version}.src.tar.xz
+#Source3: 	https://github.com/llvm/llvm-project/releases/download/llvmorg-%{llvm_compiler_rt_version}/compiler-rt-%{llvm_compiler_rt_version}.src.tar.xz
 
 # The compiler is written in Go. Needs go(1.4+) compiler for build.
 # Actual Go based bootstrap compiler provided by above source.
@@ -137,13 +137,13 @@ BuildRequires:  openssl-devel
 BuildRequires:  pcre-devel, glibc-static, perl
 
 # Necessary for building llvm address sanitizer for Go race detector
-BuildRequires: libstdc++-devel
-BuildRequires: clang
+#BuildRequires: libstdc++-devel
+#BuildRequires: clang
 
 Provides:       go = %{version}-%{release}
 Requires:       %{name}-bin = %{version}-%{release}
 Requires:       %{name}-src = %{version}-%{release}
-Requires:       %{name}-race = %{version}-%{release}
+#Requires:       %{name}-race = %{version}-%{release}
 Requires:       openssl-devel
 Requires:       diffutils
 
@@ -156,6 +156,7 @@ Patch4:		modify_go.env.patch
 Patch6:		skip_TestCrashDumpsAllThreads.patch
 # Related: https://sourceware.org/bugzilla/show_bug.cgi?id=33204
 Patch7:     revert_dwarf5.patch
+Patch8:     skip-TestTerminalSignal-in-container.patch
 
 # Having documentation separate was broken
 Obsoletes:      %{name}-docs < 1.1-4
@@ -244,12 +245,12 @@ Requires:       delve
 This is the main package for go-toolset.
 
 
-%package race
-Summary:	Race detetector library object files.
-Requires:       %{name} = %{version}-%{release}
+#package race
+#Summary:	Race detetector library object files.
+#Requires:       %{name} = %{version}-%{release}
 
-%description    race
-Binary library objects for Go's race detector.
+#description    race
+#Binary library objects for Go's race detector.
 
 %prep
 %setup -q -n go-go%{version}
@@ -290,36 +291,36 @@ cat /proc/meminfo
 
 # Build race detector .syso's from llvm sources
 # The race detector requests a -fno-exceptions build.
-%global tsan_buildflags %(rpm -D 'toolchain clang' -E '%{optflags}' | sed 's/-fexceptions//')
-%global tsan_optflag -O1
-mkdir ../llvm
+#global tsan_buildflags %(rpm -D 'toolchain clang' -E '%{optflags}' | sed 's/-fexceptions//')
+#global tsan_optflag -O1
+#mkdir ../llvm
 
-tar -xf %{SOURCE3} -C ../llvm
-tsan_go_dir="../llvm/compiler-rt-%{llvm_compiler_rt_version}.src/lib/tsan/go"
+#tar -xf %{SOURCE3} -C ../llvm
+#tsan_go_dir="../llvm/compiler-rt-%{llvm_compiler_rt_version}.src/lib/tsan/go"
 
 # The script uses uname -a and grep to set the GOARCH.  This
 # is unreliable and can get the wrong architecture in
 # circumstances like cross-architecture emulation.  We fix it
 # by just reading GOARCH directly from Go.
-export GOARCH=$(go env GOARCH)
+#export GOARCH=$(go env GOARCH)
 
-%ifarch x86_64
-pushd "${tsan_go_dir}"
-  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang GOAMD64=v3 ./buildgo.sh
-popd
-cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v3/race_linux.syso
+#ifarch x86_64
+#pushd "${tsan_go_dir}"
+#  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang GOAMD64=v3 ./buildgo.sh
+#popd
+#cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v3/race_linux.syso
 
-pushd "${tsan_go_dir}"
-  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang GOAMD64=v1 ./buildgo.sh
-popd
-cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v1/race_linux.syso
+#pushd "${tsan_go_dir}"
+#  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang GOAMD64=v1 ./buildgo.sh
+#popd
+#cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v1/race_linux.syso
 
-%else
-pushd "${tsan_go_dir}"
-  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang ./buildgo.sh
-popd
-cp "${tsan_go_dir}"/race_linux_%{gohostarch}.syso ./src/runtime/race/race_linux_%{gohostarch}.syso
-%endif
+#else
+#pushd "${tsan_go_dir}"
+#  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang ./buildgo.sh
+#popd
+#cp "${tsan_go_dir}"/race_linux_%{gohostarch}.syso ./src/runtime/race/race_linux_%{gohostarch}.syso
+#endif
 
 
 # bootstrap compiler GOROOT
@@ -400,20 +401,37 @@ shared_list=$cwd/go-shared.list
 misc_list=$cwd/go-misc.list
 docs_list=$cwd/go-docs.list
 tests_list=$cwd/go-tests.list
+
+# Ensure they don't exist
 rm -f $src_list $pkg_list $docs_list $misc_list $tests_list $shared_list
 touch $src_list $pkg_list $docs_list $misc_list $tests_list $shared_list
+
+##################
+# Register files #
+##################
 pushd $RPM_BUILD_ROOT%{goroot}
-    find src/ -type d -a \( ! -name testdata -a ! -ipath '*/testdata/*' \) -printf '%%%dir %{goroot}/%p\n' >> $src_list
-    find src/ ! -type d -a \( ! -ipath '*/testdata/*' -a ! -name '*_test*.go' \) -printf '%{goroot}/%p\n' >> $src_list
 
-    find bin/ pkg/ -type d -a ! -path '*_dynlink/*' -a ! -path '*_race/*' -printf '%%%dir %{goroot}/%p\n' >> $pkg_list
-    find bin/ pkg/ ! -type d -a ! -path '*_dynlink/*' -a ! -path '*_race/*' -printf '%{goroot}/%p\n' >> $pkg_list
+# Src
+find src/ -type d -a \( ! -name testdata -a ! -ipath '*/testdata/*' \) -printf '%%%dir %{goroot}/%p\n' >> $src_list
+find src/ ! -type d -a \( ! -ipath '*/testdata/*' -a ! -name '*_test*.go' \) -printf '%{goroot}/%p\n' >> $src_list
 
-    find doc/ -type d -printf '%%%dir %{goroot}/%p\n' >> $docs_list
-    find doc/ ! -type d -printf '%{goroot}/%p\n' >> $docs_list
+# Bin
+find bin/ pkg/ -type d -a ! -path '*_dynlink/*' -a ! -path '*_race/*' -printf '%%%dir %{goroot}/%p\n' >> $pkg_list
+find bin/ pkg/ ! -type d -a ! -path '*_dynlink/*' -a ! -path '*_race/*' -printf '%{goroot}/%p\n' >> $pkg_list
 
-    find misc/ -type d -printf '%%%dir %{goroot}/%p\n' >> $misc_list
-    find misc/ ! -type d -printf '%{goroot}/%p\n' >> $misc_list
+# Docs
+find doc/ -type d -printf '%%%dir %{goroot}/%p\n' >> $docs_list
+find doc/ ! -type d -printf '%{goroot}/%p\n' >> $docs_list
+
+# Misc
+find misc/ -type d -printf '%%%dir %{goroot}/%p\n' >> $misc_list
+find misc/ ! -type d -printf '%{goroot}/%p\n' >> $misc_list
+
+# Test
+find test/ -type d -printf '%%%dir %{goroot}/%p\n' >> $tests_list
+find test/ ! -type d -printf '%{goroot}/%p\n' >> $tests_list
+find src/ -type d -a \( -name testdata -o -ipath '*/testdata/*' \) -printf '%%%dir %{goroot}/%p\n' >> $tests_list
+find src/ ! -type d -a \( -ipath '*/testdata/*' -o -name '*_test*.go' \) -printf '%{goroot}/%p\n' >> $tests_list
 
 %if %{shared}
     mkdir -p %{buildroot}/%{_libdir}/
@@ -431,14 +449,6 @@ pushd $RPM_BUILD_ROOT%{goroot}
     find pkg/*_dynlink/ -type d -printf '%%%dir %{goroot}/%p\n' >> $shared_list
     find pkg/*_dynlink/ ! -type d -printf '%{goroot}/%p\n' >> $shared_list
 %endif
-
-    find test/ -type d -printf '%%%dir %{goroot}/%p\n' >> $tests_list
-    find test/ ! -type d -printf '%{goroot}/%p\n' >> $tests_list
-    find src/ -type d -a \( -name testdata -o -ipath '*/testdata/*' \) -printf '%%%dir %{goroot}/%p\n' >> $tests_list
-    find src/ ! -type d -a \( -ipath '*/testdata/*' -o -name '*_test*.go' \) -printf '%{goroot}/%p\n' >> $tests_list
-    # this is only the zoneinfo.zip
-    find lib/ -type d -printf '%%%dir %{goroot}/%p\n' >> $tests_list
-    find lib/ ! -type d -printf '%{goroot}/%p\n' >> $tests_list
 popd
 
 # remove the doc Makefile
@@ -557,12 +567,12 @@ cd ..
 %{_sysconfdir}/prelink.conf.d
 
 %files -f go-src.list src
-%ifarch x86_64
-%exclude %{goroot}/src/runtime/race/internal/amd64v1/race_linux.syso
-%exclude %{goroot}/src/runtime/race/internal/amd64v3/race_linux.syso
-%else
-%exclude %{goroot}/src/runtime/race/race_linux_%{gohostarch}.syso
-%endif
+#ifarch x86_64
+#exclude %{goroot}/src/runtime/race/internal/amd64v1/race_linux.syso
+#exclude %{goroot}/src/runtime/race/internal/amd64v3/race_linux.syso
+#else
+#exclude %{goroot}/src/runtime/race/race_linux_%{gohostarch}.syso
+#endif
 
 %files -f go-docs.list docs
 
@@ -581,27 +591,54 @@ cd ..
 
 %files -n go-toolset
 
-%files race
-%ifarch x86_64
-%{goroot}/src/runtime/race/internal/amd64v1/race_linux.syso
-%{goroot}/src/runtime/race/internal/amd64v3/race_linux.syso
-%else
-%{goroot}/src/runtime/race/race_linux_%{gohostarch}.syso
-%endif
+#files race
+#ifarch x86_64
+#{goroot}/src/runtime/race/internal/amd64v1/race_linux.syso
+#{goroot}/src/runtime/race/internal/amd64v3/race_linux.syso
+#else
+#{goroot}/src/runtime/race/race_linux_%{gohostarch}.syso
+#endif
 
 %changelog
+* Wed May 13 2026 Jacco Ligthart <jacco@redsleeve.org> - 1.25.9-1.redsleeve
+- added arm to golang_arches
+- removed custom race detector
+
+* Wed Apr 22 2026 dbenoit <dbenoit@redhat.com> - 1.25.9-1
+- Update to Go 1.25.9 (fips-2)
+- Resolves: RHEL-169931
+
+* Tue Mar 24 2026 dbenoit <dbenoit@redhat.com> - 1.25.8-2
+- Update to Go 1.25.8 (fips-1)
+- Resolves: RHEL-157451
+
+* Thu Feb 12 2026 dbenoit <dbenoit@redhat.com> - 1.25.7-1
+- Update to Go 1.25.7 (fips-1)
+- Resolves: RHEL-146476
+
+* Tue Jan 20 2026 dbenoit <dbenoit@redhat.com> - 1.25.5-2
+- Rebase to rhel-9-main
+- Related: RHEL-139366
+
+* Mon Jan 19 2026 dbenoit <dbenoit@redhat.com> - 1.25.5-1
+- Update to Go 1.25.5 (fips-1)
+- Resolves: RHEL-139366
+
+* Fri Dec 19 2025 Alejandro Sáez <asm@redhat.com> - 1.25.3-2
+- Cleanup lib/ ownership
+
 * Wed Oct 29 2025 Alejandro Sáez <asm@redhat.com> - 1.25.3-1
 - Update to Go 1.25.3
-- Resolves: RHEL-121220
+- Related: RHEL-139366
 
 * Mon Sep 29 2025 Archana Ravindar <aravinda@redhat.com> - 1.25.1-1
 - Update to Go 1.25.1
-- Resolves: RHEL-116850
+- Related: RHEL-139366
 
 * Fri Sep 12 2025 Alejandro Sáez <asm@redhat.com> - 1.25.0-2
 - Revert DWARF5 defaults
 - Add elf5 to rpminspect.yaml
-- Related: RHEL-109557
+- Related: RHEL-139366
 
 * Wed Aug 20 2025 Alejandro Sáez <asm@redhat.com> - 1.25.0-1
 - Update to Go 1.25.0

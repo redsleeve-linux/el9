@@ -1,7 +1,7 @@
 Summary: Lightweight library to easily extract data from zip files
 Name: zziplib
 Version: 0.13.71
-Release: 12%{?dist}
+Release: 12%{?dist}.redsleeve
 License: LGPLv2+ or MPLv1.1
 URL: http://zziplib.sourceforge.net/
 #Source: https://github.com/gdraheim/zziplib/archive/v%{version}.tar.gz
@@ -95,10 +95,10 @@ sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool
 # These platforms have a correct _config.h already
 
 pushd %{_builddir}/zziplib-%{version}
-%ifarch i686 armv7hl
+%ifarch i686 %{arm}
  patch -p2 < %{PATCH100}
 %endif
-%ifnarch i686 armv7hl
+%ifnarch i686 %{arm}
  patch -p2 < %{PATCH101}
 %endif
 popd
@@ -128,6 +128,9 @@ popd
 %{_mandir}/man3/*
 
 %changelog
+* Sun Nov 30 2025 Jacco Ligthart <jacco@redsleeve.org> - 0.13.71-12.redsleeve
+- changed armv7 to arm
+
 * Thu Jun 12 2025 Jakub Martisko <jamartis@redhat.com> - 0.13.71-12
 - Fix a directory traversal issue in unzip-mem
   Resolves: RHEL-6266

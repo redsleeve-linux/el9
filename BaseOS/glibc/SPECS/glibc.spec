@@ -2821,7 +2821,7 @@ update_gconv_modules_cache ()
 %endif
 
 %changelog
-* Sat Nov 29 2025 Jacco Ligthart <jacco@redsleeve.org> - 2.34-231.2.redsleeve
+* Wed Feb 25 2026 Jacco Ligthart <jacco@redsleeve.org> - 2.34-231.10.redsleeve
 - add dl-tunables.list for arm
 
 %{lua:patchgit.changelog()}

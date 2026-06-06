@@ -10,7 +10,7 @@
 
 Name:                 rust
 Version:              1.88.0
-Release:              %autorelease
+Release:              %autorelease.redsleeve
 Summary:              The Rust Programming Language
 License:              (Apache-2.0 OR MIT) AND (Artistic-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unicode-3.0)
 # ^ written as: (rust itself) and (bundled libraries)
@@ -18,7 +18,7 @@ URL:                  https://www.rust-lang.org
 
 # Only x86_64, i686, and aarch64 are Tier 1 platforms at this time.
 # https://doc.rust-lang.org/nightly/rustc/platform-support.html
-%global rust_arches x86_64 i686 aarch64 ppc64le s390x
+%global rust_arches x86_64 i686 aarch64 ppc64le s390x armv6hl
 ExclusiveArch:        %{rust_arches}
 
 # To bootstrap from scratch, set the channel and date from src/stage0
@@ -171,6 +171,9 @@ Patch100:             rustc-1.88.0-disable-libssh2.patch
   if arch == "armv7hl" then
     arch = "armv7"
     abi = abi.."eabihf"
+  elseif arch == "armv6hl" then
+    arch = "arm"
+    abi = "gnueabihf"
   elseif arch == "ppc64le" then
     arch = "powerpc64le"
   elseif arch == "riscv64" then
@@ -838,7 +841,7 @@ end}
 
 # Find the compiler-rt library for the Rust profiler_builtins crate.
 %define clang_lib %{expand:%%clang%{?llvm_compat_version}_resource_dir}/lib
-%define profiler %{clang_lib}/%{_arch}-redhat-linux-gnu/libclang_rt.profile.a
+%define profiler %{clang_lib}/%{_arch}-redhat-linux-gnueabihf/libclang_rt.profile.a
 test -r "%{profiler}"
 
 %configure --disable-option-checking \
@@ -1212,6 +1215,9 @@ rm -rf "./build/%{rust_triple}/stage2-tools/%{rust_triple}/cit/"
 
 
 %changelog
+* Sun Nov 30 2025 Jacco Ligthart <jacco@redsleeve.org> - 1.88.0-1.redsleeve
+- added armv6 to rust_arches
+
 * Thu Oct 30 2025 Release Engineering <releng@rockylinux.org> - 1.88.0-1
 - constrain to 4 core on s390x
 - use less verbose debuginfo for s390x

@@ -1,12 +1,13 @@
-From 1b47faf3f747a79fce589196b2fd574ada5d3357 Mon Sep 17 00:00:00 2001
+From 7fd12e0e0dbd196b4b59a5b89ea6fbe6a53df1fd Mon Sep 17 00:00:00 2001
 From: Jacco Ligthart <jacco@redsleeve.org>
-Date: Mon, 9 Jun 2025 14:04:37 +0200
+Date: Sun, 30 Nov 2025 18:06:22 +0100
 Subject: [PATCH] patched for sha1 build-ids on arm when using clang
 
 ---
  SOURCES/macros-arm.patch     | 27 +++++++++++++++++++++++++++
- SPECS/redhat-rpm-config.spec |  9 ++++++++-
- 2 files changed, 35 insertions(+), 1 deletion(-)
+ SOURCES/macros.java-srpm     |  2 +-
+ SPECS/redhat-rpm-config.spec | 10 +++++++++-
+ 3 files changed, 37 insertions(+), 2 deletions(-)
  create mode 100644 SOURCES/macros-arm.patch
 
 diff --git a/SOURCES/macros-arm.patch b/SOURCES/macros-arm.patch
@@ -42,20 +43,28 @@ index 0000000..067f786
 + %_general_options       -O2 %{?_lto_cflags} -fexceptions -g -grecord-gcc-switches -pipe
 + %_warning_options       -Wall -Werror=format-security
 + %_preprocessor_defines  -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS
+diff --git a/SOURCES/macros.java-srpm b/SOURCES/macros.java-srpm
+index a32a7fd..ff25062 100644
+--- a/SOURCES/macros.java-srpm
++++ b/SOURCES/macros.java-srpm
+@@ -1,2 +1,2 @@
+ # Arches that OpenJDK and dependent packages run on
+-%java_arches aarch64 ppc64le s390x x86_64
++%java_arches aarch64 ppc64le s390x x86_64 %{arm}
 diff --git a/SPECS/redhat-rpm-config.spec b/SPECS/redhat-rpm-config.spec
-index bd0ad17..d617add 100644
+index 414f484..92c83fc 100644
 --- a/SPECS/redhat-rpm-config.spec
 +++ b/SPECS/redhat-rpm-config.spec
 @@ -7,7 +7,7 @@
  Summary:              Red Hat specific rpm configuration files
  Name:                 redhat-rpm-config
- Version:              209
+ Version:              210
 -Release:              1%{?dist}
 +Release:              1%{?dist}.redsleeve
  # No version specified.
  License:              GPL+
  URL:                  https://src.fedoraproject.org/rpms/redhat-rpm-config
-@@ -89,6 +89,7 @@ Source801:            forge.lua
+@@ -86,6 +86,7 @@ Source801:            forge.lua
  # Documentation
  Source900:            buildflags.md
  
@@ -63,7 +72,7 @@ index bd0ad17..d617add 100644
  
  BuildArch:            noarch
  BuildRequires:        perl-generators
-@@ -174,6 +175,8 @@ mkdir -p %{buildroot}%{_rpmluadir}/fedora/{rpm,srpm}
+@@ -167,6 +168,8 @@ mkdir -p %{buildroot}%{_rpmluadir}/fedora/{rpm,srpm}
  install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora common.lua
  install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
  
@@ -72,17 +81,18 @@ index bd0ad17..d617add 100644
  # This trigger is used to decide which version of the annobin plugin for gcc
  # should be used.  See comments in the script for full details.
  #
-@@ -256,6 +259,10 @@ install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
+@@ -249,6 +252,11 @@ install -p -m 644 -t %{buildroot}%{_rpmluadir}/fedora/srpm forge.lua
  %doc buildflags.md
  
  %changelog
-+* Mon Jun 09 2025 Jacco Ligthart <jaco@redsleeve.org> 209-1.el9.redsleeve
++* Sun Nov 30 2025 Jacco Ligthart <jaco@redsleeve.org> 210-1.el9.redsleeve
 +- patched for sha1 build-ids on arm when using clang
 +- cherry picked from https://src.fedoraproject.org/rpms/redhat-rpm-config/pull-request/155
++- added %{arm} to java_arches
 +
- * Tue Apr 22 2025 Release Engineering <releng@rockylinux.org> - 209-1
+ * Fri Oct 31 2025 Release Engineering <releng@rockylinux.org> - 210-1
  - Add Rocky to dist.sh
  
 -- 
-2.43.5
+2.47.3
 

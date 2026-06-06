@@ -1,14 +1,14 @@
-From 9d965a8e5d10d2e4600c25dff0e8bd1ec497894a Mon Sep 17 00:00:00 2001
+From 44a19453072886525a8c3dbab7d16da8bfceee56 Mon Sep 17 00:00:00 2001
 From: Jacco Ligthart <jacco@redsleeve.org>
-Date: Mon, 9 Jun 2025 13:39:18 +0200
+Date: Wed, 13 May 2026 18:59:50 +0200
 Subject: [PATCH] added arm to golang_arches
 
 ---
- SPECS/golang.spec | 95 +++++++++++++++++++++++++----------------------
- 1 file changed, 50 insertions(+), 45 deletions(-)
+ SPECS/golang.spec | 96 ++++++++++++++++++++++++-----------------------
+ 1 file changed, 50 insertions(+), 46 deletions(-)
 
 diff --git a/SPECS/golang.spec b/SPECS/golang.spec
-index 3efe041..ecd9882 100644
+index c608d5c..e0ad3dc 100644
 --- a/SPECS/golang.spec
 +++ b/SPECS/golang.spec
 @@ -29,7 +29,7 @@
@@ -21,14 +21,14 @@ index 3efe041..ecd9882 100644
  
  # Golang build options.
 @@ -98,11 +98,11 @@
- %global pkg_release 1
+ %global pkg_release 2
  
  # LLVM compiler-rt version for race detector
 -%global llvm_compiler_rt_version 18.1.8
 +#global llvm_compiler_rt_version 18.1.8
  
  Name:           golang
- Version:        %{version}
+ Version:	%{version}
 -Release:        1%{?dist}
 +Release:        1%{?dist}.redsleeve
  Summary:        The Go Programming Language
@@ -60,7 +60,7 @@ index 3efe041..ecd9882 100644
  Requires:       openssl-devel
  Requires:       diffutils
  
-@@ -242,12 +242,12 @@ Requires:       delve
+@@ -245,12 +245,12 @@ Requires:       delve
  This is the main package for go-toolset.
  
  
@@ -78,13 +78,15 @@ index 3efe041..ecd9882 100644
  
  %prep
  %setup -q -n go-go%{version}
-@@ -287,35 +287,36 @@ cat /proc/cpuinfo
- cat /proc/meminfo
+@@ -291,36 +291,36 @@ cat /proc/meminfo
  
  # Build race detector .syso's from llvm sources
--%global tsan_buildflags %(echo %{build_cflags} | sed 's/-mtls-dialect=gnu2//')
+ # The race detector requests a -fno-exceptions build.
+-%global tsan_buildflags %(rpm -D 'toolchain clang' -E '%{optflags}' | sed 's/-fexceptions//')
+-%global tsan_optflag -O1
 -mkdir ../llvm
-+#global tsan_buildflags %(echo %{build_cflags} | sed 's/-mtls-dialect=gnu2//')
++#global tsan_buildflags %(rpm -D 'toolchain clang' -E '%{optflags}' | sed 's/-fexceptions//')
++#global tsan_optflag -O1
 +#mkdir ../llvm
  
 -tar -xf %{SOURCE3} -C ../llvm
@@ -101,41 +103,40 @@ index 3efe041..ecd9882 100644
  
 -%ifarch x86_64
 -pushd "${tsan_go_dir}"
--  CFLAGS="${tsan_buildflags}" CC=clang GOAMD64=v3 ./buildgo.sh
+-  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang GOAMD64=v3 ./buildgo.sh
 -popd
 -cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v3/race_linux.syso
- 
--pushd "${tsan_go_dir}"
--  CFLAGS="${tsan_buildflags}" CC=clang GOAMD64=v1 ./buildgo.sh
--popd
--cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v1/race_linux.syso
 +#ifarch x86_64
 +#pushd "${tsan_go_dir}"
-+#  CFLAGS="${tsan_buildflags}" CC=clang GOAMD64=v3 ./buildgo.sh
++#  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang GOAMD64=v3 ./buildgo.sh
 +#popd
 +#cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v3/race_linux.syso
  
+-pushd "${tsan_go_dir}"
+-  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang GOAMD64=v1 ./buildgo.sh
+-popd
+-cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v1/race_linux.syso
++#pushd "${tsan_go_dir}"
++#  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang GOAMD64=v1 ./buildgo.sh
++#popd
++#cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v1/race_linux.syso
+ 
 -%else
 -pushd "${tsan_go_dir}"
--  CFLAGS="${tsan_buildflags}" CC=clang ./buildgo.sh
+-  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang ./buildgo.sh
 -popd
 -cp "${tsan_go_dir}"/race_linux_%{gohostarch}.syso ./src/runtime/race/race_linux_%{gohostarch}.syso
 -%endif
-+#pushd "${tsan_go_dir}"
-+#  CFLAGS="${tsan_buildflags}" CC=clang GOAMD64=v1 ./buildgo.sh
-+#popd
-+#cp "${tsan_go_dir}"/race_linux_amd64.syso ./src/runtime/race/internal/amd64v1/race_linux.syso
-+
 +#else
 +#pushd "${tsan_go_dir}"
-+#  CFLAGS="${tsan_buildflags}" CC=clang ./buildgo.sh
++#  CFLAGS="%{tsan_buildflags} %{tsan_optflag}" CC=clang ./buildgo.sh
 +#popd
 +#cp "${tsan_go_dir}"/race_linux_%{gohostarch}.syso ./src/runtime/race/race_linux_%{gohostarch}.syso
 +#endif
  
  
  # bootstrap compiler GOROOT
-@@ -550,12 +551,12 @@ cd ..
+@@ -567,12 +567,12 @@ cd ..
  %{_sysconfdir}/prelink.conf.d
  
  %files -f go-src.list src
@@ -154,7 +155,7 @@ index 3efe041..ecd9882 100644
  
  %files -f go-docs.list docs
  
-@@ -574,15 +575,19 @@ cd ..
+@@ -591,15 +591,19 @@ cd ..
  
  %files -n go-toolset
  
@@ -174,13 +175,13 @@ index 3efe041..ecd9882 100644
 +#endif
  
  %changelog
-+* Mon Jun 09 2025 Jacco Ligthart <jacco@redsleeve.org> - 1.23.4-1.redsleeve
++* Wed May 13 2026 Jacco Ligthart <jacco@redsleeve.org> - 1.25.9-1.redsleeve
 +- added arm to golang_arches
 +- removed custom race detector
 +
- * Thu Jan 09 2025 David Benoit <dbenoit@redhat.com> - 1.23.4-1
- - Update to Go 1.23.4 (fips-1)
- - Resolves: RHEL-61048
+ * Wed Apr 22 2026 dbenoit <dbenoit@redhat.com> - 1.25.9-1
+ - Update to Go 1.25.9 (fips-2)
+ - Resolves: RHEL-169931
 -- 
-2.43.5
+2.47.3
 

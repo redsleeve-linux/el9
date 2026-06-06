@@ -10,9 +10,17 @@
 %global with_gamepad 1
 %endif
 
+# Clang is preferred: https://skia.org/docs/user/build/#supported-and-preferred-compilers
+%global toolchain clang
+
+# We run out of memory if building with LTO enabled on i686.
+%ifarch %{ix86}
+%global _lto_cflags %{nil}
+%endif
+
 Name:           webkit2gtk3
-Version:        2.42.5
-Release:        1%{?dist}.redsleeve
+Version:        2.52.3
+Release:        0%{?dist}.1.redsleeve
 Summary:        GTK Web content engine library
 
 License:        LGPLv2
@@ -21,18 +29,35 @@ Source0:        https://webkitgtk.org/releases/webkitgtk-%{version}.tar.xz
 Source1:        https://webkitgtk.org/releases/webkitgtk-%{version}.tar.xz.asc
 # Use the keys from https://webkitgtk.org/verifying.html
 # $ gpg --import aperez.key carlosgc.key
-# $ gpg --export --export-options export-minimal D7FCF61CF9A2DEAB31D81BD3F3D322D0EC4582C3 5AA3BC334FD7E3369E7C77B291C559DBE4C9123B > webkitgtk-keys.gpg
+# $ gpg --export --export-options export-minimal 013A0127AC9C65B34FFA62526C1009B693975393 5AA3BC334FD7E3369E7C77B291C559DBE4C9123B > webkitgtk-keys.gpg
 Source2:        webkitgtk-keys.gpg
 
-# https://bugs.webkit.org/show_bug.cgi?id=268739
-Patch:          i686-build.patch
-Patch100:       webkitgtk-arm-ANGLE-serial.patch
+##
+## Patches to support older or missing build dependencies
+##
+Patch:          glib-2-68.patch
+Patch:          libsoup2.patch
+Patch:          icu-67.patch
+Patch:          g-ir-scanner-nonfatal.patch
+
+##
+## Patches to support older Evolution
+##
+Patch:          evolution-sandbox-warning.patch
+
+##
+## Upstream patches to remove, hopefully after next update
+##
+
+# https://github.com/WebKit/WebKit/pull/58096
+Patch:          aarch64-build.patch
 
 BuildRequires:  bison
 BuildRequires:  bubblewrap
+BuildRequires:  clang
 BuildRequires:  cmake
 BuildRequires:  flex
-BuildRequires:  gcc-c++
+BuildRequires:  gcc-toolset-14-libatomic-devel
 BuildRequires:  gettext
 BuildRequires:  git
 BuildRequires:  gnupg2
@@ -41,6 +66,7 @@ BuildRequires:  hyphen-devel
 BuildRequires:  libatomic
 BuildRequires:  ninja-build
 BuildRequires:  openssl-devel
+BuildRequires:  perl(bigint)
 BuildRequires:  perl(English)
 BuildRequires:  perl(FindBin)
 BuildRequires:  perl(JSON::PP)
@@ -56,6 +82,7 @@ BuildRequires:  pkgconfig(cairo)
 BuildRequires:  pkgconfig(egl)
 BuildRequires:  pkgconfig(enchant-2)
 BuildRequires:  pkgconfig(epoxy)
+BuildRequires:  pkgconfig(expat)
 BuildRequires:  pkgconfig(fontconfig)
 BuildRequires:  pkgconfig(freetype2)
 BuildRequires:  pkgconfig(gbm)
@@ -72,7 +99,6 @@ BuildRequires:  pkgconfig(libdrm)
 BuildRequires:  pkgconfig(libgcrypt)
 BuildRequires:  pkgconfig(libjpeg)
 BuildRequires:  pkgconfig(libnotify)
-BuildRequires:  pkgconfig(libopenjp2)
 BuildRequires:  pkgconfig(libpcre)
 BuildRequires:  pkgconfig(libpng)
 BuildRequires:  pkgconfig(libseccomp)
@@ -87,13 +113,12 @@ BuildRequires:  pkgconfig(libxslt)
 BuildRequires:  pkgconfig(manette-0.2)
 %endif
 BuildRequires:  pkgconfig(sqlite3)
+BuildRequires:  pkgconfig(sysprof-capture-4)
 BuildRequires:  pkgconfig(upower-glib)
 BuildRequires:  pkgconfig(wayland-client)
 BuildRequires:  pkgconfig(wayland-egl)
 BuildRequires:  pkgconfig(wayland-protocols)
 BuildRequires:  pkgconfig(wayland-server)
-BuildRequires:  pkgconfig(wpe-1.0)
-BuildRequires:  pkgconfig(wpebackend-fdo-1.0)
 BuildRequires:  pkgconfig(xt)
 
 # These are hard requirements of WebKit's bubblewrap sandbox.
@@ -134,6 +159,8 @@ Provides:       webkit2gtk3-doc = %{version}-%{release}
 # We're supposed to specify versions here, but these libraries don't do
 # normal releases. Accordingly, they're not suitable to be system libs.
 Provides:       bundled(angle)
+Provides:       bundled(pdfjs)
+Provides:       bundled(skia)
 Provides:       bundled(xdgmime)
 
 # Require the jsc subpackage
@@ -164,6 +191,8 @@ files for developing applications that use %{name}.
 Summary:        JavaScript engine from %{name}
 Obsoletes:      webkitgtk4-jsc < %{version}-%{release}
 Provides:       webkitgtk4-jsc = %{version}-%{release}
+Provides:       bundled(simde)
+Provides:       bundled(simdutf)
 
 %description    jsc
 This package contains JavaScript engine from %{name}.
@@ -215,18 +244,23 @@ rm -rf Source/ThirdParty/qunit/
   -GNinja \
   -DPORT=GTK \
   -DCMAKE_BUILD_TYPE=Release \
-  -DENABLE_JIT=OFF \
+  -DUSE_GTK4=OFF \
   -DUSE_SOUP2=ON \
   -DUSE_AVIF=OFF \
   -DENABLE_DOCUMENTATION=OFF \
+  -DENABLE_SPEECH_SYNTHESIS=OFF \
   -DUSE_GSTREAMER_TRANSCODER=OFF \
   -DUSE_JPEGXL=OFF \
+  -DUSE_LIBBACKTRACE=OFF \
 %if !0%{?with_gamepad}
   -DENABLE_GAMEPAD=OFF \
 %endif
 %if 0%{?rhel}
 %ifarch aarch64
   -DUSE_64KB_PAGE_BLOCK=ON \
+%endif
+%ifarch armv6hl
+  -DCMAKE_SHARED_LINKER_FLAGS="-latomic" \
 %endif
 %endif
   %{nil}
@@ -298,8 +332,109 @@ export NINJA_STATUS="[%f/%t][%e] "
 %{_datadir}/gir-1.0/JavaScriptCore-4.0.gir
 
 %changelog
-* Fri May 31 2024 Jacco Ligthart <jacco@redsleeve.org> - 2.42.5-1.redsleeve
-- Add a patch to build on armv6
+* Fri May 08 2026 Jacco Ligthart <jacco@redsleeve.org> - 2.52.3-0.1.redsleeve
+- added atomic to the linker
+
+* Mon Apr 20 2026 Michael Catanzaro <mcatanzaro@redhat.com> - 2.52.3-0.1
+- Update to 2.52.1
+
+* Fri Dec 19 2025 Ravina Jain <rajain@redhat.com> - 2.50.4-1
+- Update to 2.50.4
+- Fix CVE-2025-43529 with Rebase
+- Fix CVE-2025-43531 with Rebase
+- Fix CVE-2025-43501 with Rebase
+- Fix CVE-2025-43536 with Rebase
+- Fix CVE-2025-43535 with Rebase
+- Fix CVE-2025-43541 with Rebase
+
+* Fri Dec 05 2025 Kashyap <kekbote@redhat.com> - 2.50.3-1
+- Update to 2.50.3
+- Fix CVE-2025-43443 with Rebase
+- Fix CVE-2025-43440 with Rebase
+- Fix CVE-2025-43434 with Rebase
+- Fix CVE-2025-43432 with Rebase
+- Fix CVE-2025-43431 with Rebase
+- Fix CVE-2025-43430 with Rebase
+- Fix CVE-2025-43429 with Rebase
+- Fix CVE-2025-43427 with Rebase
+- Fix CVE-2025-43425 with Rebase
+- Fix CVE-2025-43421 with Rebase
+- Fix CVE-2025-43392 with Rebase
+- Fix CVE-2025-66287 with Rebase
+- Fix CVE-2025-43458 with Rebase
+- Fix CVE-2025-13947 with Rebase
+- Fix CVE-2025-13502 with Rebase
+
+* Tue Oct 14 2025 Michael Catanzaro <mcatanzaro@redhat.com> - 2.50.1-1
+- Update to 2.50.1
+
+* Wed Oct 01 2025 Michael Catanzaro <mcatanzaro@redhat.com> - 2.50.0-1
+- Update to 2.50.0
+
+* Fri Aug 08 2025 Michael Catanzaro <mcatanzaro@redhat.com> - 2.48.5-1
+- Update to 2.48.5
+
+* Fri May 30 2025 Michael Catanzaro <mcatanzaro@redhat.com> - 2.48.3-1
+- Update to 2.48.3
+
+* Wed May 14 2025 Michael Catanzaro <mcatanzaro@redhat.com> - 2.48.2-1
+- Update to 2.48.2
+- Reenable JIT
+
+* Wed Apr 02 2025 Michael Catanzaro <mcatanzaro@redhat.com> - 2.48.1-1
+- Update to 2.48.1
+
+* Mon Mar 31 2025 Michael Catanzaro <mcatanzaro@redhat.com> - 2.48.0-1
+- Update to 2.48.0
+
+* Thu Mar 13 2025 Michael Catanzaro <mcatanzaro@redhat.com> - 2.46.6-2
+- Add patch for CVE-2025-24201
+
+* Tue Feb 25 2025 Michael Catanzaro <mcatanzaro@redhat.com> - 2.46.6-1
+- Update to 2.46.6
+
+* Wed Dec 18 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.46.5-1
+- Update to 2.46.5
+
+* Mon Dec 02 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.46.4-1
+- Update to 2.46.4
+
+* Wed Oct 30 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.46.3-1
+- Update to 2.46.3
+
+* Mon Oct 21 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.46.2-1
+- Update to 2.46.2
+- Add patch to disable Evolution sandbox warning 
+  Resolves: RHEL-59181
+
+* Thu Oct 10 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.46.1-2
+- Add patch to keep GSocketMonitor callback alive
+  Resolves: RHEL-59181
+
+* Mon Sep 30 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.46.1-1
+- Update to 2.46.1
+  Resolves: RHEL-59181
+
+* Wed Sep 18 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.46.0-1
+- Upgrade to 2.46.0
+  Resolves: RHEL-59181
+
+* Thu Aug 15 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.44.3-2
+- Add patch to fix WebAssembly
+  Resolves: RHEL-32578
+
+* Tue Aug 13 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.44.3-1
+- Update to 2.44.3
+  Resolves: RHEL-32578
+
+* Thu May 16 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.44.2-1
+- Update to 2.44.2
+  Resolves: RHEL-32578
+
+* Thu Apr 11 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.44.1-1
+- Update to 2.44.1
+  Resolves: RHEL-32578
+  Resolves: RHEL-29637 
 
 * Mon Feb 05 2024 Michael Catanzaro <mcatanzaro@redhat.com> - 2.42.5-1
 - Update to 2.42.5

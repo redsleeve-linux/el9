@@ -14,7 +14,7 @@ ExcludeArch: %{ix86}
 # The last version on which the full testsuite has been run
 # In case of further rebuilds of that version, don't require full testsuite to be run
 # run only "main" suite
-%global last_tested_version 10.5.27
+%global last_tested_version 10.5.29
 # Set to 1 to force run the testsuite even if it was already tested in current version
 %global force_run_testsuite 0
 
@@ -157,8 +157,8 @@ ExcludeArch: %{ix86}
 %global sameevr   %{epoch}:%{version}-%{release}
 
 Name:             mariadb
-Version:          10.5.27
-Release:          1%{?with_debug:.debug}%{?dist}.redsleeve
+Version:          10.5.29
+Release:          3%{?with_debug:.debug}%{?dist}.redsleeve
 Epoch:            3
 
 Summary:          A very fast and robust SQL database server
@@ -225,6 +225,8 @@ Patch10:          %{pkgnamepatch}-ssl-cipher-tests.patch
 
 #   Patch14: make MTR port calculation reasonably predictable
 Patch14:          %{pkgnamepatch}-mtr.patch
+
+Patch18:          CVE-2025-13699.patch
 
 Patch1000:        1063738-revert-c432c9ef.patch
 
@@ -760,6 +762,7 @@ rm -r storage/rocksdb/
 # Keeping the patch commented out, need to revisit
 #  once the test is re-enabled by upstream  in some future release
 #%%patch10 -p1
+%patch18 -p1
 
 # generate a list of tests that fail, but are not disabled by upstream
 cat %{SOURCE50} | tee -a mysql-test/unstable-tests
@@ -1658,8 +1661,17 @@ fi
 %endif
 
 %changelog
-* Sat Mar 22 2025 Jacco Ligthart <jacco@redsleeve.org> 3:10.5.27-1.redsleeve
+* Fri Jan 16 2026 Jacco Ligthart <jacco@redsleeve.org> 3:10.5.29-3.redsleeve
 - Added a patch to fix FTBFS on 32 bit
+
+* Tue Dec 02 2025 Pavol Sloboda <psloboda@redhat.com> - 3:10.5.29-3
+- Release bump for rebuild
+
+* Wed Oct 01 2025 Pavol Sloboda <psloboda@redhat.com> - 3:10.5.29-2
+- Release bump for rebuild
+
+* Mon Aug 25 2025 Pavol Sloboda <psloboda@redhat.com> - 3:10.5.29-1
+- Rebase to 10.5.29
 
 * Tue Dec 03 2024 Michal Schorm <mschorm@redhat.com> - 3:10.5.27-1
 - Rebase to 10.5.27

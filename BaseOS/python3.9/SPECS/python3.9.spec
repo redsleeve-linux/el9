@@ -17,8 +17,12 @@ URL: https://www.python.org/
 #global prerel ...
 %global upstream_version %{general_version}%{?prerel}
 Version: %{general_version}%{?prerel:~%{prerel}}
-Release: 2%{?dist}
+Release: 3%{?dist}.3.redsleeve
 License: Python
+
+%ifarch armv6hl
+%define _gnu "-gnueabihf"
+%endif
 
 
 # ==================================
@@ -437,6 +441,64 @@ Patch415: 00415-cve-2023-27043-gh-102988-reject-malformed-addresses-in-email-par
 # Feeding the parser by too small chunks defers parsing to prevent
 # CVE-2023-52425. Future versions of Expat may be more reactive.
 Patch422: 00422-fix-tests-for-xmlpullparser-with-expat-2-6-0.patch
+
+# 00471 # fc5f344f7e15c13dbf41824a1b7a82d92205f79d
+# CVE-2025-12084
+#
+# * gh-142145: Remove quadratic behavior in node ID cache clearing (GH-142146)
+# * gh-142754: Ensure that Element & Attr instances have the ownerDocument attribute (GH-142794)
+Patch471: 00471-cve-2025-12084.patch
+
+# 00473 # 7e68b796abe391a467dba42b6641053aac726d67
+# CVE-2026-0865
+#
+#  gh-143916: Reject control characters in wsgiref.headers.Headers  (GH-143917)
+#
+# * Add 'test.support' fixture for C0 control characters
+# * gh-143916: Reject control characters in wsgiref.headers.Headers
+Patch473: 00473-cve-2026-0865.patch
+
+# 00474 # 837ddca0372fa87ff9cee47142200caa21e77def
+# CVE-2025-15366
+#
+# gh-143921: Reject control characters in IMAP commands
+#
+# (cherry-picked from commit 6262704b134db2a4ba12e85ecfbd968534f28b45)
+Patch474: 00474-cve-2025-15366.patch
+
+# 00475 # 00384c03f44af74c955a44637eee0b66f717a487
+# CVE-2025-15367
+#
+# gh-143923: Reject control characters in POP3 commands
+#
+# (cherry-picked from commit b234a2b67539f787e191d2ef19a7cbdce32874e7)
+Patch475: 00475-cve-2025-15367.patch
+
+# 00476 # efbfd1798bf8c1a9845546a0ed9193f94661dd1b
+# CVE-2026-1299
+#
+# gh-144125: email: verify headers are sound in BytesGenerator
+Patch476: 00476-cve-2026-1299.patch
+
+# 00478 # 88bb1e37c971fd1d6bda82a68b5ad873ed099f08
+# CVE-2026-4519
+#
+# Reject leading dashes in webbrowser URLs (GH-143931) (GH-146359)
+#
+# Cherry-picked from Python 3.10: ad4d5ba32af4d80b0dfa2ba9d8203bfb219e60a5
+Patch478: 00478-cve-2026-4519.patch
+
+# 00480 # 9f4b1483ecfbc8c08117133c239fba544fcb42e7
+# CVE-2026-4786
+#
+# Fix webbrowser `%%action` substitution bypass of dash-prefix check
+Patch480: 00480-cve-2026-4786.patch
+
+# 00482 # 51e25e8a804257b707e2021655037d07dcfa9cd6
+# CVE-2026-6100
+#
+# Fix a possible UAF in {LZMA,BZ2,_Zlib}Decompressor
+Patch482: 00482-cve-2026-6100.patch
 
 # (New patches go here ^^^)
 #
@@ -1039,10 +1101,10 @@ InstallPython() {
 %endif # with gdb_hooks
 
   # Rename the -devel script that differs on different arches to arch specific name
-  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
-  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
-    %{buildroot}%{_bindir}/python${LDVersion}-config
-    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
+#  mv %{buildroot}%{_bindir}/python${LDVersion}-{,`uname -m`-}config
+#  echo -e '#!/bin/sh\nexec %{_bindir}/python'${LDVersion}'-`uname -m`-config "$@"' > \
+#    %{buildroot}%{_bindir}/python${LDVersion}-config
+#    chmod +x %{buildroot}%{_bindir}/python${LDVersion}-config
 
   # Make python3-devel multilib-ready
   mv %{buildroot}%{_includedir}/python${LDVersion}/pyconfig.h \
@@ -1227,7 +1289,7 @@ ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python
 ln -s %{_bindir}/python%{pybasever} %{buildroot}%{_libexecdir}/platform-python%{pybasever}
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python-config
 ln -s %{_bindir}/python%{pybasever}-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-config
-ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
+#ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{pybasever}-`uname -m`-config
 # There were also executables with %%{LDVERSION_optimized} in RHEL 8,
 # but since Python 3.8 %%{LDVERSION_optimized} == %%{pybasever}.
 # We list both in the %%files section to assert this.
@@ -1235,7 +1297,7 @@ ln -s %{_bindir}/python%{pybasever}-`uname -m`-config %{buildroot}%{_libexecdir}
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python-debug
 ln -s %{_bindir}/python%{LDVERSION_debug} %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}
 ln -s %{_bindir}/python%{LDVERSION_debug}-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-config
-ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
+#ln -s %{_bindir}/python%{LDVERSION_debug}-`uname -m`-config %{buildroot}%{_libexecdir}/platform-python%{LDVERSION_debug}-`uname -m`-config
 %endif
 %endif
 
@@ -1623,7 +1685,7 @@ CheckPython optimized
 
 %{_bindir}/python%{pybasever}-config
 %{_bindir}/python%{LDVERSION_optimized}-config
-%{_bindir}/python%{LDVERSION_optimized}-*-config
+#%{_bindir}/python%{LDVERSION_optimized}-*-config
 %{_libdir}/libpython%{LDVERSION_optimized}.so
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}.pc
 %{_libdir}/pkgconfig/python-%{LDVERSION_optimized}-embed.pc
@@ -1634,8 +1696,8 @@ CheckPython optimized
 %{_libexecdir}/platform-python-config
 %{_libexecdir}/platform-python%{pybasever}-config
 %{_libexecdir}/platform-python%{LDVERSION_optimized}-config
-%{_libexecdir}/platform-python%{pybasever}-*-config
-%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
+#%{_libexecdir}/platform-python%{pybasever}-*-config
+#%{_libexecdir}/platform-python%{LDVERSION_optimized}-*-config
 %endif
 
 
@@ -1795,7 +1857,7 @@ CheckPython optimized
 %{pylibdir}/config-%{LDVERSION_debug}-%{platform_triplet}
 %{_includedir}/python%{LDVERSION_debug}
 %{_bindir}/python%{LDVERSION_debug}-config
-%{_bindir}/python%{LDVERSION_debug}-*-config
+#%{_bindir}/python%{LDVERSION_debug}-*-config
 %{_libdir}/libpython%{LDVERSION_debug}.so
 %{_libdir}/libpython%{LDVERSION_debug}.so.%{py_SOVERSION}
 %{_libdir}/pkgconfig/python-%{LDVERSION_debug}.pc
@@ -1805,7 +1867,7 @@ CheckPython optimized
 %{_libexecdir}/platform-python-debug
 %{_libexecdir}/platform-python%{LDVERSION_debug}
 %{_libexecdir}/platform-python%{LDVERSION_debug}-config
-%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
+#%{_libexecdir}/platform-python%{LDVERSION_debug}-*-config
 %endif
 
 # Analog of the -tools subpackage's files:
@@ -1849,6 +1911,25 @@ CheckPython optimized
 # ======================================================
 
 %changelog
+* Wed May 13 2026 Jacco Ligthart <jacco@redsleeve.org> - 3.9.25-3.3.redsleeve
+- three minor changes for armv6
+
+* Fri Apr 17 2026 Charalampos Stratakis <cstratak@redhat.com> - 3.9.25-3.3
+- Security fixes for CVE-2026-4786 and CVE-2026-6100
+Resolves: RHEL-168157, RHEL-167915
+
+* Thu Mar 26 2026 Lumír Balhar <lbalhar@redhat.com> - 3.9.25-3.2
+- Security fix for CVE-2026-4519
+Resolves: RHEL-158052
+
+* Wed Feb 25 2026 Tomáš Hrnčiar <thrnciar@redhat.com> - 3.9.25-3.1
+- Security fixes for CVE-2026-0865, CVE-2025-15366, CVE-2025-15367 and CVE-2026-1299
+Resolves: RHEL-143108 RHEL-143169 RHEL-144893
+
+* Wed Jan 14 2026 Lumír Balhar <lbalhar@redhat.com> - 3.9.25-3
+- Security fix for CVE-2025-12084
+Resolves: RHEL-135897
+
 * Mon Nov 10 2025 Tomas Orsava <torsava@redhat.com> - 3.9.25-2
 - Move _sysconfigdata_d_linux*.py to the debug subpackage
 

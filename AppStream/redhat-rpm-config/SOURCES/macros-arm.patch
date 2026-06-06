@@ -1,0 +1,27 @@
+diff --git a/macros b/macros
+index 8749e3b..062fece 100644
+--- a/macros
++++ b/macros
+@@ -72,7 +72,7 @@
+ # When clang is used as a linker driver, it does not auto-detect the LTO
+ # bytecode and neither does bfd, so we need to explicitly pass the -flto
+ # flag when linking.
+-%build_ldflags -Wl,-z,relro %{_ld_as_needed_flags} %{_ld_symbols_flags} %{_hardened_ldflags} %{_annotation_ldflags} %[ "%{toolchain}" == "clang" ? "%{?_lto_cflags}" : "" ]
++%build_ldflags -Wl,-z,relro %{_ld_as_needed_flags} %{_ld_symbols_flags} %{_hardened_ldflags} %{_annotation_ldflags} %[ "%{toolchain}" == "clang" ? "%{?_lto_cflags}" : "" ] %{_build_id_flags}
+ 
+ # Expands to shell code to set the compiler/linker environment
+ # variables CFLAGS, CXXFLAGS, FFLAGS, FCFLAGS, LDFLAGS if they have
+@@ -325,6 +325,13 @@ print(result)
+ %_clang_lto_cflags	-flto
+ %_lto_cflags		%{expand:%%{_%{toolchain}_lto_cflags}}
+ 
++# Some linkers default to a build-id algoritim that is not supported by rpmbuild,
++# so we need to specify the right algorithm to use.
++%_gcc_build_id_flags	%{nil}
++# Clang defaults to lld on arm, which defaults to an build-id that is too short.
++%_clang_build_id_flags %[ "%{_target_cpu}" == "armv6hl" ? "-Wl,--build-id=sha1" : "%{nil}" ]
++%_build_id_flags	%{expand:%%{_%{toolchain}_build_id_flags}}
++
+ %_general_options       -O2 %{?_lto_cflags} -fexceptions -g -grecord-gcc-switches -pipe
+ %_warning_options       -Wall -Werror=format-security
+ %_preprocessor_defines  -Wp,-D_FORTIFY_SOURCE=2 -Wp,-D_GLIBCXX_ASSERTIONS

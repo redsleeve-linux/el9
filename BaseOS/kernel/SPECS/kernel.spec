@@ -118,7 +118,7 @@ Summary: The Linux kernel
 %global signmodules 1
 
 # Compress modules only for architectures that build modules
-%ifarch noarch
+%ifarch noarch %{arm}
 %global zipmodules 0
 %else
 %global zipmodules 1
@@ -165,15 +165,15 @@ Summary: The Linux kernel
 # define buildid .local
 %define specversion 5.14.0
 %define patchversion 5.14
-%define pkgrelease 611.16.1
+%define pkgrelease 611.55.1
 %define kversion 5
-%define tarfile_release 5.14.0-611.16.1.el9_7
+%define tarfile_release 5.14.0-611.55.1.el9_7
 # This is needed to do merge window version magic
 %define patchlevel 14
 # This allows pkg_release to have configurable %%{?dist} tag
-%define specrelease 611.16.1%{?buildid}%{?dist}
+%define specrelease 611.55.1%{?buildid}%{?dist}
 # This defines the kabi tarball version
-%define kabiversion 5.14.0-611.16.1.el9_7
+%define kabiversion 5.14.0-611.55.1.el9_7
 
 #
 # End of genspec.sh variables
@@ -504,7 +504,7 @@ Summary: The Linux kernel
 %define kernel_mflags KALLSYMS_EXTRA_PASS=1
 # we only build headers/perf/tools on the base arm arches
 # just like we used to only build them on i386 for x86
-%ifnarch armv7hl
+%ifnarch armv7hl armv6hl
 %define with_headers 0
 %define with_cross_headers 0
 %endif
@@ -518,6 +518,11 @@ Summary: The Linux kernel
 %define hdrarch arm64
 %define make_target vmlinuz.efi
 %define kernel_image arch/arm64/boot/vmlinuz.efi
+%endif
+
+%ifarch %{arm}
+%define asmarch arm
+%define hdrarch arm
 %endif
 
 # Should make listnewconfig fail if there's config options
@@ -599,7 +604,7 @@ Name: kernel
 License: ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-2-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-only WITH Linux-syscall-note) OR CDDL-1.0) AND ((GPL-2.0-only WITH Linux-syscall-note) OR Linux-OpenIB) AND ((GPL-2.0-only WITH Linux-syscall-note) OR MIT) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR BSD-3-Clause) AND ((GPL-2.0-or-later WITH Linux-syscall-note) OR MIT) AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSD-3-Clause-Clear AND GFDL-1.1-no-invariants-or-later AND GPL-1.0-or-later AND (GPL-1.0-or-later OR BSD-3-Clause) AND (GPL-1.0-or-later WITH Linux-syscall-note) AND GPL-2.0-only AND (GPL-2.0-only OR Apache-2.0) AND (GPL-2.0-only OR BSD-2-Clause) AND (GPL-2.0-only OR BSD-3-Clause) AND (GPL-2.0-only OR CDDL-1.0) AND (GPL-2.0-only OR GFDL-1.1-no-invariants-or-later) AND (GPL-2.0-only OR GFDL-1.2-no-invariants-only) AND (GPL-2.0-only WITH Linux-syscall-note) AND GPL-2.0-or-later AND (GPL-2.0-or-later OR BSD-2-Clause) AND (GPL-2.0-or-later OR BSD-3-Clause) AND (GPL-2.0-or-later OR CC-BY-4.0) AND (GPL-2.0-or-later WITH GCC-exception-2.0) AND (GPL-2.0-or-later WITH Linux-syscall-note) AND ISC AND LGPL-2.0-or-later AND (LGPL-2.0-or-later OR BSD-2-Clause) AND (LGPL-2.0-or-later WITH Linux-syscall-note) AND LGPL-2.1-only AND (LGPL-2.1-only OR BSD-2-Clause) AND (LGPL-2.1-only WITH Linux-syscall-note) AND LGPL-2.1-or-later AND (LGPL-2.1-or-later WITH Linux-syscall-note) AND (Linux-OpenIB OR GPL-2.0-only) AND (Linux-OpenIB OR GPL-2.0-only OR BSD-2-Clause) AND Linux-man-pages-copyleft AND MIT AND (MIT OR GPL-2.0-only) AND (MIT OR GPL-2.0-or-later) AND (MIT OR LGPL-2.1-only) AND (MPL-1.1 OR GPL-2.0-only) AND (X11 OR GPL-2.0-only) AND (X11 OR GPL-2.0-or-later) AND Zlib AND (copyleft-next-0.3.1 OR GPL-2.0-or-later)
 URL: https://www.kernel.org/
 Version: %{specversion}
-Release: %{pkg_release}
+Release: %{pkg_release}.redsleeve
 # DO NOT CHANGE THE 'ExclusiveArch' LINE TO TEMPORARILY EXCLUDE AN ARCHITECTURE BUILD.
 # SET %%nobuildarches (ABOVE) INSTEAD
 %if 0%{?fedora}
@@ -623,7 +628,7 @@ BuildRequires: kmod, bash, coreutils, tar, git-core, which
 BuildRequires: bzip2, xz, findutils, gzip, m4, perl-interpreter, perl-Carp, perl-devel, perl-generators, make, diffutils, gawk, %compression
 BuildRequires: gcc, binutils, redhat-rpm-config, hmaccalc, bison, flex, gcc-c++
 BuildRequires: net-tools, hostname, bc, elfutils-devel
-BuildRequires: dwarves
+#BuildRequires: dwarves
 BuildRequires: python3-devel
 BuildRequires: gcc-plugin-devel
 BuildRequires: kernel-rpm-macros >= 185-9
@@ -881,30 +886,16 @@ Source82: update_scripts.sh
 Source84: mod-internal.list
 Source85: mod-partner.list
 
-# dup1
-Source100: rockydup1.x509
-Source110: rockydup1-aarch64.x509
-# kpatch
-Source101: rockykpatch1.x509
-Source111: rockykpatch1-aarch64.x509
-# ima
-Source102: rocky-ima-ca.crt
-Source103: rocky-imarelease.crt
-# nvidia
-Source105: rocky-nvidiagpuoot101.x509
-Source115: rocky-nvidiagpuoot101-aarch64.x509
-
-%ifarch aarch64
-%define driver_cert %{SOURCE110}
-%define kpatch_cert %{SOURCE111}
-%define nvidia_cert %{SOURCE115}
-%else
-%define driver_cert %{SOURCE100}
-%define kpatch_cert %{SOURCE101}
-%define nvidia_cert %{SOURCE105}
+# Rocky Linux has all SB/IMA certificates in its release
+%if 0%{?rocky}
+BuildRequires: system-sb-certs
 %endif
 
-%define ima_signing_cert %{SOURCE103}
+%define driver_cert %{_datadir}/pki/sb-certs/kernel-dup1-%{_arch}.der
+%define kpatch_cert %{_datadir}/pki/sb-certs/kernel-kpatch1-%{_arch}.der
+%define nvidia_cert %{_datadir}/pki/sb-certs/kernel-nvidiagpuoot101-%{_arch}.der
+%define ima_signing_cert %{_datadir}/pki/sb-certs/rocky-imarelease.crt
+%define ima_ca_cert %{_datadir}/pki/sb-certs/rocky-ima-ca.crt
 
 %define ima_cert_name ima.cer
 
@@ -985,6 +976,9 @@ Recommends: linux-firmware\
 Requires(preun): systemd >= 200\
 Conflicts: xfsprogs < 4.3.0-1\
 Conflicts: xorg-x11-drv-vmmouse < 13.0.99\
+%ifarch x86_64 aarch64\
+Conflicts: shim < 15.8-1\
+%endif\
 %{expand:%%{?kernel%{?1:_%{1}}_conflicts:Conflicts: %%{kernel%{?1:_%{1}}_conflicts}}}\
 %{expand:%%{?kernel%{?1:_%{1}}_obsoletes:Obsoletes: %%{kernel%{?1:_%{1}}_obsoletes}}}\
 %{expand:%%{?kernel%{?1:_%{1}}_provides:Provides: %%{kernel%{?1:_%{1}}_provides}}}\
@@ -1660,7 +1654,6 @@ ApplyOptionalPatch patch-%{patchversion}-redhat.patch
 
 ApplyOptionalPatch linux-kernel-test.patch
 ApplyOptionalPatch 1000-debrand-some-messages.patch
-ApplyOptionalPatch 1000-debrand-some-messages.patch
 
 # END OF PATCH APPLICATIONS
 
@@ -1736,7 +1729,7 @@ done
 %if %{signkernel}%{signmodules}
 openssl x509 -inform der -in %{driver_cert} -out rheldup3.pem
 openssl x509 -inform der -in %{kpatch_cert} -out rhelkpatch1.pem
-openssl x509 -inform der -in %{SOURCE102} -out rhelimaca1.pem
+openssl x509 -inform der -in %{ima_ca_cert} -out rhelimaca1.pem
 openssl x509 -inform der -in %{nvidia_cert} -out nvidiagpuoot001.pem
 cat rheldup3.pem rhelkpatch1.pem rhelimaca1.pem nvidiagpuoot001.pem > ../certs/rhel.pem
 %if %{signkernel}
@@ -2626,7 +2619,7 @@ BuildKernel %make_target %kernel_image %{_use_vdso} rt-64k
 BuildKernel %make_target %kernel_image %{_use_vdso}
 %endif
 
-%ifnarch noarch i686
+%ifnarch noarch i686 %{arm}
 %if !%{with_debug} && !%{with_zfcpdump} && !%{with_pae} && !%{with_up} && !%{with_arm64_64k} && !%{with_realtime} && !%{with_realtime_arm64_64k}
 # If only building the user space tools, then initialize the build environment
 # and some variables so that the various userspace tools can be built.
@@ -3709,10 +3702,380 @@ fi
 #
 #
 %changelog
-* Mon Dec 29 2025 Release Engineering <releng@rockylinux.org> - 5.14.0-611.16.1
+* Fri May 15 2026 Jacco Ligthart <jacco@redsleeve.org> 5.14.0-611.55.1.redsleeve
+- added flags for armv6
+
+* Tue May 12 2026 Release Engineering <releng@rockylinux.org> - 5.14.0-611.55.1
 - Replace sbat with Rocky Linux sbat (label)
 - Change bug tracker URL (label)
 - Ensure appended release in sbat is removed
+
+* Sat May 09 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.55.1.el9_7]
+- xfrm: esp: avoid in-place decrypt on shared skb frags (Sabrina Dubroca) [RHEL-174561] {CVE-2026-43284}
+
+* Sat May 02 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.54.1.el9_7]
+- crypto: algif_aead - snapshot IV for async AEAD requests (Vladislav Dronov) [RHEL-172201]
+- crypto: algif_aead - Fix minimum RX size check for decryption (Vladislav Dronov) [RHEL-172201]
+- crypto: authencesn - reject short ahash digests during instance creation (Vladislav Dronov) [RHEL-172201]
+- crypto: authencesn - Fix src offset when decrypting in-place (Vladislav Dronov) [RHEL-172201]
+- crypto: authencesn - Do not place hiseq at end of dst for out-of-place decryption (Vladislav Dronov) [RHEL-172201] {CVE-2026-31431}
+- crypto: authencesn - reject too-short AAD (assoclen<8) to match ESP/ESN spec (Vladislav Dronov) [RHEL-172201] {CVE-2026-23060}
+- crypto: af_alg - Fix page reassignment overflow in af_alg_pull_tsgl (Vladislav Dronov) [RHEL-172201]
+- crypto: af_alg - limit RX SG extraction by receive buffer budget (Vladislav Dronov) [RHEL-172201] {CVE-2026-31677}
+- crypto: algif_aead - Revert to operating out-of-place (Vladislav Dronov) [RHEL-172201] {CVE-2026-31431}
+- crypto: af-alg - fix NULL pointer dereference in scatterwalk (Vladislav Dronov) [RHEL-172201]
+
+* Thu Apr 23 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.53.1.el9_7]
+- tracing: Fix a warning when allocating buffered events fails (CKI KWF BOT) [RHEL-169366]
+- tracing: Fix a possible race when disabling buffered events (CKI KWF BOT) [RHEL-169366]
+- tracing: Fix incomplete locking when disabling buffered events (CKI KWF BOT) [RHEL-169366]
+- thunderbolt: Fix wake on connect at runtime (Desnes Nunes) [RHEL-104807]
+- thunderbolt: Fix a logic error in wake on connect (Desnes Nunes) [RHEL-104807]
+- thunderbolt: Use wake on connect and disconnect over suspend (Desnes Nunes) [RHEL-104807]
+- i2c: i801: Revert "i2c: i801: replace acpi_lock with I2C bus lock" (David Arcari) [RHEL-155311]
+- net/sched: Only allow act_ct to bind to clsact/ingress qdiscs and shared blocks (CKI Backport Bot) [RHEL-157327] {CVE-2026-23270}
+
+* Tue Apr 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.52.1.el9_7]
+- libceph: reset sparse-read state in osd_fault() (CKI Backport Bot) [RHEL-150464] {CVE-2026-23136}
+
+* Thu Apr 16 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.51.1.el9_7]
+- nfsd: fix heap overflow in NFSv4.0 LOCK replay cache (Scott Mayhew) [RHEL-167016] {CVE-2026-31402}
+- i40e: support generic devlink param "max_mac_per_vf" (Mohammad Heib) [RHEL-121643]
+- devlink: Add new "max_mac_per_vf" generic device param (Mohammad Heib) [RHEL-121643]
+- i40e: improve VF MAC filters accounting (Mohammad Heib) [RHEL-121643]
+
+* Fri Apr 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.50.1.el9_7]
+- smb: client: fix krb5 mount with username option (Paulo Alcantara) [RHEL-158987]
+- md/raid1: fix data lost for writemostly rdev (Nigel Croxon) [RHEL-143624]
+
+* Tue Apr 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.49.1.el9_7]
+- rtnetlink: Allocate vfinfo size for VF GUIDs when supported (Kamal Heib) [RHEL-149469] {CVE-2025-22075}
+
+* Fri Apr 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.48.1.el9_7]
+- scsi: qla2xxx: Fix improper freeing of purex item (CKI Backport Bot) [RHEL-159222] {CVE-2025-68741}
+- NFSv4: Check for delegation validity in nfs_start_delegation_return_locked() (Scott Mayhew) [RHEL-151414]
+- Bluetooth: MGMT: Fix memory leak in set_ssp_complete (David Marlin) [RHEL-151728]
+- Bluetooth: hci_uart: fix null-ptr-deref in hci_uart_write_work (David Marlin) [RHEL-151728]
+- Bluetooth: btusb: revert use of devm_kzalloc in btusb (David Marlin) [RHEL-151728]
+- Bluetooth: btusb: reorder cleanup in btusb_disconnect to avoid UAF (David Marlin) [RHEL-151728]
+- net: hv_netvsc: reject RSS hash key programming without RX indirection table (Medha Mummigatti) [RHEL-150571]
+- net/sched: sch_cake: Fix incorrect qlen reduction in cake_drop (CKI Backport Bot) [RHEL-150455] {CVE-2025-39766}
+- net/sched: Make cake_enqueue return NET_XMIT_CN when past buffer_limit (CKI Backport Bot) [RHEL-150455] {CVE-2025-39766}
+- iommu/vt-d: Deduplicate cache_tag_flush_all by reusing flush_range (Jerry Snitselaar) [RHEL-144218]
+- iommu/vt-d: Fix missing PASID in dev TLB flush with cache_tag_flush_all (Jerry Snitselaar) [RHEL-144218]
+- i40e: validate ring_len parameter against hardware-specific values (CKI Backport Bot) [RHEL-141722]
+
+* Tue Mar 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.47.1.el9_7]
+- net/mlx5: Fix ECVF vports unload on shutdown flow (CKI Backport Bot) [RHEL-154537] {CVE-2025-38109}
+- netfilter: nf_tables: fix use-after-free in nf_tables_addchain() (CKI Backport Bot) [RHEL-153269] {CVE-2026-23231}
+- ice: Fix PTP NULL pointer dereference during VSI rebuild (CKI Backport Bot) [RHEL-150245] {CVE-2026-23210}
+- netfilter: nf_tables: fix inverted genmask check in nft_map_catchall_activate() (CKI Backport Bot) [RHEL-149748] {CVE-2026-23111}
+
+* Thu Mar 26 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.46.1.el9_7]
+- ice: fix page leak for zero-size Rx descriptors (CKI Backport Bot) [RHEL-154094]
+- net: mana: Reduce waiting time if HWC not responding (Maxim Levitsky) [RHEL-92243]
+
+* Sat Mar 21 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.45.1.el9_7]
+- net/sched: cls_u32: use skb_header_pointer_careful() (Paolo Abeni) [RHEL-150403] {CVE-2026-23204}
+- net: add skb_header_pointer_careful() helper (Paolo Abeni) [RHEL-150403]
+- iommu: Skip PASID validation for devices without PASID capability (Eder Zulian) [RHEL-95264]
+
+* Thu Mar 19 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.44.1.el9_7]
+- nfsd: add list_head nf_gc to struct nfsd_file (Roberto Bergantinos Corpas) [RHEL-152551]
+- redhat: genlog: add new JIRA cloud server hostname (Jan Stancek)
+- smb: client: fix oops due to uninitialised var in smb2_unlink() (Paulo Alcantara) [RHEL-154395]
+- cifs: some missing initializations on replay (Paulo Alcantara) [RHEL-154395]
+- smb: client: fix potential UAF and double free in smb2_open_file() (Paulo Alcantara) [RHEL-154395]
+- smb/client: fix memory leak in smb2_open_file() (Paulo Alcantara) [RHEL-154395]
+- smb: client: split cached_fid bitfields to avoid shared-byte RMW races (Paulo Alcantara) [RHEL-154395]
+- bonding: fix use-after-free due to enslave fail after slave array update (CKI Backport Bot) [RHEL-152383] {CVE-2026-23171}
+- mm/damon/sysfs: cleanup attrs subdirs on context dir setup failure (CKI Backport Bot) [RHEL-150477] {CVE-2026-23144}
+- macvlan: observe an RCU grace period in macvlan_common_newlink() error path (Hangbin Liu) [RHEL-150226]
+- macvlan: fix error recovery in macvlan_common_newlink() (CKI Backport Bot) [RHEL-150226] {CVE-2026-23209}
+- dpll: zl3073x: Fix output pin phase adjustment sign (CKI Backport Bot) [RHEL-149764]
+- scsi: s390: zfcp: Ensure synchronous unit_add (CKI Backport Bot) [RHEL-143736]
+
+* Tue Mar 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.43.1.el9_7]
+- scsi: target: iscsi: Fix use-after-free in iscsit_dec_session_usage_count() (CKI Backport Bot) [RHEL-150422] {CVE-2026-23193}
+- ALSA: aloop: Fix racy access at PCM trigger (CKI Backport Bot) [RHEL-150130] {CVE-2026-23191}
+- net: atm: fix /proc/net/atm/lec handling (Hangbin Liu) [RHEL-146421] {CVE-2025-38180}
+- net: atm: add lec_mutex (Hangbin Liu) [RHEL-146421] {CVE-2025-38323}
+- drm/sched: Fix potential double free in drm_sched_job_add_resv_dependencies (Mika Penttilä) [RHEL-125460] {CVE-2025-40096}
+
+* Thu Mar 12 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.42.1.el9_7]
+- scsi: qla2xxx: Allow recovery for tape devices (Ewan D. Milne) [RHEL-153437]
+- xfs: set max_agbno to allow sparse alloc of last full inode chunk (Brian Foster) [RHEL-142600]
+- mm/debug_vm_pgtable: clear page table entries at destroy_args() (Herton R. Krzesinski) [RHEL-128734]
+- kbuild: use $(srctree)/$(src) for some Makefiles to fix the buildcheck test (Herton R. Krzesinski) [RHEL-106032]
+
+* Sat Mar 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.41.1.el9_7]
+- net: vxlan: prevent NULL deref in vxlan_xmit_one (Antoine Tenart) [RHEL-133369]
+- ACPI: PRM: Reduce unnecessary printing to avoid user confusion (Mark Langsdorf) [RHEL-123057]
+
+* Thu Mar 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.40.1.el9_7]
+- s390/pci: Allow automatic recovery with minimal driver support (CKI Backport Bot) [RHEL-118881]
+- mm/hugetlb: ignore hugepage kernel args if hugepages are unsupported (Luiz Capitulino) [RHEL-143846]
+
+* Tue Mar 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.39.1.el9_7]
+- HID: intel-thc-hid: intel-thc: Fix incorrect pointer arithmetic in I2C regs save (CKI Backport Bot) [RHEL-142232] {CVE-2025-39818}
+
+* Sat Feb 28 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.38.1.el9_7]
+- mlxsw: spectrum_mr: Fix use-after-free when updating multicast route stats (CKI Backport Bot) [RHEL-143194] {CVE-2025-68800}
+
+* Thu Feb 26 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.37.1.el9_7]
+- printk: Use console_is_usable on console_unblank (CKI Backport Bot) [RHEL-148302]
+- printk: Check CON_SUSPEND when unblanking a console (CKI Backport Bot) [RHEL-148302]
+- printk: Avoid irq_work for printk_deferred() on suspend (CKI Backport Bot) [RHEL-148302]
+- printk: Avoid scheduling irq_work on suspend (CKI Backport Bot) [RHEL-148302]
+- printk: nbcon: Allow reacquire during panic (CKI Backport Bot) [RHEL-148302]
+- printk: Allow printk_trigger_flush() to flush all types (CKI Backport Bot) [RHEL-148302]
+- printk: nbcon: Use raw_cpu_ptr() instead of open coding (CKI Backport Bot) [RHEL-148302]
+- backport "printk: Add helper for flush type logic" and associated changes (CKI Backport Bot) [RHEL-148302]
+- printk: Remove redundant deferred check in vprintk() (CKI Backport Bot) [RHEL-148302]
+- printk: Introduce force_legacy_kthread() macro (CKI Backport Bot) [RHEL-148302]
+- printk: Add is_printk_legacy_deferred() (CKI Backport Bot) [RHEL-148302]
+- io_uring/sqpoll: don't put task_struct on tctx setup failure (Jeff Moyer) [RHEL-137988]
+- io_uring: consistently use rcu semantics with sqpoll thread (Jeff Moyer) [RHEL-137988]
+- io_uring: fix use-after-free of sq->thread in __io_uring_show_fdinfo() (Jeff Moyer) [RHEL-137988] {CVE-2025-38106}
+- io_uring/sqpoll: fix sqpoll error handling races (Jeff Moyer) [RHEL-137988]
+- io_uring/sqpoll: annotate debug task == current with data_race() (Jeff Moyer) [RHEL-137988]
+- macvlan: fix possible UAF in macvlan_forward_source() (CKI Backport Bot) [RHEL-144125] {CVE-2026-23001}
+- net/smc: Fix lookup of netdev by using ib_device_get_netdev() (CKI Backport Bot) [RHEL-114786]
+
+* Tue Feb 24 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.36.1.el9_7]
+- net/smc: Remove validation of reserved bits in CLC Decline message (Mete Durlu) [RHEL-143718]
+- autofs: dont trigger mount if it cant succeed (Ian Kent) [RHEL-149495]
+- migrate: correct lock ordering for hugetlb file folios (Luiz Capitulino) [RHEL-147266] {CVE-2026-23097}
+- ice: PTP: fix missing timestamps on E825 hardware (CKI Backport Bot) [RHEL-148166]
+- fou: Don't allow 0 for FOU_ATTR_IPPROTO. (Xin Long) [RHEL-144987]
+- tools: ynl: Specify --no-line-number in ynl-regen.sh. (Xin Long) [RHEL-144987]
+- gue: Fix skb memleak with inner IP protocol 0. (Xin Long) [RHEL-144987]
+- netlink: specs: fou: replace underscores with dashes in names (Xin Long) [RHEL-144987]
+- fou: fix initialization of grc (Xin Long) [RHEL-144987]
+- fou: Fix null-ptr-deref in GRO. (Xin Long) [RHEL-144987]
+- fou: remove warn in gue_gro_receive on unsupported protocol (Xin Long) [RHEL-144987]
+- fou: Remove XRFM from NET_FOU Kconfig (Xin Long) [RHEL-144987]
+- fou: remove sparse errors (Xin Long) [RHEL-144987]
+- redhat: enable FOU modules in kernel-modules-extra (Xin Long) [RHEL-144987]
+- s390/mm: Fix __ptep_rdp() inline assembly (Mete Durlu) [RHEL-143713]
+- dpll: expose fractional frequency offset in ppt (Ivan Vecera) [RHEL-146357]
+- dpll: zl3073x: Implement device mode setting support (Ivan Vecera) [RHEL-147459]
+- dpll: add dpll_device op to set working mode (Ivan Vecera) [RHEL-147459]
+- dpll: add dpll_device op to get supported modes (Ivan Vecera) [RHEL-147459]
+- i40e: add rh_phys_port_name mod option to behave like upstream (CKI Backport Bot) [RHEL-128237]
+- ice: add rh_phys_port_name mod option to behave like upstream (CKI Backport Bot) [RHEL-128237]
+- scsi: qla2xxx: Fix bsg_done() causing double free (Ewan D. Milne) [RHEL-146049]
+- ipv6: BUG() in pskb_expand_head() as part of calipso_skbuff_setattr() (CKI Backport Bot) [RHEL-143545] {CVE-2025-71085}
+- tick/sched: Limit non-timekeeper CPUs calling jiffies update (Phil Auld) [RHEL-141462]
+- smc: Use __sk_dst_get() and dst_dev_rcu() in smc_clc_prfx_match(). (Mete Durlu) [RHEL-130017] {CVE-2025-40168}
+
+* Tue Feb 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.35.1.el9_7]
+- page_pool: Fix use-after-free in page_pool_recycle_in_ring (Paolo Abeni) [RHEL-137841] {CVE-2025-38129}
+- exfat: fix double free in delayed_free (CKI Backport Bot) [RHEL-146403] {CVE-2025-38206}
+
+* Sat Feb 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.34.1.el9_7]
+- scsi: storvsc: Process unsupported MODE_SENSE_10 (Li Tian) [RHEL-145183]
+- smb: client: Add tracepoint for krb5 auth (Paulo Alcantara) [RHEL-127498]
+- smb: client: improve error message when creating SMB session (Paulo Alcantara) [RHEL-127498]
+- smb: client: relax session and tcon reconnect attempts (Paulo Alcantara) [RHEL-127498]
+- cifs: #include cifsglob.h before trace.h to allow structs in tracepoints (Paulo Alcantara) [RHEL-127498]
+- smc: Fix use-after-free in __pnet_find_base_ndev(). (Mete Durlu) [RHEL-126890] {CVE-2025-40064}
+
+* Thu Feb 05 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.33.1.el9_7]
+- i40e: avoid redundant VF link state updates (CKI Backport Bot) [RHEL-141877]
+- x86/sev: Guard sev_evict_cache() with CONFIG_AMD_MEM_ENCRYPT (Paolo Bonzini) [RHEL-128030]
+- x86/sev: Evict cache lines during SNP memory validation (Paolo Bonzini) [RHEL-128030]
+- ntb_hw_switchtec: Fix shift-out-of-bounds in switchtec_ntb_mw_set_trans (Myron Stowe) [RHEL-132891] {CVE-2023-53034}
+- fbdev: Add bounds checking in bit_putcs to fix vmalloc-out-of-bounds (CKI Backport Bot) [RHEL-137683] {CVE-2025-40304}
+- crypto: iaa - Optimize rebalance_wq_table() (Jay Shin) [RHEL-137272]
+- fbdev: bitblit: bound-check glyph index in bit_putcs* (CKI Backport Bot) [RHEL-136942] {CVE-2025-40322}
+- bpf: Do not audit capability check in do_jit() (Jay Shin) [RHEL-135137]
+
+* Tue Feb 03 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.32.1.el9_7]
+- svcrdma: use rc_pageoff for memcpy byte offset (CKI Backport Bot) [RHEL-142790] {CVE-2025-68811}
+- NFSv4/pNFS: Clear NFS_INO_LAYOUTCOMMIT in pnfs_mark_layout_stateid_invalid (CKI Backport Bot) [RHEL-140260] {CVE-2025-68349}
+
+* Sat Jan 31 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.31.1.el9_7]
+- nvme-tcp: fix NULL pointer dereferences in nvmet_tcp_build_pdu_iovec (CKI Backport Bot) [RHEL-144332] {CVE-2026-22998}
+
+* Thu Jan 29 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.30.1.el9_7]
+- io_uring/net: commit partial buffers on retry (Jeff Moyer) [RHEL-137329] {CVE-2025-38730}
+- io_uring/kbuf: add io_kbuf_commit() helper (Jeff Moyer) [RHEL-137329]
+- io_uring/kbuf: use 'bl' directly rather than req->buf_list (Jeff Moyer) [RHEL-137329]
+- ice: prevent NULL deref in ice_lag_move_new_vf_nodes() (Michal Schmidt) [RHEL-143296]
+- net: openvswitch: Avoid needlessly taking the RTNL on vport destroy (Adrian Moreno) [RHEL-141404]
+- atm: clip: Fix infinite recursive call of clip_push(). (Guillaume Nault) [RHEL-137601] {CVE-2025-38459}
+- dpll: zl3073x: Remove unused dev wrappers (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Cache all output properties in zl3073x_out (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Cache all reference properties in zl3073x_ref (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Cache reference monitor status (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Split ref, out, and synth logic from core (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Store raw register values instead of parsed state (Ivan Vecera) [RHEL-139699]
+- dpll: fix device-id-get and pin-id-get to return errors properly (Ivan Vecera) [RHEL-139699]
+- dpll: spec: add missing module-name and clock-id to pin-get reply (Ivan Vecera) [RHEL-139699]
+- dpll: zl3073x: Allow to configure phase offset averaging factor (Ivan Vecera) [RHEL-139699]
+- dpll: add phase_offset_avg_factor_get/set callback ops (Ivan Vecera) [RHEL-139699]
+- dpll: add phase-offset-avg-factor device attribute to netlink spec (Ivan Vecera) [RHEL-139699]
+- dpll: fix clock quality level reporting (Ivan Vecera) [RHEL-139699]
+- dpll: add reference sync get/set (Ivan Vecera) [RHEL-139699]
+- dpll: add reference-sync netlink attribute (Ivan Vecera) [RHEL-139699]
+- dpll: remove documentation of rclk_dev_name (Ivan Vecera) [RHEL-139699]
+- net: use dst_dev_rcu() in sk_setup_caps() (Hangbin Liu) [RHEL-129084] {CVE-2025-40170}
+- ipv4: use RCU protection in ip_dst_mtu_maybe_forward() (Hangbin Liu) [RHEL-129084]
+- net: ipv4: Consolidate ipv4_mtu and ip_dst_mtu_maybe_forward (Hangbin Liu) [RHEL-129084]
+- ipv6: use RCU in ip6_xmit() (Hangbin Liu) [RHEL-129018] {CVE-2025-40135}
+- ipv6: use RCU in ip6_output() (Hangbin Liu) [RHEL-128982] {CVE-2025-40158}
+- net: dst: introduce dst->dev_rcu (Hangbin Liu) [RHEL-128982]
+- ipv4: use RCU protection in __ip_rt_update_pmtu() (Hangbin Liu) [RHEL-128982]
+- net: Add locking to protect skb->dev access in ip_output (Hangbin Liu) [RHEL-128982]
+- net: dst: add four helpers to annotate data-races around dst->dev (Hangbin Liu) [RHEL-128982]
+- bpf: Fix mismatched RCU unlock flavour in bpf_out_neigh_v6 (Hangbin Liu) [RHEL-128982]
+- vrf: Fix lockdep splat in output path (Hangbin Liu) [RHEL-128982]
+- ipv6: remove nexthop_fib6_nh_bh() (Hangbin Liu) [RHEL-128982]
+- net: remove rcu_dereference_bh_rtnl() (Hangbin Liu) [RHEL-128982]
+- neighbour: switch to standard rcu, instead of rcu_bh (Hangbin Liu) [RHEL-128982]
+- ipv6: flowlabel: do not disable BH where not needed (Hangbin Liu) [RHEL-128982]
+- ipv6: remove one read_lock()/read_unlock() pair in rt6_check_neigh() (Hangbin Liu) [RHEL-128982]
+- neigh: introduce neigh_confirm() helper function (Hangbin Liu) [RHEL-128982]
+- net: bonding: update the slave array for broadcast mode (Hangbin Liu) [RHEL-132923]
+- net: bonding: add broadcast_neighbor netlink option (Hangbin Liu) [RHEL-132923]
+- net: bonding: add broadcast_neighbor option for 802.3ad (Hangbin Liu) [RHEL-132923]
+- vsock/vmci: Clear the vmci transport packet properly when initializing it (CKI Backport Bot) [RHEL-137697] {CVE-2025-38403}
+- ALSA: usb-audio: Fix potential overflow of PCM transfer buffer (CKI Backport Bot) [RHEL-136909] {CVE-2025-40269}
+- nvme: tcp: Fix compilation warning with W=1 (John Meneghini) [RHEL-129928]
+- nvme-tcp: Fix I/O queue cpu spreading for multiple controllers (John Meneghini) [RHEL-129928]
+
+* Tue Jan 27 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.29.1.el9_7]
+- squashfs: fix memory leak in squashfs_fill_super (Abhi Das) [RHEL-138015] {CVE-2025-38415}
+- Squashfs: check return result of sb_min_blocksize (CKI Backport Bot) [RHEL-138015] {CVE-2025-38415}
+- usb: core: config: Prevent OOB read in SS endpoint companion parsing (CKI Backport Bot) [RHEL-137364] {CVE-2025-39760}
+- RDMA/rxe: Fix slab-use-after-free Read in rxe_queue_cleanup bug (CKI Backport Bot) [RHEL-137069] {CVE-2025-38024}
+
+* Thu Jan 22 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.28.1.el9_7]
+- s390: Disable ARCH_WANT_OPTIMIZE_HUGETLB_VMEMMAP (Luiz Capitulino) [RHEL-133337]
+- s390: mm: add stub for hugetlb_optimize_vmemmap_key (Luiz Capitulino) [RHEL-133337]
+- fs/proc: fix uaf in proc_readdir_de() (CKI Backport Bot) [RHEL-137098] {CVE-2025-40271}
+- Bluetooth: hci_sync: fix race in hci_cmd_sync_dequeue_once (CKI Backport Bot) [RHEL-136256] {CVE-2025-40318}
+- RDMA/core: Fix "KASAN: slab-use-after-free Read in ib_register_device" problem (CKI Backport Bot) [RHEL-134352] {CVE-2025-38022}
+- cifs: Fix deadlock in cifs_writepages during reconnect (Paulo Alcantara) [RHEL-134234]
+- irqchip/gic-v2m: Prevent use after free of gicv2m_get_fwnode() (CKI Backport Bot) [RHEL-131974] {CVE-2025-37819}
+- net: openvswitch: fix nested key length validation in the set() action (CKI Backport Bot) [RHEL-131801] {CVE-2025-37789}
+- md: avoid repeated calls to del_gendisk (Nigel Croxon) [RHEL-126532]
+- md: delete mddev kobj before deleting gendisk kobj (Nigel Croxon) [RHEL-126532]
+- md: add legacy_async_del_gendisk mode (Nigel Croxon) [RHEL-126532]
+- md: Don't clear MD_CLOSING until mddev is freed (Nigel Croxon) [RHEL-126532]
+- md: fix create on open mddev lifetime regression (Nigel Croxon) [RHEL-126532]
+- md: call del_gendisk in control path (Nigel Croxon) [RHEL-126532]
+- Bluetooth: ISO: Fix possible UAF on iso_conn_free (CKI Backport Bot) [RHEL-128891] {CVE-2025-40141}
+
+* Tue Jan 20 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.27.1.el9_7]
+- net/sched: mqprio: fix stack out-of-bounds write in tc entry parsing (CKI Backport Bot) [RHEL-136822] {CVE-2025-38568}
+- devlink: rate: Unset parent pointer in devl_rate_nodes_destroy (CKI Backport Bot) [RHEL-134923] {CVE-2025-40251}
+- ASoC: Intel: bytcr_rt5640: Fix invalid quirk input mapping (CKI Backport Bot) [RHEL-129112] {CVE-2025-40154}
+
+* Sat Jan 17 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.26.1.el9_7]
+- Bluetooth: hci_sock: Prevent race in socket write iter and sock bind (CKI Backport Bot) [RHEL-139462] {CVE-2025-68305}
+- dm: fix dm_blk_report_zones (CKI Backport Bot) [RHEL-137949] {CVE-2025-38141}
+- Bluetooth: MGMT: Fix OOB access in parse_adv_monitor_pattern() (CKI Backport Bot) [RHEL-136964] {CVE-2025-40294}
+- drm/xe: Fix vm_bind_ioctl double free bug (CKI Backport Bot) [RHEL-122309] {CVE-2025-38731}
+
+* Thu Jan 15 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.25.1.el9_7]
+- ice: Fix kernel panic due to page refcount underflow (Mohammad Heib) [RHEL-139731]
+- net: atlantic: fix fragment overflow handling in RX path (CKI Backport Bot) [RHEL-139487] {CVE-2025-68301}
+- KVM: arm64: Hide ID_AA64MMFR2_EL1.NV from guest and userspace (Donald Dutile) [RHEL-134767]
+- Set fc_nlinfo in nh_create_ipv4, nh_create_ipv6 (Guillaume Nault) [RHEL-138493]
+- vsock: Ignore signal/timeout on connect() if already established (CKI Backport Bot) [RHEL-139284] {CVE-2025-40248}
+- eventpoll: don't decrement ep refcount while still holding the ep mutex (CKI Backport Bot) [RHEL-138035] {CVE-2025-38349}
+- block: don't freeze queue for updating queue limits (Ming Lei) [RHEL-135268]
+- mptcp: fix race condition in mptcp_schedule_work() (CKI Backport Bot) [RHEL-134448] {CVE-2025-40258}
+- uprobes: Fix race in uprobe_free_utask (Jay Shin) [RHEL-133868]
+- dpll: zl3073x: Specify phase adjustment granularity for pins (Ivan Vecera) [RHEL-129504]
+- dpll: add phase-adjust-gran pin attribute (Ivan Vecera) [RHEL-129504]
+
+* Sat Jan 10 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.24.1.el9_7]
+- gitlab-ci: use rhel9.7 builder image (Michael Hofmann)
+- smb: client: let recv_done verify data_offset, data_length and remaining_data_length (Paulo Alcantara) [RHEL-131388] {CVE-2025-39933}
+- tty: n_tty: Fix buffer offsets when lookahead is used (Radostin Stoyanov) [RHEL-130039]
+
+* Thu Jan 08 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.23.1.el9_7]
+- book3s64/hash: Remove kfence support temporarily (Mamatha Inamdar) [RHEL-135574]
+- xfs: rework datasync tracking and execution (CKI Backport Bot) [RHEL-135714]
+- xfs: rearrange code in xfs_inode_item_precommit (CKI Backport Bot) [RHEL-135714]
+- inetpeer: do not get a refcount in inet_getpeer() (Guillaume Nault) [RHEL-116121]
+- inetpeer: update inetpeer timestamp in inet_getpeer() (Guillaume Nault) [RHEL-116121]
+- inetpeer: remove create argument of inet_getpeer() (Guillaume Nault) [RHEL-116121]
+- inetpeer: remove create argument of inet_getpeer_v[46]() (Guillaume Nault) [RHEL-116121]
+- ipv4/route: avoid unused-but-set-variable warning (Guillaume Nault) [RHEL-116121]
+- arm64: errata: Expand speculative SSBS workaround for Cortex-A720AE (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Cortex-A720AE definitions (Waiman Long) [RHEL-130734]
+- arm64: errata: Add missing sentinels to Spectre-BHB MIDR arrays (Waiman Long) [RHEL-130734]
+- arm64: Add support for HIP09 Spectre-BHB mitigation (Waiman Long) [RHEL-130734]
+- arm64: errata: Add newer ARM cores to the spectre_bhb_loop_affected() lists (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add MIDR_CORTEX_A76AE (Waiman Long) [RHEL-130734]
+- arm64: errata: Add KRYO 2XX/3XX/4XX silver cores to Spectre BHB safe list (Waiman Long) [RHEL-130734]
+- arm64: Subscribe Microsoft Azure Cobalt 100 to erratum 3194386 (Waiman Long) [RHEL-130734]
+- arm64: errata: Expand speculative SSBS workaround once more (Waiman Long) [RHEL-130734]
+- arm64: errata: Expand speculative SSBS workaround (again) (Waiman Long) [RHEL-130734]
+- tools headers arm64: Sync arm64's cputype.h with the kernel sources (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Neoverse-N3 definitions (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Cortex-A725 definitions (Waiman Long) [RHEL-130734]
+- arm64: cputype: Add Cortex-X1C definitions (Waiman Long) [RHEL-130734]
+- drm/xe: Make dma-fences compliant with the safe access rules (Mika Penttilä) [RHEL-122263] {CVE-2025-38703}
+
+* Wed Jan 07 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.22.1.el9_7]
+- libceph: fix potential use-after-free in have_mon_and_osd_map() (CKI Backport Bot) [RHEL-137400] {CVE-2025-68285}
+
+* Thu Jan 01 2026 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.21.1.el9_7]
+- usb: dwc3: Fix race condition between concurrent dwc3_remove_requests() call paths (CKI Backport Bot) [RHEL-137147] {CVE-2025-68287}
+- redhat: conflict with unsupported shim on x86/aarch64 (9.7.z) (Li Tian) [RHEL-135775]
+- drm/vmwgfx: Validate command header size against SVGA_CMD_MAX_DATASIZE (CKI Backport Bot) [RHEL-134428] {CVE-2025-40277}
+- perf tools: Don't set attr.exclude_guest by default (Michael Petlan) [RHEL-131726]
+- smb: client: fix refcount leak in smb2_set_path_attr (Paulo Alcantara) [RHEL-127422]
+- smb: client: fix potential UAF in smb2_close_cached_fid() (Paulo Alcantara) [RHEL-127422]
+- smb: client: fix potential cfid UAF in smb2_query_info_compound (Paulo Alcantara) [RHEL-127422]
+- smb: client: Fix refcount leak for cifs_sb_tlink (Paulo Alcantara) [RHEL-127422]
+- cifs: parse_dfs_referrals: prevent oob on malformed input (Paulo Alcantara) [RHEL-127422]
+- smb: client: remove cfids_invalidation_worker (Paulo Alcantara) [RHEL-127422]
+- smb client: fix bug with newly created file in cached dir (Paulo Alcantara) [RHEL-127422]
+- smb: client: short-circuit negative lookups when parent dir is fully cached (Paulo Alcantara) [RHEL-127422]
+- smb: client: short-circuit in open_cached_dir_by_dentry() if !dentry (Paulo Alcantara) [RHEL-127422]
+- smb: client: remove pointless cfid->has_lease check (Paulo Alcantara) [RHEL-127422]
+- smb: client: remove unused fid_lock (Paulo Alcantara) [RHEL-127422]
+- smb: client: update cfid->last_access_time in open_cached_dir_by_dentry() (Paulo Alcantara) [RHEL-127422]
+- smb: client: ensure open_cached_dir_by_dentry() only returns valid cfid (Paulo Alcantara) [RHEL-127422]
+- smb: client: account smb directory cache usage and per-tcon totals (Paulo Alcantara) [RHEL-127422]
+- smb: client: add drop_dir_cache module parameter to invalidate cached dirents (Paulo Alcantara) [RHEL-127422]
+- smb: client: show lease state as R/H/W (or NONE) in open_files (Paulo Alcantara) [RHEL-127422]
+- smb: client: show negotiated cipher in DebugData (Paulo Alcantara) [RHEL-127422]
+- smb: client: add new tracepoint to trace lease break notification (Paulo Alcantara) [RHEL-127422]
+- smb: client: Fix NULL pointer dereference in cifs_debug_dirs_proc_show() (Paulo Alcantara) [RHEL-127422]
+
+* Sat Dec 20 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.20.1.el9_7]
+- HID: multitouch: fix slab out-of-bounds access in mt_report_fixup() (CKI Backport Bot) [RHEL-124607] {CVE-2025-39806}
+- sctp: avoid NULL dereference when chunk data buffer is missing (CKI Backport Bot) [RHEL-134001] {CVE-2025-40240}
+- selftests/landlock: Add a new test for setuid() (Štěpán Horáček) [RHEL-132712]
+- selftests/landlock: Split signal_scoping_threads tests (Štěpán Horáček) [RHEL-132712]
+- landlock: Always allow signals between threads of the same process (Štěpán Horáček) [RHEL-132712]
+- landlock: Prepare to add second errata (Štěpán Horáček) [RHEL-132712]
+- landlock: Add the errata interface (Štěpán Horáček) [RHEL-132712]
+- selftests/landlock: Test signal scoping for threads (Štěpán Horáček) [RHEL-132712]
+- selftests/landlock: Test signal scoping (Štěpán Horáček) [RHEL-132712]
+- landlock: Add signal scoping (Štěpán Horáček) [RHEL-132712]
+
+* Thu Dec 18 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.19.1.el9_7]
+- scsi: st: Skip buffer flush for information ioctls (John Meneghini) [RHEL-133543]
+- scsi: st: Separate st-unique ioctl handling from SCSI common ioctl handling (John Meneghini) [RHEL-133543]
+- audit: fix out-of-bounds read in audit_compare_dname_path() (Richard Guy Briggs) [RHEL-119176] {CVE-2025-39840}
+
+* Sat Dec 13 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.18.1.el9_7]
+- NFS: remove revoked delegation from server's delegation list (Benjamin Coddington) [RHEL-134237]
+- redhat: use RELEASE_LOCALVERSION also for dist-get-tag (Jan Stancek)
+- redhat: introduce RELEASE_LOCALVERSION variable (Jan Stancek)
+
+* Thu Dec 11 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.17.1.el9_7]
+- smb: client: handle lack of IPC in dfs_cache_refresh() (Paulo Alcantara) [RHEL-126165]
+- smb: client: get rid of d_drop() in cifs_do_rename() (Paulo Alcantara) [RHEL-124917]
+- mm/memory-failure: fix VM_BUG_ON_PAGE(PagePoisoned(page)) when unpoison memory (CKI Backport Bot) [RHEL-119150] {CVE-2025-39883}
 
 * Sun Dec 07 2025 CKI KWF Bot <cki-ci-bot+kwf-gitlab-com@redhat.com> [5.14.0-611.16.1.el9_7]
 - CVE-2025-38499 kernel: clone_private_mnt(): make sure that caller has CAP_SYS_ADMIN in the right userns (Abhi Das) [RHEL-129261] {CVE-2025-38499}

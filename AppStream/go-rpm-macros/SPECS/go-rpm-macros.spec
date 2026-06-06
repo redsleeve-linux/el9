@@ -11,7 +11,7 @@ Version:   3.6.0
 %global golang_arches   %{ix86} %{golang_arches_future}
 %global gccgo_arches    %{mips}
 %if 0%{?rhel} >= 9
-%global golang_arches   x86_64 aarch64 ppc64le s390x
+%global golang_arches   x86_64 aarch64 ppc64le s390x %{arm}
 %endif
 # Go sources can contain arch-specific files and our macros will package the
 # correct files for each architecture. Therefore, move gopath to _libdir and
@@ -37,7 +37,7 @@ Version:   3.6.0
 ExclusiveArch: %{golang_arches} %{gccgo_arches}
 
 Name:      go-rpm-macros
-Release:   12%{?dist}
+Release:   14%{?dist}.redsleeve
 Summary:   Build-stage rpm automation for Go packages
 
 License:   GPLv3+
@@ -263,6 +263,17 @@ sed -i "s,golist ,%{golist_execdir}/golist ,g" \
 %{_rpmluadir}/fedora/srpm/*.lua
 
 %changelog
+* Wed May 13 2026 Jaccco Ligthart <jacco@redsleeve.org> 3.6.0-14.redsleeve
+- added arm to golang_arches
+
+* Fri Apr 17 2026 Alejandro Sáez <asm@redhat.com> - 3.6.0-14
+- Rebuild with latest Go
+- Resolves: RHEL-158726
+
+* Tue Mar 03 2026 dbenoit <dbenoit@redhat.com> - 3.6.0-13
+- Rebuild with latest Go
+- Resolves: RHEL-146862
+
 * Thu Nov 20 2025 Archana <aravinda@redhat.com> - 3.6.0-12
 - Rebuilt to include Go1.25.3 to address CVE-2025-47906
 - Resolves: RHEL-125569
